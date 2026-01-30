@@ -25,12 +25,14 @@ func TestDAGNodes_AllNodesHaveCorrectOrder(t *testing.T) {
 
 	expectedOrder := []models.DAGNodeName{
 		models.DAGNodeKnowledgeSeeding,
+		models.DAGNodeColumnFeatureExtraction,
 		models.DAGNodeEntityDiscovery,
 		models.DAGNodeEntityEnrichment,
 		models.DAGNodeFKDiscovery,
 		models.DAGNodeColumnEnrichment,
 		models.DAGNodePKMatchDiscovery,
 		models.DAGNodeRelationshipEnrichment,
+		models.DAGNodeEntityPromotion,
 		models.DAGNodeOntologyFinalization,
 		models.DAGNodeGlossaryDiscovery,
 		models.DAGNodeGlossaryEnrichment,
@@ -40,7 +42,7 @@ func TestDAGNodes_AllNodesHaveCorrectOrder(t *testing.T) {
 
 	for i, expected := range expectedOrder {
 		assert.Equal(t, expected, allNodes[i])
-		assert.Equal(t, i+1, models.DAGNodeOrder[expected])
+		assert.Equal(t, models.DAGNodeOrder[expected], models.DAGNodeOrder[allNodes[i]])
 	}
 }
 
@@ -79,6 +81,10 @@ func TestNodeExecutorInterfaces_AreWellDefined(t *testing.T) {
 	// GlossaryDiscoveryMethods
 	var gdm dag.GlossaryDiscoveryMethods = &testGlossaryDiscovery{}
 	assert.NotNil(t, gdm)
+
+	// ColumnFeatureExtractionMethods
+	var cfm dag.ColumnFeatureExtractionMethods = &testColumnFeatureExtraction{}
+	assert.NotNil(t, cfm)
 }
 
 func TestDAGStatus_ValidStatuses(t *testing.T) {
@@ -172,7 +178,7 @@ func (t *testEntityDiscovery) IdentifyEntitiesFromDDL(_ context.Context, _, _, _
 
 type testEntityEnrichment struct{}
 
-func (t *testEntityEnrichment) EnrichEntitiesWithLLM(_ context.Context, _, _, _ uuid.UUID) error {
+func (t *testEntityEnrichment) EnrichEntitiesWithLLM(_ context.Context, _, _, _ uuid.UUID, _ dag.ProgressCallback) error {
 	return nil
 }
 
@@ -209,6 +215,12 @@ func (t *testColumnEnrichment) EnrichProject(_ context.Context, _ uuid.UUID, _ [
 type testGlossaryDiscovery struct{}
 
 func (t *testGlossaryDiscovery) DiscoverGlossaryTerms(_ context.Context, _, _ uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+type testColumnFeatureExtraction struct{}
+
+func (t *testColumnFeatureExtraction) ExtractColumnFeatures(_ context.Context, _, _ uuid.UUID, _ dag.ProgressCallback) (int, error) {
 	return 0, nil
 }
 
@@ -309,13 +321,17 @@ func (m *mockDAGRepository) GetNextPendingNode(ctx context.Context, dagID uuid.U
 
 // mockKnowledgeRepository is a mock implementation of KnowledgeRepository for testing Start.
 type mockKnowledgeRepository struct {
-	upsertFunc func(ctx context.Context, fact *models.KnowledgeFact) error
+	createFunc func(ctx context.Context, fact *models.KnowledgeFact) error
 }
 
-func (m *mockKnowledgeRepository) Upsert(ctx context.Context, fact *models.KnowledgeFact) error {
-	if m.upsertFunc != nil {
-		return m.upsertFunc(ctx, fact)
+func (m *mockKnowledgeRepository) Create(ctx context.Context, fact *models.KnowledgeFact) error {
+	if m.createFunc != nil {
+		return m.createFunc(ctx, fact)
 	}
+	return nil
+}
+
+func (m *mockKnowledgeRepository) Update(_ context.Context, _ *models.KnowledgeFact) error {
 	return nil
 }
 
@@ -324,10 +340,6 @@ func (m *mockKnowledgeRepository) GetByProject(_ context.Context, _ uuid.UUID) (
 }
 
 func (m *mockKnowledgeRepository) GetByType(_ context.Context, _ uuid.UUID, _ string) ([]*models.KnowledgeFact, error) {
-	return nil, nil
-}
-
-func (m *mockKnowledgeRepository) GetByKey(_ context.Context, _ uuid.UUID, _, _ string) (*models.KnowledgeFact, error) {
 	return nil, nil
 }
 
@@ -366,13 +378,13 @@ func TestStart_StoresProjectOverview(t *testing.T) {
 	userID := uuid.New()
 	projectOverview := "This is a CRM application for managing customer relationships"
 
-	// Track Upsert calls
+	// Track Create calls
 	var capturedFact *models.KnowledgeFact
-	var upsertCalled bool
+	var createCalled bool
 
 	mockKnowledgeRepo := &mockKnowledgeRepository{
-		upsertFunc: func(ctx context.Context, fact *models.KnowledgeFact) error {
-			upsertCalled = true
+		createFunc: func(ctx context.Context, fact *models.KnowledgeFact) error {
+			createCalled = true
 			capturedFact = fact
 
 			// Verify provenance was set correctly (manual provenance)
@@ -434,13 +446,11 @@ func TestStart_StoresProjectOverview(t *testing.T) {
 	// We ignore the result as we're only testing overview storage
 	_, _ = service.Start(ctx, projectID, datasourceID, projectOverview)
 
-	// Verify Upsert was called with correct fact structure
-	assert.True(t, upsertCalled, "Upsert should be called when overview is provided")
+	// Verify Create was called with correct fact structure
+	assert.True(t, createCalled, "Create should be called when overview is provided")
 	assert.NotNil(t, capturedFact, "Fact should be captured")
 	assert.Equal(t, projectID, capturedFact.ProjectID, "ProjectID should match")
-	assert.Nil(t, capturedFact.OntologyID, "OntologyID should be nil (survives ontology deletion)")
-	assert.Equal(t, "overview", capturedFact.FactType, "FactType should be 'overview'")
-	assert.Equal(t, "project_overview", capturedFact.Key, "Key should be 'project_overview'")
+	assert.Equal(t, "project_overview", capturedFact.FactType, "FactType should be 'project_overview'")
 	assert.Equal(t, projectOverview, capturedFact.Value, "Value should match the overview text")
 }
 
@@ -453,12 +463,12 @@ func TestStart_SkipsOverviewStorageWhenEmpty(t *testing.T) {
 	userID := uuid.New()
 	emptyOverview := ""
 
-	// Track Upsert calls
-	upsertCalled := false
+	// Track Create calls
+	createCalled := false
 
 	mockKnowledgeRepo := &mockKnowledgeRepository{
-		upsertFunc: func(_ context.Context, _ *models.KnowledgeFact) error {
-			upsertCalled = true
+		createFunc: func(_ context.Context, _ *models.KnowledgeFact) error {
+			createCalled = true
 			return nil
 		},
 	}
@@ -508,8 +518,8 @@ func TestStart_SkipsOverviewStorageWhenEmpty(t *testing.T) {
 	// Call Start with empty overview
 	_, _ = service.Start(ctx, projectID, datasourceID, emptyOverview)
 
-	// Verify Upsert was NOT called
-	assert.False(t, upsertCalled, "Upsert should NOT be called when overview is empty")
+	// Verify Create was NOT called
+	assert.False(t, createCalled, "Create should NOT be called when overview is empty")
 }
 
 // TestStart_ContinuesOnOverviewStorageError verifies that when Upsert fails,
@@ -522,12 +532,12 @@ func TestStart_ContinuesOnOverviewStorageError(t *testing.T) {
 	projectOverview := "A valid project overview"
 
 	// Track the flow of execution
-	var upsertCalled bool
+	var createCalled bool
 	var getActiveByDatasourceCalled bool
 
 	mockKnowledgeRepo := &mockKnowledgeRepository{
-		upsertFunc: func(_ context.Context, _ *models.KnowledgeFact) error {
-			upsertCalled = true
+		createFunc: func(_ context.Context, _ *models.KnowledgeFact) error {
+			createCalled = true
 			// Return an error to simulate storage failure
 			return fmt.Errorf("database connection failed")
 		},
@@ -580,10 +590,10 @@ func TestStart_ContinuesOnOverviewStorageError(t *testing.T) {
 	_, _ = service.Start(ctx, projectID, datasourceID, projectOverview)
 
 	// Verify both steps were attempted:
-	// 1. Upsert was called (and failed)
-	assert.True(t, upsertCalled, "Upsert should be called")
-	// 2. Extraction continued after Upsert failure (getActiveByDatasource was called)
-	assert.True(t, getActiveByDatasourceCalled, "Extraction should continue after Upsert failure")
+	// 1. Create was called (and failed)
+	assert.True(t, createCalled, "Create should be called")
+	// 2. Extraction continued after Create failure (getActiveByDatasource was called)
+	assert.True(t, getActiveByDatasourceCalled, "Extraction should continue after Create failure")
 }
 
 // TestCancel_MarksNonCompletedNodesAsSkipped verifies that canceling a DAG

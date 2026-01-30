@@ -28,12 +28,13 @@ type OntologyContextService interface {
 }
 
 type ontologyContextService struct {
-	ontologyRepo     repositories.OntologyRepository
-	entityRepo       repositories.OntologyEntityRepository
-	relationshipRepo repositories.EntityRelationshipRepository
-	schemaRepo       repositories.SchemaRepository
-	projectService   ProjectService // Reserved for Phase 2/3: project-level domain aggregation
-	logger           *zap.Logger
+	ontologyRepo      repositories.OntologyRepository
+	entityRepo        repositories.OntologyEntityRepository
+	relationshipRepo  repositories.EntityRelationshipRepository
+	schemaRepo        repositories.SchemaRepository
+	tableMetadataRepo repositories.TableMetadataRepository
+	projectService    ProjectService // Reserved for Phase 2/3: project-level domain aggregation
+	logger            *zap.Logger
 }
 
 // NewOntologyContextService creates a new OntologyContextService.
@@ -42,20 +43,23 @@ func NewOntologyContextService(
 	entityRepo repositories.OntologyEntityRepository,
 	relationshipRepo repositories.EntityRelationshipRepository,
 	schemaRepo repositories.SchemaRepository,
+	tableMetadataRepo repositories.TableMetadataRepository,
 	projectService ProjectService,
 	logger *zap.Logger,
 ) OntologyContextService {
 	return &ontologyContextService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relationshipRepo,
-		schemaRepo:       schemaRepo,
-		projectService:   projectService,
-		logger:           logger,
+		ontologyRepo:      ontologyRepo,
+		entityRepo:        entityRepo,
+		relationshipRepo:  relationshipRepo,
+		schemaRepo:        schemaRepo,
+		tableMetadataRepo: tableMetadataRepo,
+		projectService:    projectService,
+		logger:            logger,
 	}
 }
 
 // GetDomainContext returns high-level domain information.
+// Only returns promoted entities (is_promoted=true) to filter out low-value entities.
 func (s *ontologyContextService) GetDomainContext(ctx context.Context, projectID uuid.UUID) (*models.OntologyDomainContext, error) {
 	// Get active ontology (only for checking it exists and domain summary)
 	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
@@ -66,8 +70,8 @@ func (s *ontologyContextService) GetDomainContext(ctx context.Context, projectID
 		return nil, fmt.Errorf("no active ontology found")
 	}
 
-	// Get entities from normalized table
-	entities, err := s.entityRepo.GetByProject(ctx, projectID)
+	// Get only promoted entities - demoted entities are filtered out
+	entities, err := s.entityRepo.GetPromotedByProject(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get entities: %w", err)
 	}
@@ -163,6 +167,7 @@ func (s *ontologyContextService) GetDomainContext(ctx context.Context, projectID
 }
 
 // GetEntitiesContext returns entity summaries with occurrences.
+// Only returns promoted entities (is_promoted=true) to filter out low-value entities.
 func (s *ontologyContextService) GetEntitiesContext(ctx context.Context, projectID uuid.UUID) (*models.OntologyEntitiesContext, error) {
 	// Get active ontology
 	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
@@ -173,8 +178,8 @@ func (s *ontologyContextService) GetEntitiesContext(ctx context.Context, project
 		return nil, fmt.Errorf("no active ontology found")
 	}
 
-	// Get entities
-	entities, err := s.entityRepo.GetByProject(ctx, projectID)
+	// Get only promoted entities - demoted entities are filtered out
+	entities, err := s.entityRepo.GetPromotedByProject(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get entities: %w", err)
 	}
@@ -339,6 +344,29 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 		relationshipsByTable[rel.SourceColumnTable] = append(relationshipsByTable[rel.SourceColumnTable], rel)
 	}
 
+	// Fetch table metadata if repository is available
+	var tableMetadataMap map[string]*models.TableMetadata
+	if s.tableMetadataRepo != nil {
+		dsID, err := s.projectService.GetDefaultDatasourceID(ctx, projectID)
+		if err != nil {
+			s.logger.Warn("Failed to get default datasource for table metadata",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		} else {
+			metaList, err := s.tableMetadataRepo.List(ctx, projectID, dsID)
+			if err != nil {
+				s.logger.Warn("Failed to get table metadata",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err))
+			} else if len(metaList) > 0 {
+				tableMetadataMap = make(map[string]*models.TableMetadata, len(metaList))
+				for _, meta := range metaList {
+					tableMetadataMap[meta.TableName] = meta
+				}
+			}
+		}
+	}
+
 	// Build table summaries
 	tables := make(map[string]models.TableSummary)
 	for _, tableName := range tablesToInclude {
@@ -388,7 +416,7 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 		// Row count would need to come from schema_tables, but we don't have that data easily
 		// For now, leave as 0 - this could be improved later
 
-		tables[tableName] = models.TableSummary{
+		summary := models.TableSummary{
 			Schema:        entity.PrimarySchema,
 			BusinessName:  entity.Name,
 			Description:   entity.Description,
@@ -399,6 +427,23 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 			Columns:       columns,
 			Relationships: tableRelationships,
 		}
+
+		// Merge table metadata if available
+		if tableMetadataMap != nil {
+			if meta, ok := tableMetadataMap[tableName]; ok {
+				if meta.UsageNotes != nil && *meta.UsageNotes != "" {
+					summary.UsageNotes = *meta.UsageNotes
+				}
+				if meta.IsEphemeral {
+					summary.IsEphemeral = true
+				}
+				if meta.PreferredAlternative != nil && *meta.PreferredAlternative != "" {
+					summary.PreferredAlternative = *meta.PreferredAlternative
+				}
+			}
+		}
+
+		tables[tableName] = summary
 	}
 
 	return &models.OntologyTablesContext{
@@ -472,6 +517,29 @@ func (s *ontologyContextService) GetColumnsContext(ctx context.Context, projectI
 		fkInfo[rel.SourceColumnTable][rel.SourceColumnName] = rel.TargetColumnTable
 	}
 
+	// Fetch table metadata if repository is available
+	var tableMetadataMap map[string]*models.TableMetadata
+	if s.tableMetadataRepo != nil {
+		dsID, err := s.projectService.GetDefaultDatasourceID(ctx, projectID)
+		if err != nil {
+			s.logger.Warn("Failed to get default datasource for table metadata",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		} else {
+			metaList, err := s.tableMetadataRepo.List(ctx, projectID, dsID)
+			if err != nil {
+				s.logger.Warn("Failed to get table metadata",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err))
+			} else if len(metaList) > 0 {
+				tableMetadataMap = make(map[string]*models.TableMetadata, len(metaList))
+				for _, meta := range metaList {
+					tableMetadataMap[meta.TableName] = meta
+				}
+			}
+		}
+	}
+
 	// Build table details
 	tables := make(map[string]models.TableDetail)
 	for _, tableName := range tableNames {
@@ -519,12 +587,29 @@ func (s *ontologyContextService) GetColumnsContext(ctx context.Context, projectI
 			}
 		}
 
-		tables[tableName] = models.TableDetail{
+		detail := models.TableDetail{
 			Schema:       entity.PrimarySchema,
 			BusinessName: entity.Name,
 			Description:  entity.Description,
 			Columns:      columnDetails,
 		}
+
+		// Merge table metadata if available
+		if tableMetadataMap != nil {
+			if meta, ok := tableMetadataMap[tableName]; ok {
+				if meta.UsageNotes != nil && *meta.UsageNotes != "" {
+					detail.UsageNotes = *meta.UsageNotes
+				}
+				if meta.IsEphemeral {
+					detail.IsEphemeral = true
+				}
+				if meta.PreferredAlternative != nil && *meta.PreferredAlternative != "" {
+					detail.PreferredAlternative = *meta.PreferredAlternative
+				}
+			}
+		}
+
+		tables[tableName] = detail
 	}
 
 	return &models.OntologyColumnsContext{

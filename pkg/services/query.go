@@ -213,7 +213,7 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 	// Modifying queries (INSERT/UPDATE/DELETE/CALL) may not have output columns
 	// unless they use RETURNING clause, so empty is allowed for those.
 	if len(req.OutputColumns) == 0 && !req.AllowsModification {
-		return nil, fmt.Errorf("output_columns required: test query before saving to capture result columns")
+		return nil, fmt.Errorf("output_column_descriptions parameter is required. Provide descriptions for output columns, e.g., {\"total\": \"Total count of records\"}")
 	}
 
 	// Ensure Parameters is never nil (database column has NOT NULL constraint)
@@ -334,7 +334,7 @@ func (s *queryService) Update(ctx context.Context, projectID, queryID uuid.UUID,
 		// Only require output_columns for SELECT queries (non-modifying)
 		if !effectiveAllowsModification {
 			if req.OutputColumns == nil || len(*req.OutputColumns) == 0 {
-				return nil, fmt.Errorf("output_columns required when updating SQL: test query before saving to capture result columns")
+				return nil, fmt.Errorf("output_column_descriptions parameter is required when updating SQL. Provide descriptions for output columns, e.g., {\"total\": \"Total count of records\"}")
 			}
 		}
 	}

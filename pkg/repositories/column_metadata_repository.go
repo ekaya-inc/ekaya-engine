@@ -69,18 +69,19 @@ func (r *columnMetadataRepository) Upsert(ctx context.Context, meta *models.Colu
 	query := `
 		INSERT INTO engine_ontology_column_metadata (
 			project_id, table_name, column_name,
-			description, entity, role, enum_values,
+			description, entity, role, enum_values, is_sensitive,
 			source, created_by, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (project_id, table_name, column_name)
 		DO UPDATE SET
 			description = COALESCE(EXCLUDED.description, engine_ontology_column_metadata.description),
 			entity = COALESCE(EXCLUDED.entity, engine_ontology_column_metadata.entity),
 			role = COALESCE(EXCLUDED.role, engine_ontology_column_metadata.role),
 			enum_values = COALESCE(EXCLUDED.enum_values, engine_ontology_column_metadata.enum_values),
-			last_edit_source = $11,
-			updated_by = $12,
-			updated_at = $13
+			is_sensitive = COALESCE(EXCLUDED.is_sensitive, engine_ontology_column_metadata.is_sensitive),
+			last_edit_source = $12,
+			updated_by = $13,
+			updated_at = $14
 		RETURNING id, created_at, updated_at`
 
 	err = scope.Conn.QueryRow(ctx, query,
@@ -91,6 +92,7 @@ func (r *columnMetadataRepository) Upsert(ctx context.Context, meta *models.Colu
 		meta.Entity,
 		meta.Role,
 		enumValuesJSON,
+		meta.IsSensitive,
 		meta.Source,
 		meta.CreatedBy,
 		now,
@@ -114,7 +116,7 @@ func (r *columnMetadataRepository) GetByTableColumn(ctx context.Context, project
 
 	query := `
 		SELECT id, project_id, table_name, column_name,
-		       description, entity, role, enum_values,
+		       description, entity, role, enum_values, is_sensitive,
 		       source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_ontology_column_metadata
 		WHERE project_id = $1 AND table_name = $2 AND column_name = $3`
@@ -131,7 +133,7 @@ func (r *columnMetadataRepository) GetByTable(ctx context.Context, projectID uui
 
 	query := `
 		SELECT id, project_id, table_name, column_name,
-		       description, entity, role, enum_values,
+		       description, entity, role, enum_values, is_sensitive,
 		       source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_ontology_column_metadata
 		WHERE project_id = $1 AND table_name = $2
@@ -154,7 +156,7 @@ func (r *columnMetadataRepository) GetByProject(ctx context.Context, projectID u
 
 	query := `
 		SELECT id, project_id, table_name, column_name,
-		       description, entity, role, enum_values,
+		       description, entity, role, enum_values, is_sensitive,
 		       source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_ontology_column_metadata
 		WHERE project_id = $1
@@ -205,7 +207,7 @@ func scanColumnMetadata(row pgx.Row) (*models.ColumnMetadata, error) {
 
 	err := row.Scan(
 		&m.ID, &m.ProjectID, &m.TableName, &m.ColumnName,
-		&m.Description, &m.Entity, &m.Role, &enumValues,
+		&m.Description, &m.Entity, &m.Role, &enumValues, &m.IsSensitive,
 		&m.Source, &m.LastEditSource, &m.CreatedBy, &m.UpdatedBy, &m.CreatedAt, &m.UpdatedAt,
 	)
 	if err != nil {
@@ -233,7 +235,7 @@ func scanColumnMetadataRows(rows pgx.Rows) ([]*models.ColumnMetadata, error) {
 
 		err := rows.Scan(
 			&m.ID, &m.ProjectID, &m.TableName, &m.ColumnName,
-			&m.Description, &m.Entity, &m.Role, &enumValues,
+			&m.Description, &m.Entity, &m.Role, &enumValues, &m.IsSensitive,
 			&m.Source, &m.LastEditSource, &m.CreatedBy, &m.UpdatedBy, &m.CreatedAt, &m.UpdatedAt,
 		)
 		if err != nil {

@@ -262,7 +262,7 @@ var inputErrorPatterns = []string{
 	"not found",
 	"validation failed",
 	"SQL validation failed",
-	"output_columns required",
+	"output_column_descriptions parameter is required",
 	"already exists",
 	"invalid input",
 	"missing required",

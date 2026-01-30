@@ -422,6 +422,57 @@ func probeColumn(ctx context.Context, deps *ProbeToolDeps, projectID uuid.UUID, 
 		response.SampleValues = column.SampleValues
 	}
 
+	// Extract column features from metadata if available
+	if features := column.GetColumnFeatures(); features != nil {
+		response.Features = &probeColumnFeatures{
+			Purpose:            features.Purpose,
+			SemanticType:       features.SemanticType,
+			Role:               features.Role,
+			Description:        features.Description,
+			ClassificationPath: string(features.ClassificationPath),
+			Confidence:         features.Confidence,
+		}
+
+		// Add timestamp features if present
+		if features.TimestampFeatures != nil {
+			response.Features.TimestampFeatures = &probeTimestampFeatures{
+				TimestampPurpose: features.TimestampFeatures.TimestampPurpose,
+				IsSoftDelete:     features.TimestampFeatures.IsSoftDelete,
+				IsAuditField:     features.TimestampFeatures.IsAuditField,
+			}
+		}
+
+		// Add boolean features if present
+		if features.BooleanFeatures != nil {
+			response.Features.BooleanFeatures = &probeBooleanFeatures{
+				TrueMeaning:  features.BooleanFeatures.TrueMeaning,
+				FalseMeaning: features.BooleanFeatures.FalseMeaning,
+				BooleanType:  features.BooleanFeatures.BooleanType,
+			}
+		}
+
+		// Add identifier features if present
+		if features.IdentifierFeatures != nil {
+			response.Features.IdentifierFeatures = &probeIdentifierFeatures{
+				IdentifierType:   features.IdentifierFeatures.IdentifierType,
+				ExternalService:  features.IdentifierFeatures.ExternalService,
+				FKTargetTable:    features.IdentifierFeatures.FKTargetTable,
+				FKTargetColumn:   features.IdentifierFeatures.FKTargetColumn,
+				FKConfidence:     features.IdentifierFeatures.FKConfidence,
+				EntityReferenced: features.IdentifierFeatures.EntityReferenced,
+			}
+		}
+
+		// Add monetary features if present
+		if features.MonetaryFeatures != nil {
+			response.Features.MonetaryFeatures = &probeMonetaryFeatures{
+				IsMonetary:           features.MonetaryFeatures.IsMonetary,
+				CurrencyUnit:         features.MonetaryFeatures.CurrencyUnit,
+				PairedCurrencyColumn: features.MonetaryFeatures.PairedCurrencyColumn,
+			}
+		}
+	}
+
 	return response, nil
 }
 
@@ -433,7 +484,55 @@ type probeColumnResponse struct {
 	Joinability  *probeColumnJoinability `json:"joinability,omitempty"`
 	SampleValues []string                `json:"sample_values,omitempty"` // Distinct values for low-cardinality columns (≤50 values)
 	Semantic     *probeColumnSemantic    `json:"semantic,omitempty"`
-	Error        string                  `json:"error,omitempty"` // For batch mode partial failures
+	Features     *probeColumnFeatures    `json:"features,omitempty"` // Column features from extraction pipeline
+	Error        string                  `json:"error,omitempty"`    // For batch mode partial failures
+}
+
+// probeColumnFeatures contains extracted column features from the feature extraction pipeline.
+type probeColumnFeatures struct {
+	Purpose            string  `json:"purpose,omitempty"`             // "identifier", "timestamp", "flag", "measure", "enum", "text"
+	SemanticType       string  `json:"semantic_type,omitempty"`       // More specific type like "soft_delete_timestamp", "monetary"
+	Role               string  `json:"role,omitempty"`                // "primary_key", "foreign_key", "attribute", "measure"
+	Description        string  `json:"description,omitempty"`         // LLM-generated business description
+	ClassificationPath string  `json:"classification_path,omitempty"` // Analysis path taken: "timestamp", "boolean", "enum", etc.
+	Confidence         float64 `json:"confidence,omitempty"`          // Classification confidence (0.0 - 1.0)
+
+	// Path-specific features (populated based on classification)
+	TimestampFeatures  *probeTimestampFeatures  `json:"timestamp_features,omitempty"`
+	BooleanFeatures    *probeBooleanFeatures    `json:"boolean_features,omitempty"`
+	IdentifierFeatures *probeIdentifierFeatures `json:"identifier_features,omitempty"`
+	MonetaryFeatures   *probeMonetaryFeatures   `json:"monetary_features,omitempty"`
+}
+
+// probeTimestampFeatures contains timestamp-specific classification results.
+type probeTimestampFeatures struct {
+	TimestampPurpose string `json:"timestamp_purpose,omitempty"` // "audit_created", "audit_updated", "soft_delete", etc.
+	IsSoftDelete     bool   `json:"is_soft_delete,omitempty"`
+	IsAuditField     bool   `json:"is_audit_field,omitempty"`
+}
+
+// probeBooleanFeatures contains boolean-specific classification results.
+type probeBooleanFeatures struct {
+	TrueMeaning  string `json:"true_meaning,omitempty"`
+	FalseMeaning string `json:"false_meaning,omitempty"`
+	BooleanType  string `json:"boolean_type,omitempty"` // "feature_flag", "status_indicator", "permission"
+}
+
+// probeIdentifierFeatures contains identifier-specific classification results.
+type probeIdentifierFeatures struct {
+	IdentifierType   string  `json:"identifier_type,omitempty"`   // "internal_uuid", "foreign_key", "external_service_id"
+	ExternalService  string  `json:"external_service,omitempty"`  // "stripe", "twilio", etc.
+	FKTargetTable    string  `json:"fk_target_table,omitempty"`   // Resolved FK target table
+	FKTargetColumn   string  `json:"fk_target_column,omitempty"`  // Resolved FK target column
+	FKConfidence     float64 `json:"fk_confidence,omitempty"`     // FK resolution confidence
+	EntityReferenced string  `json:"entity_referenced,omitempty"` // Entity this identifier refers to
+}
+
+// probeMonetaryFeatures contains monetary-specific classification results.
+type probeMonetaryFeatures struct {
+	IsMonetary           bool   `json:"is_monetary,omitempty"`
+	CurrencyUnit         string `json:"currency_unit,omitempty"`          // "cents", "dollars", "USD"
+	PairedCurrencyColumn string `json:"paired_currency_column,omitempty"` // Column containing currency code
 }
 
 // probeColumnStatistics contains statistical information about a column.
@@ -623,6 +722,13 @@ func probeRelationships(ctx context.Context, deps *ProbeToolDeps, projectID uuid
 		filteredRelationships = append(filteredRelationships, rel)
 	}
 
+	// Build entity lookup by primary table for fallback schema-to-entity mapping
+	entityByPrimaryTable := make(map[string]*models.OntologyEntity)
+	for _, entity := range entities {
+		key := entity.PrimaryTable // Use table name without schema prefix for simpler matching
+		entityByPrimaryTable[key] = entity
+	}
+
 	// Build response for confirmed relationships
 	for _, rel := range filteredRelationships {
 		detail := probeRelationshipDetail{
@@ -685,6 +791,18 @@ func probeRelationships(ctx context.Context, deps *ProbeToolDeps, projectID uuid
 		response.Relationships = append(response.Relationships, detail)
 	}
 
+	// Fallback: If no entity relationships found but filters specified, try to derive from schema relationships
+	// This handles the case where FK discovery didn't create entity relationships but schema relationships exist
+	if len(response.Relationships) == 0 && (fromEntity != nil || toEntity != nil) {
+		derivedRelationships := deriveRelationshipsFromSchema(
+			schemaRelationshipsMap,
+			entityByPrimaryTable,
+			fromEntity,
+			toEntity,
+		)
+		response.Relationships = append(response.Relationships, derivedRelationships...)
+	}
+
 	// Add rejected candidates (filter by entity if specified)
 	if fromEntity != nil || toEntity != nil {
 		// If entity filters are specified, filter rejected candidates
@@ -727,10 +845,20 @@ type schemaRelationshipKey struct {
 	targetColumnID uuid.UUID
 }
 
+// schemaRelationshipInfo contains schema relationship data with resolved table/column names.
+// This extends models.SchemaRelationship with the names needed for entity matching.
+type schemaRelationshipInfo struct {
+	*models.SchemaRelationship
+	SourceTableName  string
+	SourceColumnName string
+	TargetTableName  string
+	TargetColumnName string
+}
+
 // getSchemaRelationshipsWithMetrics queries engine_schema_relationships to get cardinality
 // and data quality metrics. Returns a map keyed by (source_column_id, target_column_id)
 // for fast lookup, plus a list of rejected candidates.
-func getSchemaRelationshipsWithMetrics(ctx context.Context, deps *ProbeToolDeps, projectID, datasourceID uuid.UUID) (map[schemaRelationshipKey]*models.SchemaRelationship, []probeRelationshipCandidate, error) {
+func getSchemaRelationshipsWithMetrics(ctx context.Context, deps *ProbeToolDeps, projectID, datasourceID uuid.UUID) (map[schemaRelationshipKey]*schemaRelationshipInfo, []probeRelationshipCandidate, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, nil, fmt.Errorf("no tenant scope in context")
@@ -762,7 +890,7 @@ func getSchemaRelationshipsWithMetrics(ctx context.Context, deps *ProbeToolDeps,
 	}
 	defer rows.Close()
 
-	confirmedMap := make(map[schemaRelationshipKey]*models.SchemaRelationship)
+	confirmedMap := make(map[schemaRelationshipKey]*schemaRelationshipInfo)
 	var rejectedCandidates []probeRelationshipCandidate
 
 	for rows.Next() {
@@ -801,12 +929,18 @@ func getSchemaRelationshipsWithMetrics(ctx context.Context, deps *ProbeToolDeps,
 			}
 			rejectedCandidates = append(rejectedCandidates, candidate)
 		} else {
-			// If confirmed, add to map for lookup
+			// If confirmed, add to map for lookup with table/column names
 			key := schemaRelationshipKey{
 				sourceColumnID: rel.SourceColumnID,
 				targetColumnID: rel.TargetColumnID,
 			}
-			confirmedMap[key] = &rel
+			confirmedMap[key] = &schemaRelationshipInfo{
+				SchemaRelationship: &rel,
+				SourceTableName:    sourceTableName,
+				SourceColumnName:   sourceColumnName,
+				TargetTableName:    targetTableName,
+				TargetColumnName:   targetColumnName,
+			}
 		}
 	}
 
@@ -892,4 +1026,82 @@ type probeRelationshipCandidate struct {
 	ToColumn        string   `json:"to_column"`
 	RejectionReason string   `json:"rejection_reason"`
 	MatchRate       *float64 `json:"match_rate,omitempty"`
+}
+
+// deriveRelationshipsFromSchema attempts to derive entity relationships from schema relationships.
+// This is a fallback when no entity relationships exist but schema relationships do.
+// It maps schema relationships to entities by matching table names to entity primary tables.
+func deriveRelationshipsFromSchema(
+	schemaRelationshipsMap map[schemaRelationshipKey]*schemaRelationshipInfo,
+	entityByPrimaryTable map[string]*models.OntologyEntity,
+	fromEntity, toEntity *string,
+) []probeRelationshipDetail {
+	var results []probeRelationshipDetail
+
+	// Track which entity pairs we've already added (to avoid duplicates from multiple columns)
+	seen := make(map[string]bool)
+
+	for _, schemaRel := range schemaRelationshipsMap {
+		// Skip rejected relationships (should be filtered already, but check anyway)
+		if schemaRel.RejectionReason != nil && *schemaRel.RejectionReason != "" {
+			continue
+		}
+
+		// Use table names from schemaRelationshipInfo to find matching entities
+		sourceEntity := entityByPrimaryTable[schemaRel.SourceTableName]
+		targetEntity := entityByPrimaryTable[schemaRel.TargetTableName]
+
+		// Skip if we can't map both tables to entities
+		if sourceEntity == nil || targetEntity == nil {
+			continue
+		}
+
+		// Apply entity filters if specified
+		if fromEntity != nil && sourceEntity.Name != *fromEntity {
+			continue
+		}
+		if toEntity != nil && targetEntity.Name != *toEntity {
+			continue
+		}
+
+		// Build a unique key for this entity pair to avoid duplicates
+		pairKey := fmt.Sprintf("%s->%s", sourceEntity.Name, targetEntity.Name)
+		if seen[pairKey] {
+			continue
+		}
+		seen[pairKey] = true
+
+		// Build the relationship detail
+		detail := probeRelationshipDetail{
+			FromEntity:  sourceEntity.Name,
+			ToEntity:    targetEntity.Name,
+			FromColumn:  fmt.Sprintf("%s.%s", schemaRel.SourceTableName, schemaRel.SourceColumnName),
+			ToColumn:    fmt.Sprintf("%s.%s", schemaRel.TargetTableName, schemaRel.TargetColumnName),
+			Cardinality: schemaRel.Cardinality,
+		}
+
+		// Add data quality metrics if available
+		if schemaRel.MatchRate != nil && schemaRel.SourceDistinct != nil && schemaRel.TargetDistinct != nil {
+			dataQuality := &probeRelationshipDataQuality{
+				MatchRate:      *schemaRel.MatchRate,
+				SourceDistinct: *schemaRel.SourceDistinct,
+				TargetDistinct: *schemaRel.TargetDistinct,
+			}
+
+			if schemaRel.MatchedCount != nil {
+				dataQuality.MatchedCount = *schemaRel.MatchedCount
+			}
+
+			if schemaRel.SourceDistinct != nil && schemaRel.MatchedCount != nil {
+				orphanCount := *schemaRel.SourceDistinct - *schemaRel.MatchedCount
+				dataQuality.OrphanCount = &orphanCount
+			}
+
+			detail.DataQuality = dataQuality
+		}
+
+		results = append(results, detail)
+	}
+
+	return results
 }

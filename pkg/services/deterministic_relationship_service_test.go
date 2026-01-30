@@ -572,75 +572,9 @@ func TestPKMatch_WorksWithoutRowCount(t *testing.T) {
 	}
 }
 
-// TestIsPKMatchExcludedName verifies that the name exclusion function catches
-// all patterns that should not be considered as FK candidates.
-func TestIsPKMatchExcludedName(t *testing.T) {
-	tests := []struct {
-		name     string
-		column   string
-		excluded bool
-	}{
-		// Count patterns with num_ prefix
-		{"num_users should be excluded", "num_users", true},
-		{"num_items should be excluded", "num_items", true},
-		{"NUM_ORDERS should be excluded (case insensitive)", "NUM_ORDERS", true},
-
-		// Count patterns with total_ prefix
-		{"total_amount should be excluded", "total_amount", true},
-		{"total_sales should be excluded", "total_sales", true},
-		{"TOTAL_REVENUE should be excluded (case insensitive)", "TOTAL_REVENUE", true},
-
-		// Existing count suffix patterns
-		{"user_count should be excluded", "user_count", true},
-		{"order_count should be excluded", "order_count", true},
-
-		// Amount/total suffixes
-		{"order_amount should be excluded", "order_amount", true},
-		{"sale_total should be excluded", "sale_total", true},
-
-		// Aggregate function suffixes
-		{"revenue_sum should be excluded", "revenue_sum", true},
-		{"price_avg should be excluded", "price_avg", true},
-		{"score_min should be excluded", "score_min", true},
-		{"value_max should be excluded", "value_max", true},
-
-		// Rating patterns
-		{"rating should be excluded", "rating", true},
-		{"user_rating should be excluded", "user_rating", true},
-		{"product_rating should be excluded", "product_rating", true},
-		{"RATING should be excluded (case insensitive)", "RATING", true},
-
-		// Score patterns
-		{"score should be excluded", "score", true},
-		{"credit_score should be excluded", "credit_score", true},
-		{"quality_score should be excluded", "quality_score", true},
-
-		// Level patterns
-		{"level should be excluded", "level", true},
-		{"mod_level should be excluded", "mod_level", true},
-		{"access_level should be excluded", "access_level", true},
-
-		// Valid FK column names should NOT be excluded
-		{"user_id should NOT be excluded", "user_id", false},
-		{"account_id should NOT be excluded", "account_id", false},
-		{"id should NOT be excluded", "id", false},
-		{"owner_id should NOT be excluded", "owner_id", false},
-		{"host_id should NOT be excluded", "host_id", false},
-
-		// Edge cases - columns with excluded patterns as substrings
-		{"document_id should NOT be excluded (ment != amount)", "document_id", false},
-		{"internal should NOT be excluded (internal != num_)", "internal", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := isPKMatchExcludedName(tt.column)
-			if result != tt.excluded {
-				t.Errorf("isPKMatchExcludedName(%q) = %v, want %v", tt.column, result, tt.excluded)
-			}
-		})
-	}
-}
+// NOTE: TestIsPKMatchExcludedName has been removed.
+// Column filtering now uses stored ColumnFeatures.Purpose instead of name-based patterns.
+// See PLAN-extracting-column-features.md for details.
 
 // TestPKMatch_RequiresJoinableFlag verifies that columns with IsJoinable=false
 // or IsJoinable=nil are skipped and do not create relationships.
@@ -1411,6 +1345,10 @@ func (m *mockTestEntityRepo) GetByProject(ctx context.Context, projectID uuid.UU
 	return nil, nil
 }
 
+func (m *mockTestEntityRepo) GetPromotedByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
+	return nil, nil
+}
+
 func (m *mockTestEntityRepo) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error) {
 	return nil, nil
 }
@@ -1428,7 +1366,8 @@ func (m *mockTestEntityRepo) Restore(ctx context.Context, entityID uuid.UUID) er
 }
 
 type mockTestRelationshipRepo struct {
-	created []*models.EntityRelationship
+	created  []*models.EntityRelationship
+	existing []*models.EntityRelationship // Pre-existing relationships (for GetByOntology)
 }
 
 func (m *mockTestRelationshipRepo) Create(ctx context.Context, relationship *models.EntityRelationship) error {
@@ -1491,6 +1430,10 @@ func (m *mockTestSchemaRepo) ListColumnsByDatasource(ctx context.Context, projec
 		}
 	}
 	return result, nil
+}
+
+func (m *mockTestSchemaRepo) GetColumnsWithFeaturesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) (map[string][]*models.SchemaColumn, error) {
+	return nil, nil
 }
 
 func (m *mockTestSchemaRepo) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error) {
@@ -1572,7 +1515,11 @@ func (m *mockTestRelationshipRepo) DeleteByOntology(ctx context.Context, ontolog
 }
 
 func (m *mockTestRelationshipRepo) GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
-	return nil, nil
+	// Return existing + created relationships for deduplication tests
+	all := make([]*models.EntityRelationship, 0, len(m.existing)+len(m.created))
+	all = append(all, m.existing...)
+	all = append(all, m.created...)
+	return all, nil
 }
 
 func (m *mockTestRelationshipRepo) GetByOntologyGroupedByTarget(ctx context.Context, ontologyID uuid.UUID) (map[uuid.UUID][]*models.EntityRelationship, error) {
@@ -1710,6 +1657,10 @@ func (m *mockTestSchemaRepo) UpdateColumnStats(ctx context.Context, columnID uui
 }
 
 func (m *mockTestSchemaRepo) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
+	return nil
+}
+
+func (m *mockTestSchemaRepo) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
 	return nil
 }
 
@@ -1916,6 +1867,11 @@ func TestPKMatch_SmallIntegerValues_LookupTable(t *testing.T) {
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &refDistinctCount, // 15 distinct values (passes cardinality check: 15/100 = 15% > 1%)
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+						},
+					},
 				},
 			},
 		},
@@ -2071,7 +2027,7 @@ func TestPKMatch_LowCardinality_Excluded(t *testing.T) {
 	}
 }
 
-// TestPKMatch_CountColumns_NeverJoined tests that columns with count/aggregate names
+// TestPKMatch_CountColumns_NeverJoined tests that columns with PurposeMeasure feature
 // are excluded from being FK candidates (they should not try to join TO entity PKs)
 func TestPKMatch_CountColumns_NeverJoined(t *testing.T) {
 	projectID := uuid.New()
@@ -2095,9 +2051,9 @@ func TestPKMatch_CountColumns_NeverJoined(t *testing.T) {
 		PrimaryTable:  "accounts",
 	})
 
-	// Mock discoverer should NOT be called because count columns are filtered by name BEFORE cardinality ratio check
+	// Mock discoverer should NOT be called because count columns are filtered by purpose (PurposeMeasure)
 	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
-		t.Errorf("AnalyzeJoin should not be called (count columns should be excluded by name): %s.%s.%s -> %s.%s.%s",
+		t.Errorf("AnalyzeJoin should not be called (measure columns should be excluded by purpose): %s.%s.%s -> %s.%s.%s",
 			sourceSchema, sourceTable, sourceColumn,
 			targetSchema, targetTable, targetColumn)
 		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
@@ -2107,8 +2063,8 @@ func TestPKMatch_CountColumns_NeverJoined(t *testing.T) {
 	accountsTableID := uuid.New()
 
 	// Schema: users.id is a PK (entityRefColumn), accounts has count columns
-	// Count columns should NOT be FK candidates - they are excluded by NAME filter
-	// before the cardinality ratio check would exclude them
+	// Count columns should NOT be FK candidates - they are excluded by PURPOSE filter
+	// (PurposeMeasure) before the cardinality ratio check would exclude them
 	mocks.schemaRepo.tables = []*models.SchemaTable{
 		{
 			ID:         usersTableID,
@@ -2142,27 +2098,42 @@ func TestPKMatch_CountColumns_NeverJoined(t *testing.T) {
 				},
 				{
 					SchemaTableID: accountsTableID,
-					ColumnName:    "num_users", // Count column with num_ prefix
+					ColumnName:    "num_users", // Count column classified as measure
 					DataType:      "bigint",
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &candidateDistinct, // Has sufficient absolute distinct count (>= 20)
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeMeasure,
+						},
+					},
 				},
 				{
 					SchemaTableID: accountsTableID,
-					ColumnName:    "user_count", // Count column with _count suffix
+					ColumnName:    "user_count", // Count column classified as measure
 					DataType:      "bigint",
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &candidateDistinct,
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeMeasure,
+						},
+					},
 				},
 				{
 					SchemaTableID: accountsTableID,
-					ColumnName:    "total_items", // Count column with total_ prefix
+					ColumnName:    "total_items", // Count column classified as measure
 					DataType:      "bigint",
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &candidateDistinct,
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeMeasure,
+						},
+					},
 				},
 			},
 		},
@@ -2184,8 +2155,8 @@ func TestPKMatch_CountColumns_NeverJoined(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify: NO relationships created because count columns are excluded by name filter
-	// Even though they have sufficient DistinctCount, the name filter should prevent them
+	// Verify: NO relationships created because count columns are excluded by purpose (PurposeMeasure)
+	// Even though they have sufficient DistinctCount, the purpose filter should prevent them
 	// from being FK candidates
 	if result.InferredRelationships != 0 {
 		t.Errorf("expected 0 inferred relationships (count columns should be excluded), got %d", result.InferredRelationships)
@@ -2196,7 +2167,7 @@ func TestPKMatch_CountColumns_NeverJoined(t *testing.T) {
 	}
 }
 
-// TestPKMatch_RatingColumns_NeverJoined tests that columns with rating/score/level names
+// TestPKMatch_RatingColumns_NeverJoined tests that columns with PurposeMeasure feature
 // are excluded from being FK candidates (they should not try to join TO entity PKs)
 func TestPKMatch_RatingColumns_NeverJoined(t *testing.T) {
 	projectID := uuid.New()
@@ -2220,9 +2191,9 @@ func TestPKMatch_RatingColumns_NeverJoined(t *testing.T) {
 		PrimaryTable:  "reviews",
 	})
 
-	// Mock discoverer should NOT be called because rating/score/level columns are filtered by name BEFORE cardinality ratio check
+	// Mock discoverer should NOT be called because rating/score/level columns are filtered by purpose (PurposeMeasure)
 	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
-		t.Errorf("AnalyzeJoin should not be called (rating/score/level columns should be excluded by name): %s.%s.%s -> %s.%s.%s",
+		t.Errorf("AnalyzeJoin should not be called (measure columns should be excluded by purpose): %s.%s.%s -> %s.%s.%s",
 			sourceSchema, sourceTable, sourceColumn,
 			targetSchema, targetTable, targetColumn)
 		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
@@ -2232,8 +2203,8 @@ func TestPKMatch_RatingColumns_NeverJoined(t *testing.T) {
 	reviewsTableID := uuid.New()
 
 	// Schema: users.id is a PK (entityRefColumn), reviews has rating/score/level columns
-	// Rating/score/level columns should NOT be FK candidates - they are excluded by NAME filter
-	// before the cardinality ratio check would exclude them
+	// Rating/score/level columns should NOT be FK candidates - they are excluded by PURPOSE filter
+	// (PurposeMeasure) before the cardinality ratio check would exclude them
 	mocks.schemaRepo.tables = []*models.SchemaTable{
 		{
 			ID:         usersTableID,
@@ -2267,27 +2238,42 @@ func TestPKMatch_RatingColumns_NeverJoined(t *testing.T) {
 				},
 				{
 					SchemaTableID: reviewsTableID,
-					ColumnName:    "rating", // Rating column
+					ColumnName:    "rating", // Rating column classified as measure
 					DataType:      "bigint",
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &candidateDistinct, // Has sufficient absolute distinct count (>= 20)
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeMeasure,
+						},
+					},
 				},
 				{
 					SchemaTableID: reviewsTableID,
-					ColumnName:    "mod_level", // Level column
+					ColumnName:    "mod_level", // Level column classified as measure
 					DataType:      "bigint",
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &candidateDistinct,
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeMeasure,
+						},
+					},
 				},
 				{
 					SchemaTableID: reviewsTableID,
-					ColumnName:    "score", // Score column
+					ColumnName:    "score", // Score column classified as measure
 					DataType:      "bigint",
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &candidateDistinct,
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeMeasure,
+						},
+					},
 				},
 			},
 		},
@@ -2309,8 +2295,8 @@ func TestPKMatch_RatingColumns_NeverJoined(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify: NO relationships created because rating/score/level columns are excluded by name filter
-	// Even though they have sufficient DistinctCount, the name filter should prevent them
+	// Verify: NO relationships created because rating/score/level columns are excluded by purpose (PurposeMeasure)
+	// Even though they have sufficient DistinctCount, the purpose filter should prevent them
 	// from being FK candidates
 	if result.InferredRelationships != 0 {
 		t.Errorf("expected 0 inferred relationships (rating/score/level columns should be excluded), got %d", result.InferredRelationships)
@@ -3301,7 +3287,12 @@ func TestPKMatch_LowCardinalityRatio_IDColumn(t *testing.T) {
 					DataType:      "text",
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
-					DistinctCount: &visitorDistinct, // 500/100k = 0.5% (below old 5% threshold)
+					DistinctCount: &visitorDistinct, // 500/100k = 0.5% (below 5% threshold)
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+						},
+					},
 				},
 			},
 		},
@@ -3323,9 +3314,9 @@ func TestPKMatch_LowCardinalityRatio_IDColumn(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify: visitor_id should have passed the cardinality filter because it ends in _id
+	// Verify: visitor_id should have passed the cardinality filter because it has PurposeIdentifier
 	if !joinAnalysisCalled {
-		t.Error("expected join analysis to be called for visitor_id column (should bypass cardinality ratio check for _id columns)")
+		t.Error("expected join analysis to be called for visitor_id column (should bypass cardinality ratio check for identifier columns)")
 	}
 
 	// Verify: relationship created (visitor_id → user_id)
@@ -3506,6 +3497,11 @@ func TestPKMatch_BillingEngagement_MultiSoftFK_Discovery(t *testing.T) {
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &visitorDistinct, // 0.8% cardinality
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+						},
+					},
 				},
 				{
 					SchemaTableID: billingTableID,
@@ -3514,6 +3510,11 @@ func TestPKMatch_BillingEngagement_MultiSoftFK_Discovery(t *testing.T) {
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &hostDistinct, // 0.5% cardinality
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+						},
+					},
 				},
 				{
 					SchemaTableID: billingTableID,
@@ -3522,6 +3523,11 @@ func TestPKMatch_BillingEngagement_MultiSoftFK_Discovery(t *testing.T) {
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &sessionFKDistinct, // 3% cardinality
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+						},
+					},
 				},
 				{
 					SchemaTableID: billingTableID,
@@ -3530,6 +3536,11 @@ func TestPKMatch_BillingEngagement_MultiSoftFK_Discovery(t *testing.T) {
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &offerFKDistinct, // 0.15% cardinality
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+						},
+					},
 				},
 			},
 		},
@@ -3567,7 +3578,7 @@ func TestPKMatch_BillingEngagement_MultiSoftFK_Discovery(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("expected join analysis to be called for %s (should bypass cardinality ratio check for _id columns)", col)
+			t.Errorf("expected join analysis to be called for %s (should bypass cardinality ratio check for identifier columns)", col)
 		}
 	}
 
@@ -3617,39 +3628,9 @@ func TestPKMatch_BillingEngagement_MultiSoftFK_Discovery(t *testing.T) {
 	}
 }
 
-// TestIsLikelyFKColumn tests the isLikelyFKColumn helper function
-func TestIsLikelyFKColumn(t *testing.T) {
-	tests := []struct {
-		columnName string
-		expected   bool
-	}{
-		// Should return true
-		{"user_id", true},
-		{"visitor_id", true},
-		{"host_id", true},
-		{"account_uuid", true},
-		{"session_key", true},
-		{"USER_ID", true}, // case insensitive
-		{"Visitor_Id", true},
-
-		// Should return false
-		{"status", false},
-		{"id", false}, // just "id" doesn't match suffix patterns
-		{"rating", false},
-		{"visitor", false}, // no _id suffix
-		{"created_at", false},
-		{"is_active", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.columnName, func(t *testing.T) {
-			result := isLikelyFKColumn(tt.columnName)
-			if result != tt.expected {
-				t.Errorf("isLikelyFKColumn(%q) = %v, expected %v", tt.columnName, result, tt.expected)
-			}
-		})
-	}
-}
+// NOTE: TestIsLikelyFKColumn has been removed.
+// FK column identification now uses stored ColumnFeatures.Purpose instead of name-based patterns.
+// See PLAN-extracting-column-features.md for details.
 
 // TestPKMatch_NonIDColumn_StillFilteredByCardinality verifies that non-_id columns
 // still get filtered by the cardinality ratio check.
@@ -4381,10 +4362,10 @@ func TestPKMatch_DataBased_CardinalityRatioAlwaysApplied(t *testing.T) {
 	_ = result
 }
 
-// TestPKMatch_LegacyMode_IDColumnsExemptFromFilters verifies that when
-// UseLegacyPatternMatching=true (legacy mode), _id columns are exempt from
-// certain filters like cardinality ratio check.
-func TestPKMatch_LegacyMode_IDColumnsExemptFromFilters(t *testing.T) {
+// TestPKMatch_IdentifierColumnsExemptFromCardinalityFilter verifies that columns
+// with Purpose=identifier (from stored ColumnFeatures) are exempt from the
+// cardinality ratio check, allowing them to be evaluated as FK candidates.
+func TestPKMatch_IdentifierColumnsExemptFromCardinalityFilter(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 	ontologyID := uuid.New()
@@ -4396,9 +4377,7 @@ func TestPKMatch_LegacyMode_IDColumnsExemptFromFilters(t *testing.T) {
 	highRowCount := int64(10000) // 50/10000 = 0.5% < 5% threshold
 	isJoinableTrue := true
 
-	// Create mocks with legacy pattern matching ENABLED (default)
 	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
-	// UseLegacyPatternMatching defaults to true in setupMocks
 
 	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
 		ID:            eventEntityID,
@@ -4408,7 +4387,7 @@ func TestPKMatch_LegacyMode_IDColumnsExemptFromFilters(t *testing.T) {
 		PrimaryTable:  "events",
 	})
 
-	// In legacy mode, _id columns should be evaluated even with low cardinality ratio
+	// Identifier columns with stored features should be evaluated even with low cardinality ratio
 	joinAnalysisCalled := false
 	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
 		if sourceColumn == "user_id" && sourceTable == "events" {
@@ -4451,8 +4430,8 @@ func TestPKMatch_LegacyMode_IDColumnsExemptFromFilters(t *testing.T) {
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &highRowCount,
 				},
-				// This _id column has low cardinality ratio (0.5% < 5%)
-				// In legacy mode, _id columns skip this check
+				// This column has low cardinality ratio (0.5% < 5%)
+				// But has Purpose=identifier in its features, so it skips cardinality check
 				{
 					SchemaTableID: eventsTableID,
 					ColumnName:    "user_id",
@@ -4460,6 +4439,11 @@ func TestPKMatch_LegacyMode_IDColumnsExemptFromFilters(t *testing.T) {
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &lowDistinct, // 50/10000 = 0.5% < 5%
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+						},
+					},
 				},
 			},
 		},
@@ -4481,9 +4465,9 @@ func TestPKMatch_LegacyMode_IDColumnsExemptFromFilters(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// In legacy mode, user_id should have been evaluated (exempt from cardinality ratio check)
+	// Identifier columns (via stored features) should be evaluated (exempt from cardinality ratio check)
 	if !joinAnalysisCalled {
-		t.Error("expected events.user_id to be evaluated in legacy mode (_id columns exempt from cardinality ratio check)")
+		t.Error("expected events.user_id to be evaluated (identifier columns exempt from cardinality ratio check)")
 	}
 }
 
@@ -5144,5 +5128,774 @@ func TestPKMatch_InfersCardinalityFromJoinAnalysis(t *testing.T) {
 				t.Errorf("reverse cardinality: expected %q, got %q", expectedReverseCardinality, reverseRel.Cardinality)
 			}
 		})
+	}
+}
+
+// TestFKDiscovery_FromColumnFeatures tests that FK relationships are created from
+// columns where ColumnFeatureExtraction Phase 4 has already resolved FK targets.
+func TestFKDiscovery_FromColumnFeatures(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	orderEntityID := uuid.New()
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Add order entity
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
+
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+	userIDColumnID := uuid.New()
+	buyerIDColumnID := uuid.New()
+
+	// Setup tables with columns
+	// The buyer_id column has ColumnFeatures with FKTargetTable already resolved
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            userIDColumnID,
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+				},
+			},
+		},
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            buyerIDColumnID,
+					SchemaTableID: ordersTableID,
+					ColumnName:    "buyer_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					// ColumnFeatures stored in Metadata with FK target already resolved
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose":       "identifier",
+							"semantic_type": "foreign_key",
+							"role":          "foreign_key",
+							"identifier_features": map[string]any{
+								"identifier_type":  "foreign_key",
+								"fk_target_table":  "users",
+								"fk_target_column": "id",
+								"fk_confidence":    0.95,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// No schema-level FK relationships - only ColumnFeatures
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{}
+
+	// Setup join analysis to return valid join (no orphans)
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		// Simulate a valid FK relationship: all source values exist in target
+		return &datasource.JoinAnalysis{
+			JoinCount:     100,
+			SourceMatched: 100,
+			TargetMatched: 50,
+			OrphanCount:   0, // No orphans = valid FK
+		}, nil
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: 1 FK relationship discovered from ColumnFeatures (creates 2 rows: forward + reverse)
+	if result.FKRelationships != 1 {
+		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
+	}
+
+	// Bidirectional: 2 relationships created (forward + reverse)
+	if len(mocks.relationshipRepo.created) != 2 {
+		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
+	}
+
+	// Find the forward relationship (order -> user via buyer_id)
+	var forwardRel *models.EntityRelationship
+	for _, rel := range mocks.relationshipRepo.created {
+		if rel.SourceEntityID == orderEntityID && rel.TargetEntityID == userEntityID {
+			forwardRel = rel
+			break
+		}
+	}
+
+	if forwardRel == nil {
+		t.Fatal("forward relationship (order -> user) not found")
+	}
+
+	// Verify: forward relationship has detection_method="data_overlap"
+	if forwardRel.DetectionMethod != models.DetectionMethodDataOverlap {
+		t.Errorf("expected forward DetectionMethod=%q, got %q", models.DetectionMethodDataOverlap, forwardRel.DetectionMethod)
+	}
+
+	// Verify: confidence matches the ColumnFeatures FK confidence
+	if forwardRel.Confidence != 0.95 {
+		t.Errorf("expected confidence=0.95, got %f", forwardRel.Confidence)
+	}
+
+	// Verify: source column info
+	if forwardRel.SourceColumnTable != "orders" || forwardRel.SourceColumnName != "buyer_id" {
+		t.Errorf("expected source=orders.buyer_id, got %s.%s", forwardRel.SourceColumnTable, forwardRel.SourceColumnName)
+	}
+
+	// Verify: target column info
+	if forwardRel.TargetColumnTable != "users" || forwardRel.TargetColumnName != "id" {
+		t.Errorf("expected target=users.id, got %s.%s", forwardRel.TargetColumnTable, forwardRel.TargetColumnName)
+	}
+}
+
+// TestFKDiscovery_ColumnFeaturesAndSchemaFK_Deduplication tests that when both
+// ColumnFeatures and schema FK constraints point to the same relationship,
+// only one relationship is created (via upsert semantics).
+func TestFKDiscovery_ColumnFeaturesAndSchemaFK_Deduplication(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	orderEntityID := uuid.New()
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Add order entity
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
+
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+	userIDColumnID := uuid.New()
+	buyerIDColumnID := uuid.New()
+
+	// Setup tables with columns - buyer_id has ColumnFeatures with FK resolved
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            userIDColumnID,
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+				},
+			},
+		},
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            buyerIDColumnID,
+					SchemaTableID: ordersTableID,
+					ColumnName:    "buyer_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose":       "identifier",
+							"semantic_type": "foreign_key",
+							"role":          "foreign_key",
+							"identifier_features": map[string]any{
+								"identifier_type":  "foreign_key",
+								"fk_target_table":  "users",
+								"fk_target_column": "id",
+								"fk_confidence":    0.85, // Lower confidence from data overlap
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// ALSO have a schema-level FK constraint for the same relationship
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{
+		{
+			ID:               uuid.New(),
+			ProjectID:        projectID,
+			SourceTableID:    ordersTableID,
+			SourceColumnID:   buyerIDColumnID,
+			TargetTableID:    usersTableID,
+			TargetColumnID:   userIDColumnID,
+			RelationshipType: models.RelationshipTypeFK,
+		},
+	}
+
+	// Setup join analysis
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		return &datasource.JoinAnalysis{
+			JoinCount:     100,
+			SourceMatched: 100,
+			TargetMatched: 50,
+			OrphanCount:   0,
+		}, nil
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Result count shows both sources found the relationship
+	// (ColumnFeatures: 1, SchemaFK: 1, total: 2)
+	// But thanks to upsert, the DB will have only one unique relationship
+	if result.FKRelationships != 2 {
+		t.Errorf("expected 2 FK relationships reported (from both sources), got %d", result.FKRelationships)
+	}
+
+	// The mock doesn't implement upsert deduplication, so we see 4 relationships created
+	// (2 from ColumnFeatures, 2 from SchemaFK). In production, the DB upsert would
+	// deduplicate these, but the mock just appends.
+	// The key point is that the code correctly processes both sources.
+	if len(mocks.relationshipRepo.created) != 4 {
+		t.Fatalf("expected 4 relationships created by mock (bidirectional from both sources), got %d", len(mocks.relationshipRepo.created))
+	}
+
+	// The first pair should be from ColumnFeatures (data_overlap)
+	foundDataOverlap := false
+	foundForeignKey := false
+	for _, rel := range mocks.relationshipRepo.created {
+		if rel.DetectionMethod == models.DetectionMethodDataOverlap {
+			foundDataOverlap = true
+		}
+		if rel.DetectionMethod == models.DetectionMethodForeignKey {
+			foundForeignKey = true
+		}
+	}
+
+	if !foundDataOverlap {
+		t.Error("expected at least one relationship with detection_method=data_overlap")
+	}
+	if !foundForeignKey {
+		t.Error("expected at least one relationship with detection_method=foreign_key")
+	}
+}
+
+// TestFKDiscovery_ColumnFeatures_NoTargetTable tests that columns with ColumnFeatures
+// but unresolvable target tables are skipped gracefully.
+func TestFKDiscovery_ColumnFeatures_NoTargetTable(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	orderEntityID := uuid.New()
+
+	// Create mocks with just the order entity (no user entity/table)
+	mocks := setupMocks(projectID, ontologyID, datasourceID, orderEntityID)
+	mocks.entityRepo.entities = []*models.OntologyEntity{
+		{
+			ID:            orderEntityID,
+			OntologyID:    ontologyID,
+			Name:          "order",
+			PrimarySchema: "public",
+			PrimaryTable:  "orders",
+		},
+	}
+
+	ordersTableID := uuid.New()
+	buyerIDColumnID := uuid.New()
+
+	// Setup tables - only orders table, no users table
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            buyerIDColumnID,
+					SchemaTableID: ordersTableID,
+					ColumnName:    "buyer_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					// ColumnFeatures points to non-existent "users" table
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose":       "identifier",
+							"semantic_type": "foreign_key",
+							"role":          "foreign_key",
+							"identifier_features": map[string]any{
+								"identifier_type":  "foreign_key",
+								"fk_target_table":  "users", // Table doesn't exist
+								"fk_target_column": "id",
+								"fk_confidence":    0.95,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// No relationships should be created since target table doesn't exist
+	if result.FKRelationships != 0 {
+		t.Errorf("expected 0 FK relationships (target table missing), got %d", result.FKRelationships)
+	}
+
+	if len(mocks.relationshipRepo.created) != 0 {
+		t.Errorf("expected 0 relationships created, got %d", len(mocks.relationshipRepo.created))
+	}
+}
+
+// TestPKMatch_SkipsHighConfidenceFK verifies that PKMatchDiscovery skips columns
+// with FKConfidence > 0.8 from ColumnFeatureExtraction Phase 4, avoiding redundant SQL analysis.
+func TestPKMatch_SkipsHighConfidenceFK(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	orderEntityID := uuid.New()
+
+	distinctCount := int64(100)
+	isJoinableTrue := true
+
+	// Create mocks with user entity
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Add order entity
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
+
+	// Track if AnalyzeJoin is called for the high-confidence column
+	analyzeJoinCalled := false
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		if sourceColumn == "user_id" {
+			analyzeJoinCalled = true
+		}
+		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
+	}
+
+	// Schema: orders.user_id has high FKConfidence (0.95) with resolved FK target
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+	userIDColumnID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			RowCount:   &distinctCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            uuid.New(),
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+			},
+		},
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			RowCount:   &distinctCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            uuid.New(),
+					SchemaTableID: ordersTableID,
+					ColumnName:    "id",
+					DataType:      "int8",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+				{
+					ID:            userIDColumnID,
+					SchemaTableID: ordersTableID,
+					ColumnName:    "user_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+					// High confidence FK from Phase 4 - should be SKIPPED
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+							"role":    models.RoleForeignKey,
+							"identifier_features": map[string]any{
+								"fk_confidence":   0.95, // > 0.8 threshold
+								"fk_target_table": "users",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	// Execute PK match discovery
+	_, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: AnalyzeJoin was NOT called for user_id (skipped due to high confidence)
+	if analyzeJoinCalled {
+		t.Error("expected AnalyzeJoin NOT to be called for user_id (high FK confidence should skip)")
+	}
+}
+
+// TestPKMatch_SkipsColumnsWithExistingRelationships verifies that PKMatchDiscovery
+// skips columns that already have relationships from FKDiscovery.
+func TestPKMatch_SkipsColumnsWithExistingRelationships(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	orderEntityID := uuid.New()
+
+	distinctCount := int64(100)
+	isJoinableTrue := true
+
+	// Create mocks with user entity
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Add order entity
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
+
+	// Track if AnalyzeJoin is called
+	analyzeJoinCalled := false
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		if sourceColumn == "user_id" {
+			analyzeJoinCalled = true
+		}
+		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
+	}
+
+	// Schema with user_id column
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+	userIDColumnID := uuid.New()
+	targetColumnID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			RowCount:   &distinctCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            targetColumnID,
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+			},
+		},
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			RowCount:   &distinctCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            uuid.New(),
+					SchemaTableID: ordersTableID,
+					ColumnName:    "id",
+					DataType:      "int8",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+				{
+					ID:            userIDColumnID,
+					SchemaTableID: ordersTableID,
+					ColumnName:    "user_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Pre-existing relationship from FKDiscovery for user_id column
+	mocks.relationshipRepo.existing = []*models.EntityRelationship{
+		{
+			ID:               uuid.New(),
+			OntologyID:       ontologyID,
+			SourceEntityID:   orderEntityID,
+			TargetEntityID:   userEntityID,
+			SourceColumnID:   &userIDColumnID,
+			SourceColumnName: "user_id",
+			TargetColumnID:   &targetColumnID,
+			TargetColumnName: "id",
+			DetectionMethod:  models.DetectionMethodForeignKey,
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	// Execute PK match discovery
+	_, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: AnalyzeJoin was NOT called for user_id (skipped due to existing relationship)
+	if analyzeJoinCalled {
+		t.Error("expected AnalyzeJoin NOT to be called for user_id (existing relationship should skip)")
+	}
+}
+
+// TestPKMatch_PrioritizesForeignKeyRole verifies that columns with Role=foreign_key
+// are processed before regular candidates.
+func TestPKMatch_PrioritizesForeignKeyRole(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	orderEntityID := uuid.New()
+
+	distinctCount := int64(100)
+	isJoinableTrue := true
+
+	// Create mocks with user entity
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Add order entity
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
+
+	// Track the order in which columns are analyzed
+	var analyzedColumns []string
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		analyzedColumns = append(analyzedColumns, sourceColumn)
+		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
+	}
+
+	// Schema with two FK candidate columns - one with Role=foreign_key, one without
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			RowCount:   &distinctCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            uuid.New(),
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+			},
+		},
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			RowCount:   &distinctCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            uuid.New(),
+					SchemaTableID: ordersTableID,
+					ColumnName:    "id",
+					DataType:      "int8",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+				// Regular candidate (no Role set) - should be processed SECOND
+				{
+					ID:            uuid.New(),
+					SchemaTableID: ordersTableID,
+					ColumnName:    "other_user_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+							// No "role" set - this is a regular candidate
+						},
+					},
+				},
+				// Priority candidate with Role=foreign_key - should be processed FIRST
+				{
+					ID:            uuid.New(),
+					SchemaTableID: ordersTableID,
+					ColumnName:    "user_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+							"role":    models.RoleForeignKey, // Priority candidate
+						},
+					},
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	// Execute PK match discovery
+	_, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: user_id (with Role=foreign_key) was analyzed BEFORE other_user_id
+	if len(analyzedColumns) < 2 {
+		t.Fatalf("expected at least 2 columns analyzed, got %d: %v", len(analyzedColumns), analyzedColumns)
+	}
+
+	// Find positions of each column in the analyzed order
+	userIDPos := -1
+	otherUserIDPos := -1
+	for i, col := range analyzedColumns {
+		if col == "user_id" && userIDPos == -1 {
+			userIDPos = i
+		}
+		if col == "other_user_id" && otherUserIDPos == -1 {
+			otherUserIDPos = i
+		}
+	}
+
+	if userIDPos == -1 || otherUserIDPos == -1 {
+		t.Fatalf("expected both columns to be analyzed, got: %v", analyzedColumns)
+	}
+
+	if userIDPos > otherUserIDPos {
+		t.Errorf("expected user_id (Role=foreign_key) to be analyzed before other_user_id, but order was: %v", analyzedColumns)
 	}
 }

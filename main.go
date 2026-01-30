@@ -138,6 +138,7 @@ func main() {
 	ontologyDAGRepo := repositories.NewOntologyDAGRepository()
 	pendingChangeRepo := repositories.NewPendingChangeRepository()
 	columnMetadataRepo := repositories.NewColumnMetadataRepository()
+	tableMetadataRepo := repositories.NewTableMetadataRepository()
 
 	// Create connection manager with config-driven settings
 	connManagerCfg := datasource.ConnectionManagerConfig{
@@ -198,7 +199,7 @@ func main() {
 		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, convRepo, llmFactory, getTenantCtx, logger)
 	entityService := services.NewEntityService(ontologyEntityRepo, entityRelationshipRepo, ontologyRepo, logger)
 	ontologyContextService := services.NewOntologyContextService(
-		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, projectService, logger)
+		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, tableMetadataRepo, projectService, logger)
 
 	// Create worker pool for parallel LLM calls
 	workerPoolConfig := llm.DefaultWorkerPoolConfig()
@@ -216,7 +217,7 @@ func main() {
 		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, convRepo, projectRepo, ontologyQuestionService,
 		datasourceService, adapterFactory, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
 	relationshipEnrichmentService := services.NewRelationshipEnrichmentService(
-		entityRelationshipRepo, ontologyEntityRepo, knowledgeRepo, convRepo, ontologyQuestionService, ontologyRepo, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
+		entityRelationshipRepo, ontologyEntityRepo, knowledgeRepo, convRepo, ontologyQuestionService, ontologyRepo, schemaRepo, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
 	glossaryRepo := repositories.NewGlossaryRepository()
 	glossaryService := services.NewGlossaryService(glossaryRepo, ontologyRepo, ontologyEntityRepo, knowledgeRepo, schemaRepo, datasourceService, adapterFactory, llmFactory, getTenantCtx, logger, cfg.Env)
 
@@ -229,11 +230,17 @@ func main() {
 	// Wire DAG adapters using setter pattern (avoids import cycles)
 	knowledgeSeedingService := services.NewKnowledgeSeedingService(knowledgeService, schemaService, llmFactory, logger)
 	ontologyDAGService.SetKnowledgeSeedingMethods(knowledgeSeedingService)
+	columnFeatureExtractionService := services.NewColumnFeatureExtractionServiceFull(
+		schemaRepo, datasourceService, adapterFactory, llmFactory, llmWorkerPool, getTenantCtx, logger)
+	ontologyDAGService.SetColumnFeatureExtractionMethods(columnFeatureExtractionService)
 	ontologyDAGService.SetEntityDiscoveryMethods(services.NewEntityDiscoveryAdapter(entityDiscoveryService))
 	ontologyDAGService.SetEntityEnrichmentMethods(services.NewEntityEnrichmentAdapter(entityDiscoveryService, schemaRepo, getTenantCtx))
 	ontologyDAGService.SetFKDiscoveryMethods(services.NewFKDiscoveryAdapter(deterministicRelationshipService))
 	ontologyDAGService.SetPKMatchDiscoveryMethods(services.NewPKMatchDiscoveryAdapter(deterministicRelationshipService))
 	ontologyDAGService.SetRelationshipEnrichmentMethods(services.NewRelationshipEnrichmentAdapter(relationshipEnrichmentService))
+	entityPromotionService := services.NewEntityPromotionService(
+		ontologyEntityRepo, entityRelationshipRepo, schemaRepo, ontologyRepo, logger)
+	ontologyDAGService.SetEntityPromotionMethods(services.NewEntityPromotionAdapter(entityPromotionService))
 	ontologyDAGService.SetFinalizationMethods(services.NewOntologyFinalizationAdapter(ontologyFinalizationService))
 	ontologyDAGService.SetColumnEnrichmentMethods(services.NewColumnEnrichmentAdapter(columnEnrichmentService))
 	ontologyDAGService.SetGlossaryDiscoveryMethods(services.NewGlossaryDiscoveryAdapter(glossaryService))
@@ -305,6 +312,7 @@ func main() {
 		ChangeReviewService:          changeReviewService,
 		PendingChangeRepo:            pendingChangeRepo,
 		InstalledAppService:          installedAppService,
+		Auditor:                      securityAuditor, // For SIEM logging of modifying queries
 		Logger:                       logger,
 	}
 	mcpServer := mcp.NewServer("ekaya-engine", cfg.Version, logger,
@@ -429,12 +437,17 @@ func main() {
 	ontologyDAGHandler := handlers.NewOntologyDAGHandler(ontologyDAGService, projectService, logger)
 	ontologyDAGHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
+	// Register ontology enrichment handler (protected) - read-only tiered ontology for UI
+	ontologyEnrichmentHandler := handlers.NewOntologyEnrichmentHandler(ontologyRepo, schemaRepo, projectService, logger)
+	ontologyEnrichmentHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
 	// Register glossary handler (protected) - business glossary for MCP clients
 	glossaryHandler := handlers.NewGlossaryHandler(glossaryService, logger)
 	glossaryHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register knowledge handler (protected) - project knowledge facts
-	knowledgeHandler := handlers.NewKnowledgeHandler(knowledgeService, logger)
+	knowledgeParsingService := services.NewKnowledgeParsingService(knowledgeService, llmFactory, logger)
+	knowledgeHandler := handlers.NewKnowledgeHandler(knowledgeService, knowledgeParsingService, logger)
 	knowledgeHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register installed apps handler (protected) - application installation tracking
@@ -470,6 +483,9 @@ func main() {
 		SchemaService:          schemaService,
 		GlossaryService:        glossaryService,
 		SchemaRepo:             schemaRepo,
+		ColumnMetadataRepo:     columnMetadataRepo,
+		TableMetadataRepo:      tableMetadataRepo,
+		KnowledgeRepo:          knowledgeRepo,
 		Logger:                 logger,
 	}
 	mcptools.RegisterContextTools(mcpServer.MCP(), contextToolDeps)
@@ -508,6 +524,17 @@ func main() {
 	}
 	mcptools.RegisterColumnTools(mcpServer.MCP(), columnToolDeps)
 	mcptools.RegisterBatchTools(mcpServer.MCP(), columnToolDeps)
+
+	// Register table metadata tools (for updating table-level semantic information)
+	tableToolDeps := &mcptools.TableToolDeps{
+		DB:                db,
+		MCPConfigService:  mcpConfigService,
+		SchemaRepo:        schemaRepo,
+		TableMetadataRepo: tableMetadataRepo,
+		ProjectService:    projectService,
+		Logger:            logger,
+	}
+	mcptools.RegisterTableTools(mcpServer.MCP(), tableToolDeps)
 
 	// Register column probe tools (for deep-diving into column statistics and semantics)
 	probeToolDeps := &mcptools.ProbeToolDeps{

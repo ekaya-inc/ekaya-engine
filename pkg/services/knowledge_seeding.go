@@ -44,17 +44,14 @@ var _ dag.KnowledgeSeedingMethods = (*knowledgeSeedingService)(nil)
 // Returns the number of facts stored.
 func (s *knowledgeSeedingService) ExtractKnowledgeFromOverview(ctx context.Context, projectID, datasourceID uuid.UUID) (int, error) {
 	// 1. Get the project overview from knowledge table
-	facts, err := s.knowledgeService.GetByType(ctx, projectID, "overview")
+	facts, err := s.knowledgeService.GetByType(ctx, projectID, "project_overview")
 	if err != nil {
 		return 0, fmt.Errorf("failed to get project overview: %w", err)
 	}
 
 	var projectOverview string
-	for _, fact := range facts {
-		if fact.Key == "project_overview" {
-			projectOverview = fact.Value
-			break
-		}
+	if len(facts) > 0 {
+		projectOverview = facts[0].Value
 	}
 
 	if projectOverview == "" {
@@ -63,7 +60,32 @@ func (s *knowledgeSeedingService) ExtractKnowledgeFromOverview(ctx context.Conte
 		return 0, nil
 	}
 
-	// 2. Get schema summary for context
+	// 2. Get existing knowledge facts (excluding project_overview)
+	allFacts, err := s.knowledgeService.GetAll(ctx, projectID)
+	if err != nil {
+		s.logger.Warn("Failed to get existing knowledge facts, continuing without them",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		allFacts = nil
+	}
+
+	// Filter out project_overview - it's the input, not learned knowledge
+	existingFacts := make([]*models.KnowledgeFact, 0, len(allFacts))
+	for _, fact := range allFacts {
+		if fact.FactType != "project_overview" {
+			existingFacts = append(existingFacts, fact)
+		}
+	}
+
+	// Skip seeding if we already have learned facts (knowledge seeding is one-time initialization)
+	if len(existingFacts) > 0 {
+		s.logger.Info("Knowledge facts already exist, skipping seeding",
+			zap.String("project_id", projectID.String()),
+			zap.Int("existing_facts", len(existingFacts)))
+		return 0, nil
+	}
+
+	// 3. Get schema summary for context
 	schemaContext, err := s.schemaService.GetDatasourceSchemaForPrompt(ctx, projectID, datasourceID, true)
 	if err != nil {
 		s.logger.Warn("Failed to get schema summary, continuing without schema context",
@@ -72,20 +94,19 @@ func (s *knowledgeSeedingService) ExtractKnowledgeFromOverview(ctx context.Conte
 		schemaContext = ""
 	}
 
-	// 3. Use LLM to extract knowledge facts
+	// 4. Use LLM to extract knowledge facts
 	extractedFacts, err := s.extractKnowledgeFacts(ctx, projectID, projectOverview, schemaContext)
 	if err != nil {
 		return 0, fmt.Errorf("failed to extract knowledge facts: %w", err)
 	}
 
-	// 4. Store extracted facts with source='inferred'
+	// 5. Store extracted facts with source='inferred'
 	storedCount := 0
 	for _, fact := range extractedFacts {
 		if _, err := s.knowledgeService.StoreWithSource(
-			ctx, projectID, fact.FactType, fact.Key, fact.Value, fact.Context, "inferred",
+			ctx, projectID, fact.FactType, fact.Value, fact.Context, "inferred",
 		); err != nil {
 			s.logger.Warn("Failed to store extracted fact",
-				zap.String("key", fact.Key),
 				zap.String("fact_type", fact.FactType),
 				zap.Error(err))
 			// Continue with other facts - don't fail the entire operation
@@ -105,7 +126,6 @@ func (s *knowledgeSeedingService) ExtractKnowledgeFromOverview(ctx context.Conte
 // extractedFact represents a knowledge fact extracted from the overview.
 type extractedFact struct {
 	FactType string `json:"fact_type"`
-	Key      string `json:"key"`
 	Value    string `json:"value"`
 	Context  string `json:"context,omitempty"`
 }
@@ -159,9 +179,8 @@ Your task is to identify important business facts, conventions, and terminology 
 
 You must respond with a JSON object containing an array of facts. Each fact should have:
 - fact_type: One of "business_rule", "convention", "terminology", "entity_hint"
-- key: A unique identifier for the fact (e.g., "currency_format", "user_vs_customer")
-- value: The actual fact or rule
-- context: Optional additional context about the fact
+- value: The actual fact or rule stated clearly and completely
+- context: Optional additional context about where/how this fact applies
 
 Focus on extracting:
 1. business_rule: Business logic or rules (e.g., "All timestamps are stored in UTC")
@@ -198,14 +217,13 @@ Respond with a JSON object containing extracted facts:
   "facts": [
     {
       "fact_type": "business_rule" | "convention" | "terminology" | "entity_hint",
-      "key": "unique_identifier",
-      "value": "The actual fact or rule",
+      "value": "The actual fact or rule stated clearly",
       "context": "Optional additional context"
     }
   ]
 }
 
-Extract all relevant facts from the overview. Return an empty array if no clear facts can be extracted.`)
+Return {"facts": []} if no clear facts can be extracted from the overview.`)
 
 	return sb.String()
 }
@@ -228,10 +246,9 @@ func (s *knowledgeSeedingService) parseExtractionResponse(content string) ([]ext
 	validFacts := make([]extractedFact, 0, len(response.Facts))
 	for _, fact := range response.Facts {
 		// Validate required fields
-		if fact.FactType == "" || fact.Key == "" || fact.Value == "" {
+		if fact.FactType == "" || fact.Value == "" {
 			s.logger.Debug("Skipping invalid fact - missing required fields",
-				zap.String("fact_type", fact.FactType),
-				zap.String("key", fact.Key))
+				zap.String("fact_type", fact.FactType))
 			continue
 		}
 
@@ -239,8 +256,7 @@ func (s *knowledgeSeedingService) parseExtractionResponse(content string) ([]ext
 		mappedType := mapFactTypeToModel(fact.FactType)
 		if mappedType == "" {
 			s.logger.Debug("Skipping fact with unknown type",
-				zap.String("fact_type", fact.FactType),
-				zap.String("key", fact.Key))
+				zap.String("fact_type", fact.FactType))
 			continue
 		}
 		fact.FactType = mappedType

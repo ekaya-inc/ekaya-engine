@@ -87,6 +87,11 @@ type TableSummary struct {
 	Synonyms      []string            `json:"synonyms,omitempty"`
 	Columns       []ColumnOverview    `json:"columns"`
 	Relationships []TableRelationship `json:"relationships,omitempty"`
+
+	// Table metadata (from engine_table_metadata)
+	UsageNotes           string `json:"usage_notes,omitempty"`
+	IsEphemeral          bool   `json:"is_ephemeral,omitempty"`
+	PreferredAlternative string `json:"preferred_alternative,omitempty"`
 }
 
 // ColumnOverview provides basic column information for table summary.
@@ -120,4 +125,9 @@ type TableDetail struct {
 	BusinessName string         `json:"business_name"`
 	Description  string         `json:"description"`
 	Columns      []ColumnDetail `json:"columns"`
+
+	// Table metadata (from engine_table_metadata)
+	UsageNotes           string `json:"usage_notes,omitempty"`
+	IsEphemeral          bool   `json:"is_ephemeral,omitempty"`
+	PreferredAlternative string `json:"preferred_alternative,omitempty"`
 }

@@ -14,9 +14,10 @@ type ColumnMetadata struct {
 	TableName   string    `json:"table_name"`
 	ColumnName  string    `json:"column_name"`
 	Description *string   `json:"description,omitempty"`
-	Entity      *string   `json:"entity,omitempty"`      // Entity this column belongs to (e.g., 'User', 'Account')
-	Role        *string   `json:"role,omitempty"`        // Semantic role: 'dimension', 'measure', 'identifier', 'attribute'
-	EnumValues  []string  `json:"enum_values,omitempty"` // Array of enum values with descriptions
+	Entity      *string   `json:"entity,omitempty"`       // Entity this column belongs to (e.g., 'User', 'Account')
+	Role        *string   `json:"role,omitempty"`         // Semantic role: 'dimension', 'measure', 'identifier', 'attribute'
+	EnumValues  []string  `json:"enum_values,omitempty"`  // Array of enum values with descriptions
+	IsSensitive *bool     `json:"is_sensitive,omitempty"` // Sensitive data override: nil=auto-detect, true=always, false=never
 
 	// Provenance: source tracking (how it was created/modified)
 	Source         string  `json:"source"`                     // 'inferred', 'mcp', 'manual'

@@ -177,8 +177,7 @@ func (s *ontologyBuilderService) buildAnswerProcessingPrompt(question *models.On
   "knowledge_facts": [
     {
       "fact_type": "terminology",
-      "key": "SKU",
-      "value": "Stock Keeping Unit - unique product identifier"
+      "value": "SKU means Stock Keeping Unit - a unique product identifier"
     }
   ],
   "actions_summary": "Updated orders entity and status column with business context"
@@ -209,7 +208,6 @@ func (s *ontologyBuilderService) parseAnswerProcessingResponse(response string, 
 		} `json:"column_updates"`
 		KnowledgeFacts []struct {
 			FactType string `json:"fact_type"`
-			Key      string `json:"key"`
 			Value    string `json:"value"`
 			Context  string `json:"context"`
 		} `json:"knowledge_facts"`
@@ -249,12 +247,10 @@ func (s *ontologyBuilderService) parseAnswerProcessingResponse(response string, 
 
 	for _, kf := range llmResp.KnowledgeFacts {
 		result.KnowledgeFacts = append(result.KnowledgeFacts, &models.KnowledgeFact{
-			ProjectID:  projectID,
-			OntologyID: &ontologyID,
-			FactType:   kf.FactType,
-			Key:        kf.Key,
-			Value:      kf.Value,
-			Context:    kf.Context,
+			ProjectID: projectID,
+			FactType:  kf.FactType,
+			Value:     kf.Value,
+			Context:   kf.Context,
 		})
 	}
 

@@ -612,8 +612,8 @@ func TestIsInputError(t *testing.T) {
 			expected: true,
 		},
 		{
-			name:     "output_columns required error",
-			err:      errors.New("output_columns required: test query before saving"),
+			name:     "output_column_descriptions required error",
+			err:      errors.New("output_column_descriptions parameter is required. Provide descriptions for output columns"),
 			expected: true,
 		},
 		{

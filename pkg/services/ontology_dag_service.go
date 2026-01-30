@@ -50,16 +50,18 @@ type ontologyDAGService struct {
 	knowledgeRepo    repositories.KnowledgeRepository
 
 	// Adapted service methods for dag package
-	knowledgeSeedingMethods       dag.KnowledgeSeedingMethods
-	entityDiscoveryMethods        dag.EntityDiscoveryMethods
-	entityEnrichmentMethods       dag.EntityEnrichmentMethods
-	fkDiscoveryMethods            dag.FKDiscoveryMethods
-	pkMatchDiscoveryMethods       dag.PKMatchDiscoveryMethods
-	relationshipEnrichmentMethods dag.RelationshipEnrichmentMethods
-	finalizationMethods           dag.OntologyFinalizationMethods
-	columnEnrichmentMethods       dag.ColumnEnrichmentMethods
-	glossaryDiscoveryMethods      dag.GlossaryDiscoveryMethods
-	glossaryEnrichmentMethods     dag.GlossaryEnrichmentMethods
+	knowledgeSeedingMethods        dag.KnowledgeSeedingMethods
+	columnFeatureExtractionMethods dag.ColumnFeatureExtractionMethods
+	entityDiscoveryMethods         dag.EntityDiscoveryMethods
+	entityEnrichmentMethods        dag.EntityEnrichmentMethods
+	fkDiscoveryMethods             dag.FKDiscoveryMethods
+	pkMatchDiscoveryMethods        dag.PKMatchDiscoveryMethods
+	relationshipEnrichmentMethods  dag.RelationshipEnrichmentMethods
+	entityPromotionMethods         dag.EntityPromotionMethods
+	finalizationMethods            dag.OntologyFinalizationMethods
+	columnEnrichmentMethods        dag.ColumnEnrichmentMethods
+	glossaryDiscoveryMethods       dag.GlossaryDiscoveryMethods
+	glossaryEnrichmentMethods      dag.GlossaryEnrichmentMethods
 
 	getTenantCtx TenantContextFunc
 	logger       *zap.Logger
@@ -109,6 +111,12 @@ func (s *ontologyDAGService) SetKnowledgeSeedingMethods(methods dag.KnowledgeSee
 	s.knowledgeSeedingMethods = methods
 }
 
+// SetColumnFeatureExtractionMethods sets the column feature extraction methods interface.
+// This is called after service construction to avoid circular dependencies.
+func (s *ontologyDAGService) SetColumnFeatureExtractionMethods(methods dag.ColumnFeatureExtractionMethods) {
+	s.columnFeatureExtractionMethods = methods
+}
+
 // SetEntityDiscoveryMethods sets the entity discovery methods interface.
 // This is called after service construction to avoid circular dependencies.
 func (s *ontologyDAGService) SetEntityDiscoveryMethods(methods dag.EntityDiscoveryMethods) {
@@ -136,6 +144,11 @@ func (s *ontologyDAGService) SetRelationshipEnrichmentMethods(methods dag.Relati
 	s.relationshipEnrichmentMethods = methods
 }
 
+// SetEntityPromotionMethods sets the entity promotion methods interface.
+func (s *ontologyDAGService) SetEntityPromotionMethods(methods dag.EntityPromotionMethods) {
+	s.entityPromotionMethods = methods
+}
+
 // SetFinalizationMethods sets the ontology finalization methods interface.
 func (s *ontologyDAGService) SetFinalizationMethods(methods dag.OntologyFinalizationMethods) {
 	s.finalizationMethods = methods
@@ -158,8 +171,8 @@ func (s *ontologyDAGService) SetGlossaryEnrichmentMethods(methods dag.GlossaryEn
 
 // Start initiates a new DAG execution or returns an existing active DAG.
 // projectOverview is optional user-provided context about the application domain.
-// If provided, the overview is stored as project knowledge with source='manual' and
-// ontology_id=NULL so it survives ontology deletion and can be used on re-extraction.
+// If provided, the overview is stored as project knowledge with source='manual'.
+// Knowledge facts have project-lifecycle scope and persist across re-extractions.
 func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID uuid.UUID, projectOverview string) (*models.OntologyDAG, error) {
 	s.logger.Info("Starting ontology DAG",
 		zap.String("project_id", projectID.String()),
@@ -175,17 +188,15 @@ func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID 
 
 	// Store project overview as knowledge if provided.
 	// Uses manual provenance since this is user-provided context.
-	// Sets ontology_id=nil so the overview survives ontology deletion.
+	// Knowledge facts have project-lifecycle scope and persist across re-extractions.
 	if projectOverview != "" {
 		manualCtx := models.WithManualProvenance(ctx, userID)
 		overviewFact := &models.KnowledgeFact{
-			ProjectID:  projectID,
-			OntologyID: nil, // nil so it survives ontology deletion
-			FactType:   "overview",
-			Key:        "project_overview",
-			Value:      projectOverview,
+			ProjectID: projectID,
+			FactType:  "project_overview",
+			Value:     projectOverview,
 		}
-		if err := s.knowledgeRepo.Upsert(manualCtx, overviewFact); err != nil {
+		if err := s.knowledgeRepo.Create(manualCtx, overviewFact); err != nil {
 			s.logger.Warn("Failed to store project overview, continuing with extraction",
 				zap.String("project_id", projectID.String()),
 				zap.Error(err))
@@ -372,8 +383,9 @@ func (s *ontologyDAGService) Delete(ctx context.Context, projectID uuid.UUID) er
 	// 5. Ontology entities
 	// 6. Ontology questions
 	// 7. Chat messages
-	// 8. Project knowledge
+	// 8. Inferred glossary terms (preserving manual/client terms)
 	// 9. Ontologies
+	// NOTE: Project knowledge is NOT deleted - it has project-lifecycle scope
 
 	// Delete DAGs (cascade deletes dag_nodes)
 	if _, err := tx.Exec(ctx, "DELETE FROM engine_ontology_dag WHERE project_id = $1", projectID); err != nil {
@@ -416,12 +428,9 @@ func (s *ontologyDAGService) Delete(ctx context.Context, projectID uuid.UUID) er
 	}
 	s.logger.Debug("Deleted chat messages", zap.String("project_id", projectID.String()))
 
-	// Delete project knowledge
-	if _, err := tx.Exec(ctx, "DELETE FROM engine_project_knowledge WHERE project_id = $1", projectID); err != nil {
-		s.logger.Error("Failed to delete project knowledge", zap.String("project_id", projectID.String()), zap.Error(err))
-		return fmt.Errorf("delete project knowledge: %w", err)
-	}
-	s.logger.Debug("Deleted project knowledge", zap.String("project_id", projectID.String()))
+	// NOTE: engine_project_knowledge is NOT deleted here.
+	// Knowledge facts have project-lifecycle scope and persist across ontology re-extractions.
+	// They are only deleted when the project itself is deleted (via CASCADE on project_id FK).
 
 	// Delete inferred glossary terms (preserve manual and client terms)
 	// First delete aliases for inferred terms
@@ -690,6 +699,13 @@ func (s *ontologyDAGService) getNodeExecutor(nodeName models.DAGNodeName, nodeID
 		node.SetCurrentNodeID(nodeID)
 		return node, nil
 
+	case models.DAGNodeColumnFeatureExtraction:
+		// Column feature extraction extracts deterministic features from columns.
+		// If columnFeatureExtractionMethods is nil, the node operates in no-op mode.
+		node := dag.NewColumnFeatureExtractionNode(s.dagRepo, s.columnFeatureExtractionMethods, s.logger)
+		node.SetCurrentNodeID(nodeID)
+		return node, nil
+
 	case models.DAGNodeEntityDiscovery:
 		if s.entityDiscoveryMethods == nil {
 			return nil, fmt.Errorf("entity discovery methods not set")
@@ -727,6 +743,13 @@ func (s *ontologyDAGService) getNodeExecutor(nodeName models.DAGNodeName, nodeID
 			return nil, fmt.Errorf("relationship enrichment methods not set")
 		}
 		node := dag.NewRelationshipEnrichmentNode(s.dagRepo, s.relationshipEnrichmentMethods, s.logger)
+		node.SetCurrentNodeID(nodeID)
+		return node, nil
+
+	case models.DAGNodeEntityPromotion:
+		// Entity promotion is optional - operates in no-op mode if not configured.
+		// This allows backward compatibility during the incremental rollout.
+		node := dag.NewEntityPromotionNode(s.dagRepo, s.entityPromotionMethods, s.logger)
 		node.SetCurrentNodeID(nodeID)
 		return node, nil
 

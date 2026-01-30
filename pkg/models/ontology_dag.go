@@ -97,42 +97,48 @@ func (s DAGNodeStatus) IsTerminal() bool {
 type DAGNodeName string
 
 const (
-	DAGNodeKnowledgeSeeding       DAGNodeName = "KnowledgeSeeding"
-	DAGNodeEntityDiscovery        DAGNodeName = "EntityDiscovery"
-	DAGNodeEntityEnrichment       DAGNodeName = "EntityEnrichment"
-	DAGNodeFKDiscovery            DAGNodeName = "FKDiscovery"
-	DAGNodeColumnEnrichment       DAGNodeName = "ColumnEnrichment"
-	DAGNodePKMatchDiscovery       DAGNodeName = "PKMatchDiscovery"
-	DAGNodeRelationshipEnrichment DAGNodeName = "RelationshipEnrichment"
-	DAGNodeOntologyFinalization   DAGNodeName = "OntologyFinalization"
-	DAGNodeGlossaryDiscovery      DAGNodeName = "GlossaryDiscovery"
-	DAGNodeGlossaryEnrichment     DAGNodeName = "GlossaryEnrichment"
+	DAGNodeKnowledgeSeeding        DAGNodeName = "KnowledgeSeeding"
+	DAGNodeColumnFeatureExtraction DAGNodeName = "ColumnFeatureExtraction"
+	DAGNodeEntityDiscovery         DAGNodeName = "EntityDiscovery"
+	DAGNodeEntityEnrichment        DAGNodeName = "EntityEnrichment"
+	DAGNodeFKDiscovery             DAGNodeName = "FKDiscovery"
+	DAGNodeColumnEnrichment        DAGNodeName = "ColumnEnrichment"
+	DAGNodePKMatchDiscovery        DAGNodeName = "PKMatchDiscovery"
+	DAGNodeRelationshipEnrichment  DAGNodeName = "RelationshipEnrichment"
+	DAGNodeEntityPromotion         DAGNodeName = "EntityPromotion"
+	DAGNodeOntologyFinalization    DAGNodeName = "OntologyFinalization"
+	DAGNodeGlossaryDiscovery       DAGNodeName = "GlossaryDiscovery"
+	DAGNodeGlossaryEnrichment      DAGNodeName = "GlossaryEnrichment"
 )
 
 // DAGNodeOrder defines the execution order for each node.
 var DAGNodeOrder = map[DAGNodeName]int{
-	DAGNodeKnowledgeSeeding:       1,
-	DAGNodeEntityDiscovery:        2,
-	DAGNodeEntityEnrichment:       3,
-	DAGNodeFKDiscovery:            4,
-	DAGNodeColumnEnrichment:       5,
-	DAGNodePKMatchDiscovery:       6,
-	DAGNodeRelationshipEnrichment: 7,
-	DAGNodeOntologyFinalization:   8,
-	DAGNodeGlossaryDiscovery:      9,
-	DAGNodeGlossaryEnrichment:     10,
+	DAGNodeKnowledgeSeeding:        1,
+	DAGNodeColumnFeatureExtraction: 2,
+	DAGNodeEntityDiscovery:         3,
+	DAGNodeEntityEnrichment:        4,
+	DAGNodeFKDiscovery:             5,
+	DAGNodeColumnEnrichment:        6,
+	DAGNodePKMatchDiscovery:        7,
+	DAGNodeRelationshipEnrichment:  8,
+	DAGNodeEntityPromotion:         9,
+	DAGNodeOntologyFinalization:    10,
+	DAGNodeGlossaryDiscovery:       11,
+	DAGNodeGlossaryEnrichment:      12,
 }
 
 // AllDAGNodes returns all DAG node names in execution order.
 func AllDAGNodes() []DAGNodeName {
 	return []DAGNodeName{
 		DAGNodeKnowledgeSeeding,
+		DAGNodeColumnFeatureExtraction,
 		DAGNodeEntityDiscovery,
 		DAGNodeEntityEnrichment,
 		DAGNodeFKDiscovery,
 		DAGNodeColumnEnrichment,
 		DAGNodePKMatchDiscovery,
 		DAGNodeRelationshipEnrichment,
+		DAGNodeEntityPromotion,
 		DAGNodeOntologyFinalization,
 		DAGNodeGlossaryDiscovery,
 		DAGNodeGlossaryEnrichment,

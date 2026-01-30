@@ -232,7 +232,6 @@ func TestFKSemanticEvaluationService_EvaluateCandidates_WithDomainKnowledge(t *t
 				ID:        uuid.New(),
 				ProjectID: projectID,
 				FactType:  "terminology",
-				Key:       "Host definition",
 				Value:     "Host is a content creator who receives payments",
 				Context:   "User role",
 			},
@@ -284,7 +283,7 @@ func TestFKSemanticEvaluationService_EvaluateCandidates_EmptyCandidates(t *testi
 	// Assert
 	require.NoError(t, err)
 	require.Len(t, results, 0)
-	assert.Equal(t, 0, mockFactory.MockClient.GenerateResponseCalls, "LLM should not be called for empty candidates")
+	assert.Equal(t, int64(0), mockFactory.MockClient.GenerateResponseCalls.Load(), "LLM should not be called for empty candidates")
 }
 
 func TestFKSemanticEvaluationService_EvaluateCandidates_LLMError(t *testing.T) {
@@ -605,16 +604,11 @@ func (m *mockKnowledgeRepoForFKEval) GetByType(ctx context.Context, projectID uu
 	return result, nil
 }
 
-func (m *mockKnowledgeRepoForFKEval) GetByKey(ctx context.Context, projectID uuid.UUID, factType, key string) (*models.KnowledgeFact, error) {
-	for _, f := range m.facts {
-		if f.FactType == factType && f.Key == key {
-			return f, nil
-		}
-	}
-	return nil, nil
+func (m *mockKnowledgeRepoForFKEval) Create(ctx context.Context, fact *models.KnowledgeFact) error {
+	return nil
 }
 
-func (m *mockKnowledgeRepoForFKEval) Upsert(ctx context.Context, fact *models.KnowledgeFact) error {
+func (m *mockKnowledgeRepoForFKEval) Update(ctx context.Context, fact *models.KnowledgeFact) error {
 	return nil
 }
 

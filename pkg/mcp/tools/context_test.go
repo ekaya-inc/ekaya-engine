@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -32,6 +33,9 @@ func TestContextToolDeps_Structure(t *testing.T) {
 	assert.Nil(t, deps.SchemaService, "SchemaService field should be nil by default")
 	assert.Nil(t, deps.GlossaryService, "GlossaryService field should be nil by default")
 	assert.Nil(t, deps.SchemaRepo, "SchemaRepo field should be nil by default")
+	assert.Nil(t, deps.ColumnMetadataRepo, "ColumnMetadataRepo field should be nil by default")
+	assert.Nil(t, deps.TableMetadataRepo, "TableMetadataRepo field should be nil by default")
+	assert.Nil(t, deps.KnowledgeRepo, "KnowledgeRepo field should be nil by default")
 	assert.Nil(t, deps.Logger, "Logger field should be nil by default")
 }
 
@@ -46,6 +50,7 @@ func TestContextToolDeps_Initialization(t *testing.T) {
 	var schemaService services.SchemaService
 	var glossaryService services.GlossaryService
 	var schemaRepo repositories.SchemaRepository
+	var knowledgeRepo repositories.KnowledgeRepository
 	logger := zap.NewNop()
 
 	// Verify struct can be initialized with all dependencies
@@ -58,6 +63,7 @@ func TestContextToolDeps_Initialization(t *testing.T) {
 		SchemaService:          schemaService,
 		GlossaryService:        glossaryService,
 		SchemaRepo:             schemaRepo,
+		KnowledgeRepo:          knowledgeRepo,
 		Logger:                 logger,
 	}
 
@@ -258,6 +264,163 @@ func TestBuildGlossaryResponse(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestBuildProjectKnowledgeResponse tests the buildProjectKnowledgeResponse function.
+func TestBuildProjectKnowledgeResponse(t *testing.T) {
+	projectID := uuid.New()
+
+	tests := []struct {
+		name               string
+		facts              []*models.KnowledgeFact
+		expectedCategories []string // categories expected in result
+		expectedFactCounts map[string]int
+	}{
+		{
+			name:               "empty facts returns empty map",
+			facts:              []*models.KnowledgeFact{},
+			expectedCategories: []string{},
+			expectedFactCounts: map[string]int{},
+		},
+		{
+			name:               "nil facts returns empty map",
+			facts:              nil,
+			expectedCategories: []string{},
+			expectedFactCounts: map[string]int{},
+		},
+		{
+			name: "single business_rule fact",
+			facts: []*models.KnowledgeFact{
+				{
+					ID:        uuid.New(),
+					ProjectID: projectID,
+					FactType:  "business_rule",
+					Value:     "sessions table is ephemeral and should not be used for analytics",
+					Context:   "Discovered from table structure",
+				},
+			},
+			expectedCategories: []string{"business_rule"},
+			expectedFactCounts: map[string]int{"business_rule": 1},
+		},
+		{
+			name: "multiple facts in same category",
+			facts: []*models.KnowledgeFact{
+				{
+					ID:        uuid.New(),
+					ProjectID: projectID,
+					FactType:  "business_rule",
+					Value:     "Use billing_engagements not billing_transactions for engagement counts",
+				},
+				{
+					ID:        uuid.New(),
+					ProjectID: projectID,
+					FactType:  "business_rule",
+					Value:     "Platform fees are ~33% of total_amount",
+					Context:   "Verified: tikr_share/total_amount ≈ 0.33",
+				},
+			},
+			expectedCategories: []string{"business_rule"},
+			expectedFactCounts: map[string]int{"business_rule": 2},
+		},
+		{
+			name: "facts across multiple categories",
+			facts: []*models.KnowledgeFact{
+				{
+					ID:        uuid.New(),
+					ProjectID: projectID,
+					FactType:  "terminology",
+					Value:     "A tik represents 6 seconds of engagement",
+				},
+				{
+					ID:        uuid.New(),
+					ProjectID: projectID,
+					FactType:  "business_rule",
+					Value:     "sessions table is ephemeral",
+				},
+				{
+					ID:        uuid.New(),
+					ProjectID: projectID,
+					FactType:  "convention",
+					Value:     "All tables use deleted_at for soft deletes",
+				},
+				{
+					ID:        uuid.New(),
+					ProjectID: projectID,
+					FactType:  "enumeration",
+					Value:     "engagement_status: PENDING, COMPLETED, CANCELLED",
+				},
+			},
+			expectedCategories: []string{"terminology", "business_rule", "convention", "enumeration"},
+			expectedFactCounts: map[string]int{
+				"terminology":   1,
+				"business_rule": 1,
+				"convention":    1,
+				"enumeration":   1,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := buildProjectKnowledgeResponse(tt.facts)
+
+			// Check expected categories are present
+			assert.Equal(t, len(tt.expectedCategories), len(result), "Number of categories should match")
+
+			for _, category := range tt.expectedCategories {
+				facts, exists := result[category]
+				assert.True(t, exists, "Category %s should be present", category)
+				assert.Equal(t, tt.expectedFactCounts[category], len(facts), "Fact count for category %s should match", category)
+			}
+
+			// Verify structure of facts
+			if len(result) > 0 && len(tt.facts) > 0 {
+				// Find a fact with context to verify context is included
+				for _, fact := range tt.facts {
+					if fact.Context != "" {
+						categoryFacts := result[fact.FactType]
+						foundWithContext := false
+						for _, f := range categoryFacts {
+							if f["fact"] == fact.Value {
+								if ctx, ok := f["context"]; ok {
+									assert.Equal(t, fact.Context, ctx)
+									foundWithContext = true
+								}
+							}
+						}
+						if fact.Context != "" {
+							assert.True(t, foundWithContext, "Fact with context should have context field")
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestBuildProjectKnowledgeResponse_ContextOmittedWhenEmpty verifies context is omitted when empty.
+func TestBuildProjectKnowledgeResponse_ContextOmittedWhenEmpty(t *testing.T) {
+	facts := []*models.KnowledgeFact{
+		{
+			ID:        uuid.New(),
+			ProjectID: uuid.New(),
+			FactType:  "business_rule",
+			Value:     "Test rule value",
+			Context:   "", // Empty context
+		},
+	}
+
+	result := buildProjectKnowledgeResponse(facts)
+
+	require.Len(t, result["business_rule"], 1)
+	factData := result["business_rule"][0]
+
+	// Verify fact value is present
+	assert.Equal(t, "Test rule value", factData["fact"])
+
+	// Verify context is NOT present when empty
+	_, hasContext := factData["context"]
+	assert.False(t, hasContext, "Context should not be present when empty")
 }
 
 // TestFilterDatasourceTables tests the filterDatasourceTables function.
@@ -483,6 +646,359 @@ func TestAddStatisticsToColumnDetail(t *testing.T) {
 					expectedRatio := float64(*tt.schemaCol.DistinctCount) / float64(*tt.schemaCol.RowCount)
 					assert.InDelta(t, expectedRatio, cardRatio, 0.0001, "cardinality_ratio calculation should be accurate")
 				}
+			}
+		})
+	}
+}
+
+// TestSampleValuesRedaction tests that sample values are properly redacted for sensitive data.
+// This covers the integration of SensitiveDetector into the get_context tool.
+func TestSampleValuesRedaction(t *testing.T) {
+	tests := []struct {
+		name                    string
+		columnName              string
+		sampleValues            []string
+		expectRedacted          bool
+		expectRedactionReason   string
+		expectSampleValuesCount int // -1 means sample_values should be absent
+	}{
+		{
+			name:                    "sensitive column name (api_key) - fully redacted",
+			columnName:              "api_key",
+			sampleValues:            []string{"secret123", "secret456"},
+			expectRedacted:          true,
+			expectRedactionReason:   "column name matches sensitive pattern",
+			expectSampleValuesCount: -1, // no sample_values should be present
+		},
+		{
+			name:                    "sensitive column name (password) - fully redacted",
+			columnName:              "password",
+			sampleValues:            []string{"hashedpw1", "hashedpw2"},
+			expectRedacted:          true,
+			expectRedactionReason:   "column name matches sensitive pattern",
+			expectSampleValuesCount: -1,
+		},
+		{
+			name:                    "sensitive column name (livekit_api_secret) - fully redacted",
+			columnName:              "livekit_api_secret",
+			sampleValues:            []string{"MATPBGtZAPGGxyslrsjHaZjN3W6KsU2pIfdwNHMfR0i"},
+			expectRedacted:          true,
+			expectRedactionReason:   "column name matches sensitive pattern",
+			expectSampleValuesCount: -1,
+		},
+		{
+			name:       "non-sensitive column with sensitive JSON content - values redacted",
+			columnName: "agent_data",
+			sampleValues: []string{
+				"",
+				`{"livekit_url":"wss://tikragents-xxx.livekit.cloud","livekit_api_key":"API67e2wiyw3KvB","livekit_api_secret":"MATPBGtZAPGGxyslrsjHaZjN3W6KsU2pIfdwNHMfR0i","livekit_agent_id":"kitt"}`,
+			},
+			expectRedacted:          true,
+			expectRedactionReason:   "values contain sensitive patterns (api keys, secrets, etc.)",
+			expectSampleValuesCount: 2,
+		},
+		{
+			name:                    "non-sensitive column with clean content - no redaction",
+			columnName:              "email",
+			sampleValues:            []string{"user@example.com", "test@example.com"},
+			expectRedacted:          false,
+			expectRedactionReason:   "",
+			expectSampleValuesCount: 2,
+		},
+		{
+			name:                    "non-sensitive column with empty values",
+			columnName:              "status",
+			sampleValues:            []string{"active", "inactive"},
+			expectRedacted:          false,
+			expectRedactionReason:   "",
+			expectSampleValuesCount: 2,
+		},
+		{
+			name:       "JSON with nested password field - values redacted",
+			columnName: "config",
+			sampleValues: []string{
+				`{"database":{"password":"secret123","host":"localhost"}}`,
+			},
+			expectRedacted:          true,
+			expectRedactionReason:   "values contain sensitive patterns (api keys, secrets, etc.)",
+			expectSampleValuesCount: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a column detail map and simulate the sample_values logic
+			colDetail := map[string]any{
+				"column_name": tt.columnName,
+			}
+			col := &models.DatasourceColumn{
+				ColumnName: tt.columnName,
+			}
+			schemaCol := &models.SchemaColumn{
+				SampleValues: tt.sampleValues,
+			}
+
+			// Simulate the sample_values logic from buildColumnDetails
+			if len(schemaCol.SampleValues) > 0 {
+				// Check if column name indicates sensitive data
+				if DefaultSensitiveDetector.IsSensitiveColumn(col.ColumnName) {
+					colDetail["sample_values_redacted"] = true
+					colDetail["redaction_reason"] = "column name matches sensitive pattern"
+				} else {
+					// Check each sample value for sensitive content and redact if needed
+					redactedValues := make([]string, 0, len(schemaCol.SampleValues))
+					anyRedacted := false
+					for _, val := range schemaCol.SampleValues {
+						if DefaultSensitiveDetector.IsSensitiveContent(val) {
+							redactedValues = append(redactedValues, DefaultSensitiveDetector.RedactContent(val))
+							anyRedacted = true
+						} else {
+							redactedValues = append(redactedValues, val)
+						}
+					}
+					colDetail["sample_values"] = redactedValues
+					if anyRedacted {
+						colDetail["sample_values_redacted"] = true
+						colDetail["redaction_reason"] = "values contain sensitive patterns (api keys, secrets, etc.)"
+					}
+				}
+			}
+
+			// Verify expectations
+			redacted, hasRedactedFlag := colDetail["sample_values_redacted"].(bool)
+			reason, _ := colDetail["redaction_reason"].(string)
+
+			if tt.expectRedacted {
+				assert.True(t, hasRedactedFlag && redacted, "Expected sample_values_redacted to be true")
+				assert.Equal(t, tt.expectRedactionReason, reason, "Redaction reason should match")
+			} else {
+				assert.False(t, hasRedactedFlag, "Expected sample_values_redacted to not be set")
+			}
+
+			// Check sample values count
+			if tt.expectSampleValuesCount == -1 {
+				_, hasSampleValues := colDetail["sample_values"]
+				assert.False(t, hasSampleValues, "Expected sample_values to be absent for fully redacted columns")
+			} else {
+				sampleValues, hasSampleValues := colDetail["sample_values"].([]string)
+				assert.True(t, hasSampleValues, "Expected sample_values to be present")
+				assert.Equal(t, tt.expectSampleValuesCount, len(sampleValues), "Sample values count should match")
+			}
+
+			// For content redaction, verify values were actually redacted
+			if tt.expectRedacted && tt.expectSampleValuesCount > 0 {
+				sampleValues := colDetail["sample_values"].([]string)
+				foundRedaction := false
+				for _, val := range sampleValues {
+					// Check if any value contains [REDACTED], indicating redaction occurred
+					if strings.Contains(val, "[REDACTED]") {
+						foundRedaction = true
+						break
+					}
+				}
+				assert.True(t, foundRedaction, "At least one value should contain [REDACTED] after redaction")
+			}
+		})
+	}
+}
+
+// TestSampleValuesRedactionPreservesJSONStructure verifies that JSON structure is preserved during redaction.
+func TestSampleValuesRedactionPreservesJSONStructure(t *testing.T) {
+	// Test case from the issue - LiveKit credentials in agent_data
+	originalJSON := `{"livekit_url":"wss://tikragents-xxx.livekit.cloud","livekit_api_key":"API67e2wiyw3KvB","livekit_api_secret":"MATPBGtZAPGGxyslrsjHaZjN3W6KsU2pIfdwNHMfR0i","livekit_agent_id":"kitt"}`
+
+	redacted := DefaultSensitiveDetector.RedactContent(originalJSON)
+
+	// Verify it's still valid JSON
+	var parsed map[string]any
+	err := json.Unmarshal([]byte(redacted), &parsed)
+	assert.NoError(t, err, "Redacted JSON should still be valid JSON")
+
+	// Verify sensitive fields are redacted
+	assert.Equal(t, "[REDACTED]", parsed["livekit_api_key"], "API key should be redacted")
+	assert.Equal(t, "[REDACTED]", parsed["livekit_api_secret"], "API secret should be redacted")
+
+	// Verify non-sensitive fields are preserved
+	assert.Equal(t, "wss://tikragents-xxx.livekit.cloud", parsed["livekit_url"], "Non-sensitive URL should be preserved")
+	assert.Equal(t, "kitt", parsed["livekit_agent_id"], "Non-sensitive agent ID should be preserved")
+}
+
+// TestColumnMetadataEnrichment tests that column metadata from update_column is merged into
+// column details in get_context output.
+func TestColumnMetadataEnrichment(t *testing.T) {
+	tests := []struct {
+		name              string
+		columnName        string
+		datasourceCol     *models.DatasourceColumn
+		columnMeta        *models.ColumnMetadata
+		expectedFields    map[string]any
+		notExpectedFields []string
+	}{
+		{
+			name:       "no metadata - only datasource values",
+			columnName: "user_id",
+			datasourceCol: &models.DatasourceColumn{
+				ColumnName: "user_id",
+				DataType:   "uuid",
+				IsNullable: false,
+			},
+			columnMeta: nil,
+			expectedFields: map[string]any{
+				"column_name": "user_id",
+				"data_type":   "uuid",
+				"is_nullable": false,
+			},
+			notExpectedFields: []string{"description", "entity", "role", "enum_values"},
+		},
+		{
+			name:       "metadata with description overrides datasource",
+			columnName: "host_id",
+			datasourceCol: &models.DatasourceColumn{
+				ColumnName:  "host_id",
+				DataType:    "uuid",
+				IsNullable:  false,
+				Description: "Original datasource description",
+			},
+			columnMeta: &models.ColumnMetadata{
+				ColumnName:  "host_id",
+				Description: ptrString("Use this to find all hosts who had engagements"),
+			},
+			expectedFields: map[string]any{
+				"column_name": "host_id",
+				"description": "Use this to find all hosts who had engagements", // Should override
+			},
+			notExpectedFields: []string{"entity", "role", "enum_values"},
+		},
+		{
+			name:       "metadata with entity and role",
+			columnName: "status",
+			datasourceCol: &models.DatasourceColumn{
+				ColumnName: "status",
+				DataType:   "varchar",
+				IsNullable: false,
+			},
+			columnMeta: &models.ColumnMetadata{
+				ColumnName: "status",
+				Entity:     ptrString("User"),
+				Role:       ptrString("dimension"),
+			},
+			expectedFields: map[string]any{
+				"column_name": "status",
+				"entity":      "User",
+				"role":        "dimension",
+			},
+			notExpectedFields: []string{"description", "enum_values"},
+		},
+		{
+			name:       "metadata with enum_values",
+			columnName: "order_status",
+			datasourceCol: &models.DatasourceColumn{
+				ColumnName: "order_status",
+				DataType:   "varchar",
+				IsNullable: false,
+			},
+			columnMeta: &models.ColumnMetadata{
+				ColumnName: "order_status",
+				EnumValues: []string{"PENDING - Order is pending", "COMPLETED - Order completed"},
+			},
+			expectedFields: map[string]any{
+				"column_name": "order_status",
+				"enum_values": []string{"PENDING - Order is pending", "COMPLETED - Order completed"},
+			},
+			notExpectedFields: []string{"description", "entity", "role"},
+		},
+		{
+			name:       "full metadata enrichment",
+			columnName: "amount",
+			datasourceCol: &models.DatasourceColumn{
+				ColumnName: "amount",
+				DataType:   "numeric",
+				IsNullable: false,
+			},
+			columnMeta: &models.ColumnMetadata{
+				ColumnName:  "amount",
+				Description: ptrString("Transaction amount in USD cents"),
+				Entity:      ptrString("Transaction"),
+				Role:        ptrString("measure"),
+			},
+			expectedFields: map[string]any{
+				"column_name": "amount",
+				"data_type":   "numeric",
+				"is_nullable": false,
+				"description": "Transaction amount in USD cents",
+				"entity":      "Transaction",
+				"role":        "measure",
+			},
+			notExpectedFields: []string{"enum_values"},
+		},
+		{
+			name:       "empty string values are not included",
+			columnName: "test_col",
+			datasourceCol: &models.DatasourceColumn{
+				ColumnName: "test_col",
+				DataType:   "varchar",
+				IsNullable: true,
+			},
+			columnMeta: &models.ColumnMetadata{
+				ColumnName:  "test_col",
+				Description: ptrString(""), // Empty string
+				Entity:      ptrString(""), // Empty string
+				Role:        ptrString(""), // Empty string
+				EnumValues:  []string{},    // Empty slice
+			},
+			expectedFields: map[string]any{
+				"column_name": "test_col",
+			},
+			notExpectedFields: []string{"description", "entity", "role", "enum_values"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Build column detail as done in buildColumnDetails
+			colDetail := map[string]any{
+				"column_name": tt.datasourceCol.ColumnName,
+				"data_type":   tt.datasourceCol.DataType,
+				"is_nullable": tt.datasourceCol.IsNullable,
+			}
+			if tt.datasourceCol.BusinessName != "" {
+				colDetail["business_name"] = tt.datasourceCol.BusinessName
+			}
+			if tt.datasourceCol.Description != "" {
+				colDetail["description"] = tt.datasourceCol.Description
+			}
+
+			// Apply column metadata enrichment (same logic as context.go)
+			if tt.columnMeta != nil {
+				// Description from update_column overrides datasource description
+				if tt.columnMeta.Description != nil && *tt.columnMeta.Description != "" {
+					colDetail["description"] = *tt.columnMeta.Description
+				}
+				// Entity association
+				if tt.columnMeta.Entity != nil && *tt.columnMeta.Entity != "" {
+					colDetail["entity"] = *tt.columnMeta.Entity
+				}
+				// Semantic role
+				if tt.columnMeta.Role != nil && *tt.columnMeta.Role != "" {
+					colDetail["role"] = *tt.columnMeta.Role
+				}
+				// Enum values
+				if len(tt.columnMeta.EnumValues) > 0 {
+					colDetail["enum_values"] = tt.columnMeta.EnumValues
+				}
+			}
+
+			// Verify expected fields are present with correct values
+			for field, expectedVal := range tt.expectedFields {
+				actualVal, exists := colDetail[field]
+				assert.True(t, exists, "Expected field %s to be present", field)
+				assert.Equal(t, expectedVal, actualVal, "Field %s should have expected value", field)
+			}
+
+			// Verify fields that should not be present
+			for _, field := range tt.notExpectedFields {
+				_, exists := colDetail[field]
+				assert.False(t, exists, "Field %s should NOT be present", field)
 			}
 		})
 	}

@@ -153,6 +153,14 @@ export interface WorkflowResultResponse {
   metadata?: Record<string, unknown>;
 }
 
+/**
+ * Response from GET /api/projects/{project_id}/ontology/enrichment
+ */
+export interface EnrichmentResponse {
+  entity_summaries: EntitySummary[];
+  column_details: EntityColumns[];
+}
+
 // ===================================================================
 // Hierarchical Tiered Ontology (HTO) Types
 // ===================================================================
@@ -492,14 +500,16 @@ export type DAGNodeStatus = 'pending' | 'running' | 'completed' | 'failed' | 'sk
  * DAG node names in execution order
  */
 export type DAGNodeName =
+  | 'KnowledgeSeeding'
   | 'EntityDiscovery'
   | 'EntityEnrichment'
   | 'FKDiscovery'
   | 'PKMatchDiscovery'
   | 'RelationshipDiscovery'
   | 'RelationshipEnrichment'
-  | 'OntologyFinalization'
+  | 'ColumnFeatureExtraction'
   | 'ColumnEnrichment'
+  | 'OntologyFinalization'
   | 'GlossaryDiscovery'
   | 'GlossaryEnrichment';
 
@@ -535,48 +545,139 @@ export interface DAGStatusResponse {
   completed_at?: string;
 }
 
+// ===================================================================
+// Extraction Phase Types (Multi-Phase Progress within DAG Nodes)
+// ===================================================================
+
+/**
+ * Status of an extraction phase
+ */
+export type ExtractionPhaseStatus = 'pending' | 'in_progress' | 'complete' | 'failed';
+
+/**
+ * Represents progress within a single extraction phase
+ * Used for multi-phase progress display (e.g., Column Feature Extraction)
+ */
+export interface ExtractionPhase {
+  /** Unique phase identifier (e.g., "phase1", "phase2") */
+  id: string;
+  /** Display name for the phase */
+  name: string;
+  /** Current status of the phase */
+  status: ExtractionPhaseStatus;
+  /** Total items to process in this phase (known at phase start) */
+  totalItems?: number;
+  /** Number of items completed so far */
+  completedItems?: number;
+  /** Description of what's currently being processed */
+  currentItem?: string;
+}
+
+/**
+ * Progress for Column Feature Extraction (multi-phase mini-DAG)
+ * Matches models.FeatureExtractionProgress from the backend
+ */
+export interface ColumnFeatureExtractionProgress {
+  /** Current phase ID */
+  currentPhase: string;
+  /** Human-readable description of current activity */
+  phaseDescription: string;
+  /** Total items in current phase */
+  totalItems: number;
+  /** Completed items in current phase */
+  completedItems: number;
+  /** Total columns discovered */
+  totalColumns: number;
+  /** Number of enum candidates found */
+  enumCandidates: number;
+  /** Number of FK candidates found */
+  fkCandidates: number;
+  /** Number of tables needing cross-column analysis */
+  crossColumnCandidates: number;
+  /** Detailed phase progress */
+  phases: ExtractionPhase[];
+}
+
+/**
+ * Human-readable descriptions for each extraction phase
+ */
+export const ExtractionPhaseDescriptions: Record<string, { title: string; description: string }> = {
+  phase1: {
+    title: 'Collecting column metadata',
+    description: 'Gathering statistics, samples, and patterns from each column',
+  },
+  phase2: {
+    title: 'Classifying columns',
+    description: 'Determining column purpose using AI analysis',
+  },
+  phase3: {
+    title: 'Analyzing enum values',
+    description: 'Labeling enumeration values and detecting state machines',
+  },
+  phase4: {
+    title: 'Resolving FK candidates',
+    description: 'Determining foreign key relationships via data overlap',
+  },
+  phase5: {
+    title: 'Cross-column analysis',
+    description: 'Detecting monetary pairs and soft delete patterns',
+  },
+  phase6: {
+    title: 'Saving results',
+    description: 'Persisting extracted features to the database',
+  },
+};
+
 /**
  * Human-readable descriptions for each DAG node
  */
 export const DAGNodeDescriptions: Record<DAGNodeName, { title: string; description: string }> = {
+  KnowledgeSeeding: {
+    title: 'Seeding Knowledge',
+    description: 'Initialize project knowledge from description and schema',
+  },
   EntityDiscovery: {
-    title: 'Entity Discovery',
+    title: 'Discovering Entities',
     description: 'Identifying entities from schema constraints',
   },
   EntityEnrichment: {
-    title: 'Entity Enrichment',
+    title: 'Enriching Entities',
     description: 'Generating entity names and descriptions',
   },
   FKDiscovery: {
-    title: 'Foreign Key Discovery',
+    title: 'Discovering Foreign Keys',
     description: 'Discovering foreign key relationships',
   },
   PKMatchDiscovery: {
-    title: 'Primary Key Match Discovery',
+    title: 'Discovering Primary Key Matches',
     description: 'Discovering relationships via primary key matching',
   },
   RelationshipDiscovery: {
-    title: 'Relationship Discovery',
+    title: 'Discovering Relationships',
     description: 'Discovering foreign key relationships',
   },
   RelationshipEnrichment: {
-    title: 'Relationship Enrichment',
+    title: 'Enriching Relationships',
     description: 'Generating relationship descriptions',
   },
-  OntologyFinalization: {
-    title: 'Ontology Finalization',
-    description: 'Generating domain summary and conventions',
+  ColumnFeatureExtraction: {
+    title: 'Extracting Column Features',
+    description: 'Analyzing column statistics and patterns',
   },
   ColumnEnrichment: {
-    title: 'Column Enrichment',
+    title: 'Enriching Columns',
     description: 'Generating column descriptions and semantic types',
   },
+  OntologyFinalization: {
+    title: 'Finalizing Ontology',
+    description: 'Generating domain summary and conventions',
+  },
   GlossaryDiscovery: {
-    title: 'Glossary Discovery',
+    title: 'Discovering Glossary Terms',
     description: 'Discovering business glossary terms and definitions',
   },
   GlossaryEnrichment: {
-    title: 'Glossary Enrichment',
+    title: 'Enriching Glossary',
     description: 'Generating SQL definitions for glossary terms',
   },
 };

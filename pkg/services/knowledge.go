@@ -14,16 +14,15 @@ import (
 
 // KnowledgeService provides operations for project knowledge management.
 type KnowledgeService interface {
-	// Store creates or updates a knowledge fact.
-	Store(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error)
+	// Store creates a knowledge fact.
+	Store(ctx context.Context, projectID uuid.UUID, factType, value, contextInfo string) (*models.KnowledgeFact, error)
 
-	// StoreWithSource creates or updates a knowledge fact with explicit source provenance.
+	// StoreWithSource creates a knowledge fact with explicit source provenance.
 	// Use source="manual" for user-entered data, source="inferred" for LLM-extracted data.
-	// For project_overview facts, ontologyID is set to nil so it survives ontology deletion.
-	StoreWithSource(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo, source string) (*models.KnowledgeFact, error)
+	StoreWithSource(ctx context.Context, projectID uuid.UUID, factType, value, contextInfo, source string) (*models.KnowledgeFact, error)
 
 	// Update modifies an existing knowledge fact by ID.
-	Update(ctx context.Context, projectID, id uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error)
+	Update(ctx context.Context, projectID, id uuid.UUID, factType, value, contextInfo string) (*models.KnowledgeFact, error)
 
 	// GetAll retrieves all knowledge facts for a project.
 	GetAll(ctx context.Context, projectID uuid.UUID) ([]*models.KnowledgeFact, error)
@@ -33,6 +32,9 @@ type KnowledgeService interface {
 
 	// Delete removes a knowledge fact.
 	Delete(ctx context.Context, id uuid.UUID) error
+
+	// DeleteAll removes all knowledge facts for a project.
+	DeleteAll(ctx context.Context, projectID uuid.UUID) error
 }
 
 type knowledgeService struct {
@@ -59,46 +61,33 @@ func NewKnowledgeService(
 
 var _ KnowledgeService = (*knowledgeService)(nil)
 
-func (s *knowledgeService) Store(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error) {
-	// Look up active ontology to associate knowledge with it
-	var ontologyID *uuid.UUID
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err == nil && ontology != nil {
-		ontologyID = &ontology.ID
-	}
-	// If no active ontology found, ontologyID remains nil (allowed by schema)
-
+func (s *knowledgeService) Store(ctx context.Context, projectID uuid.UUID, factType, value, contextInfo string) (*models.KnowledgeFact, error) {
 	fact := &models.KnowledgeFact{
-		ProjectID:  projectID,
-		OntologyID: ontologyID,
-		FactType:   factType,
-		Key:        key,
-		Value:      value,
-		Context:    contextInfo,
+		ProjectID: projectID,
+		FactType:  factType,
+		Value:     value,
+		Context:   contextInfo,
 	}
 
-	if err := s.repo.Upsert(ctx, fact); err != nil {
+	if err := s.repo.Create(ctx, fact); err != nil {
 		s.logger.Error("Failed to store knowledge fact",
 			zap.String("project_id", projectID.String()),
 			zap.String("fact_type", factType),
-			zap.String("key", key),
 			zap.Error(err))
 		return nil, err
 	}
 
 	s.logger.Info("Knowledge fact stored",
 		zap.String("project_id", projectID.String()),
-		zap.String("fact_type", factType),
-		zap.String("key", key))
+		zap.String("fact_type", factType))
 
 	return fact, nil
 }
 
-// StoreWithSource creates or updates a knowledge fact with explicit source provenance.
+// StoreWithSource creates a knowledge fact with explicit source provenance.
 // The source parameter should be "manual" for user-entered data or "inferred" for LLM-extracted data.
-// For project_overview facts (factType="overview", key="project_overview"), ontologyID is set to nil
-// so the fact survives ontology deletion and can be reused on re-extraction.
-func (s *knowledgeService) StoreWithSource(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo, source string) (*models.KnowledgeFact, error) {
+// Knowledge facts have project-lifecycle scope and persist across ontology re-extractions.
+func (s *knowledgeService) StoreWithSource(ctx context.Context, projectID uuid.UUID, factType, value, contextInfo, source string) (*models.KnowledgeFact, error) {
 	// Validate and convert source to ProvenanceSource
 	provenanceSource := models.ProvenanceSource(source)
 	if !provenanceSource.IsValid() {
@@ -130,35 +119,17 @@ func (s *knowledgeService) StoreWithSource(ctx context.Context, projectID uuid.U
 		return nil, fmt.Errorf("unsupported source: %s", source)
 	}
 
-	// Determine ontologyID based on fact type:
-	// - For project_overview facts, set ontologyID to nil so they survive ontology deletion
-	// - For other facts, associate with active ontology if available
-	var ontologyID *uuid.UUID
-	if factType == "overview" && key == "project_overview" {
-		// Project overview should survive ontology deletion
-		ontologyID = nil
-	} else {
-		// Look up active ontology for other fact types
-		ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-		if err == nil && ontology != nil {
-			ontologyID = &ontology.ID
-		}
-	}
-
 	fact := &models.KnowledgeFact{
-		ProjectID:  projectID,
-		OntologyID: ontologyID,
-		FactType:   factType,
-		Key:        key,
-		Value:      value,
-		Context:    contextInfo,
+		ProjectID: projectID,
+		FactType:  factType,
+		Value:     value,
+		Context:   contextInfo,
 	}
 
-	if err := s.repo.Upsert(provenanceCtx, fact); err != nil {
+	if err := s.repo.Create(provenanceCtx, fact); err != nil {
 		s.logger.Error("Failed to store knowledge fact with source",
 			zap.String("project_id", projectID.String()),
 			zap.String("fact_type", factType),
-			zap.String("key", key),
 			zap.String("source", source),
 			zap.Error(err))
 		return nil, err
@@ -167,23 +138,21 @@ func (s *knowledgeService) StoreWithSource(ctx context.Context, projectID uuid.U
 	s.logger.Info("Knowledge fact stored with source",
 		zap.String("project_id", projectID.String()),
 		zap.String("fact_type", factType),
-		zap.String("key", key),
 		zap.String("source", source))
 
 	return fact, nil
 }
 
-func (s *knowledgeService) Update(ctx context.Context, projectID, id uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error) {
+func (s *knowledgeService) Update(ctx context.Context, projectID, id uuid.UUID, factType, value, contextInfo string) (*models.KnowledgeFact, error) {
 	fact := &models.KnowledgeFact{
 		ID:        id,
 		ProjectID: projectID,
 		FactType:  factType,
-		Key:       key,
 		Value:     value,
 		Context:   contextInfo,
 	}
 
-	if err := s.repo.Upsert(ctx, fact); err != nil {
+	if err := s.repo.Update(ctx, fact); err != nil {
 		s.logger.Error("Failed to update knowledge fact",
 			zap.String("id", id.String()),
 			zap.String("project_id", projectID.String()),
@@ -194,8 +163,7 @@ func (s *knowledgeService) Update(ctx context.Context, projectID, id uuid.UUID, 
 	s.logger.Info("Knowledge fact updated",
 		zap.String("id", id.String()),
 		zap.String("project_id", projectID.String()),
-		zap.String("fact_type", factType),
-		zap.String("key", key))
+		zap.String("fact_type", factType))
 
 	return fact, nil
 }
@@ -230,5 +198,19 @@ func (s *knowledgeService) Delete(ctx context.Context, id uuid.UUID) error {
 			zap.Error(err))
 		return err
 	}
+	return nil
+}
+
+func (s *knowledgeService) DeleteAll(ctx context.Context, projectID uuid.UUID) error {
+	if err := s.repo.DeleteByProject(ctx, projectID); err != nil {
+		s.logger.Error("Failed to delete all knowledge facts",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		return err
+	}
+
+	s.logger.Info("Deleted all knowledge facts",
+		zap.String("project_id", projectID.String()))
+
 	return nil
 }

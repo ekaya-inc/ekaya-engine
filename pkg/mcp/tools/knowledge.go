@@ -54,6 +54,7 @@ func registerUpdateProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 				"Facts are upserted by (category, fact) pair - the same fact can be updated with new context. "+
 				"Categories: 'terminology' (domain-specific terms), 'business_rule' (validation rules, calculations), "+
 				"'enumeration' (status values, type codes), 'convention' (naming patterns, soft deletes). "+
+				"For table-specific metadata (ephemeral tables, usage notes, preferred alternatives), use update_table instead. "+
 				"Example: fact='A tik represents 6 seconds of engagement', category='terminology', context='Inferred from billing_engagements table'",
 		),
 		mcp.WithString(
@@ -128,27 +129,15 @@ func registerUpdateProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 			), nil
 		}
 
-		// Look up active ontology to associate knowledge with it (optional dependency)
-		var ontologyID *uuid.UUID
-		if deps.OntologyRepository != nil {
-			ontology, err := deps.OntologyRepository.GetActive(tenantCtx, projectID)
-			if err == nil && ontology != nil {
-				ontologyID = &ontology.ID
-			}
-		}
-		// If no active ontology found or OntologyRepository not provided, ontologyID remains nil (allowed by schema)
-
-		// Build KnowledgeFact
+		// Build KnowledgeFact (project-lifecycle scope, no ontology association)
 		knowledgeFact := &models.KnowledgeFact{
-			ProjectID:  projectID,
-			OntologyID: ontologyID,
-			FactType:   category,
-			Key:        fact, // Using fact as the key for upsert semantics
-			Value:      fact,
-			Context:    context,
+			ProjectID: projectID,
+			FactType:  category,
+			Value:     fact,
+			Context:   context,
 		}
 
-		// If fact_id provided, parse it and set ID for explicit update
+		// If fact_id provided, parse it and update existing fact
 		if factIDStr != "" {
 			factIDStr = trimString(factIDStr)
 			factID, err := uuid.Parse(factIDStr)
@@ -159,12 +148,17 @@ func registerUpdateProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 				), nil
 			}
 			knowledgeFact.ID = factID
-		}
-
-		// Upsert the fact
-		err = deps.KnowledgeRepository.Upsert(tenantCtx, knowledgeFact)
-		if err != nil {
-			return nil, fmt.Errorf("failed to upsert project knowledge: %w", err)
+			// Update existing fact
+			err = deps.KnowledgeRepository.Update(tenantCtx, knowledgeFact)
+			if err != nil {
+				return nil, fmt.Errorf("failed to update project knowledge: %w", err)
+			}
+		} else {
+			// Create new fact
+			err = deps.KnowledgeRepository.Create(tenantCtx, knowledgeFact)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create project knowledge: %w", err)
+			}
 		}
 
 		// Build response

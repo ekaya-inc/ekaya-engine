@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
+	"github.com/ekaya-inc/ekaya-engine/pkg/audit"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
@@ -35,6 +36,7 @@ type MCPToolDeps struct {
 	ChangeReviewService          services.ChangeReviewService
 	PendingChangeRepo            repositories.PendingChangeRepository
 	InstalledAppService          services.InstalledAppService
+	Auditor                      *audit.SecurityAuditor // Optional: for modifying query SIEM logging
 	Logger                       *zap.Logger
 }
 
@@ -50,6 +52,9 @@ func (d *MCPToolDeps) GetMCPConfigService() services.MCPConfigService { return d
 
 // GetLogger implements ToolAccessDeps.
 func (d *MCPToolDeps) GetLogger() *zap.Logger { return d.Logger }
+
+// GetAuditor implements QueryLoggingDeps.
+func (d *MCPToolDeps) GetAuditor() *audit.SecurityAuditor { return d.Auditor }
 
 // getOptionalString extracts an optional string argument from the request.
 func getOptionalString(req mcp.CallToolRequest, key string) string {
@@ -515,8 +520,12 @@ func registerQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 		}
 		defer executor.Close()
 
+		// Track execution time for logging
+		startTime := time.Now()
+
 		// Execute with limit + 1 to detect truncation
 		queryResult, err := executor.Query(tenantCtx, sql, limit+1)
+		executionTimeMs := time.Since(startTime).Milliseconds()
 		if err != nil {
 			// Check if this is a SQL user error (syntax, missing table, etc.)
 			if errResult := NewSQLErrorResult(err); errResult != nil {
@@ -531,6 +540,19 @@ func registerQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 		if truncated {
 			rows = rows[:limit]
 		}
+
+		// Log execution to history (best effort - don't fail request if logging fails)
+		// Note: QueryID is nil for ad-hoc queries executed via the query tool
+		go logQueryExecution(tenantCtx, deps, QueryExecutionLog{
+			ProjectID:       projectID,
+			QueryID:         uuid.Nil, // Ad-hoc query, no associated approved query
+			SQL:             sql,
+			SQLType:         "SELECT",
+			RowCount:        len(rows),
+			ExecutionTimeMs: int(executionTimeMs),
+			IsModifying:     false,
+			Success:         true,
+		})
 
 		// Extract column names from ColumnInfo for response
 		columnNames := make([]string, len(queryResult.Columns))
@@ -717,12 +739,33 @@ func registerExecuteTool(s *server.MCPServer, deps *MCPToolDeps) {
 		}
 		defer executor.Close()
 
+		// Detect SQL type for logging
+		sqlType := services.DetectSQLType(sql)
+
+		// Track execution time for logging
+		startTime := time.Now()
+
 		// Execute statement with timeout to prevent long-running operations
 		execCtx, cancel := context.WithTimeout(tenantCtx, 30*time.Second)
 		defer cancel()
 
 		execResult, err := executor.Execute(execCtx, sql)
+		executionTimeMs := time.Since(startTime).Milliseconds()
 		if err != nil {
+			// Log failed execution
+			go logQueryExecution(tenantCtx, deps, QueryExecutionLog{
+				ProjectID:       projectID,
+				QueryID:         uuid.Nil, // Ad-hoc query, no associated approved query
+				SQL:             sql,
+				SQLType:         string(sqlType),
+				RowCount:        0,
+				RowsAffected:    0,
+				ExecutionTimeMs: int(executionTimeMs),
+				IsModifying:     true,
+				Success:         false,
+				ErrorMessage:    err.Error(),
+			})
+
 			// Check if this is a SQL user error (syntax, constraint, missing table, etc.)
 			// These should be returned as JSON errors, not MCP protocol errors
 			if errResult := NewSQLErrorResult(err); errResult != nil {
@@ -746,6 +789,19 @@ func registerExecuteTool(s *server.MCPServer, deps *MCPToolDeps) {
 			zap.String("project_id", projectID.String()),
 			zap.Int64("rows_affected", execResult.RowsAffected),
 		)
+
+		// Log successful execution
+		go logQueryExecution(tenantCtx, deps, QueryExecutionLog{
+			ProjectID:       projectID,
+			QueryID:         uuid.Nil, // Ad-hoc query, no associated approved query
+			SQL:             sql,
+			SQLType:         string(sqlType),
+			RowCount:        execResult.RowCount,
+			RowsAffected:    execResult.RowsAffected,
+			ExecutionTimeMs: int(executionTimeMs),
+			IsModifying:     true,
+			Success:         true,
+		})
 
 		// Build response based on whether rows were returned
 		var result any
@@ -1043,7 +1099,7 @@ func registerRefreshSchemaTool(s *server.MCPServer, deps *MCPToolDeps) {
 		}{
 			TablesAdded:           result.NewTableNames,
 			TablesRemoved:         result.RemovedTableNames,
-			ColumnsAdded:          result.ColumnsUpserted,
+			ColumnsAdded:          len(result.NewColumns),
 			RelationshipsFound:    len(relPairs),
 			Relationships:         relPairs,
 			AutoSelectApplied:     autoSelectApplied,

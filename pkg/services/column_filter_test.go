@@ -10,9 +10,9 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
 
-// TestFilterEntityCandidates_LegacyMode tests filtering with legacy pattern matching enabled.
-// In legacy mode, columns with patterns like *_status, is_*, has_*, *_at are excluded.
-func TestFilterEntityCandidates_LegacyMode(t *testing.T) {
+// TestFilterEntityCandidates tests filtering based on data types, statistics, and column features.
+// Name-based pattern matching has been removed; filtering uses stored ColumnFeatures.Purpose.
+func TestFilterEntityCandidates_Basic(t *testing.T) {
 	logger := zap.NewNop()
 	projectID := uuid.New()
 	tableID := uuid.New()
@@ -80,7 +80,7 @@ func TestFilterEntityCandidates_LegacyMode(t *testing.T) {
 			IsPrimaryKey:  false,
 			IsUnique:      false,
 		},
-		// Should be excluded: Name pattern (*_status) - only in legacy mode
+		// Should be excluded: Low distinct count (5 < 20)
 		{
 			ID:            uuid.New(),
 			ProjectID:     projectID,
@@ -148,8 +148,8 @@ func TestFilterEntityCandidates_LegacyMode(t *testing.T) {
 		},
 	}
 
-	// Test with legacy pattern matching ENABLED
-	candidates, excluded := FilterEntityCandidates(columns, tableByID, statsMap, true, logger)
+	// Test filtering based on types and statistics (no legacy pattern matching)
+	candidates, excluded := FilterEntityCandidates(columns, tableByID, statsMap, logger)
 
 	// Verify candidates
 	if len(candidates) != 3 {
@@ -194,9 +194,9 @@ func TestFilterEntityCandidates_LegacyMode(t *testing.T) {
 	}
 }
 
-// TestFilterEntityCandidates_DataBasedMode tests filtering with data-based detection
-// (UseLegacyPatternMatching=false). In this mode, name patterns like *_status are NOT
-// used to exclude columns - only type and data (distinct count, ratio) are considered.
+// TestFilterEntityCandidates_DataBasedMode tests filtering with data-based detection.
+// Name patterns like *_status are NOT used to exclude columns -
+// only type, data (distinct count, ratio), and stored ColumnFeatures are considered.
 func TestFilterEntityCandidates_DataBasedMode(t *testing.T) {
 	logger := zap.NewNop()
 	projectID := uuid.New()
@@ -224,8 +224,7 @@ func TestFilterEntityCandidates_DataBasedMode(t *testing.T) {
 			IsPrimaryKey:  true,
 			IsUnique:      false,
 		},
-		// In legacy mode, this would be excluded by name pattern (*_status)
-		// In data-based mode, it should be included if it has high enough stats
+		// Name patterns are not used for exclusion; included if it has high enough stats
 		{
 			ID:            uuid.New(),
 			ProjectID:     projectID,
@@ -285,16 +284,16 @@ func TestFilterEntityCandidates_DataBasedMode(t *testing.T) {
 		},
 	}
 
-	// Test with data-based mode (UseLegacyPatternMatching=false)
-	candidates, excluded := FilterEntityCandidates(columns, tableByID, statsMap, false, logger)
+	// Test with data-based mode (name patterns not used)
+	candidates, excluded := FilterEntityCandidates(columns, tableByID, statsMap, logger)
 
-	// In data-based mode:
+	// Expected results:
 	// - "id" is a candidate (PK)
-	// - "account_status" is now a candidate (not excluded by name pattern, has good stats)
+	// - "account_status" is a candidate (high distinct count, no features to exclude)
 	// - "is_active" is excluded (boolean type)
 	// - "created_at" is excluded (timestamp type)
 
-	// Verify account_status is now a candidate (not excluded by name)
+	// Verify account_status is a candidate (high distinct count, no features to exclude)
 	accountStatusCandidate := false
 	for _, c := range candidates {
 		if c.ColumnName == "account_status" {
@@ -328,8 +327,7 @@ func TestFilterEntityCandidates_DataBasedMode(t *testing.T) {
 	}
 }
 
-// TestFilterEntityCandidates is the original test, kept for backward compatibility.
-// It tests the legacy mode (useLegacyPatternMatching=true).
+// TestFilterEntityCandidates tests basic filtering behavior with type and data constraints.
 func TestFilterEntityCandidates(t *testing.T) {
 	logger := zap.NewNop()
 	projectID := uuid.New()
@@ -466,7 +464,7 @@ func TestFilterEntityCandidates(t *testing.T) {
 		},
 	}
 
-	candidates, excluded := FilterEntityCandidates(columns, tableByID, statsMap, true, logger)
+	candidates, excluded := FilterEntityCandidates(columns, tableByID, statsMap, logger)
 
 	// Verify candidates
 	if len(candidates) != 3 {
@@ -539,66 +537,6 @@ func TestIsExcludedType(t *testing.T) {
 	}
 }
 
-// TestIsExcludedName tests the legacy pattern-matching exclusion function.
-// This function is only used when UseLegacyPatternMatching=true.
-// When UseLegacyPatternMatching=false, name-based exclusions are not applied
-// and only type-based/data-based filters are used.
-func TestIsExcludedName(t *testing.T) {
-	tests := []struct {
-		columnName string
-		expected   bool
-	}{
-		{"created_at", true},
-		{"updated_at", true},
-		{"deleted_at", true},
-		{"birth_date", true},
-		{"is_active", true},
-		{"is_deleted", true},
-		{"has_password", true},
-		{"has_avatar", true},
-		{"account_status", true},
-		{"user_type", true},
-		{"active_flag", true},
-		{"user_id", false},
-		{"account_id", false},
-		{"email", false},
-		{"name", false},
-		{"id", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.columnName, func(t *testing.T) {
-			result := isExcludedName(tt.columnName)
-			if result != tt.expected {
-				t.Errorf("isExcludedName(%s) = %v, want %v", tt.columnName, result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestIsEntityReferenceName(t *testing.T) {
-	tests := []struct {
-		columnName string
-		expected   bool
-	}{
-		{"id", true},
-		{"user_id", true},
-		{"account_id", true},
-		{"USER_ID", true},
-		{"account_uuid", true},
-		{"session_key", true},
-		{"email", false},
-		{"name", false},
-		{"status", false},
-		{"created_at", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.columnName, func(t *testing.T) {
-			result := isEntityReferenceName(tt.columnName)
-			if result != tt.expected {
-				t.Errorf("isEntityReferenceName(%s) = %v, want %v", tt.columnName, result, tt.expected)
-			}
-		})
-	}
-}
+// NOTE: TestIsExcludedName and TestIsEntityReferenceName have been removed.
+// Column filtering now uses stored ColumnFeatures.Purpose instead of name-based patterns.
+// See PLAN-extracting-column-features.md for details.

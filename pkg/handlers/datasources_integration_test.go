@@ -916,11 +916,11 @@ func TestDatasourcesIntegration_DeleteClearsKnowledgeAndGlossary(t *testing.T) {
 		t.Fatalf("failed to create test ontology: %v", err)
 	}
 
-	// Create knowledge facts linked to this ontology
+	// Create knowledge facts (project-level scope, not linked to ontology)
 	_, err = scope.Conn.Exec(ctx, `
-		INSERT INTO engine_project_knowledge (id, project_id, ontology_id, fact_type, key, value, context, created_at, updated_at)
-		VALUES ($1, $2, $3, 'terminology', 'active_user', 'A user who logged in within the last 30 days', 'From old datasource', NOW(), NOW())
-	`, uuid.New(), tc.projectID, ontologyID)
+		INSERT INTO engine_project_knowledge (id, project_id, fact_type, value, context, source, created_at, updated_at)
+		VALUES ($1, $2, 'terminology', 'A user who logged in within the last 30 days', 'From old datasource', 'manual', NOW(), NOW())
+	`, uuid.New(), tc.projectID)
 	if err != nil {
 		t.Fatalf("failed to create test knowledge fact: %v", err)
 	}
@@ -975,14 +975,14 @@ func TestDatasourcesIntegration_DeleteClearsKnowledgeAndGlossary(t *testing.T) {
 		t.Errorf("expected 0 ontologies after delete, got %d", ontologyCountAfter)
 	}
 
-	// Verify knowledge facts are gone (CASCADE from ontology_id FK)
+	// Verify knowledge facts are preserved (project-level scope, survives ontology deletion)
 	var knowledgeCountAfter int
 	err = scope.Conn.QueryRow(ctx, `SELECT COUNT(*) FROM engine_project_knowledge WHERE project_id = $1`, tc.projectID).Scan(&knowledgeCountAfter)
 	if err != nil {
 		t.Fatalf("failed to count knowledge facts after delete: %v", err)
 	}
-	if knowledgeCountAfter != 0 {
-		t.Errorf("BUG-10: expected 0 knowledge facts after datasource delete, got %d - stale domain facts retained!", knowledgeCountAfter)
+	if knowledgeCountAfter != 1 {
+		t.Errorf("expected 1 knowledge fact after datasource delete (project-level scope preserved), got %d", knowledgeCountAfter)
 	}
 
 	// Verify glossary terms are gone (CASCADE from ontology_id FK)

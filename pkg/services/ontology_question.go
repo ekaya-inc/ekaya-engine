@@ -156,12 +156,11 @@ func (s *ontologyQuestionService) AnswerQuestion(ctx context.Context, questionID
 
 	// Store knowledge facts
 	for _, fact := range processingResult.KnowledgeFacts {
-		if err := s.knowledgeRepo.Upsert(ctx, fact); err != nil {
+		if err := s.knowledgeRepo.Create(ctx, fact); err != nil {
 			s.logger.Error("Failed to store knowledge fact",
 				zap.String("fact_type", fact.FactType),
-				zap.String("key", fact.Key),
 				zap.Error(err))
-			return nil, fmt.Errorf("store knowledge fact %s/%s: %w", fact.FactType, fact.Key, err)
+			return nil, fmt.Errorf("store knowledge fact %s: %w", fact.FactType, err)
 		}
 	}
 

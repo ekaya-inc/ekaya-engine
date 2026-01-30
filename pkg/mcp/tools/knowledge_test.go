@@ -22,13 +22,21 @@ type mockKnowledgeRepository struct {
 	err   error
 }
 
-func (m *mockKnowledgeRepository) Upsert(ctx context.Context, fact *models.KnowledgeFact) error {
+func (m *mockKnowledgeRepository) Create(ctx context.Context, fact *models.KnowledgeFact) error {
 	if m.err != nil {
 		return m.err
 	}
 	// Set ID if not set (simulates database behavior)
 	if fact.ID == uuid.Nil {
 		fact.ID = uuid.New()
+	}
+	m.facts = append(m.facts, fact)
+	return nil
+}
+
+func (m *mockKnowledgeRepository) Update(ctx context.Context, fact *models.KnowledgeFact) error {
+	if m.err != nil {
+		return m.err
 	}
 	m.facts = append(m.facts, fact)
 	return nil
@@ -52,18 +60,6 @@ func (m *mockKnowledgeRepository) GetByType(ctx context.Context, projectID uuid.
 		}
 	}
 	return filtered, nil
-}
-
-func (m *mockKnowledgeRepository) GetByKey(ctx context.Context, projectID uuid.UUID, factType, key string) (*models.KnowledgeFact, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	for _, f := range m.facts {
-		if f.FactType == factType && f.Key == key {
-			return f, nil
-		}
-	}
-	return nil, nil
 }
 
 func (m *mockKnowledgeRepository) Delete(ctx context.Context, id uuid.UUID) error {
@@ -698,18 +694,17 @@ func TestUpdateProjectKnowledgeTool_Success(t *testing.T) {
 		fact := &models.KnowledgeFact{
 			ProjectID: uuid.New(),
 			FactType:  "terminology",
-			Key:       "A tik represents 6 seconds of engagement",
 			Value:     "A tik represents 6 seconds of engagement",
 			Context:   "Found in billing_engagements table",
 		}
 
-		// Simulate successful upsert
-		err := mockRepo.Upsert(context.Background(), fact)
+		// Simulate successful create
+		err := mockRepo.Create(context.Background(), fact)
 		require.NoError(t, err)
 
 		// Verify fact was created in mock repo
 		assert.Len(t, mockRepo.facts, 1, "fact should be created in repository")
-		assert.Equal(t, fact.Key, mockRepo.facts[0].Key)
+		assert.Equal(t, fact.Value, mockRepo.facts[0].Value)
 		assert.Equal(t, fact.FactType, mockRepo.facts[0].FactType)
 		assert.Equal(t, fact.Context, mockRepo.facts[0].Context)
 		assert.NotEqual(t, uuid.Nil, mockRepo.facts[0].ID, "ID should be set")
@@ -747,7 +742,6 @@ func TestUpdateProjectKnowledgeTool_Success(t *testing.T) {
 			ID:        existingID,
 			ProjectID: uuid.New(),
 			FactType:  "business_rule",
-			Key:       "Platform fees are calculated as percentage",
 			Value:     "Platform fees are calculated as percentage",
 			Context:   "Initial observation",
 		}
@@ -758,13 +752,12 @@ func TestUpdateProjectKnowledgeTool_Success(t *testing.T) {
 			ID:        existingID,
 			ProjectID: existingFact.ProjectID,
 			FactType:  "business_rule",
-			Key:       existingFact.Key,
 			Value:     existingFact.Value,
 			Context:   "Verified: tikr_share/total_amount ≈ 0.33",
 		}
 
 		// Simulate successful update
-		err := mockRepo.Upsert(context.Background(), updatedFact)
+		err := mockRepo.Update(context.Background(), updatedFact)
 		require.NoError(t, err)
 
 		// Verify fact was updated (not duplicated)
@@ -806,13 +799,12 @@ func TestUpdateProjectKnowledgeTool_Success(t *testing.T) {
 			ID:        uuid.New(),
 			ProjectID: uuid.New(),
 			FactType:  "enumeration",
-			Key:       "Transaction status values",
 			Value:     "Transaction status values",
 			Context:   "Found in transactions.status column: PENDING, COMPLETED, FAILED",
 		}
 
-		// Simulate successful upsert with explicit ID
-		err := mockRepo.Upsert(context.Background(), fact)
+		// Simulate successful create with explicit ID
+		err := mockRepo.Create(context.Background(), fact)
 		require.NoError(t, err)
 
 		// Verify fact was created
@@ -831,13 +823,12 @@ func TestUpdateProjectKnowledgeTool_Success(t *testing.T) {
 		fact := &models.KnowledgeFact{
 			ProjectID: uuid.New(),
 			FactType:  "terminology", // Default category
-			Key:       "GMV means Gross Merchandise Value",
 			Value:     "GMV means Gross Merchandise Value",
 			Context:   "", // Empty context is allowed
 		}
 
-		// Simulate successful upsert
-		err := mockRepo.Upsert(context.Background(), fact)
+		// Simulate successful create
+		err := mockRepo.Create(context.Background(), fact)
 		require.NoError(t, err)
 
 		// Verify fact was created with defaults
@@ -859,7 +850,6 @@ func TestDeleteProjectKnowledgeTool_Success(t *testing.T) {
 			ID:        existingID,
 			ProjectID: uuid.New(),
 			FactType:  "business_rule",
-			Key:       "Old fact that needs to be removed",
 			Value:     "Old fact that needs to be removed",
 		}
 		mockRepo.facts = append(mockRepo.facts, existingFact)
@@ -905,21 +895,18 @@ func TestDeleteProjectKnowledgeTool_Success(t *testing.T) {
 				ID:        fact1ID,
 				ProjectID: uuid.New(),
 				FactType:  "terminology",
-				Key:       "Fact 1",
 				Value:     "Fact 1",
 			},
 			{
 				ID:        fact2ID,
 				ProjectID: uuid.New(),
 				FactType:  "business_rule",
-				Key:       "Fact 2",
 				Value:     "Fact 2",
 			},
 			{
 				ID:        fact3ID,
 				ProjectID: uuid.New(),
 				FactType:  "convention",
-				Key:       "Fact 3",
 				Value:     "Fact 3",
 			},
 		}

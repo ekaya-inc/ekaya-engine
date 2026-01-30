@@ -26,13 +26,12 @@ type ColumnFilterResult struct {
 
 // FilterEntityCandidates applies heuristics to identify entity candidate columns.
 // Returns separate lists of candidates and excluded columns with reasons.
-// When useLegacyPatternMatching is true, columns are filtered based on naming patterns
-// (e.g., _at suffix, is_ prefix). When false, filtering relies solely on data-based analysis.
+// Filtering uses stored ColumnFeatures.Purpose when available (from feature extraction pipeline),
+// and falls back to data-based analysis (type, statistics) otherwise.
 func FilterEntityCandidates(
 	columns []*models.SchemaColumn,
 	tableByID map[string]*models.SchemaTable,
 	statsByTableColumn map[string]datasource.ColumnStats,
-	useLegacyPatternMatching bool,
 	logger *zap.Logger,
 ) (candidates []ColumnFilterResult, excluded []ColumnFilterResult) {
 	candidates = make([]ColumnFilterResult, 0)
@@ -70,6 +69,9 @@ func FilterEntityCandidates(
 			IsUnique:      col.IsUnique,
 		}
 
+		// Check stored column features for classification (from feature extraction pipeline)
+		features := col.GetColumnFeatures()
+
 		// Apply exclusion heuristics first (highest priority)
 		if isExcludedType(col.DataType) {
 			result.IsCandidate = false
@@ -78,13 +80,22 @@ func FilterEntityCandidates(
 			continue
 		}
 
-		// Exclude names unlikely to be entity references
-		// Only apply when legacy pattern matching is enabled
-		if useLegacyPatternMatching && isExcludedName(col.ColumnName) {
-			result.IsCandidate = false
-			result.Reason = fmt.Sprintf("excluded name pattern (%s)", col.ColumnName)
-			excluded = append(excluded, result)
-			continue
+		// Use stored purpose to exclude non-identifier columns
+		// Purpose values like "timestamp", "flag", "enum" indicate the column is not an entity reference
+		if features != nil && features.Purpose != "" {
+			switch features.Purpose {
+			case models.PurposeTimestamp, models.PurposeFlag, models.PurposeEnum, models.PurposeMeasure, models.PurposeText, models.PurposeJSON:
+				result.IsCandidate = false
+				result.Reason = fmt.Sprintf("excluded by purpose (%s)", features.Purpose)
+				excluded = append(excluded, result)
+				continue
+			case models.PurposeIdentifier:
+				// Identifier columns are candidates
+				result.IsCandidate = true
+				result.Reason = fmt.Sprintf("identifier (feature extraction: %s)", features.SemanticType)
+				candidates = append(candidates, result)
+				continue
+			}
 		}
 
 		// Apply inclusion heuristics
@@ -100,15 +111,7 @@ func FilterEntityCandidates(
 			continue
 		}
 
-		// Priority 2: Name matches entity reference pattern
-		if isEntityReferenceName(col.ColumnName) {
-			result.IsCandidate = true
-			result.Reason = "entity reference name pattern"
-			candidates = append(candidates, result)
-			continue
-		}
-
-		// Priority 3: High distinct count and ratio
+		// Priority 2: High distinct count and ratio (data-based heuristic)
 		if hasStats && stats.DistinctCount >= 20 && ratio > 0.05 {
 			result.IsCandidate = true
 			result.Reason = fmt.Sprintf("%d distinct (%.1f%% ratio)", stats.DistinctCount, ratio*100)
@@ -149,50 +152,9 @@ func isExcludedType(dataType string) bool {
 	return false
 }
 
-// isExcludedName returns true for column names that are unlikely to be entity references.
-func isExcludedName(columnName string) bool {
-	lowerName := strings.ToLower(columnName)
-
-	// Timestamp patterns
-	if strings.HasSuffix(lowerName, "_at") ||
-		strings.HasSuffix(lowerName, "_date") {
-		return true
-	}
-
-	// Boolean flag patterns
-	if strings.HasPrefix(lowerName, "is_") ||
-		strings.HasPrefix(lowerName, "has_") {
-		return true
-	}
-
-	// Status/type/flag patterns
-	if strings.HasSuffix(lowerName, "_status") ||
-		strings.HasSuffix(lowerName, "_type") ||
-		strings.HasSuffix(lowerName, "_flag") {
-		return true
-	}
-
-	return false
-}
-
-// isEntityReferenceName returns true for column names that match entity reference patterns.
-func isEntityReferenceName(columnName string) bool {
-	lowerName := strings.ToLower(columnName)
-
-	// Exact match for "id"
-	if lowerName == "id" {
-		return true
-	}
-
-	// Suffix patterns for entity references
-	if strings.HasSuffix(lowerName, "_id") ||
-		strings.HasSuffix(lowerName, "_uuid") ||
-		strings.HasSuffix(lowerName, "_key") {
-		return true
-	}
-
-	return false
-}
+// NOTE: isExcludedName() and isEntityReferenceName() have been removed.
+// Column filtering now uses stored ColumnFeatures.Purpose from the feature extraction pipeline
+// instead of name-based pattern matching. See PLAN-extracting-column-features.md for details.
 
 // LogFilterResults logs the filtering results in a human-readable format.
 func LogFilterResults(candidates, excluded []ColumnFilterResult, logger *zap.Logger) {

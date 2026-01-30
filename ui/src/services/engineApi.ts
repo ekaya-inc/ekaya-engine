@@ -32,6 +32,7 @@ import type {
   ListPendingQueriesResponse,
   ListQueriesResponse,
   MCPConfigResponse,
+  ParseProjectKnowledgeResponse,
   ProjectKnowledge,
   ProjectKnowledgeListResponse,
   Query,
@@ -655,6 +656,23 @@ class EngineApiService {
   }
 
   /**
+   * Parse a free-form fact using LLM and create structured knowledge facts
+   * POST /api/projects/{projectId}/project-knowledge/parse
+   */
+  async parseProjectKnowledge(
+    projectId: string,
+    text: string
+  ): Promise<ApiResponse<ParseProjectKnowledgeResponse>> {
+    return this.makeRequest<ParseProjectKnowledgeResponse>(
+      `/${projectId}/project-knowledge/parse`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ text }),
+      }
+    );
+  }
+
+  /**
    * Update an existing project knowledge fact
    * PUT /api/projects/{projectId}/project-knowledge/{id}
    */
@@ -681,6 +699,18 @@ class EngineApiService {
     id: string
   ): Promise<ApiResponse<void>> {
     return this.makeRequest<void>(`/${projectId}/project-knowledge/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
+   * Delete all project knowledge facts
+   * DELETE /api/projects/{projectId}/project-knowledge
+   */
+  async deleteAllProjectKnowledge(
+    projectId: string
+  ): Promise<ApiResponse<void>> {
+    return this.makeRequest<void>(`/${projectId}/project-knowledge`, {
       method: 'DELETE',
     });
   }

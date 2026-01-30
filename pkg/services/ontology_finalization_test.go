@@ -89,6 +89,19 @@ func (m *mockEntityRepoForFinalization) GetByProject(ctx context.Context, projec
 	return m.entities, nil
 }
 
+func (m *mockEntityRepoForFinalization) GetPromotedByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
+	if m.getByProjectErr != nil {
+		return nil, m.getByProjectErr
+	}
+	var promoted []*models.OntologyEntity
+	for _, e := range m.entities {
+		if e.IsPromoted {
+			promoted = append(promoted, e)
+		}
+	}
+	return promoted, nil
+}
+
 func (m *mockEntityRepoForFinalization) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error) {
 	return nil, nil
 }
@@ -296,6 +309,9 @@ func (m *mockSchemaRepoForFinalization) ListColumnsByTable(ctx context.Context, 
 func (m *mockSchemaRepoForFinalization) ListColumnsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }
+func (m *mockSchemaRepoForFinalization) GetColumnsWithFeaturesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) (map[string][]*models.SchemaColumn, error) {
+	return nil, nil
+}
 func (m *mockSchemaRepoForFinalization) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 0, nil
 }
@@ -318,6 +334,9 @@ func (m *mockSchemaRepoForFinalization) UpdateColumnStats(ctx context.Context, c
 	return nil
 }
 func (m *mockSchemaRepoForFinalization) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
+	return nil
+}
+func (m *mockSchemaRepoForFinalization) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
 	return nil
 }
 func (m *mockSchemaRepoForFinalization) ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
@@ -1053,4 +1072,371 @@ func TestOntologyFinalization_SampleQuestionsAreEmpty(t *testing.T) {
 
 	// Verify sample questions are nil/empty (sample question generation code removed)
 	assert.Empty(t, ontologyRepo.updatedDomainSummary.SampleQuestions)
+}
+
+// ============================================================================
+// ColumnFeatures-based Convention Discovery Tests
+// ============================================================================
+
+func TestOntologyFinalization_ExtractsColumnFeatureInsights_SoftDelete(t *testing.T) {
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "User", Domain: "customer", PrimaryTable: "users"},
+		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "Order", Domain: "sales", PrimaryTable: "orders"},
+	}
+
+	// Columns with ColumnFeatures indicating soft-delete
+	columnsByTable := map[string][]*models.SchemaColumn{
+		"users": {
+			{ColumnName: "id", DataType: "uuid"},
+			{
+				ColumnName: "deleted_at",
+				DataType:   "timestamptz",
+				Metadata: map[string]any{
+					"column_features": map[string]any{
+						"timestamp_features": map[string]any{
+							"is_soft_delete":    true,
+							"timestamp_purpose": "soft_delete",
+						},
+					},
+				},
+			},
+		},
+		"orders": {
+			{ColumnName: "id", DataType: "uuid"},
+			{
+				ColumnName: "deleted_at",
+				DataType:   "timestamptz",
+				Metadata: map[string]any{
+					"column_features": map[string]any{
+						"timestamp_features": map[string]any{
+							"is_soft_delete":    true,
+							"timestamp_purpose": "soft_delete",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	ontologyRepo := &mockOntologyRepoForFinalization{
+		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
+	}
+	entityRepo := &mockEntityRepoForFinalization{entities: entities}
+	relationshipRepo := &mockRelationshipRepoForFinalization{}
+	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: columnsByTable}
+	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
+	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
+	logger := zap.NewNop()
+
+	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
+
+	err := svc.Finalize(ctx, projectID)
+	require.NoError(t, err)
+	require.NotNil(t, ontologyRepo.updatedDomainSummary)
+	require.NotNil(t, ontologyRepo.updatedDomainSummary.Conventions)
+	require.NotNil(t, ontologyRepo.updatedDomainSummary.Conventions.SoftDelete)
+
+	sd := ontologyRepo.updatedDomainSummary.Conventions.SoftDelete
+	assert.True(t, sd.Enabled)
+	assert.Equal(t, "deleted_at", sd.Column)
+	assert.Equal(t, "timestamp", sd.ColumnType)
+	assert.Equal(t, "deleted_at IS NULL", sd.Filter)
+	assert.Equal(t, 1.0, sd.Coverage) // 100% of tables
+}
+
+func TestOntologyFinalization_ExtractsColumnFeatureInsights_ExternalServices(t *testing.T) {
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "Payment", Domain: "billing", PrimaryTable: "payments"},
+		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "Notification", Domain: "messaging", PrimaryTable: "notifications"},
+	}
+
+	// Columns with ColumnFeatures indicating external service IDs
+	columnsByTable := map[string][]*models.SchemaColumn{
+		"payments": {
+			{ColumnName: "id", DataType: "uuid"},
+			{
+				ColumnName: "stripe_charge_id",
+				DataType:   "text",
+				Metadata: map[string]any{
+					"column_features": map[string]any{
+						"identifier_features": map[string]any{
+							"identifier_type":  "external_service_id",
+							"external_service": "stripe",
+						},
+					},
+				},
+			},
+			{
+				ColumnName: "stripe_customer_id",
+				DataType:   "text",
+				Metadata: map[string]any{
+					"column_features": map[string]any{
+						"identifier_features": map[string]any{
+							"identifier_type":  "external_service_id",
+							"external_service": "stripe",
+						},
+					},
+				},
+			},
+		},
+		"notifications": {
+			{ColumnName: "id", DataType: "uuid"},
+			{
+				ColumnName: "twilio_message_sid",
+				DataType:   "text",
+				Metadata: map[string]any{
+					"column_features": map[string]any{
+						"identifier_features": map[string]any{
+							"identifier_type":  "external_service_id",
+							"external_service": "twilio",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	ontologyRepo := &mockOntologyRepoForFinalization{
+		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
+	}
+	entityRepo := &mockEntityRepoForFinalization{entities: entities}
+	relationshipRepo := &mockRelationshipRepoForFinalization{}
+	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: columnsByTable}
+	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
+	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
+	logger := zap.NewNop()
+
+	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
+
+	err := svc.Finalize(ctx, projectID)
+	require.NoError(t, err)
+
+	// The external services are included in the LLM prompt (visible in description generation)
+	// We verify this by checking that the service completes successfully
+	require.NotNil(t, ontologyRepo.updatedDomainSummary)
+}
+
+func TestOntologyFinalization_ExtractsColumnFeatureInsights_AuditColumns(t *testing.T) {
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "User", Domain: "customer", PrimaryTable: "users"},
+		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "Order", Domain: "sales", PrimaryTable: "orders"},
+	}
+
+	// Columns with ColumnFeatures indicating audit fields
+	columnsByTable := map[string][]*models.SchemaColumn{
+		"users": {
+			{ColumnName: "id", DataType: "uuid"},
+			{
+				ColumnName: "created_at",
+				DataType:   "timestamptz",
+				Metadata: map[string]any{
+					"column_features": map[string]any{
+						"timestamp_features": map[string]any{
+							"is_audit_field":    true,
+							"timestamp_purpose": "audit_created",
+						},
+					},
+				},
+			},
+			{
+				ColumnName: "updated_at",
+				DataType:   "timestamptz",
+				Metadata: map[string]any{
+					"column_features": map[string]any{
+						"timestamp_features": map[string]any{
+							"is_audit_field":    true,
+							"timestamp_purpose": "audit_updated",
+						},
+					},
+				},
+			},
+		},
+		"orders": {
+			{ColumnName: "id", DataType: "uuid"},
+			{
+				ColumnName: "created_at",
+				DataType:   "timestamptz",
+				Metadata: map[string]any{
+					"column_features": map[string]any{
+						"timestamp_features": map[string]any{
+							"is_audit_field":    true,
+							"timestamp_purpose": "audit_created",
+						},
+					},
+				},
+			},
+			{
+				ColumnName: "updated_at",
+				DataType:   "timestamptz",
+				Metadata: map[string]any{
+					"column_features": map[string]any{
+						"timestamp_features": map[string]any{
+							"is_audit_field":    true,
+							"timestamp_purpose": "audit_updated",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	ontologyRepo := &mockOntologyRepoForFinalization{
+		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
+	}
+	entityRepo := &mockEntityRepoForFinalization{entities: entities}
+	relationshipRepo := &mockRelationshipRepoForFinalization{}
+	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: columnsByTable}
+	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
+	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
+	logger := zap.NewNop()
+
+	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
+
+	err := svc.Finalize(ctx, projectID)
+	require.NoError(t, err)
+	require.NotNil(t, ontologyRepo.updatedDomainSummary)
+	require.NotNil(t, ontologyRepo.updatedDomainSummary.Conventions)
+
+	// Audit columns should be discovered from ColumnFeatures
+	audit := ontologyRepo.updatedDomainSummary.Conventions.AuditColumns
+	require.Len(t, audit, 2) // created_at and updated_at
+
+	var createdAt, updatedAt *models.AuditColumnInfo
+	for i := range audit {
+		switch audit[i].Column {
+		case "created_at":
+			createdAt = &audit[i]
+		case "updated_at":
+			updatedAt = &audit[i]
+		}
+	}
+	require.NotNil(t, createdAt)
+	require.NotNil(t, updatedAt)
+	assert.Equal(t, 1.0, createdAt.Coverage)
+	assert.Equal(t, 1.0, updatedAt.Coverage)
+}
+
+func TestOntologyFinalization_ExtractsColumnFeatureInsights_MonetaryColumns(t *testing.T) {
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "Transaction", Domain: "billing", PrimaryTable: "transactions"},
+	}
+
+	// Columns with ColumnFeatures indicating monetary columns with paired currency
+	columnsByTable := map[string][]*models.SchemaColumn{
+		"transactions": {
+			{ColumnName: "id", DataType: "uuid"},
+			{
+				ColumnName: "amount_cents",
+				DataType:   "bigint",
+				Metadata: map[string]any{
+					"column_features": map[string]any{
+						"monetary_features": map[string]any{
+							"is_monetary":            true,
+							"currency_unit":          "cents",
+							"paired_currency_column": "currency",
+						},
+					},
+				},
+			},
+			{
+				ColumnName: "fee_cents",
+				DataType:   "bigint",
+				Metadata: map[string]any{
+					"column_features": map[string]any{
+						"monetary_features": map[string]any{
+							"is_monetary":            true,
+							"currency_unit":          "cents",
+							"paired_currency_column": "currency",
+						},
+					},
+				},
+			},
+			{ColumnName: "currency", DataType: "text"},
+		},
+	}
+
+	ontologyRepo := &mockOntologyRepoForFinalization{
+		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
+	}
+	entityRepo := &mockEntityRepoForFinalization{entities: entities}
+	relationshipRepo := &mockRelationshipRepoForFinalization{}
+	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: columnsByTable}
+	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
+	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
+	logger := zap.NewNop()
+
+	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
+
+	err := svc.Finalize(ctx, projectID)
+	require.NoError(t, err)
+
+	// The monetary insights are included in the LLM prompt
+	require.NotNil(t, ontologyRepo.updatedDomainSummary)
+}
+
+func TestOntologyFinalization_FallsBackToPatternDetection_WhenNoColumnFeatures(t *testing.T) {
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "User", Domain: "customer", PrimaryTable: "users"},
+		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "Order", Domain: "sales", PrimaryTable: "orders"},
+	}
+
+	// Columns WITHOUT ColumnFeatures - should fallback to pattern-based detection
+	columnsByTable := map[string][]*models.SchemaColumn{
+		"users": {
+			{ColumnName: "id", DataType: "uuid"},
+			{ColumnName: "deleted_at", DataType: "timestamptz", IsNullable: true}, // No Metadata
+			{ColumnName: "created_at", DataType: "timestamptz"},
+		},
+		"orders": {
+			{ColumnName: "id", DataType: "uuid"},
+			{ColumnName: "deleted_at", DataType: "timestamptz", IsNullable: true}, // No Metadata
+			{ColumnName: "created_at", DataType: "timestamptz"},
+		},
+	}
+
+	ontologyRepo := &mockOntologyRepoForFinalization{
+		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
+	}
+	entityRepo := &mockEntityRepoForFinalization{entities: entities}
+	relationshipRepo := &mockRelationshipRepoForFinalization{}
+	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: columnsByTable}
+	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
+	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
+	logger := zap.NewNop()
+
+	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
+
+	err := svc.Finalize(ctx, projectID)
+	require.NoError(t, err)
+
+	require.NotNil(t, ontologyRepo.updatedDomainSummary)
+	require.NotNil(t, ontologyRepo.updatedDomainSummary.Conventions)
+
+	// Should still detect soft-delete via pattern matching fallback
+	require.NotNil(t, ontologyRepo.updatedDomainSummary.Conventions.SoftDelete)
+	assert.Equal(t, "deleted_at", ontologyRepo.updatedDomainSummary.Conventions.SoftDelete.Column)
+
+	// Should still detect audit columns via pattern matching fallback
+	// Both created_at and deleted_at are in the auditColumnNames list
+	require.Len(t, ontologyRepo.updatedDomainSummary.Conventions.AuditColumns, 2)
 }

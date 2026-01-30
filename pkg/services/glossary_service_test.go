@@ -203,6 +203,19 @@ func (m *mockEntityRepoForGlossary) GetByProject(ctx context.Context, projectID 
 	return m.entities, nil
 }
 
+func (m *mockEntityRepoForGlossary) GetPromotedByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
+	if m.getByProjectErr != nil {
+		return nil, m.getByProjectErr
+	}
+	var promoted []*models.OntologyEntity
+	for _, e := range m.entities {
+		if e.IsPromoted {
+			promoted = append(promoted, e)
+		}
+	}
+	return promoted, nil
+}
+
 func (m *mockEntityRepoForGlossary) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error) {
 	return nil, nil
 }
@@ -1376,13 +1389,12 @@ func (m *mockKnowledgeRepoForGlossary) GetByType(ctx context.Context, projectID 
 	return filtered, nil
 }
 
-func (m *mockKnowledgeRepoForGlossary) GetByKey(ctx context.Context, projectID uuid.UUID, factType, key string) (*models.KnowledgeFact, error) {
-	for _, f := range m.facts {
-		if f.FactType == factType && f.Key == key {
-			return f, nil
-		}
-	}
-	return nil, nil
+func (m *mockKnowledgeRepoForGlossary) Create(ctx context.Context, fact *models.KnowledgeFact) error {
+	return nil
+}
+
+func (m *mockKnowledgeRepoForGlossary) Update(ctx context.Context, fact *models.KnowledgeFact) error {
+	return nil
 }
 
 func (m *mockKnowledgeRepoForGlossary) Delete(ctx context.Context, id uuid.UUID) error {
@@ -1466,7 +1478,6 @@ func TestGlossaryService_SuggestTerms_WithDomainKnowledge_IncludesFactsInPrompt(
 			ID:        uuid.New(),
 			ProjectID: projectID,
 			FactType:  "terminology",
-			Key:       "A tik represents 6 seconds of engagement time",
 			Value:     "A tik represents 6 seconds of engagement time",
 			Context:   "Billing unit - from billing_helpers.go:413",
 		},
@@ -1474,7 +1485,6 @@ func TestGlossaryService_SuggestTerms_WithDomainKnowledge_IncludesFactsInPrompt(
 			ID:        uuid.New(),
 			ProjectID: projectID,
 			FactType:  "terminology",
-			Key:       "Host is a content creator who receives payments",
 			Value:     "Host is a content creator who receives payments",
 			Context:   "User role",
 		},
@@ -1482,7 +1492,6 @@ func TestGlossaryService_SuggestTerms_WithDomainKnowledge_IncludesFactsInPrompt(
 			ID:        uuid.New(),
 			ProjectID: projectID,
 			FactType:  "terminology",
-			Key:       "Visitor is a viewer who pays for engagements",
 			Value:     "Visitor is a viewer who pays for engagements",
 			Context:   "User role",
 		},
@@ -1490,7 +1499,6 @@ func TestGlossaryService_SuggestTerms_WithDomainKnowledge_IncludesFactsInPrompt(
 			ID:        uuid.New(),
 			ProjectID: projectID,
 			FactType:  "business_rule",
-			Key:       "Platform fees are 4.5% of total amount",
 			Value:     "Platform fees are 4.5% of total amount",
 			Context:   "billing_helpers.go:373",
 		},
@@ -1498,7 +1506,6 @@ func TestGlossaryService_SuggestTerms_WithDomainKnowledge_IncludesFactsInPrompt(
 			ID:        uuid.New(),
 			ProjectID: projectID,
 			FactType:  "business_rule",
-			Key:       "Tikr share is 30% of amount after platform fees",
 			Value:     "Tikr share is 30% of amount after platform fees",
 			Context:   "billing_helpers.go:375",
 		},
@@ -1656,7 +1663,6 @@ func TestGlossaryService_DiscoverGlossaryTerms_WithDomainKnowledge_GeneratesDoma
 			ID:        uuid.New(),
 			ProjectID: projectID,
 			FactType:  "terminology",
-			Key:       "A tik represents 6 seconds of engagement time",
 			Value:     "A tik represents 6 seconds of engagement time",
 			Context:   "Billing unit",
 		},
@@ -1664,7 +1670,6 @@ func TestGlossaryService_DiscoverGlossaryTerms_WithDomainKnowledge_GeneratesDoma
 			ID:        uuid.New(),
 			ProjectID: projectID,
 			FactType:  "terminology",
-			Key:       "Host is a content creator",
 			Value:     "Host is a content creator",
 			Context:   "User role",
 		},
@@ -4624,6 +4629,32 @@ func TestValidateColumnReferences(t *testing.T) {
 		// The suggestion logic should suggest created_at
 		assert.Equal(t, "created_at", errors[0].SuggestFrom, "Should suggest similar column")
 	})
+
+	t.Run("does not flag PostgreSQL EXTRACT EPOCH as invalid column", func(t *testing.T) {
+		sql := "SELECT AVG(EXTRACT(EPOCH FROM (ended_at - created_at))) as avg_duration FROM sessions WHERE ended_at IS NOT NULL"
+		errors := validateColumnReferences(sql, schemaColumns)
+
+		// Should not flag EPOCH, (, ), =, etc. as invalid columns
+		for _, err := range errors {
+			assert.NotEqual(t, "EPOCH", strings.ToUpper(err.Column), "EPOCH should not be flagged as invalid column")
+			assert.NotEqual(t, "(", err.Column, "( should not be flagged as invalid column")
+			assert.NotEqual(t, ")", err.Column, ") should not be flagged as invalid column")
+			assert.NotEqual(t, "=", err.Column, "= should not be flagged as invalid column")
+		}
+		// All columns in this query exist in the schema, so there should be no errors
+		assert.Empty(t, errors, "Valid SQL with EXTRACT(EPOCH FROM ...) should have no column errors")
+	})
+
+	t.Run("does not flag DATE_PART as invalid column", func(t *testing.T) {
+		sql := "SELECT DATE_PART('epoch', ended_at - created_at) as duration FROM sessions"
+		errors := validateColumnReferences(sql, schemaColumns)
+
+		for _, err := range errors {
+			assert.NotEqual(t, "DATE_PART", strings.ToUpper(err.Column), "DATE_PART should not be flagged as invalid column")
+		}
+		// All columns in this query exist in the schema, so there should be no errors
+		assert.Empty(t, errors, "Valid SQL with DATE_PART should have no column errors")
+	})
 }
 
 func TestTokenizeSQL(t *testing.T) {
@@ -4815,6 +4846,58 @@ func TestExtractColumnReferences(t *testing.T) {
 		for _, ref := range refs {
 			assert.NotEqual(t, "COUNT", strings.ToUpper(ref.column))
 			assert.NotEqual(t, "SUM", strings.ToUpper(ref.column))
+		}
+	})
+
+	t.Run("skips PostgreSQL date/time function arguments", func(t *testing.T) {
+		// EXTRACT(EPOCH FROM ...) should not flag EPOCH as a column
+		sql := "SELECT EXTRACT(EPOCH FROM created_at) as epoch_time FROM events"
+		refs := extractColumnReferences(sql)
+
+		for _, ref := range refs {
+			assert.NotEqual(t, "EPOCH", strings.ToUpper(ref.column), "EPOCH should not be flagged as column")
+			assert.NotEqual(t, "EXTRACT", strings.ToUpper(ref.column), "EXTRACT should not be flagged as column")
+		}
+		// Note: the column inside the function may or may not be detected depending
+		// on the parser heuristics, but the key thing is we don't flag EPOCH/EXTRACT.
+	})
+
+	t.Run("skips DATE_PART function arguments", func(t *testing.T) {
+		// DATE_PART('epoch', ...) should not flag epoch or date_part as columns
+		sql := "SELECT DATE_PART('epoch', ended_at - started_at) as duration FROM sessions"
+		refs := extractColumnReferences(sql)
+
+		for _, ref := range refs {
+			assert.NotEqual(t, "DATE_PART", strings.ToUpper(ref.column), "DATE_PART should not be flagged as column")
+			// 'epoch' in quotes is a string literal, not a column
+		}
+		// Note: the columns inside the function may or may not be detected depending
+		// on the parser heuristics, but the key thing is we don't flag DATE_PART.
+	})
+
+	t.Run("skips operators and punctuation", func(t *testing.T) {
+		sql := "SELECT id FROM users WHERE status = 'active' AND (role = 'admin')"
+		refs := extractColumnReferences(sql)
+
+		for _, ref := range refs {
+			assert.NotEqual(t, "=", ref.column, "= should not be flagged as column")
+			assert.NotEqual(t, "(", ref.column, "( should not be flagged as column")
+			assert.NotEqual(t, ")", ref.column, ") should not be flagged as column")
+		}
+	})
+
+	t.Run("handles complex EXTRACT expressions", func(t *testing.T) {
+		// This pattern was causing "SQL references non-existent columns: EPOCH"
+		sql := `SELECT
+			AVG(EXTRACT(EPOCH FROM (ended_at - started_at))) as avg_duration
+		FROM billing_engagements
+		WHERE ended_at IS NOT NULL`
+		refs := extractColumnReferences(sql)
+
+		for _, ref := range refs {
+			assert.NotEqual(t, "EPOCH", strings.ToUpper(ref.column), "EPOCH should not be flagged as column")
+			assert.NotEqual(t, "(", ref.column, "( should not be flagged as column")
+			assert.NotEqual(t, ")", ref.column, ") should not be flagged as column")
 		}
 	})
 }

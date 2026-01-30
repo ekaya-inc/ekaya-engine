@@ -12,6 +12,7 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
 
 // Simple mock repositories for testing
@@ -115,6 +116,16 @@ type testRelEnrichmentEntityRepo struct {
 
 func (r *testRelEnrichmentEntityRepo) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
 	return r.entities, nil
+}
+
+func (r *testRelEnrichmentEntityRepo) GetPromotedByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
+	var promoted []*models.OntologyEntity
+	for _, e := range r.entities {
+		if e.IsPromoted {
+			promoted = append(promoted, e)
+		}
+	}
+	return promoted, nil
 }
 
 func (r *testRelEnrichmentEntityRepo) Create(ctx context.Context, entity *models.OntologyEntity) error {
@@ -253,7 +264,7 @@ func TestRelationshipEnrichmentService_ValidationFiltersInvalid(t *testing.T) {
 	mockFactory := llm.NewMockClientFactory()
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -262,7 +273,7 @@ func TestRelationshipEnrichmentService_ValidationFiltersInvalid(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 0, result.RelationshipsEnriched)
 	assert.Equal(t, 2, result.RelationshipsFailed)
-	assert.Equal(t, 0, mockFactory.MockClient.GenerateResponseCalls, "LLM should not be called for invalid relationships")
+	assert.Equal(t, int64(0), mockFactory.MockClient.GenerateResponseCalls.Load(), "LLM should not be called for invalid relationships")
 }
 
 func TestRelationshipEnrichmentService_RetryOnTransientError(t *testing.T) {
@@ -307,7 +318,7 @@ func TestRelationshipEnrichmentService_RetryOnTransientError(t *testing.T) {
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -355,7 +366,7 @@ func TestRelationshipEnrichmentService_NonRetryableError(t *testing.T) {
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -404,7 +415,7 @@ func TestRelationshipEnrichmentService_InvalidJSONResponse(t *testing.T) {
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -460,7 +471,7 @@ func TestRelationshipEnrichmentService_SelfReferentialRelationship(t *testing.T)
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -536,7 +547,7 @@ func TestRelationshipEnrichmentService_MultipleSelfReferentialFK(t *testing.T) {
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -610,7 +621,6 @@ func TestRelationshipEnrichmentService_HostVisitorRolesWithKnowledge(t *testing.
 				ID:        uuid.New(),
 				ProjectID: projectID,
 				FactType:  "terminology",
-				Key:       "Host is a content creator who receives payments",
 				Value:     "Host is a content creator who receives payments",
 				Context:   "User role",
 			},
@@ -618,7 +628,6 @@ func TestRelationshipEnrichmentService_HostVisitorRolesWithKnowledge(t *testing.
 				ID:        uuid.New(),
 				ProjectID: projectID,
 				FactType:  "terminology",
-				Key:       "Visitor is a viewer who pays for engagements",
 				Value:     "Visitor is a viewer who pays for engagements",
 				Context:   "User role",
 			},
@@ -643,7 +652,7 @@ func TestRelationshipEnrichmentService_HostVisitorRolesWithKnowledge(t *testing.
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, knowledgeRepo, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, knowledgeRepo, nil, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -690,16 +699,11 @@ func (m *mockKnowledgeRepoForRelEnrichment) GetByType(ctx context.Context, proje
 	return result, nil
 }
 
-func (m *mockKnowledgeRepoForRelEnrichment) GetByKey(ctx context.Context, projectID uuid.UUID, factType, key string) (*models.KnowledgeFact, error) {
-	for _, f := range m.facts {
-		if f.FactType == factType && f.Key == key {
-			return f, nil
-		}
-	}
-	return nil, nil
+func (m *mockKnowledgeRepoForRelEnrichment) Create(ctx context.Context, fact *models.KnowledgeFact) error {
+	return nil
 }
 
-func (m *mockKnowledgeRepoForRelEnrichment) Upsert(ctx context.Context, fact *models.KnowledgeFact) error {
+func (m *mockKnowledgeRepoForRelEnrichment) Update(ctx context.Context, fact *models.KnowledgeFact) error {
 	return nil
 }
 
@@ -712,6 +716,212 @@ func (m *mockKnowledgeRepoForRelEnrichment) DeleteByProject(ctx context.Context,
 }
 
 func (m *mockKnowledgeRepoForRelEnrichment) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
+}
+
+func TestRelationshipEnrichmentService_ColumnFeaturesIntegration(t *testing.T) {
+	// Test that ColumnFeatures role and description context is included in the prompt
+	projectID := uuid.New()
+	entity1ID := uuid.New()
+	entity2ID := uuid.New()
+	hostRelID := uuid.New()
+
+	// Setup entities
+	entities := []*models.OntologyEntity{
+		{ID: entity1ID, Name: "User", Description: "A platform user"},
+		{ID: entity2ID, Name: "Engagement", Description: "A user engagement record"},
+	}
+
+	// Setup relationship: engagements.host_id -> users.id
+	relationships := []*models.EntityRelationship{
+		{
+			ID:                hostRelID,
+			SourceEntityID:    entity2ID,
+			TargetEntityID:    entity1ID,
+			SourceColumnTable: "engagements",
+			SourceColumnName:  "host_id",
+			TargetColumnTable: "users",
+			TargetColumnName:  "id",
+		},
+	}
+
+	relRepo := &testRelEnrichmentRelRepo{relationships: relationships}
+	entityRepo := &testRelEnrichmentEntityRepo{entities: entities}
+
+	// Setup schema repo with column features
+	schemaRepo := &mockSchemaRepoForRelEnrichment{
+		columnsByTable: map[string][]*models.SchemaColumn{
+			"engagements": {
+				{
+					ColumnName: "host_id",
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"description": "References the content creator who receives engagement",
+							"identifier_features": map[string]any{
+								"identifier_type":   "foreign_key",
+								"entity_referenced": "host",
+								"fk_target_table":   "users",
+								"fk_target_column":  "id",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+
+	// Capture the prompt to verify column context
+	var capturedPrompt string
+	mockFactory.MockClient.GenerateResponseFunc = func(ctx context.Context, prompt, systemMsg string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		capturedPrompt = prompt
+		return &llm.GenerateResponseResult{
+			Content: `{"relationships": [{"id": 1, "description": "Links engagement to the host (content creator) who receives it.", "association": "as_host"}]}`,
+		}, nil
+	}
+
+	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
+	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, nil, nil, schemaRepo, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+
+	// Execute
+	result, err := service.EnrichProject(context.Background(), projectID, nil)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.Equal(t, 1, result.RelationshipsEnriched)
+	assert.Equal(t, 0, result.RelationshipsFailed)
+
+	// Verify column context was included in the prompt
+	assert.Contains(t, capturedPrompt, "Column Context", "Prompt should include column context section")
+	assert.Contains(t, capturedPrompt, "engagements.host_id", "Prompt should include the source column")
+	assert.Contains(t, capturedPrompt, "Role: host", "Prompt should include the role from ColumnFeatures")
+	assert.Contains(t, capturedPrompt, "content creator", "Prompt should include the column description")
+}
+
+// mockSchemaRepoForRelEnrichment implements SchemaRepository for testing.
+type mockSchemaRepoForRelEnrichment struct {
+	columnsByTable map[string][]*models.SchemaColumn
+}
+
+func (m *mockSchemaRepoForRelEnrichment) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error) {
+	result := make(map[string][]*models.SchemaColumn)
+	for _, name := range tableNames {
+		if cols, ok := m.columnsByTable[name]; ok {
+			result[name] = cols
+		}
+	}
+	return result, nil
+}
+
+// Stub implementations for SchemaRepository interface (not used in this test)
+func (m *mockSchemaRepoForRelEnrichment) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) GetTableByID(ctx context.Context, projectID, tableID uuid.UUID) (*models.SchemaTable, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) GetTableByName(ctx context.Context, projectID, datasourceID uuid.UUID, schemaName, tableName string) (*models.SchemaTable, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) FindTableByName(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) UpsertTable(ctx context.Context, table *models.SchemaTable) error {
+	return nil
+}
+func (m *mockSchemaRepoForRelEnrichment) SoftDeleteRemovedTables(ctx context.Context, projectID, datasourceID uuid.UUID, activeTableKeys []repositories.TableKey) (int64, error) {
+	return 0, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) UpdateTableSelection(ctx context.Context, projectID, tableID uuid.UUID, isSelected bool) error {
+	return nil
+}
+func (m *mockSchemaRepoForRelEnrichment) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
+	return nil
+}
+func (m *mockSchemaRepoForRelEnrichment) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) ListColumnsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) GetColumnsWithFeaturesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) (map[string][]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return 0, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) GetColumnByID(ctx context.Context, projectID, columnID uuid.UUID) (*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) GetColumnByName(ctx context.Context, tableID uuid.UUID, columnName string) (*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) UpsertColumn(ctx context.Context, column *models.SchemaColumn) error {
+	return nil
+}
+func (m *mockSchemaRepoForRelEnrichment) SoftDeleteRemovedColumns(ctx context.Context, tableID uuid.UUID, activeColumnNames []string) (int64, error) {
+	return 0, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) UpdateColumnSelection(ctx context.Context, projectID, columnID uuid.UUID, isSelected bool) error {
+	return nil
+}
+func (m *mockSchemaRepoForRelEnrichment) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64, sampleValues []string) error {
+	return nil
+}
+func (m *mockSchemaRepoForRelEnrichment) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
+	return nil
+}
+func (m *mockSchemaRepoForRelEnrichment) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
+	return nil
+}
+func (m *mockSchemaRepoForRelEnrichment) ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) GetRelationshipByID(ctx context.Context, projectID, relationshipID uuid.UUID) (*models.SchemaRelationship, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) GetRelationshipByColumns(ctx context.Context, sourceColumnID, targetColumnID uuid.UUID) (*models.SchemaRelationship, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) UpsertRelationship(ctx context.Context, rel *models.SchemaRelationship) error {
+	return nil
+}
+func (m *mockSchemaRepoForRelEnrichment) UpdateRelationshipApproval(ctx context.Context, projectID, relationshipID uuid.UUID, isApproved bool) error {
+	return nil
+}
+func (m *mockSchemaRepoForRelEnrichment) SoftDeleteRelationship(ctx context.Context, projectID, relationshipID uuid.UUID) error {
+	return nil
+}
+func (m *mockSchemaRepoForRelEnrichment) SoftDeleteOrphanedRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (int64, error) {
+	return 0, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) GetRelationshipDetails(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.RelationshipDetail, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) GetEmptyTables(ctx context.Context, projectID, datasourceID uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) GetOrphanTables(ctx context.Context, projectID, datasourceID uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) UpsertRelationshipWithMetrics(ctx context.Context, rel *models.SchemaRelationship, metrics *models.DiscoveryMetrics) error {
+	return nil
+}
+func (m *mockSchemaRepoForRelEnrichment) GetJoinableColumns(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount, distinctCount *int64, isJoinable *bool, joinabilityReason *string) error {
+	return nil
+}
+func (m *mockSchemaRepoForRelEnrichment) GetPrimaryKeyColumns(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) GetNonPKColumnsByExactType(ctx context.Context, projectID, datasourceID uuid.UUID, dataType string) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForRelEnrichment) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
 

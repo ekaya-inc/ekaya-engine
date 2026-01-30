@@ -3,7 +3,6 @@ package services
 import (
 	"fmt"
 	"regexp"
-	"slices"
 	"strings"
 	"unicode"
 
@@ -64,7 +63,8 @@ func (g *DeterministicQuestionGenerator) GenerateFromSchema(tables []*models.Sch
 const highNullRateThreshold = 0.80
 
 // checkHighNullRate generates a question if a column has >80% NULL values
-// and doesn't match known optional column patterns.
+// and the column features don't indicate this is an expected optional pattern.
+// Uses stored ColumnFeatures from the feature extraction pipeline for data-driven decisions.
 func (g *DeterministicQuestionGenerator) checkHighNullRate(tableName string, col *models.SchemaColumn, tableRowCount *int64) *models.OntologyQuestion {
 	// Need both null count and row count to calculate rate
 	if col.NullCount == nil || tableRowCount == nil || *tableRowCount == 0 {
@@ -76,10 +76,30 @@ func (g *DeterministicQuestionGenerator) checkHighNullRate(tableName string, col
 		return nil
 	}
 
-	// Skip known optional column patterns
-	if isKnownOptionalColumn(col.ColumnName) {
-		return nil
+	// Check stored column features (data-driven approach)
+	// If features indicate this is a known optional pattern, skip
+	if features := col.GetColumnFeatures(); features != nil {
+		// Soft delete timestamps with high null rate are expected
+		if features.TimestampFeatures != nil && features.TimestampFeatures.IsSoftDelete {
+			return nil
+		}
+		// Text fields classified as free-form text are often optional
+		if features.Purpose == models.PurposeText {
+			return nil
+		}
+		// Timestamp columns with high null rates are often lifecycle events (completed_at, etc.)
+		if features.Purpose == models.PurposeTimestamp {
+			return nil
+		}
+		// JSON/metadata columns are often optional
+		if features.Purpose == models.PurposeJSON {
+			return nil
+		}
 	}
+
+	// NOTE: Name-based pattern matching (isKnownOptionalColumn) has been removed.
+	// Column classification is now handled by the column_feature_extraction service.
+	// If features are not available, we generate the question - user can answer or dismiss it.
 
 	return &models.OntologyQuestion{
 		ProjectID:       g.projectID,
@@ -99,100 +119,11 @@ func (g *DeterministicQuestionGenerator) checkHighNullRate(tableName string, col
 	}
 }
 
-// knownOptionalColumnPatterns are column name patterns that are commonly optional.
-// We don't generate NULL rate questions for these.
-var knownOptionalColumnPatterns = []string{
-	// Soft delete and lifecycle timestamps
-	"deleted_at", "deleted_on", "deleted_date",
-	"archived_at", "archived_on", "archived_date",
-	"canceled_at", "cancelled_at", "canceled_on", "cancelled_on",
-	"completed_at", "completed_on", "completed_date",
-	"expired_at", "expired_on", "expiry_date", "expires_at",
-	"ended_at", "ended_on", "end_date",
-	"closed_at", "closed_on", "closed_date",
-	"suspended_at", "suspended_on",
-	"terminated_at", "terminated_on",
-	"revoked_at", "revoked_on",
-	"deactivated_at", "deactivated_on",
-	"last_login_at", "last_login",
-	"last_seen_at", "last_seen",
-	"last_active_at", "last_active",
-	"verified_at", "verified_on", "email_verified_at",
-	"confirmed_at", "confirmed_on",
-	"approved_at", "approved_on",
-
-	// Optional relationship references
-	"parent_id", "parent_uuid",
-	"manager_id", "supervisor_id",
-	"referrer_id", "referred_by",
-	"assigned_to", "assigned_to_id",
-	"reviewed_by", "reviewed_by_id",
-	"approved_by", "approved_by_id",
-
-	// Optional descriptive fields
-	"description", "notes", "comment", "comments", "memo", "remarks",
-	"middle_name", "suffix", "title", "nickname",
-	"secondary_email", "alt_email", "alternate_email",
-	"secondary_phone", "alt_phone", "mobile", "fax",
-	"address_line_2", "address2", "apt", "suite", "unit",
-	"company", "organization", "employer",
-	"website", "url", "homepage",
-	"bio", "about", "summary",
-	"avatar", "avatar_url", "profile_image", "photo", "picture",
-
-	// Optional tracking fields
-	"updated_by", "modified_by", "changed_by",
-	"source", "source_id", "origin", "referral_source",
-	"campaign", "campaign_id", "utm_source", "utm_medium",
-	"legacy_id", "external_id", "old_id",
-	"metadata", "extra", "custom_fields", "attributes", "properties", "data",
-	"tags", "labels", "categories",
-
-	// Optional payment/billing
-	"discount", "discount_amount", "discount_percent",
-	"coupon", "coupon_code", "promo_code",
-	"refund_amount", "refunded_at",
-	"tax", "tax_amount", "tax_rate",
-	"shipping", "shipping_cost", "shipping_address",
-	"billing_address", "billing_address_id",
-}
-
-// isKnownOptionalColumn checks if a column name matches known optional patterns.
-func isKnownOptionalColumn(columnName string) bool {
-	lower := strings.ToLower(columnName)
-
-	// Exact matches
-	if slices.Contains(knownOptionalColumnPatterns, lower) {
-		return true
-	}
-
-	// Suffix patterns (e.g., _notes, _description)
-	optionalSuffixes := []string{
-		"_notes", "_note", "_comment", "_comments", "_memo", "_remarks",
-		"_description", "_desc",
-		"_url", "_link",
-		"_at", "_on", // Timestamp suffixes often nullable
-	}
-	for _, suffix := range optionalSuffixes {
-		if strings.HasSuffix(lower, suffix) {
-			return true
-		}
-	}
-
-	// Prefix patterns
-	optionalPrefixes := []string{
-		"old_", "legacy_", "deprecated_",
-		"alt_", "alternate_", "secondary_",
-		"custom_", "extra_", "meta_",
-	}
-	for _, prefix := range optionalPrefixes {
-		if strings.HasPrefix(lower, prefix) {
-			return true
-		}
-	}
-
-	return false
-}
+// NOTE: knownOptionalColumnPatterns and isKnownOptionalColumn() have been removed.
+// Column classification is now handled by the column_feature_extraction service.
+// High NULL rate columns are filtered using stored ColumnFeatures.Purpose and
+// ColumnFeatures.TimestampFeatures instead of name-based pattern matching.
+// See PLAN-extracting-column-features.md for details.
 
 // checkCrypticEnumValues generates a question if sample values appear to be
 // cryptic codes (single letters, numbers, abbreviations) that need interpretation.

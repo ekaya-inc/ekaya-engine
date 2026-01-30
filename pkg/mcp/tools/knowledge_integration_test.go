@@ -206,7 +206,7 @@ func TestUpdateProjectKnowledgeTool_Integration_CreateNewFact(t *testing.T) {
 	var count int
 	err = scope.Conn.QueryRow(ctx, `
 		SELECT COUNT(*) FROM engine_project_knowledge
-		WHERE project_id = $1 AND fact_type = 'terminology' AND key = $2
+		WHERE project_id = $1 AND fact_type = 'terminology' AND value = $2
 	`, tc.projectID, "A tik represents 6 seconds of engagement").Scan(&count)
 	require.NoError(t, err)
 	assert.Equal(t, 1, count, "fact should exist in database")
@@ -224,11 +224,10 @@ func TestUpdateProjectKnowledgeTool_Integration_UpdateExistingFact(t *testing.T)
 	initialFact := &models.KnowledgeFact{
 		ProjectID: tc.projectID,
 		FactType:  "business_rule",
-		Key:       "Platform fees calculation",
 		Value:     "Platform fees calculation",
 		Context:   "Initial observation",
 	}
-	err := tc.knowledgeRepository.Upsert(ctx, initialFact)
+	err := tc.knowledgeRepository.Create(ctx, initialFact)
 	require.NoError(t, err)
 	factID := initialFact.ID
 
@@ -392,11 +391,10 @@ func TestDeleteProjectKnowledgeTool_Integration_DeleteExistingFact(t *testing.T)
 	fact := &models.KnowledgeFact{
 		ProjectID: tc.projectID,
 		FactType:  "convention",
-		Key:       "Fact to delete",
 		Value:     "Fact to delete",
 		Context:   "Test context",
 	}
-	err := tc.knowledgeRepository.Upsert(ctx, fact)
+	err := tc.knowledgeRepository.Create(ctx, fact)
 	require.NoError(t, err)
 	factID := fact.ID
 
@@ -632,4 +630,56 @@ func TestKnowledgeTools_Integration_MultipleFactsWithDifferentCategories(t *test
 	`, tc.projectID).Scan(&count)
 	require.NoError(t, err)
 	assert.Equal(t, len(categories), count, "all facts should exist in database")
+}
+
+func TestUpdateProjectKnowledgeTool_Integration_LongFact(t *testing.T) {
+	tc := setupKnowledgeToolIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// This fact exceeds the previous 255 character limit
+	longFact := "billing_engagements tracks ALL engagements (including free ones with no charges). " +
+		"billing_transactions tracks only engagements where money was actually charged. " +
+		"An engagement can exist without billing if: (1) it's a free engagement, " +
+		"(2) it ended before the first tik (15 seconds), or (3) the host set a $0 fee_per_minute."
+
+	// Verify the fact is longer than 255 characters (the old limit)
+	require.Greater(t, len(longFact), 255, "test fact should exceed old 255 char limit")
+
+	// Call update_project_knowledge tool with long fact
+	result, err := tc.callTool(ctx, "update_project_knowledge", map[string]any{
+		"fact":     longFact,
+		"category": "business_rule",
+		"context":  "Documented after analyzing billing tables",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.IsError, "should not return error for long fact")
+
+	// Parse response
+	var response updateProjectKnowledgeResponse
+	require.Len(t, result.Content, 1)
+	err = json.Unmarshal([]byte(result.Content[0].(mcp.TextContent).Text), &response)
+	require.NoError(t, err)
+
+	// Verify response fields
+	assert.NotEmpty(t, response.FactID, "fact_id should be set")
+	assert.Equal(t, longFact, response.Fact)
+	assert.Equal(t, "business_rule", response.Category)
+
+	// Verify fact was persisted in database
+	scope, err := tc.engineDB.DB.WithoutTenant(context.Background())
+	require.NoError(t, err)
+	defer scope.Close()
+
+	var storedFact string
+	err = scope.Conn.QueryRow(ctx, `
+		SELECT value FROM engine_project_knowledge
+		WHERE project_id = $1 AND id = $2
+	`, tc.projectID, response.FactID).Scan(&storedFact)
+	require.NoError(t, err)
+	assert.Equal(t, longFact, storedFact, "full fact should be stored in database")
 }

@@ -184,6 +184,10 @@ func (m *mockSchemaRepository) ListColumnsByDatasource(ctx context.Context, proj
 	return m.columns, nil
 }
 
+func (m *mockSchemaRepository) GetColumnsWithFeaturesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) (map[string][]*models.SchemaColumn, error) {
+	return nil, nil
+}
+
 func (m *mockSchemaRepository) GetColumnByID(ctx context.Context, projectID, columnID uuid.UUID) (*models.SchemaColumn, error) {
 	for _, c := range m.columns {
 		if c.ID == columnID {
@@ -248,6 +252,10 @@ func (m *mockSchemaRepository) UpdateColumnMetadata(ctx context.Context, project
 	if m.updateColumnMetadataErr != nil {
 		return m.updateColumnMetadataErr
 	}
+	return nil
+}
+
+func (m *mockSchemaRepository) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
 	return nil
 }
 
@@ -2375,6 +2383,19 @@ func (m *mockEntityRepository) GetByProject(ctx context.Context, projectID uuid.
 		return nil, m.getByProjErr
 	}
 	return m.entities, nil
+}
+
+func (m *mockEntityRepository) GetPromotedByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
+	if m.getByProjErr != nil {
+		return nil, m.getByProjErr
+	}
+	var promoted []*models.OntologyEntity
+	for _, e := range m.entities {
+		if e.IsPromoted {
+			promoted = append(promoted, e)
+		}
+	}
+	return promoted, nil
 }
 
 func (m *mockEntityRepository) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error) {

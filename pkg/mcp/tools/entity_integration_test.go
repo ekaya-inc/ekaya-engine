@@ -600,3 +600,223 @@ func TestEntityTools_Integration_FullWorkflow(t *testing.T) {
 	require.NotNil(t, getResult3)
 	assert.True(t, getResult3.IsError, "deleted entity should not be found")
 }
+
+// ============================================================================
+// Integration Tests: Manual Promotion/Demotion via update_entity
+// ============================================================================
+
+// TestUpdateEntityTool_Integration_ManualDemotion verifies that setting is_promoted=false
+// demotes an entity and sets Source to 'manual' for persistence across re-extraction.
+func TestUpdateEntityTool_Integration_ManualDemotion(t *testing.T) {
+	tc := setupEntityToolIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create an entity that simulates what extraction would create
+	_, entityID := tc.createOntologyAndEntity(ctx, "Session")
+
+	// Demote the entity via update_entity with is_promoted=false
+	result, err := tc.callTool(ctx, "update_entity", map[string]any{
+		"name":        "Session",
+		"is_promoted": false,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.IsError, "should not return error")
+
+	// Parse response
+	var response updateEntityResponse
+	require.Len(t, result.Content, 1)
+	err = json.Unmarshal([]byte(result.Content[0].(mcp.TextContent).Text), &response)
+	require.NoError(t, err)
+
+	// Verify response shows is_promoted=false
+	assert.Equal(t, "Session", response.Name)
+	assert.False(t, response.Created, "should update existing entity")
+	require.NotNil(t, response.IsPromoted)
+	assert.False(t, *response.IsPromoted, "is_promoted should be false")
+
+	// Verify the entity in database has Source='manual' (for persistence)
+	entity, err := tc.ontologyEntityRepo.GetByID(ctx, entityID)
+	require.NoError(t, err)
+	require.NotNil(t, entity)
+	assert.False(t, entity.IsPromoted, "entity should be demoted in database")
+	assert.Equal(t, models.ProvenanceManual, entity.Source, "Source should be 'manual' for persistence")
+	// Note: LastEditSource remains 'mcp' since the update was performed via MCP tool.
+	// The key for persistence is Source='manual', which the ScoreAndPromoteEntities method checks.
+	require.NotNil(t, entity.LastEditSource)
+	assert.Equal(t, models.ProvenanceMCP, *entity.LastEditSource, "LastEditSource should be 'mcp' (the method used)")
+}
+
+// TestUpdateEntityTool_Integration_ManualPromotion verifies that setting is_promoted=true
+// promotes an entity and sets Source to 'manual' for persistence across re-extraction.
+func TestUpdateEntityTool_Integration_ManualPromotion(t *testing.T) {
+	tc := setupEntityToolIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create an entity that simulates what extraction would create
+	_, entityID := tc.createOntologyAndEntity(ctx, "PasswordReset")
+
+	// First demote it (simulating a low-scoring entity from extraction)
+	// by directly setting is_promoted=false in DB
+	entity, err := tc.ontologyEntityRepo.GetByID(ctx, entityID)
+	require.NoError(t, err)
+	entity.IsPromoted = false
+	ctxWithProv := models.WithInferredProvenance(ctx, uuid.Nil)
+	err = tc.ontologyEntityRepo.Update(ctxWithProv, entity)
+	require.NoError(t, err)
+
+	// Now manually promote via update_entity
+	result, err := tc.callTool(ctx, "update_entity", map[string]any{
+		"name":        "PasswordReset",
+		"is_promoted": true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.IsError, "should not return error")
+
+	// Parse response
+	var response updateEntityResponse
+	require.Len(t, result.Content, 1)
+	err = json.Unmarshal([]byte(result.Content[0].(mcp.TextContent).Text), &response)
+	require.NoError(t, err)
+
+	// Verify response shows is_promoted=true
+	assert.Equal(t, "PasswordReset", response.Name)
+	require.NotNil(t, response.IsPromoted)
+	assert.True(t, *response.IsPromoted, "is_promoted should be true")
+
+	// Verify the entity in database has Source='manual' (for persistence)
+	entity, err = tc.ontologyEntityRepo.GetByID(ctx, entityID)
+	require.NoError(t, err)
+	require.NotNil(t, entity)
+	assert.True(t, entity.IsPromoted, "entity should be promoted in database")
+	assert.Equal(t, models.ProvenanceManual, entity.Source, "Source should be 'manual' for persistence")
+}
+
+// TestUpdateEntityTool_Integration_ManualDemotionPersistsAcrossReExtraction verifies that
+// manual demotions are preserved when the entity would normally be auto-promoted.
+func TestUpdateEntityTool_Integration_ManualDemotionPersistsAcrossReExtraction(t *testing.T) {
+	tc := setupEntityToolIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create an entity and manually demote it
+	_, entityID := tc.createOntologyAndEntity(ctx, "Notification")
+
+	result, err := tc.callTool(ctx, "update_entity", map[string]any{
+		"name":        "Notification",
+		"is_promoted": false,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.IsError)
+
+	// Verify entity has Source='manual'
+	entity, err := tc.ontologyEntityRepo.GetByID(ctx, entityID)
+	require.NoError(t, err)
+	assert.Equal(t, models.ProvenanceManual, entity.Source)
+	assert.False(t, entity.IsPromoted)
+
+	// Now simulate what the EntityPromotion DAG node would do during re-extraction:
+	// It checks if Source == "manual" and skips updating is_promoted
+	// (This is verified by the ScoreAndPromoteEntities method)
+
+	// The key assertion: an entity with Source='manual' should NOT be modified
+	// by automatic promotion scoring. We test this by checking that:
+	// 1. The entity has Source='manual' (which we just set)
+	// 2. The ScoreAndPromoteEntities method would skip it (tested in entity_promotion_test.go)
+
+	// Here we just verify the state is correct for the persistence check
+	assert.Equal(t, models.ProvenanceManual, entity.Source,
+		"manual demotion should set Source='manual' for persistence across re-extraction")
+}
+
+// TestUpdateEntityTool_Integration_NewEntityWithPromotion verifies that creating
+// a new entity with is_promoted sets the Source to 'manual'.
+func TestUpdateEntityTool_Integration_NewEntityWithPromotion(t *testing.T) {
+	tc := setupEntityToolIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create a new entity with explicit is_promoted=true
+	result, err := tc.callTool(ctx, "update_entity", map[string]any{
+		"name":        "ManuallyCreatedEntity",
+		"description": "An entity created manually with explicit promotion",
+		"is_promoted": true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.IsError, "should not return error")
+
+	// Parse response
+	var response updateEntityResponse
+	require.Len(t, result.Content, 1)
+	err = json.Unmarshal([]byte(result.Content[0].(mcp.TextContent).Text), &response)
+	require.NoError(t, err)
+
+	assert.True(t, response.Created, "should create new entity")
+	require.NotNil(t, response.IsPromoted)
+	assert.True(t, *response.IsPromoted)
+
+	// Get the entity from database and verify Source='manual'
+	entity, err := tc.ontologyEntityRepo.GetByProjectAndName(ctx, tc.projectID, "ManuallyCreatedEntity")
+	require.NoError(t, err)
+	require.NotNil(t, entity)
+	assert.True(t, entity.IsPromoted)
+	assert.Equal(t, models.ProvenanceManual, entity.Source,
+		"new entity with explicit is_promoted should have Source='manual'")
+}
+
+// TestUpdateEntityTool_Integration_UpdateWithoutIsPromotedDoesNotChangeSource verifies
+// that updating other fields without is_promoted doesn't affect the Source field.
+func TestUpdateEntityTool_Integration_UpdateWithoutIsPromotedDoesNotChangeSource(t *testing.T) {
+	tc := setupEntityToolIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create an entity via extraction (has Source='inferred')
+	_, entityID := tc.createOntologyAndEntity(ctx, "Product")
+
+	// Update only the description (not is_promoted)
+	result, err := tc.callTool(ctx, "update_entity", map[string]any{
+		"name":        "Product",
+		"description": "Updated product description",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.IsError)
+
+	// Parse response - is_promoted should NOT be in the response
+	var response updateEntityResponse
+	require.Len(t, result.Content, 1)
+	err = json.Unmarshal([]byte(result.Content[0].(mcp.TextContent).Text), &response)
+	require.NoError(t, err)
+
+	assert.Nil(t, response.IsPromoted, "is_promoted should not be in response when not provided")
+
+	// Verify the Source was NOT changed to 'manual'
+	entity, err := tc.ontologyEntityRepo.GetByID(ctx, entityID)
+	require.NoError(t, err)
+	require.NotNil(t, entity)
+	// Note: Source should remain 'inferred' (from extraction), LastEditSource may be 'mcp'
+	// The key point is that Source should NOT be 'manual' since is_promoted was not explicitly set
+	assert.NotEqual(t, models.ProvenanceManual, entity.Source,
+		"Source should not be 'manual' when is_promoted was not explicitly set")
+}

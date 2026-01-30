@@ -27,6 +27,9 @@ type ContextToolDeps struct {
 	SchemaService          services.SchemaService
 	GlossaryService        services.GlossaryService
 	SchemaRepo             repositories.SchemaRepository
+	ColumnMetadataRepo     repositories.ColumnMetadataRepository
+	TableMetadataRepo      repositories.TableMetadataRepository
+	KnowledgeRepo          repositories.KnowledgeRepository
 	Logger                 *zap.Logger
 }
 
@@ -73,6 +76,7 @@ func registerGetContextTool(s *server.MCPServer, deps *ContextToolDeps) {
 				"Consolidates ontology, schema, and glossary information into a single tool. "+
 				"Depth levels: 'domain' (high-level context, ~500 tokens), 'entities' (entity summaries, ~2k tokens), "+
 				"'tables' (table details with key columns, ~4k tokens), 'columns' (full column details, ~8k tokens). "+
+				"At 'domain' depth, includes project_knowledge (business rules, terminology, conventions) if available. "+
 				"Always returns useful information even without ontology extraction - schema data is always available.",
 		),
 		mcp.WithString(
@@ -197,6 +201,8 @@ func handleContextWithOntology(
 	}
 
 	// Route to appropriate handler based on depth
+	// Domain/Entities: Ontology-driven (conceptual business entities)
+	// Tables/Columns: Schema-driven (physical structure with column features)
 	switch depth {
 	case "domain":
 		domainCtx, err := deps.OntologyContextService.GetDomainContext(ctx, projectID)
@@ -210,6 +216,19 @@ func handleContextWithOntology(
 		response["entities"] = domainCtx.Entities
 		response["relationships"] = domainCtx.Relationships
 
+		// Include project knowledge at domain level
+		if deps.KnowledgeRepo != nil {
+			knowledge, err := deps.KnowledgeRepo.GetByProject(ctx, projectID)
+			if err != nil {
+				deps.Logger.Warn("Failed to get project knowledge",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err))
+				// Continue without project knowledge - not a fatal error
+			} else if len(knowledge) > 0 {
+				response["project_knowledge"] = buildProjectKnowledgeResponse(knowledge)
+			}
+		}
+
 	case "entities":
 		entitiesCtx, err := deps.OntologyContextService.GetEntitiesContext(ctx, projectID)
 		if err != nil {
@@ -221,19 +240,14 @@ func handleContextWithOntology(
 		response["entities"] = entitiesCtx.Entities
 		response["relationships"] = entitiesCtx.Relationships
 
-	case "tables":
-		tablesCtx, err := deps.OntologyContextService.GetTablesContext(ctx, projectID, tables)
+	case "tables", "columns":
+		// Tables and columns always come from schema (engine_schema_columns)
+		// not from ontology - column features are stored in schema metadata
+		tablesResponse, err := buildTablesFromSchema(ctx, deps, projectID, depth, tables, include)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get tables context: %w", err)
+			return nil, err
 		}
-		response["tables"] = tablesCtx.Tables
-
-	case "columns":
-		columnsCtx, err := deps.OntologyContextService.GetColumnsContext(ctx, projectID, tables)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get columns context: %w", err)
-		}
-		response["tables"] = columnsCtx.Tables
+		response["tables"] = tablesResponse
 	}
 
 	// Add glossary to response (always included regardless of depth)
@@ -299,6 +313,19 @@ func handleContextWithoutOntology(
 		}
 		response["entities"] = tableList
 
+		// Include project knowledge at domain level
+		if deps.KnowledgeRepo != nil {
+			knowledge, err := deps.KnowledgeRepo.GetByProject(ctx, projectID)
+			if err != nil {
+				deps.Logger.Warn("Failed to get project knowledge",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err))
+				// Continue without project knowledge - not a fatal error
+			} else if len(knowledge) > 0 {
+				response["project_knowledge"] = buildProjectKnowledgeResponse(knowledge)
+			}
+		}
+
 	case "entities":
 		// Table list with basic information
 		tableList := make([]map[string]any, 0, len(schema.Tables))
@@ -312,53 +339,119 @@ func handleContextWithoutOntology(
 		response["entities"] = tableList
 
 	case "tables", "columns":
-		// Filter tables if specified
-		filteredTables := schema.Tables
-		if len(tables) > 0 {
-			filteredTables = filterDatasourceTables(schema.Tables, tables)
+		// Use shared function for schema-based table/column retrieval
+		tablesResponse, err := buildTablesFromSchema(ctx, deps, projectID, depth, tables, include)
+		if err != nil {
+			return nil, err
 		}
-
-		// Build table details
-		tableDetails := make([]map[string]any, 0, len(filteredTables))
-		for _, table := range filteredTables {
-			tableDetail := map[string]any{
-				"schema_name": table.SchemaName,
-				"table_name":  table.TableName,
-				"row_count":   table.RowCount,
-			}
-
-			if depth == "columns" {
-				// Include full column details
-				columns, err := buildColumnDetails(ctx, deps, projectID, dsID, table, include)
-				if err != nil {
-					deps.Logger.Warn("Failed to build column details",
-						zap.String("table", table.TableName),
-						zap.Error(err))
-					// Continue with partial data - don't fail the entire request
-					columns = make([]map[string]any, 0, len(table.Columns))
-					for _, col := range table.Columns {
-						columns = append(columns, map[string]any{
-							"column_name": col.ColumnName,
-							"data_type":   col.DataType,
-							"is_nullable": col.IsNullable,
-						})
-					}
-				}
-				tableDetail["columns"] = columns
-			} else {
-				// Just column count for 'tables' depth
-				tableDetail["column_count"] = len(table.Columns)
-			}
-
-			tableDetails = append(tableDetails, tableDetail)
-		}
-		response["tables"] = tableDetails
+		response["tables"] = tablesResponse
 	}
 
 	// Add glossary to response (always included regardless of depth)
 	response["glossary"] = buildGlossaryResponse(glossary)
 
 	return response, nil
+}
+
+// buildTablesFromSchema builds table/column details from schema (engine_schema_columns).
+// This is the single source of truth for tables and columns, including column features.
+func buildTablesFromSchema(
+	ctx context.Context,
+	deps *ContextToolDeps,
+	projectID uuid.UUID,
+	depth string,
+	tableFilter []string,
+	include includeOptions,
+) ([]map[string]any, error) {
+	// Get default datasource
+	dsID, err := deps.ProjectService.GetDefaultDatasourceID(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get default datasource: %w", err)
+	}
+
+	// Get schema information
+	schema, err := deps.SchemaService.GetDatasourceSchema(ctx, projectID, dsID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get schema: %w", err)
+	}
+
+	// Filter tables if specified
+	filteredTables := schema.Tables
+	if len(tableFilter) > 0 {
+		filteredTables = filterDatasourceTables(schema.Tables, tableFilter)
+	}
+
+	// Fetch table metadata for all tables in one batch
+	var tableMetadataMap map[string]*models.TableMetadata
+	if deps.TableMetadataRepo != nil {
+		metaList, err := deps.TableMetadataRepo.List(ctx, projectID, dsID)
+		if err != nil {
+			deps.Logger.Warn("Failed to get table metadata",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			// Continue without table metadata - not a fatal error
+		} else if len(metaList) > 0 {
+			tableMetadataMap = make(map[string]*models.TableMetadata, len(metaList))
+			for _, meta := range metaList {
+				tableMetadataMap[meta.TableName] = meta
+			}
+		}
+	}
+
+	// Build table details
+	tableDetails := make([]map[string]any, 0, len(filteredTables))
+	for _, table := range filteredTables {
+		tableDetail := map[string]any{
+			"schema_name": table.SchemaName,
+			"table_name":  table.TableName,
+			"row_count":   table.RowCount,
+		}
+
+		// Merge table metadata if available (omit null/empty fields)
+		if tableMetadataMap != nil {
+			if meta, ok := tableMetadataMap[table.TableName]; ok {
+				if meta.Description != nil && *meta.Description != "" {
+					tableDetail["description"] = *meta.Description
+				}
+				if meta.UsageNotes != nil && *meta.UsageNotes != "" {
+					tableDetail["usage_notes"] = *meta.UsageNotes
+				}
+				if meta.IsEphemeral {
+					tableDetail["is_ephemeral"] = true
+				}
+				if meta.PreferredAlternative != nil && *meta.PreferredAlternative != "" {
+					tableDetail["preferred_alternative"] = *meta.PreferredAlternative
+				}
+			}
+		}
+
+		if depth == "columns" {
+			// Include full column details with features
+			columns, err := buildColumnDetails(ctx, deps, projectID, dsID, table, include)
+			if err != nil {
+				deps.Logger.Warn("Failed to build column details",
+					zap.String("table", table.TableName),
+					zap.Error(err))
+				// Continue with partial data - don't fail the entire request
+				columns = make([]map[string]any, 0, len(table.Columns))
+				for _, col := range table.Columns {
+					columns = append(columns, map[string]any{
+						"column_name": col.ColumnName,
+						"data_type":   col.DataType,
+						"is_nullable": col.IsNullable,
+					})
+				}
+			}
+			tableDetail["columns"] = columns
+		} else {
+			// Just column count for 'tables' depth
+			tableDetail["column_count"] = len(table.Columns)
+		}
+
+		tableDetails = append(tableDetails, tableDetail)
+	}
+
+	return tableDetails, nil
 }
 
 // buildGlossaryResponse converts glossary terms to response format.
@@ -380,6 +473,27 @@ func buildGlossaryResponse(terms []*models.BusinessGlossaryTerm) []map[string]an
 			termData["sql_pattern"] = term.DefiningSQL
 		}
 		result = append(result, termData)
+	}
+	return result
+}
+
+// buildProjectKnowledgeResponse converts knowledge facts to response format.
+// Facts are grouped by category (business_rule, terminology, enumeration, convention).
+func buildProjectKnowledgeResponse(facts []*models.KnowledgeFact) map[string][]map[string]any {
+	if len(facts) == 0 {
+		return map[string][]map[string]any{}
+	}
+
+	// Group facts by category
+	result := make(map[string][]map[string]any)
+	for _, fact := range facts {
+		factData := map[string]any{
+			"fact": fact.Value,
+		}
+		if fact.Context != "" {
+			factData["context"] = fact.Context
+		}
+		result[fact.FactType] = append(result[fact.FactType], factData)
 	}
 	return result
 }
@@ -407,31 +521,44 @@ func filterDatasourceTables(tables []*models.DatasourceTable, tableNames []strin
 	return filtered
 }
 
-// buildColumnDetails builds column detail maps with optional statistics and sample values.
-// Note: Sample values fetching on-demand requires datasource adapter access, which is not yet implemented.
-// For now, sample values are only included if already stored in the column metadata.
+// buildColumnDetails builds column detail maps including features, statistics, and sample values.
+// Column features are always included when available (from engine_schema_columns.metadata).
 func buildColumnDetails(
 	ctx context.Context,
 	deps *ContextToolDeps,
 	projectID uuid.UUID,
-	datasourceID uuid.UUID,
+	_ uuid.UUID, // datasourceID - unused but kept for interface compatibility
 	table *models.DatasourceTable,
 	include includeOptions,
 ) ([]map[string]any, error) {
 	columns := make([]map[string]any, 0, len(table.Columns))
 
-	// Get full schema columns if we need additional stats or sample values
+	// Always fetch schema columns to get column features from metadata
 	var schemaColumns map[string]*models.SchemaColumn
-	if include.Statistics || include.SampleValues {
-		cols, err := deps.SchemaRepo.GetColumnsByTables(ctx, projectID, []string{table.TableName}, false)
+	cols, err := deps.SchemaRepo.GetColumnsByTables(ctx, projectID, []string{table.TableName}, false)
+	if err != nil {
+		deps.Logger.Warn("Failed to get schema columns",
+			zap.String("table", table.TableName),
+			zap.Error(err))
+	} else if tableCols, ok := cols[table.TableName]; ok {
+		schemaColumns = make(map[string]*models.SchemaColumn, len(tableCols))
+		for _, col := range tableCols {
+			schemaColumns[col.ColumnName] = col
+		}
+	}
+
+	// Fetch column metadata for sensitive flag overrides
+	var columnMetadata map[string]*models.ColumnMetadata
+	if deps.ColumnMetadataRepo != nil {
+		metaList, err := deps.ColumnMetadataRepo.GetByTable(ctx, projectID, table.TableName)
 		if err != nil {
-			deps.Logger.Warn("Failed to get schema columns for statistics",
+			deps.Logger.Warn("Failed to get column metadata",
 				zap.String("table", table.TableName),
 				zap.Error(err))
-		} else if tableCols, ok := cols[table.TableName]; ok {
-			schemaColumns = make(map[string]*models.SchemaColumn, len(tableCols))
-			for _, col := range tableCols {
-				schemaColumns[col.ColumnName] = col
+		} else if len(metaList) > 0 {
+			columnMetadata = make(map[string]*models.ColumnMetadata, len(metaList))
+			for _, meta := range metaList {
+				columnMetadata[meta.ColumnName] = meta
 			}
 		}
 	}
@@ -449,6 +576,29 @@ func buildColumnDetails(
 			colDetail["description"] = col.Description
 		}
 
+		// Add enriched column metadata from update_column (MCP enrichment)
+		// These take precedence over datasource column values when present
+		if columnMetadata != nil {
+			if meta, ok := columnMetadata[col.ColumnName]; ok {
+				// Description from update_column overrides datasource description
+				if meta.Description != nil && *meta.Description != "" {
+					colDetail["description"] = *meta.Description
+				}
+				// Entity association (e.g., 'User', 'Account')
+				if meta.Entity != nil && *meta.Entity != "" {
+					colDetail["entity"] = *meta.Entity
+				}
+				// Semantic role (e.g., 'dimension', 'measure', 'identifier', 'attribute')
+				if meta.Role != nil && *meta.Role != "" {
+					colDetail["role"] = *meta.Role
+				}
+				// Enum value labels if defined
+				if len(meta.EnumValues) > 0 {
+					colDetail["enum_values"] = meta.EnumValues
+				}
+			}
+		}
+
 		// Get corresponding schema column if available
 		var schemaCol *models.SchemaColumn
 		if schemaColumns != nil {
@@ -462,8 +612,135 @@ func buildColumnDetails(
 
 		// Add sample values if requested and available
 		// Sample values are persisted during ontology extraction for low-cardinality columns (≤50 distinct values)
+		// Sensitive data is automatically redacted to prevent exposure of API keys, secrets, etc.
+		// Manual is_sensitive flag overrides automatic detection: true=always redact, false=never redact, nil=auto-detect
 		if include.SampleValues && schemaCol != nil && len(schemaCol.SampleValues) > 0 {
-			colDetail["sample_values"] = schemaCol.SampleValues
+			// Check for manual sensitive override from column metadata
+			var isSensitiveOverride *bool
+			if columnMetadata != nil {
+				if meta, ok := columnMetadata[col.ColumnName]; ok && meta.IsSensitive != nil {
+					isSensitiveOverride = meta.IsSensitive
+				}
+			}
+
+			// Determine if column should be treated as sensitive
+			isSensitive := false
+			redactionReason := ""
+
+			if isSensitiveOverride != nil {
+				// Manual override takes precedence
+				if *isSensitiveOverride {
+					isSensitive = true
+					redactionReason = "column marked as sensitive (manual override)"
+				}
+				// If explicitly marked as not sensitive (*isSensitiveOverride == false), skip auto-detection
+			} else {
+				// Use automatic detection
+				if DefaultSensitiveDetector.IsSensitiveColumn(col.ColumnName) {
+					isSensitive = true
+					redactionReason = "column name matches sensitive pattern"
+				}
+			}
+
+			if isSensitive {
+				colDetail["sample_values_redacted"] = true
+				colDetail["redaction_reason"] = redactionReason
+			} else {
+				// Check each sample value for sensitive content and redact if needed
+				// (only if not explicitly marked as not sensitive)
+				redactedValues := make([]string, 0, len(schemaCol.SampleValues))
+				anyRedacted := false
+
+				// Only do content-based detection if no manual override
+				if isSensitiveOverride == nil {
+					for _, val := range schemaCol.SampleValues {
+						if DefaultSensitiveDetector.IsSensitiveContent(val) {
+							redactedValues = append(redactedValues, DefaultSensitiveDetector.RedactContent(val))
+							anyRedacted = true
+						} else {
+							redactedValues = append(redactedValues, val)
+						}
+					}
+				} else {
+					// Manual override to not sensitive - return values as-is
+					redactedValues = schemaCol.SampleValues
+				}
+
+				colDetail["sample_values"] = redactedValues
+				if anyRedacted {
+					colDetail["sample_values_redacted"] = true
+					colDetail["redaction_reason"] = "values contain sensitive patterns (api keys, secrets, etc.)"
+				}
+			}
+		}
+
+		// Add column features from metadata (from feature extraction pipeline)
+		if schemaCol != nil {
+			if features := schemaCol.GetColumnFeatures(); features != nil {
+				featuresMap := map[string]any{}
+				if features.Purpose != "" {
+					featuresMap["purpose"] = features.Purpose
+				}
+				if features.SemanticType != "" {
+					featuresMap["semantic_type"] = features.SemanticType
+				}
+				if features.Role != "" {
+					featuresMap["role"] = features.Role
+				}
+				if features.Description != "" {
+					featuresMap["description"] = features.Description
+				}
+				if features.Confidence > 0 {
+					featuresMap["confidence"] = features.Confidence
+				}
+				if features.ClassificationPath != "" {
+					featuresMap["classification_path"] = string(features.ClassificationPath)
+				}
+
+				// Add path-specific features
+				if features.TimestampFeatures != nil {
+					featuresMap["timestamp_features"] = map[string]any{
+						"timestamp_purpose": features.TimestampFeatures.TimestampPurpose,
+						"is_soft_delete":    features.TimestampFeatures.IsSoftDelete,
+						"is_audit_field":    features.TimestampFeatures.IsAuditField,
+					}
+				}
+				if features.BooleanFeatures != nil {
+					featuresMap["boolean_features"] = map[string]any{
+						"true_meaning":  features.BooleanFeatures.TrueMeaning,
+						"false_meaning": features.BooleanFeatures.FalseMeaning,
+						"boolean_type":  features.BooleanFeatures.BooleanType,
+					}
+				}
+				if features.IdentifierFeatures != nil {
+					idFeatures := map[string]any{
+						"identifier_type": features.IdentifierFeatures.IdentifierType,
+					}
+					if features.IdentifierFeatures.ExternalService != "" {
+						idFeatures["external_service"] = features.IdentifierFeatures.ExternalService
+					}
+					if features.IdentifierFeatures.FKTargetTable != "" {
+						idFeatures["fk_target_table"] = features.IdentifierFeatures.FKTargetTable
+						idFeatures["fk_target_column"] = features.IdentifierFeatures.FKTargetColumn
+						idFeatures["fk_confidence"] = features.IdentifierFeatures.FKConfidence
+					}
+					if features.IdentifierFeatures.EntityReferenced != "" {
+						idFeatures["entity_referenced"] = features.IdentifierFeatures.EntityReferenced
+					}
+					featuresMap["identifier_features"] = idFeatures
+				}
+				if features.MonetaryFeatures != nil {
+					featuresMap["monetary_features"] = map[string]any{
+						"is_monetary":            features.MonetaryFeatures.IsMonetary,
+						"currency_unit":          features.MonetaryFeatures.CurrencyUnit,
+						"paired_currency_column": features.MonetaryFeatures.PairedCurrencyColumn,
+					}
+				}
+
+				if len(featuresMap) > 0 {
+					colDetail["features"] = featuresMap
+				}
+			}
 		}
 
 		columns = append(columns, colDetail)

@@ -670,6 +670,10 @@ func (r *pkMatchRealSchemaDiscoverer) GetDistinctValues(ctx context.Context, sch
 	return nil, nil
 }
 
+func (r *pkMatchRealSchemaDiscoverer) GetEnumValueDistribution(ctx context.Context, schemaName, tableName, columnName string, completionTimestampCol string, limit int) (*datasource.EnumDistributionResult, error) {
+	return nil, nil
+}
+
 func (r *pkMatchRealSchemaDiscoverer) Close() error {
 	return nil
 }

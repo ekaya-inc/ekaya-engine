@@ -26,7 +26,6 @@ type ProjectKnowledgeListResponse struct {
 // CreateKnowledgeRequest for POST /project-knowledge
 type CreateKnowledgeRequest struct {
 	FactType string `json:"fact_type"`
-	Key      string `json:"key"`
 	Value    string `json:"value"`
 	Context  string `json:"context,omitempty"`
 }
@@ -34,7 +33,6 @@ type CreateKnowledgeRequest struct {
 // UpdateKnowledgeRequest for PUT /project-knowledge/{id}
 type UpdateKnowledgeRequest struct {
 	FactType string `json:"fact_type"`
-	Key      string `json:"key"`
 	Value    string `json:"value"`
 	Context  string `json:"context,omitempty"`
 }
@@ -44,24 +42,37 @@ type ProjectOverviewResponse struct {
 	Overview *string `json:"overview"`
 }
 
+// ParseKnowledgeRequest for POST /project-knowledge/parse
+type ParseKnowledgeRequest struct {
+	Text string `json:"text"`
+}
+
+// ParseKnowledgeResponse for POST /project-knowledge/parse
+type ParseKnowledgeResponse struct {
+	Facts []*models.KnowledgeFact `json:"facts"`
+}
+
 // ============================================================================
 // Handler
 // ============================================================================
 
 // KnowledgeHandler handles project knowledge HTTP requests.
 type KnowledgeHandler struct {
-	knowledgeService services.KnowledgeService
-	logger           *zap.Logger
+	knowledgeService        services.KnowledgeService
+	knowledgeParsingService services.KnowledgeParsingService
+	logger                  *zap.Logger
 }
 
 // NewKnowledgeHandler creates a new knowledge handler.
 func NewKnowledgeHandler(
 	knowledgeService services.KnowledgeService,
+	knowledgeParsingService services.KnowledgeParsingService,
 	logger *zap.Logger,
 ) *KnowledgeHandler {
 	return &KnowledgeHandler{
-		knowledgeService: knowledgeService,
-		logger:           logger,
+		knowledgeService:        knowledgeService,
+		knowledgeParsingService: knowledgeParsingService,
+		logger:                  logger,
 	}
 }
 
@@ -78,10 +89,14 @@ func (h *KnowledgeHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *au
 	// Write endpoints - require provenance for audit tracking
 	mux.HandleFunc("POST "+base,
 		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Create)))
+	mux.HandleFunc("POST "+base+"/parse",
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Parse)))
 	mux.HandleFunc("PUT "+base+"/{kid}",
 		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Update)))
 	mux.HandleFunc("DELETE "+base+"/{kid}",
 		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Delete)))
+	mux.HandleFunc("DELETE "+base,
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.DeleteAll)))
 }
 
 // List handles GET /api/projects/{pid}/project-knowledge
@@ -134,12 +149,6 @@ func (h *KnowledgeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if req.Key == "" {
-		if err := ErrorResponse(w, http.StatusBadRequest, "validation_error", "key is required"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
 	if req.Value == "" {
 		if err := ErrorResponse(w, http.StatusBadRequest, "validation_error", "value is required"); err != nil {
 			h.logger.Error("Failed to write error response", zap.Error(err))
@@ -147,12 +156,11 @@ func (h *KnowledgeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fact, err := h.knowledgeService.Store(r.Context(), projectID, req.FactType, req.Key, req.Value, req.Context)
+	fact, err := h.knowledgeService.Store(r.Context(), projectID, req.FactType, req.Value, req.Context)
 	if err != nil {
 		h.logger.Error("Failed to create knowledge fact",
 			zap.String("project_id", projectID.String()),
 			zap.String("fact_type", req.FactType),
-			zap.String("key", req.Key),
 			zap.Error(err))
 		if err := ErrorResponse(w, http.StatusInternalServerError, "create_knowledge_failed", err.Error()); err != nil {
 			h.logger.Error("Failed to write error response", zap.Error(err))
@@ -192,12 +200,6 @@ func (h *KnowledgeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if req.Key == "" {
-		if err := ErrorResponse(w, http.StatusBadRequest, "validation_error", "key is required"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
 	if req.Value == "" {
 		if err := ErrorResponse(w, http.StatusBadRequest, "validation_error", "value is required"); err != nil {
 			h.logger.Error("Failed to write error response", zap.Error(err))
@@ -205,7 +207,7 @@ func (h *KnowledgeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fact, err := h.knowledgeService.Update(r.Context(), projectID, knowledgeID, req.FactType, req.Key, req.Value, req.Context)
+	fact, err := h.knowledgeService.Update(r.Context(), projectID, knowledgeID, req.FactType, req.Value, req.Context)
 	if err != nil {
 		h.logger.Error("Failed to update knowledge fact",
 			zap.String("project_id", projectID.String()),
@@ -267,6 +269,28 @@ func (h *KnowledgeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// DeleteAll handles DELETE /api/projects/{pid}/project-knowledge
+func (h *KnowledgeHandler) DeleteAll(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	if err := h.knowledgeService.DeleteAll(r.Context(), projectID); err != nil {
+		h.logger.Error("Failed to delete all knowledge facts",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "delete_all_knowledge_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: map[string]string{"status": "deleted"}}); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
 // GetOverview handles GET /api/projects/{pid}/project-knowledge/overview
 func (h *KnowledgeHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
 	projectID, ok := ParseProjectID(w, r, h.logger)
@@ -274,7 +298,7 @@ func (h *KnowledgeHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	facts, err := h.knowledgeService.GetByType(r.Context(), projectID, "overview")
+	facts, err := h.knowledgeService.GetByType(r.Context(), projectID, "project_overview")
 	if err != nil {
 		h.logger.Error("Failed to get project overview",
 			zap.String("project_id", projectID.String()),
@@ -286,11 +310,8 @@ func (h *KnowledgeHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var overview *string
-	for _, fact := range facts {
-		if fact.Key == "project_overview" {
-			overview = &fact.Value
-			break
-		}
+	if len(facts) > 0 {
+		overview = &facts[0].Value
 	}
 
 	response := ProjectOverviewResponse{
@@ -298,6 +319,50 @@ func (h *KnowledgeHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// Parse handles POST /api/projects/{pid}/project-knowledge/parse
+// It takes a free-form text input and uses LLM to extract structured knowledge facts.
+func (h *KnowledgeHandler) Parse(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	var req ParseKnowledgeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_request", "Invalid request body"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Validate required fields
+	if req.Text == "" {
+		if err := ErrorResponse(w, http.StatusBadRequest, "validation_error", "text is required"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	facts, err := h.knowledgeParsingService.ParseAndStore(r.Context(), projectID, req.Text)
+	if err != nil {
+		h.logger.Error("Failed to parse knowledge fact",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "parse_knowledge_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	response := ParseKnowledgeResponse{
+		Facts: facts,
+	}
+
+	if err := WriteJSON(w, http.StatusCreated, ApiResponse{Success: true, Data: response}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
 }

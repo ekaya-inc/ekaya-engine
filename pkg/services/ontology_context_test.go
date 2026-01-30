@@ -84,6 +84,20 @@ func (m *mockOntologyEntityRepository) GetByProject(ctx context.Context, project
 	return m.entities, nil
 }
 
+func (m *mockOntologyEntityRepository) GetPromotedByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
+	if m.getByProjectErr != nil {
+		return nil, m.getByProjectErr
+	}
+	// Filter to only promoted entities
+	var promoted []*models.OntologyEntity
+	for _, e := range m.entities {
+		if e.IsPromoted {
+			promoted = append(promoted, e)
+		}
+	}
+	return promoted, nil
+}
+
 func (m *mockOntologyEntityRepository) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error) {
 	return nil, nil
 }
@@ -384,6 +398,7 @@ func TestGetDomainContext(t *testing.T) {
 			PrimarySchema: "public",
 			PrimaryTable:  "users",
 			PrimaryColumn: "id",
+			IsPromoted:    true, // Must be promoted to appear in GetDomainContext
 		},
 		{
 			ID:            entityID2,
@@ -394,6 +409,7 @@ func TestGetDomainContext(t *testing.T) {
 			PrimarySchema: "public",
 			PrimaryTable:  "orders",
 			PrimaryColumn: "id",
+			IsPromoted:    true, // Must be promoted to appear in GetDomainContext
 		},
 	}
 
@@ -455,7 +471,7 @@ func TestGetDomainContext(t *testing.T) {
 	}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetDomainContext(ctx, projectID)
 
@@ -499,7 +515,7 @@ func TestGetDomainContext_NoActiveOntology(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetDomainContext(ctx, projectID)
 
@@ -536,6 +552,7 @@ func TestGetEntitiesContext(t *testing.T) {
 			Description:   "Platform user",
 			PrimaryTable:  "users",
 			PrimaryColumn: "id",
+			IsPromoted:    true, // Must be promoted to appear in GetEntitiesContext
 		},
 	}
 
@@ -603,7 +620,7 @@ func TestGetEntitiesContext(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetEntitiesContext(ctx, projectID)
 
@@ -677,7 +694,7 @@ func TestGetTablesContext(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	// Test with specific table filter
 	result, err := svc.GetTablesContext(ctx, projectID, []string{"users"})
@@ -737,7 +754,7 @@ func TestGetTablesContext_AllTables(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	// Test without filter - should return all entity tables
 	result, err := svc.GetTablesContext(ctx, projectID, nil)
@@ -802,7 +819,7 @@ func TestGetTablesContext_FKRoles(t *testing.T) {
 	}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetTablesContext(ctx, projectID, []string{"billing_engagements"})
 
@@ -879,7 +896,7 @@ func TestGetColumnsContext(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetColumnsContext(ctx, projectID, []string{"users"})
 
@@ -906,7 +923,7 @@ func TestGetColumnsContext_RequiresTableFilter(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetColumnsContext(ctx, projectID, nil)
 
@@ -933,7 +950,7 @@ func TestGetColumnsContext_MissingTable(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	// Should not error, but table won't be in results (no entity matches)
 	result, err := svc.GetColumnsContext(ctx, projectID, []string{"nonexistent"})
@@ -953,7 +970,7 @@ func TestGetColumnsContext_TooManyTables(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	// Create list of tables exceeding the limit
 	tables := make([]string, MaxColumnsDepthTables+1)
@@ -991,6 +1008,7 @@ func TestGetDomainContext_DeduplicatesRelationships(t *testing.T) {
 			PrimarySchema: "public",
 			PrimaryTable:  "users",
 			PrimaryColumn: "id",
+			IsPromoted:    true,
 		},
 		{
 			ID:            entityID2,
@@ -998,6 +1016,7 @@ func TestGetDomainContext_DeduplicatesRelationships(t *testing.T) {
 			PrimarySchema: "public",
 			PrimaryTable:  "billing_engagements",
 			PrimaryColumn: "id",
+			IsPromoted:    true,
 		},
 	}
 
@@ -1046,7 +1065,7 @@ func TestGetDomainContext_DeduplicatesRelationships(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetDomainContext(ctx, projectID)
 
@@ -1077,8 +1096,8 @@ func TestGetDomainContext_DeduplicatesRelationships_FirstWinsWhenSameLength(t *t
 	}
 
 	entities := []*models.OntologyEntity{
-		{ID: entityID1, Name: "user", PrimaryTable: "users"},
-		{ID: entityID2, Name: "order", PrimaryTable: "orders"},
+		{ID: entityID1, Name: "user", PrimaryTable: "users", IsPromoted: true},
+		{ID: entityID2, Name: "order", PrimaryTable: "orders", IsPromoted: true},
 	}
 
 	// Same-length descriptions
@@ -1107,7 +1126,7 @@ func TestGetDomainContext_DeduplicatesRelationships_FirstWinsWhenSameLength(t *t
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetDomainContext(ctx, projectID)
 
@@ -1115,4 +1134,135 @@ func TestGetDomainContext_DeduplicatesRelationships_FirstWinsWhenSameLength(t *t
 	assert.Len(t, result.Relationships, 1)
 	// When same length, first one wins (no update happens)
 	assert.Equal(t, "first", result.Relationships[0].Label)
+}
+
+// TestGetEntitiesContext_FiltersPromotedEntities verifies that only promoted entities
+// are returned by GetEntitiesContext, filtering out demoted entities.
+func TestGetEntitiesContext_FiltersPromotedEntities(t *testing.T) {
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	promotedEntityID := uuid.New()
+	demotedEntityID := uuid.New()
+
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+	}
+
+	// Create mix of promoted and demoted entities
+	entities := []*models.OntologyEntity{
+		{
+			ID:            promotedEntityID,
+			ProjectID:     projectID,
+			OntologyID:    ontologyID,
+			Name:          "User",
+			Description:   "Core user entity with many relationships",
+			PrimarySchema: "public",
+			PrimaryTable:  "users",
+			PrimaryColumn: "id",
+			IsPromoted:    true, // Promoted - should appear
+		},
+		{
+			ID:            demotedEntityID,
+			ProjectID:     projectID,
+			OntologyID:    ontologyID,
+			Name:          "Session",
+			Description:   "User session table",
+			PrimarySchema: "public",
+			PrimaryTable:  "sessions",
+			PrimaryColumn: "id",
+			IsPromoted:    false, // Demoted - should NOT appear
+		},
+	}
+
+	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
+	entityRepo := &mockOntologyEntityRepository{
+		entities:   entities,
+		aliases:    make(map[uuid.UUID][]*models.OntologyEntityAlias),
+		keyColumns: make(map[uuid.UUID][]*models.OntologyEntityKeyColumn),
+	}
+	relationshipRepo := &mockEntityRelationshipRepository{}
+	schemaRepo := &mockSchemaRepository{}
+	projectService := &mockProjectServiceForOntology{}
+
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
+
+	result, err := svc.GetEntitiesContext(ctx, projectID)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+
+	// Only promoted entity should appear
+	assert.Len(t, result.Entities, 1, "Only promoted entities should be returned")
+	assert.Contains(t, result.Entities, "User", "Promoted entity 'User' should be present")
+	assert.NotContains(t, result.Entities, "Session", "Demoted entity 'Session' should NOT be present")
+}
+
+// TestGetDomainContext_FiltersPromotedEntities verifies that only promoted entities
+// are returned by GetDomainContext, filtering out demoted entities.
+func TestGetDomainContext_FiltersPromotedEntities(t *testing.T) {
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	promotedEntityID := uuid.New()
+	demotedEntityID := uuid.New()
+
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+		DomainSummary: &models.DomainSummary{
+			Description: "Test domain",
+		},
+	}
+
+	// Create mix of promoted and demoted entities
+	entities := []*models.OntologyEntity{
+		{
+			ID:            promotedEntityID,
+			ProjectID:     projectID,
+			OntologyID:    ontologyID,
+			Name:          "User",
+			Description:   "Core user entity",
+			PrimarySchema: "public",
+			PrimaryTable:  "users",
+			PrimaryColumn: "id",
+			IsPromoted:    true,
+		},
+		{
+			ID:            demotedEntityID,
+			ProjectID:     projectID,
+			OntologyID:    ontologyID,
+			Name:          "Session",
+			Description:   "User session table",
+			PrimarySchema: "public",
+			PrimaryTable:  "sessions",
+			PrimaryColumn: "id",
+			IsPromoted:    false,
+		},
+	}
+
+	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
+	entityRepo := &mockOntologyEntityRepository{
+		entities: entities,
+	}
+	relationshipRepo := &mockEntityRelationshipRepository{}
+	schemaRepo := &mockSchemaRepository{}
+	projectService := &mockProjectServiceForOntology{}
+
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
+
+	result, err := svc.GetDomainContext(ctx, projectID)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+
+	// Only promoted entity should appear in briefs
+	assert.Len(t, result.Entities, 1, "Only promoted entities should be in entity briefs")
+	assert.Equal(t, "User", result.Entities[0].Name, "Promoted entity 'User' should be present")
+
+	// Domain TableCount should reflect only promoted entities
+	assert.Equal(t, 1, result.Domain.TableCount, "TableCount should count only promoted entities")
 }

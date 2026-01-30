@@ -19,7 +19,6 @@ type knowledgeTestContext struct {
 	engineDB   *testhelpers.EngineDB
 	repo       KnowledgeRepository
 	projectID  uuid.UUID
-	ontologyID uuid.UUID
 	testUserID uuid.UUID // User ID for provenance context
 }
 
@@ -31,11 +30,9 @@ func setupKnowledgeTest(t *testing.T) *knowledgeTestContext {
 		engineDB:   engineDB,
 		repo:       NewKnowledgeRepository(),
 		projectID:  uuid.MustParse("00000000-0000-0000-0000-000000000043"),
-		ontologyID: uuid.MustParse("00000000-0000-0000-0000-000000000143"),
 		testUserID: uuid.MustParse("00000000-0000-0000-0000-000000000046"), // Test user for provenance
 	}
 	tc.ensureTestProject()
-	tc.ensureTestOntology()
 	return tc
 }
 
@@ -66,27 +63,6 @@ func (tc *knowledgeTestContext) ensureTestProject() {
 	`, tc.projectID, tc.testUserID)
 	if err != nil {
 		tc.t.Fatalf("failed to ensure test user: %v", err)
-	}
-}
-
-// ensureTestOntology creates the test ontology if it doesn't exist.
-func (tc *knowledgeTestContext) ensureTestOntology() {
-	tc.t.Helper()
-	ctx, cleanup := tc.createTestContext()
-	defer cleanup()
-
-	scope, _ := database.GetTenantScope(ctx)
-	// Use ON CONFLICT on the unique constraint (project_id, version) - version defaults to 1
-	// Don't change the ID if an ontology already exists (would violate FK constraints)
-	// Return the actual ID in case one already exists
-	err := scope.Conn.QueryRow(ctx, `
-		INSERT INTO engine_ontologies (id, project_id, is_active, domain_summary, entity_summaries, column_details)
-		VALUES ($1, $2, true, '{}', '{}', '{}')
-		ON CONFLICT (project_id, version) DO UPDATE SET is_active = true
-		RETURNING id
-	`, tc.ontologyID, tc.projectID).Scan(&tc.ontologyID)
-	if err != nil {
-		tc.t.Fatalf("failed to ensure test ontology: %v", err)
 	}
 }
 
@@ -125,17 +101,15 @@ func (tc *knowledgeTestContext) createTestContextWithSource(source models.Proven
 }
 
 // createTestFact creates a knowledge fact for testing.
-func (tc *knowledgeTestContext) createTestFact(ctx context.Context, factType, key, value string) *models.KnowledgeFact {
+func (tc *knowledgeTestContext) createTestFact(ctx context.Context, factType, value string) *models.KnowledgeFact {
 	tc.t.Helper()
 	fact := &models.KnowledgeFact{
-		ProjectID:  tc.projectID,
-		OntologyID: &tc.ontologyID,
-		FactType:   factType,
-		Key:        key,
-		Value:      value,
-		Context:    "Test context",
+		ProjectID: tc.projectID,
+		FactType:  factType,
+		Value:     value,
+		Context:   "Test context",
 	}
-	err := tc.repo.Upsert(ctx, fact)
+	err := tc.repo.Create(ctx, fact)
 	if err != nil {
 		tc.t.Fatalf("failed to create test fact: %v", err)
 	}
@@ -143,10 +117,10 @@ func (tc *knowledgeTestContext) createTestFact(ctx context.Context, factType, ke
 }
 
 // ============================================================================
-// Upsert Tests (Insert)
+// Create Tests
 // ============================================================================
 
-func TestKnowledgeRepository_Upsert_Insert(t *testing.T) {
+func TestKnowledgeRepository_Create_Success(t *testing.T) {
 	tc := setupKnowledgeTest(t)
 	tc.cleanup()
 
@@ -154,17 +128,15 @@ func TestKnowledgeRepository_Upsert_Insert(t *testing.T) {
 	defer cleanup()
 
 	fact := &models.KnowledgeFact{
-		ProjectID:  tc.projectID,
-		OntologyID: &tc.ontologyID,
-		FactType:   models.FactTypeFiscalYear,
-		Key:        "start_month",
-		Value:      "July",
-		Context:    "Company follows July-June fiscal year",
+		ProjectID: tc.projectID,
+		FactType:  models.FactTypeFiscalYear,
+		Value:     "July",
+		Context:   "Company follows July-June fiscal year",
 	}
 
-	err := tc.repo.Upsert(ctx, fact)
+	err := tc.repo.Create(ctx, fact)
 	if err != nil {
-		t.Fatalf("Upsert failed: %v", err)
+		t.Fatalf("Create failed: %v", err)
 	}
 
 	if fact.ID == uuid.Nil {
@@ -174,23 +146,23 @@ func TestKnowledgeRepository_Upsert_Insert(t *testing.T) {
 		t.Error("expected CreatedAt to be set")
 	}
 
-	// Verify by fetching
-	retrieved, err := tc.repo.GetByKey(ctx, tc.projectID, models.FactTypeFiscalYear, "start_month")
+	// Verify by fetching all facts
+	facts, err := tc.repo.GetByProject(ctx, tc.projectID)
 	if err != nil {
-		t.Fatalf("GetByKey failed: %v", err)
+		t.Fatalf("GetByProject failed: %v", err)
 	}
-	if retrieved == nil {
-		t.Fatal("expected fact, got nil")
+	if len(facts) != 1 {
+		t.Fatalf("expected 1 fact, got %d", len(facts))
 	}
-	if retrieved.Value != "July" {
-		t.Errorf("expected value 'July', got %q", retrieved.Value)
+	if facts[0].Value != "July" {
+		t.Errorf("expected value 'July', got %q", facts[0].Value)
 	}
-	if retrieved.Context != "Company follows July-June fiscal year" {
-		t.Errorf("expected context, got %q", retrieved.Context)
+	if facts[0].Context != "Company follows July-June fiscal year" {
+		t.Errorf("expected context, got %q", facts[0].Context)
 	}
 }
 
-func TestKnowledgeRepository_Upsert_InsertWithoutContext(t *testing.T) {
+func TestKnowledgeRepository_Create_WithoutContext(t *testing.T) {
 	tc := setupKnowledgeTest(t)
 	tc.cleanup()
 
@@ -198,103 +170,34 @@ func TestKnowledgeRepository_Upsert_InsertWithoutContext(t *testing.T) {
 	defer cleanup()
 
 	fact := &models.KnowledgeFact{
-		ProjectID:  tc.projectID,
-		OntologyID: &tc.ontologyID,
-		FactType:   models.FactTypeTerminology,
-		Key:        "customer",
-		Value:      "A person or organization that purchases goods",
+		ProjectID: tc.projectID,
+		FactType:  models.FactTypeTerminology,
+		Value:     "A person or organization that purchases goods",
 		// No context
 	}
 
-	err := tc.repo.Upsert(ctx, fact)
+	err := tc.repo.Create(ctx, fact)
 	if err != nil {
-		t.Fatalf("Upsert failed: %v", err)
+		t.Fatalf("Create failed: %v", err)
 	}
 
-	retrieved, err := tc.repo.GetByKey(ctx, tc.projectID, models.FactTypeTerminology, "customer")
-	if err != nil {
-		t.Fatalf("GetByKey failed: %v", err)
-	}
-	if retrieved.Context != "" {
-		t.Errorf("expected empty context, got %q", retrieved.Context)
-	}
-}
-
-// ============================================================================
-// Upsert Tests (Update)
-// ============================================================================
-
-func TestKnowledgeRepository_Upsert_Update(t *testing.T) {
-	tc := setupKnowledgeTest(t)
-	tc.cleanup()
-
-	ctx, cleanup := tc.createTestContext()
-	defer cleanup()
-
-	// Create initial fact
-	original := tc.createTestFact(ctx, models.FactTypeBusinessRule, "discount_threshold", "100")
-	originalID := original.ID
-
-	// Upsert with same key should update
-	updated := &models.KnowledgeFact{
-		ProjectID:  tc.projectID,
-		OntologyID: &tc.ontologyID,
-		FactType:   models.FactTypeBusinessRule,
-		Key:        "discount_threshold",
-		Value:      "150", // Changed value
-		Context:    "Updated policy",
-	}
-
-	err := tc.repo.Upsert(ctx, updated)
-	if err != nil {
-		t.Fatalf("Upsert failed: %v", err)
-	}
-
-	// ID should be preserved (same record)
-	if updated.ID != originalID {
-		t.Errorf("expected same ID %v, got %v", originalID, updated.ID)
-	}
-
-	// CreatedAt should be preserved
-	if updated.CreatedAt != original.CreatedAt {
-		t.Errorf("expected same CreatedAt, but it changed")
-	}
-
-	// Verify value was updated
-	retrieved, err := tc.repo.GetByKey(ctx, tc.projectID, models.FactTypeBusinessRule, "discount_threshold")
-	if err != nil {
-		t.Fatalf("GetByKey failed: %v", err)
-	}
-	if retrieved.Value != "150" {
-		t.Errorf("expected updated value '150', got %q", retrieved.Value)
-	}
-	if retrieved.Context != "Updated policy" {
-		t.Errorf("expected updated context, got %q", retrieved.Context)
-	}
-}
-
-func TestKnowledgeRepository_Upsert_SameTypesDifferentKeys(t *testing.T) {
-	tc := setupKnowledgeTest(t)
-	tc.cleanup()
-
-	ctx, cleanup := tc.createTestContext()
-	defer cleanup()
-
-	// Create facts with same type but different keys
-	tc.createTestFact(ctx, models.FactTypeEnumeration, "status_active", "Account is active and in good standing")
-	tc.createTestFact(ctx, models.FactTypeEnumeration, "status_suspended", "Account is temporarily suspended")
-	tc.createTestFact(ctx, models.FactTypeEnumeration, "status_closed", "Account is permanently closed")
-
-	facts, err := tc.repo.GetByType(ctx, tc.projectID, models.FactTypeEnumeration)
+	facts, err := tc.repo.GetByType(ctx, tc.projectID, models.FactTypeTerminology)
 	if err != nil {
 		t.Fatalf("GetByType failed: %v", err)
 	}
-	if len(facts) != 3 {
-		t.Errorf("expected 3 facts, got %d", len(facts))
+	if len(facts) != 1 {
+		t.Fatalf("expected 1 fact, got %d", len(facts))
+	}
+	if facts[0].Context != "" {
+		t.Errorf("expected empty context, got %q", facts[0].Context)
 	}
 }
 
-func TestKnowledgeRepository_Upsert_UpdateByID(t *testing.T) {
+// ============================================================================
+// Update Tests
+// ============================================================================
+
+func TestKnowledgeRepository_Update_Success(t *testing.T) {
 	tc := setupKnowledgeTest(t)
 	tc.cleanup()
 
@@ -302,62 +205,46 @@ func TestKnowledgeRepository_Upsert_UpdateByID(t *testing.T) {
 	defer cleanup()
 
 	// Create initial fact
-	original := tc.createTestFact(ctx, models.FactTypeTerminology, "original_key", "Original value")
+	original := tc.createTestFact(ctx, models.FactTypeBusinessRule, "100")
 	originalID := original.ID
 	originalCreatedAt := original.CreatedAt
 
-	// Update by ID with a NEW key (this was the bug - it would fail with duplicate key error)
-	updated := &models.KnowledgeFact{
-		ID:         originalID, // Explicitly set ID for update-by-ID
-		ProjectID:  tc.projectID,
-		OntologyID: &tc.ontologyID,
-		FactType:   models.FactTypeTerminology,
-		Key:        "updated_key", // Different key
-		Value:      "Updated value",
-		Context:    "New context",
-	}
+	// Update the fact
+	original.Value = "150"
+	original.Context = "Updated policy"
 
-	err := tc.repo.Upsert(ctx, updated)
+	err := tc.repo.Update(ctx, original)
 	if err != nil {
-		t.Fatalf("Upsert with ID failed: %v", err)
+		t.Fatalf("Update failed: %v", err)
 	}
 
 	// ID should be unchanged
-	if updated.ID != originalID {
-		t.Errorf("expected same ID %v, got %v", originalID, updated.ID)
+	if original.ID != originalID {
+		t.Errorf("expected same ID %v, got %v", originalID, original.ID)
 	}
 
 	// CreatedAt should be preserved
-	if !updated.CreatedAt.Equal(originalCreatedAt) {
-		t.Errorf("expected CreatedAt to be preserved, was %v now %v", originalCreatedAt, updated.CreatedAt)
+	if !original.CreatedAt.Equal(originalCreatedAt) {
+		t.Errorf("expected CreatedAt to be preserved")
 	}
 
-	// Verify old key no longer exists
-	oldFact, err := tc.repo.GetByKey(ctx, tc.projectID, models.FactTypeTerminology, "original_key")
+	// Verify value was updated
+	facts, err := tc.repo.GetByType(ctx, tc.projectID, models.FactTypeBusinessRule)
 	if err != nil {
-		t.Fatalf("GetByKey failed: %v", err)
+		t.Fatalf("GetByType failed: %v", err)
 	}
-	if oldFact != nil {
-		t.Error("expected old key to not exist after update")
+	if len(facts) != 1 {
+		t.Fatalf("expected 1 fact, got %d", len(facts))
 	}
-
-	// Verify new key exists with correct values
-	newFact, err := tc.repo.GetByKey(ctx, tc.projectID, models.FactTypeTerminology, "updated_key")
-	if err != nil {
-		t.Fatalf("GetByKey failed: %v", err)
+	if facts[0].Value != "150" {
+		t.Errorf("expected updated value '150', got %q", facts[0].Value)
 	}
-	if newFact == nil {
-		t.Fatal("expected new key to exist")
-	}
-	if newFact.Value != "Updated value" {
-		t.Errorf("expected value 'Updated value', got %q", newFact.Value)
-	}
-	if newFact.Context != "New context" {
-		t.Errorf("expected context 'New context', got %q", newFact.Context)
+	if facts[0].Context != "Updated policy" {
+		t.Errorf("expected updated context, got %q", facts[0].Context)
 	}
 }
 
-func TestKnowledgeRepository_Upsert_UpdateByID_NotFound(t *testing.T) {
+func TestKnowledgeRepository_Update_NotFound(t *testing.T) {
 	tc := setupKnowledgeTest(t)
 	tc.cleanup()
 
@@ -367,20 +254,15 @@ func TestKnowledgeRepository_Upsert_UpdateByID_NotFound(t *testing.T) {
 	// Try to update a non-existent ID
 	nonExistentID := uuid.New()
 	fact := &models.KnowledgeFact{
-		ID:         nonExistentID,
-		ProjectID:  tc.projectID,
-		OntologyID: &tc.ontologyID,
-		FactType:   models.FactTypeTerminology,
-		Key:        "some_key",
-		Value:      "Some value",
+		ID:        nonExistentID,
+		ProjectID: tc.projectID,
+		FactType:  models.FactTypeTerminology,
+		Value:     "Some value",
 	}
 
-	err := tc.repo.Upsert(ctx, fact)
+	err := tc.repo.Update(ctx, fact)
 	if err == nil {
 		t.Error("expected error for non-existent ID")
-	}
-	if err != nil && err.Error() != "fact with id "+nonExistentID.String()+" not found" {
-		t.Errorf("unexpected error message: %v", err)
 	}
 }
 
@@ -395,9 +277,9 @@ func TestKnowledgeRepository_GetByProject_Success(t *testing.T) {
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
 
-	tc.createTestFact(ctx, models.FactTypeFiscalYear, "start_month", "January")
-	tc.createTestFact(ctx, models.FactTypeBusinessRule, "max_discount", "30%")
-	tc.createTestFact(ctx, models.FactTypeTerminology, "SKU", "Stock Keeping Unit")
+	tc.createTestFact(ctx, models.FactTypeFiscalYear, "January")
+	tc.createTestFact(ctx, models.FactTypeBusinessRule, "30%")
+	tc.createTestFact(ctx, models.FactTypeTerminology, "Stock Keeping Unit")
 
 	facts, err := tc.repo.GetByProject(ctx, tc.projectID)
 	if err != nil {
@@ -432,25 +314,19 @@ func TestKnowledgeRepository_GetByProject_Ordering(t *testing.T) {
 	defer cleanup()
 
 	// Create in non-alphabetical order
-	tc.createTestFact(ctx, models.FactTypeTerminology, "zebra", "Z animal")
-	tc.createTestFact(ctx, models.FactTypeBusinessRule, "alpha", "A rule")
-	tc.createTestFact(ctx, models.FactTypeTerminology, "apple", "A fruit")
+	tc.createTestFact(ctx, models.FactTypeTerminology, "Z animal")
+	tc.createTestFact(ctx, models.FactTypeBusinessRule, "A rule")
+	tc.createTestFact(ctx, models.FactTypeTerminology, "A fruit")
 
 	facts, err := tc.repo.GetByProject(ctx, tc.projectID)
 	if err != nil {
 		t.Fatalf("GetByProject failed: %v", err)
 	}
 
-	// Should be ordered by fact_type, then key
+	// Should be ordered by fact_type, then value
 	// business_rule < terminology (alphabetically)
 	if facts[0].FactType != models.FactTypeBusinessRule {
 		t.Errorf("expected first fact to be business_rule, got %q", facts[0].FactType)
-	}
-	// Then terminology facts ordered by key
-	if len(facts) == 3 {
-		if facts[1].Key != "apple" {
-			t.Errorf("expected second fact key 'apple', got %q", facts[1].Key)
-		}
 	}
 }
 
@@ -465,9 +341,9 @@ func TestKnowledgeRepository_GetByType_Success(t *testing.T) {
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
 
-	tc.createTestFact(ctx, models.FactTypeTerminology, "API", "Application Programming Interface")
-	tc.createTestFact(ctx, models.FactTypeTerminology, "SDK", "Software Development Kit")
-	tc.createTestFact(ctx, models.FactTypeBusinessRule, "max_users", "100")
+	tc.createTestFact(ctx, models.FactTypeTerminology, "Application Programming Interface")
+	tc.createTestFact(ctx, models.FactTypeTerminology, "Software Development Kit")
+	tc.createTestFact(ctx, models.FactTypeBusinessRule, "100")
 
 	facts, err := tc.repo.GetByType(ctx, tc.projectID, models.FactTypeTerminology)
 	if err != nil {
@@ -490,7 +366,7 @@ func TestKnowledgeRepository_GetByType_Empty(t *testing.T) {
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
 
-	tc.createTestFact(ctx, models.FactTypeBusinessRule, "rule1", "value")
+	tc.createTestFact(ctx, models.FactTypeBusinessRule, "value")
 
 	facts, err := tc.repo.GetByType(ctx, tc.projectID, models.FactTypeTerminology)
 	if err != nil {
@@ -498,66 +374,6 @@ func TestKnowledgeRepository_GetByType_Empty(t *testing.T) {
 	}
 	if len(facts) != 0 {
 		t.Errorf("expected 0 terminology facts, got %d", len(facts))
-	}
-}
-
-// ============================================================================
-// GetByKey Tests
-// ============================================================================
-
-func TestKnowledgeRepository_GetByKey_Success(t *testing.T) {
-	tc := setupKnowledgeTest(t)
-	tc.cleanup()
-
-	ctx, cleanup := tc.createTestContext()
-	defer cleanup()
-
-	tc.createTestFact(ctx, models.FactTypeFiscalYear, "end_month", "June")
-
-	fact, err := tc.repo.GetByKey(ctx, tc.projectID, models.FactTypeFiscalYear, "end_month")
-	if err != nil {
-		t.Fatalf("GetByKey failed: %v", err)
-	}
-	if fact == nil {
-		t.Fatal("expected fact, got nil")
-	}
-	if fact.Value != "June" {
-		t.Errorf("expected value 'June', got %q", fact.Value)
-	}
-}
-
-func TestKnowledgeRepository_GetByKey_NotFound(t *testing.T) {
-	tc := setupKnowledgeTest(t)
-	tc.cleanup()
-
-	ctx, cleanup := tc.createTestContext()
-	defer cleanup()
-
-	fact, err := tc.repo.GetByKey(ctx, tc.projectID, models.FactTypeFiscalYear, "nonexistent")
-	if err != nil {
-		t.Fatalf("GetByKey should not error for not found: %v", err)
-	}
-	if fact != nil {
-		t.Errorf("expected nil for not found, got %+v", fact)
-	}
-}
-
-func TestKnowledgeRepository_GetByKey_WrongType(t *testing.T) {
-	tc := setupKnowledgeTest(t)
-	tc.cleanup()
-
-	ctx, cleanup := tc.createTestContext()
-	defer cleanup()
-
-	tc.createTestFact(ctx, models.FactTypeBusinessRule, "my_key", "value")
-
-	// Same key but different type should not be found
-	fact, err := tc.repo.GetByKey(ctx, tc.projectID, models.FactTypeTerminology, "my_key")
-	if err != nil {
-		t.Fatalf("GetByKey should not error: %v", err)
-	}
-	if fact != nil {
-		t.Errorf("expected nil for wrong type, got %+v", fact)
 	}
 }
 
@@ -572,20 +388,21 @@ func TestKnowledgeRepository_Delete_Success(t *testing.T) {
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
 
-	fact := tc.createTestFact(ctx, models.FactTypeConvention, "date_format", "YYYY-MM-DD")
+	fact := tc.createTestFact(ctx, models.FactTypeBusinessRule, "To be deleted")
+	factID := fact.ID
 
-	err := tc.repo.Delete(ctx, fact.ID)
+	err := tc.repo.Delete(ctx, factID)
 	if err != nil {
 		t.Fatalf("Delete failed: %v", err)
 	}
 
-	// Verify deleted
-	retrieved, err := tc.repo.GetByKey(ctx, tc.projectID, models.FactTypeConvention, "date_format")
+	// Verify it's gone
+	facts, err := tc.repo.GetByProject(ctx, tc.projectID)
 	if err != nil {
-		t.Fatalf("GetByKey failed: %v", err)
+		t.Fatalf("GetByProject failed: %v", err)
 	}
-	if retrieved != nil {
-		t.Error("expected fact to be deleted")
+	if len(facts) != 0 {
+		t.Errorf("expected 0 facts after delete, got %d", len(facts))
 	}
 }
 
@@ -596,96 +413,76 @@ func TestKnowledgeRepository_Delete_NotFound(t *testing.T) {
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
 
+	// Try to delete non-existent fact - returns not found error
 	err := tc.repo.Delete(ctx, uuid.New())
 	if err == nil {
-		t.Error("expected error for non-existent fact")
+		t.Error("Delete should error for non-existent ID")
 	}
 }
 
 // ============================================================================
-// All Fact Types Tests
+// DeleteByProject Tests
 // ============================================================================
 
-func TestKnowledgeRepository_AllFactTypes(t *testing.T) {
+func TestKnowledgeRepository_DeleteByProject_Success(t *testing.T) {
 	tc := setupKnowledgeTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
 
-	// Test all supported fact types
-	factTypes := []struct {
-		factType string
-		key      string
-		value    string
-	}{
-		{models.FactTypeFiscalYear, "start", "January"},
-		{models.FactTypeBusinessRule, "max_discount", "25%"},
-		{models.FactTypeTerminology, "MRR", "Monthly Recurring Revenue"},
-		{models.FactTypeConvention, "currency", "USD"},
-		{models.FactTypeEnumeration, "order_status_pending", "Order has been placed but not processed"},
-		{models.FactTypeRelationship, "user_orders", "Users can have multiple orders"},
+	tc.createTestFact(ctx, models.FactTypeBusinessRule, "Rule 1")
+	tc.createTestFact(ctx, models.FactTypeTerminology, "Term 1")
+
+	err := tc.repo.DeleteByProject(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("DeleteByProject failed: %v", err)
 	}
 
-	for _, ft := range factTypes {
-		tc.createTestFact(ctx, ft.factType, ft.key, ft.value)
-	}
-
+	// Verify all gone
 	facts, err := tc.repo.GetByProject(ctx, tc.projectID)
 	if err != nil {
 		t.Fatalf("GetByProject failed: %v", err)
 	}
-	if len(facts) != len(factTypes) {
-		t.Errorf("expected %d facts, got %d", len(factTypes), len(facts))
+	if len(facts) != 0 {
+		t.Errorf("expected 0 facts after delete, got %d", len(facts))
 	}
 }
 
 // ============================================================================
-// No Tenant Scope Tests (RLS Enforcement)
+// DeleteBySource Tests
 // ============================================================================
 
-func TestKnowledgeRepository_NoTenantScope(t *testing.T) {
+func TestKnowledgeRepository_DeleteBySource_Success(t *testing.T) {
 	tc := setupKnowledgeTest(t)
 	tc.cleanup()
 
-	ctx := context.Background() // No tenant scope
+	// Create facts with manual source
+	manualCtx, manualCleanup := tc.createTestContextWithSource(models.SourceManual)
+	defer manualCleanup()
+	tc.createTestFact(manualCtx, models.FactTypeBusinessRule, "Manual rule")
 
-	fact := &models.KnowledgeFact{
-		ProjectID:  tc.projectID,
-		OntologyID: &tc.ontologyID,
-		FactType:   models.FactTypeTerminology,
-		Key:        "test",
-		Value:      "value",
+	// Create facts with inferred source
+	inferredCtx, inferredCleanup := tc.createTestContextWithSource(models.SourceInferred)
+	defer inferredCleanup()
+	tc.createTestFact(inferredCtx, models.FactTypeBusinessRule, "Inferred rule")
+
+	// Delete only inferred facts
+	err := tc.repo.DeleteBySource(inferredCtx, tc.projectID, models.SourceInferred)
+	if err != nil {
+		t.Fatalf("DeleteBySource failed: %v", err)
 	}
 
-	// Upsert should fail
-	err := tc.repo.Upsert(ctx, fact)
-	if err == nil {
-		t.Error("expected error for Upsert without tenant scope")
+	// Verify only manual fact remains
+	facts, err := tc.repo.GetByProject(manualCtx, tc.projectID)
+	if err != nil {
+		t.Fatalf("GetByProject failed: %v", err)
 	}
-
-	// GetByProject should fail
-	_, err = tc.repo.GetByProject(ctx, tc.projectID)
-	if err == nil {
-		t.Error("expected error for GetByProject without tenant scope")
+	if len(facts) != 1 {
+		t.Errorf("expected 1 fact remaining, got %d", len(facts))
 	}
-
-	// GetByType should fail
-	_, err = tc.repo.GetByType(ctx, tc.projectID, models.FactTypeTerminology)
-	if err == nil {
-		t.Error("expected error for GetByType without tenant scope")
-	}
-
-	// GetByKey should fail
-	_, err = tc.repo.GetByKey(ctx, tc.projectID, models.FactTypeTerminology, "test")
-	if err == nil {
-		t.Error("expected error for GetByKey without tenant scope")
-	}
-
-	// Delete should fail
-	err = tc.repo.Delete(ctx, uuid.New())
-	if err == nil {
-		t.Error("expected error for Delete without tenant scope")
+	if len(facts) > 0 && facts[0].Source != string(models.SourceManual) {
+		t.Errorf("expected manual source, got %q", facts[0].Source)
 	}
 }
 
@@ -693,278 +490,33 @@ func TestKnowledgeRepository_NoTenantScope(t *testing.T) {
 // Provenance Tests
 // ============================================================================
 
-func TestKnowledgeRepository_Upsert_Provenance_Create(t *testing.T) {
+func TestKnowledgeRepository_Create_WithProvenance(t *testing.T) {
 	tc := setupKnowledgeTest(t)
 	tc.cleanup()
 
-	// Test with manual provenance
-	ctx, cleanup := tc.createTestContextWithSource(models.SourceManual)
+	ctx, cleanup := tc.createTestContextWithSource(models.SourceMCP)
 	defer cleanup()
 
 	fact := &models.KnowledgeFact{
-		ProjectID:  tc.projectID,
-		OntologyID: &tc.ontologyID,
-		FactType:   models.FactTypeTerminology,
-		Key:        "provenance_test",
-		Value:      "Testing provenance on create",
+		ProjectID: tc.projectID,
+		FactType:  models.FactTypeTerminology,
+		Value:     "A fact from MCP",
 	}
 
-	err := tc.repo.Upsert(ctx, fact)
-	if err != nil {
-		t.Fatalf("Upsert failed: %v", err)
-	}
-
-	// Verify Source was set from context
-	if fact.Source != "manual" {
-		t.Errorf("expected Source 'manual', got %q", fact.Source)
-	}
-	// Verify CreatedBy was set from context
-	if fact.CreatedBy == nil {
-		t.Error("expected CreatedBy to be set")
-	}
-	if fact.CreatedBy != nil && *fact.CreatedBy != tc.testUserID {
-		t.Errorf("expected CreatedBy to be %v, got %v", tc.testUserID, *fact.CreatedBy)
-	}
-
-	// Verify persisted correctly
-	retrieved, err := tc.repo.GetByKey(ctx, tc.projectID, models.FactTypeTerminology, "provenance_test")
-	if err != nil {
-		t.Fatalf("GetByKey failed: %v", err)
-	}
-	if retrieved.Source != "manual" {
-		t.Errorf("expected persisted Source 'manual', got %q", retrieved.Source)
-	}
-	if retrieved.CreatedBy == nil || *retrieved.CreatedBy != tc.testUserID {
-		t.Errorf("expected persisted CreatedBy %v, got %v", tc.testUserID, retrieved.CreatedBy)
-	}
-}
-
-func TestKnowledgeRepository_Upsert_Provenance_Inference(t *testing.T) {
-	tc := setupKnowledgeTest(t)
-	tc.cleanup()
-
-	// Test with inference provenance
-	ctx, cleanup := tc.createTestContextWithSource(models.SourceInferred)
-	defer cleanup()
-
-	fact := &models.KnowledgeFact{
-		ProjectID:  tc.projectID,
-		OntologyID: &tc.ontologyID,
-		FactType:   models.FactTypeTerminology,
-		Key:        "inferred_fact",
-		Value:      "Created by inference",
-	}
-
-	err := tc.repo.Upsert(ctx, fact)
-	if err != nil {
-		t.Fatalf("Upsert failed: %v", err)
-	}
-
-	// Verify Source was set from context
-	if fact.Source != "inferred" {
-		t.Errorf("expected Source 'inference', got %q", fact.Source)
-	}
-
-	// Verify persisted correctly
-	retrieved, err := tc.repo.GetByKey(ctx, tc.projectID, models.FactTypeTerminology, "inferred_fact")
-	if err != nil {
-		t.Fatalf("GetByKey failed: %v", err)
-	}
-	if retrieved.Source != "inferred" {
-		t.Errorf("expected persisted Source 'inference', got %q", retrieved.Source)
-	}
-}
-
-func TestKnowledgeRepository_Upsert_NoProvenance(t *testing.T) {
-	tc := setupKnowledgeTest(t)
-	tc.cleanup()
-
-	// Create context with tenant scope but NO provenance
-	ctx := context.Background()
-	scope, err := tc.engineDB.DB.WithoutTenant(ctx)
-	if err != nil {
-		t.Fatalf("failed to create tenant scope: %v", err)
-	}
-	defer scope.Close()
-	ctx = database.SetTenantScope(ctx, scope)
-	// Note: no provenance set
-
-	fact := &models.KnowledgeFact{
-		ProjectID:  tc.projectID,
-		OntologyID: &tc.ontologyID,
-		FactType:   models.FactTypeTerminology,
-		Key:        "no_provenance",
-		Value:      "Created without provenance",
-	}
-
-	err = tc.repo.Upsert(ctx, fact)
-	if err == nil {
-		t.Error("expected error when creating without provenance context")
-	}
-	if err != nil && err.Error() != "provenance context required" {
-		t.Errorf("expected 'provenance context required' error, got: %v", err)
-	}
-}
-
-func TestKnowledgeRepository_Upsert_Provenance_Update(t *testing.T) {
-	tc := setupKnowledgeTest(t)
-	tc.cleanup()
-
-	// Create fact with inference provenance
-	ctxInference, cleanupCreate := tc.createTestContextWithSource(models.SourceInferred)
-	defer cleanupCreate()
-
-	fact := &models.KnowledgeFact{
-		ProjectID:  tc.projectID,
-		OntologyID: &tc.ontologyID,
-		FactType:   models.FactTypeTerminology,
-		Key:        "updatable_fact",
-		Value:      "Original value",
-	}
-
-	err := tc.repo.Upsert(ctxInference, fact)
+	err := tc.repo.Create(ctx, fact)
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
 
-	// Verify initial state
-	if fact.Source != "inferred" {
-		t.Errorf("expected initial Source 'inference', got %q", fact.Source)
-	}
-	if fact.LastEditSource != nil {
-		t.Errorf("expected nil LastEditSource initially, got %v", fact.LastEditSource)
-	}
-
-	originalID := fact.ID
-
-	// Update by ID with manual provenance
-	ctxManual, cleanupUpdate := tc.createTestContextWithSource(models.SourceManual)
-	defer cleanupUpdate()
-
-	// Update by ID
-	updateFact := &models.KnowledgeFact{
-		ID:         originalID,
-		ProjectID:  tc.projectID,
-		OntologyID: &tc.ontologyID,
-		FactType:   models.FactTypeTerminology,
-		Key:        "updatable_fact_renamed",
-		Value:      "Updated by user",
-		Context:    "Manual update",
-	}
-
-	err = tc.repo.Upsert(ctxManual, updateFact)
+	// Verify source was set from provenance
+	facts, err := tc.repo.GetByProject(ctx, tc.projectID)
 	if err != nil {
-		t.Fatalf("Update failed: %v", err)
+		t.Fatalf("GetByProject failed: %v", err)
 	}
-
-	// Verify LastEditSource was set
-	if updateFact.LastEditSource == nil || *updateFact.LastEditSource != "manual" {
-		t.Errorf("expected LastEditSource 'manual', got %v", updateFact.LastEditSource)
+	if len(facts) != 1 {
+		t.Fatalf("expected 1 fact, got %d", len(facts))
 	}
-	// Verify UpdatedBy was set
-	if updateFact.UpdatedBy == nil || *updateFact.UpdatedBy != tc.testUserID {
-		t.Errorf("expected UpdatedBy %v, got %v", tc.testUserID, updateFact.UpdatedBy)
-	}
-
-	// Verify persisted correctly
-	retrieved, err := tc.repo.GetByKey(ctxManual, tc.projectID, models.FactTypeTerminology, "updatable_fact_renamed")
-	if err != nil {
-		t.Fatalf("GetByKey failed: %v", err)
-	}
-	if retrieved == nil {
-		t.Fatal("expected fact to be found")
-	}
-	// Note: Source is now whatever the upsert set (since update doesn't preserve original source)
-	// LastEditSource should be set to manual
-	if retrieved.LastEditSource == nil || *retrieved.LastEditSource != "manual" {
-		t.Errorf("expected persisted LastEditSource 'manual', got %v", retrieved.LastEditSource)
-	}
-	// UpdatedBy should be set
-	if retrieved.UpdatedBy == nil || *retrieved.UpdatedBy != tc.testUserID {
-		t.Errorf("expected persisted UpdatedBy %v, got %v", tc.testUserID, retrieved.UpdatedBy)
-	}
-}
-
-func TestKnowledgeRepository_DeleteBySource(t *testing.T) {
-	tc := setupKnowledgeTest(t)
-	tc.cleanup()
-
-	// Create facts with inference provenance
-	ctxInference, cleanupInference := tc.createTestContextWithSource(models.SourceInferred)
-	defer cleanupInference()
-
-	fact1 := &models.KnowledgeFact{
-		ProjectID:  tc.projectID,
-		OntologyID: &tc.ontologyID,
-		FactType:   models.FactTypeTerminology,
-		Key:        "inferred_fact_1",
-		Value:      "Created by inference",
-	}
-	if err := tc.repo.Upsert(ctxInference, fact1); err != nil {
-		t.Fatalf("Create fact1 failed: %v", err)
-	}
-
-	fact2 := &models.KnowledgeFact{
-		ProjectID:  tc.projectID,
-		OntologyID: &tc.ontologyID,
-		FactType:   models.FactTypeBusinessRule,
-		Key:        "inferred_fact_2",
-		Value:      "Also created by inference",
-	}
-	if err := tc.repo.Upsert(ctxInference, fact2); err != nil {
-		t.Fatalf("Create fact2 failed: %v", err)
-	}
-
-	// Create fact with manual provenance
-	ctxManual, cleanupManual := tc.createTestContextWithSource(models.SourceManual)
-	defer cleanupManual()
-
-	fact3 := &models.KnowledgeFact{
-		ProjectID:  tc.projectID,
-		OntologyID: &tc.ontologyID,
-		FactType:   models.FactTypeTerminology,
-		Key:        "manual_fact",
-		Value:      "Created manually",
-	}
-	if err := tc.repo.Upsert(ctxManual, fact3); err != nil {
-		t.Fatalf("Create fact3 failed: %v", err)
-	}
-
-	// Delete inference facts
-	err := tc.repo.DeleteBySource(ctxManual, tc.projectID, models.SourceInferred)
-	if err != nil {
-		t.Fatalf("DeleteBySource failed: %v", err)
-	}
-
-	// Verify inference facts are deleted
-	retrieved1, _ := tc.repo.GetByKey(ctxManual, tc.projectID, models.FactTypeTerminology, "inferred_fact_1")
-	if retrieved1 != nil {
-		t.Error("expected inferred fact1 to be deleted")
-	}
-
-	retrieved2, _ := tc.repo.GetByKey(ctxManual, tc.projectID, models.FactTypeBusinessRule, "inferred_fact_2")
-	if retrieved2 != nil {
-		t.Error("expected inferred fact2 to be deleted")
-	}
-
-	// Verify manual fact still exists
-	retrieved3, err := tc.repo.GetByKey(ctxManual, tc.projectID, models.FactTypeTerminology, "manual_fact")
-	if err != nil {
-		t.Fatalf("GetByKey for manual fact failed: %v", err)
-	}
-	if retrieved3 == nil {
-		t.Error("expected manual fact to still exist")
-	}
-}
-
-func TestKnowledgeRepository_DeleteBySource_NoTenantScope(t *testing.T) {
-	tc := setupKnowledgeTest(t)
-	tc.cleanup()
-
-	ctx := context.Background() // No tenant scope
-
-	err := tc.repo.DeleteBySource(ctx, tc.projectID, models.SourceInferred)
-	if err == nil {
-		t.Error("expected error for DeleteBySource without tenant scope")
+	if facts[0].Source != string(models.SourceMCP) {
+		t.Errorf("expected source 'mcp', got %q", facts[0].Source)
 	}
 }

@@ -33,7 +33,7 @@ type chatIntegrationTestContext struct {
 	knowledgeRepo    repositories.KnowledgeRepository
 	projectID        uuid.UUID
 	mockChatService  *mockChatService
-	mockKnowledgeSvc *mockKnowledgeService
+	mockKnowledgeSvc *mockKnowledgeServiceChat
 }
 
 // mockChatService is a mock implementation of OntologyChatService for testing.
@@ -88,72 +88,73 @@ func (m *mockChatService) SaveMessage(ctx context.Context, message *models.ChatM
 	return nil
 }
 
-// mockKnowledgeService is a mock implementation of KnowledgeService for testing.
-type mockKnowledgeService struct {
-	storeFunc     func(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error)
+// mockKnowledgeServiceChat is a mock implementation of KnowledgeService for testing.
+type mockKnowledgeServiceChat struct {
+	storeFunc     func(ctx context.Context, projectID uuid.UUID, factType, value, contextInfo string) (*models.KnowledgeFact, error)
 	getAllFunc    func(ctx context.Context, projectID uuid.UUID) ([]*models.KnowledgeFact, error)
 	getByTypeFunc func(ctx context.Context, projectID uuid.UUID, factType string) ([]*models.KnowledgeFact, error)
 	deleteFunc    func(ctx context.Context, id uuid.UUID) error
 }
 
-func (m *mockKnowledgeService) Store(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error) {
+func (m *mockKnowledgeServiceChat) Store(ctx context.Context, projectID uuid.UUID, factType, value, contextInfo string) (*models.KnowledgeFact, error) {
 	if m.storeFunc != nil {
-		return m.storeFunc(ctx, projectID, factType, key, value, contextInfo)
+		return m.storeFunc(ctx, projectID, factType, value, contextInfo)
 	}
 	return &models.KnowledgeFact{
 		ID:        uuid.New(),
 		ProjectID: projectID,
 		FactType:  factType,
-		Key:       key,
 		Value:     value,
 		Context:   contextInfo,
 	}, nil
 }
 
-func (m *mockKnowledgeService) StoreWithSource(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo, source string) (*models.KnowledgeFact, error) {
+func (m *mockKnowledgeServiceChat) StoreWithSource(ctx context.Context, projectID uuid.UUID, factType, value, contextInfo, source string) (*models.KnowledgeFact, error) {
 	if m.storeFunc != nil {
-		return m.storeFunc(ctx, projectID, factType, key, value, contextInfo)
+		return m.storeFunc(ctx, projectID, factType, value, contextInfo)
 	}
 	return &models.KnowledgeFact{
 		ID:        uuid.New(),
 		ProjectID: projectID,
 		FactType:  factType,
-		Key:       key,
 		Value:     value,
 		Context:   contextInfo,
 		Source:    source,
 	}, nil
 }
 
-func (m *mockKnowledgeService) Update(ctx context.Context, projectID, id uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error) {
+func (m *mockKnowledgeServiceChat) Update(ctx context.Context, projectID, id uuid.UUID, factType, value, contextInfo string) (*models.KnowledgeFact, error) {
 	return &models.KnowledgeFact{
 		ID:        id,
 		ProjectID: projectID,
 		FactType:  factType,
-		Key:       key,
 		Value:     value,
 		Context:   contextInfo,
 	}, nil
 }
 
-func (m *mockKnowledgeService) GetAll(ctx context.Context, projectID uuid.UUID) ([]*models.KnowledgeFact, error) {
+func (m *mockKnowledgeServiceChat) GetAll(ctx context.Context, projectID uuid.UUID) ([]*models.KnowledgeFact, error) {
 	if m.getAllFunc != nil {
 		return m.getAllFunc(ctx, projectID)
 	}
 	return []*models.KnowledgeFact{}, nil
 }
 
-func (m *mockKnowledgeService) GetByType(ctx context.Context, projectID uuid.UUID, factType string) ([]*models.KnowledgeFact, error) {
+func (m *mockKnowledgeServiceChat) GetByType(ctx context.Context, projectID uuid.UUID, factType string) ([]*models.KnowledgeFact, error) {
 	if m.getByTypeFunc != nil {
 		return m.getByTypeFunc(ctx, projectID, factType)
 	}
 	return []*models.KnowledgeFact{}, nil
 }
 
-func (m *mockKnowledgeService) Delete(ctx context.Context, id uuid.UUID) error {
+func (m *mockKnowledgeServiceChat) Delete(ctx context.Context, id uuid.UUID) error {
 	if m.deleteFunc != nil {
 		return m.deleteFunc(ctx, id)
 	}
+	return nil
+}
+
+func (m *mockKnowledgeServiceChat) DeleteAll(ctx context.Context, projectID uuid.UUID) error {
 	return nil
 }
 
@@ -164,7 +165,7 @@ func setupChatIntegrationTest(t *testing.T) *chatIntegrationTestContext {
 	engineDB := testhelpers.GetEngineDB(t)
 
 	mockChatSvc := &mockChatService{}
-	mockKnowledgeSvc := &mockKnowledgeService{}
+	mockKnowledgeSvc := &mockKnowledgeServiceChat{}
 
 	handler := NewOntologyChatHandler(mockChatSvc, mockKnowledgeSvc, zap.NewNop())
 
@@ -227,7 +228,7 @@ func setupChatIntegrationTestWithRealServices(t *testing.T) *chatIntegrationTest
 	}
 
 	tc.mockChatService = mockChatSvc
-	tc.mockKnowledgeSvc = &mockKnowledgeService{
+	tc.mockKnowledgeSvc = &mockKnowledgeServiceChat{
 		getAllFunc: func(ctx context.Context, pid uuid.UUID) ([]*models.KnowledgeFact, error) {
 			return knowledgeRepo.GetByProject(ctx, pid)
 		},
@@ -564,7 +565,6 @@ func TestChatHandlerIntegration_SendMessage_KnowledgeStored(t *testing.T) {
 		fact := &models.KnowledgeFact{
 			ID:       uuid.New(),
 			FactType: models.FactTypeFiscalYear,
-			Key:      "start_month",
 			Value:    "July",
 		}
 		eventChan <- models.NewTextEvent("I've stored that information.")
@@ -781,13 +781,11 @@ func TestChatHandlerIntegration_GetKnowledge_Success(t *testing.T) {
 			{
 				ID:       uuid.New(),
 				FactType: models.FactTypeFiscalYear,
-				Key:      "start_month",
 				Value:    "July",
 			},
 			{
 				ID:       uuid.New(),
 				FactType: models.FactTypeTerminology,
-				Key:      "MRR",
 				Value:    "Monthly Recurring Revenue",
 			},
 		}, nil
@@ -834,7 +832,6 @@ func TestChatHandlerIntegration_GetKnowledge_FilterByType(t *testing.T) {
 			{
 				ID:       uuid.New(),
 				FactType: factType,
-				Key:      "test",
 				Value:    "value",
 			},
 		}, nil

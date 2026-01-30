@@ -6,6 +6,7 @@
 import { fetchWithAuth } from '../lib/api';
 import type {
   AnswerQuestionResponse,
+  EnrichmentResponse,
   ExtractOntologyResponse,
   GetNextQuestionResponse,
   SkipDeleteResponse,
@@ -94,9 +95,18 @@ class OntologyApiService {
   /**
    * Get workflow result (tiered ontology) for the latest workflow
    * GET /api/projects/{project_id}/ontology/result
+   * @deprecated Use getEnrichment instead
    */
   async getWorkflowResult(projectId: string): Promise<WorkflowResultResponse> {
     return this.makeRequest<WorkflowResultResponse>(`/${projectId}/ontology/result`);
+  }
+
+  /**
+   * Get enrichment data (entity summaries + column details) for the Enrichment UI page
+   * GET /api/projects/{project_id}/ontology/enrichment
+   */
+  async getEnrichment(projectId: string): Promise<EnrichmentResponse> {
+    return this.makeRequest<EnrichmentResponse>(`/${projectId}/ontology/enrichment`);
   }
 
   /**

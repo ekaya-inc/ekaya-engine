@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/google/uuid"
 )
@@ -28,10 +29,10 @@ type MockLLMClient struct {
 	// Endpoint is returned by GetEndpoint. Defaults to "http://mock-endpoint".
 	Endpoint string
 
-	// Call tracking for verification
-	GenerateResponseCalls int
-	CreateEmbeddingCalls  int
-	CreateEmbeddingsCalls int
+	// Call tracking for verification (use atomic operations for thread safety)
+	GenerateResponseCalls atomic.Int64
+	CreateEmbeddingCalls  atomic.Int64
+	CreateEmbeddingsCalls atomic.Int64
 }
 
 // NewMockLLMClient creates a new mock with sensible defaults.
@@ -44,7 +45,7 @@ func NewMockLLMClient() *MockLLMClient {
 
 // GenerateResponse implements LLMClient.
 func (m *MockLLMClient) GenerateResponse(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*GenerateResponseResult, error) {
-	m.GenerateResponseCalls++
+	m.GenerateResponseCalls.Add(1)
 	if m.GenerateResponseFunc != nil {
 		return m.GenerateResponseFunc(ctx, prompt, systemMessage, temperature, thinking)
 	}
@@ -53,7 +54,7 @@ func (m *MockLLMClient) GenerateResponse(ctx context.Context, prompt string, sys
 
 // CreateEmbedding implements LLMClient.
 func (m *MockLLMClient) CreateEmbedding(ctx context.Context, input string, model string) ([]float32, error) {
-	m.CreateEmbeddingCalls++
+	m.CreateEmbeddingCalls.Add(1)
 	if m.CreateEmbeddingFunc != nil {
 		return m.CreateEmbeddingFunc(ctx, input, model)
 	}
@@ -62,7 +63,7 @@ func (m *MockLLMClient) CreateEmbedding(ctx context.Context, input string, model
 
 // CreateEmbeddings implements LLMClient.
 func (m *MockLLMClient) CreateEmbeddings(ctx context.Context, inputs []string, model string) ([][]float32, error) {
-	m.CreateEmbeddingsCalls++
+	m.CreateEmbeddingsCalls.Add(1)
 	if m.CreateEmbeddingsFunc != nil {
 		return m.CreateEmbeddingsFunc(ctx, inputs, model)
 	}
@@ -87,9 +88,9 @@ func (m *MockLLMClient) GetEndpoint() string {
 
 // Reset clears call tracking counters.
 func (m *MockLLMClient) Reset() {
-	m.GenerateResponseCalls = 0
-	m.CreateEmbeddingCalls = 0
-	m.CreateEmbeddingsCalls = 0
+	m.GenerateResponseCalls.Store(0)
+	m.CreateEmbeddingCalls.Store(0)
+	m.CreateEmbeddingsCalls.Store(0)
 }
 
 // Ensure MockLLMClient implements LLMClient at compile time.

@@ -41,6 +41,9 @@ type SchemaRepository interface {
 	// If selectedOnly is true, only columns with is_selected=true are returned.
 	ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error)
 	ListColumnsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error)
+	// GetColumnsWithFeaturesByDatasource returns columns with features, grouped by table name.
+	// Only returns columns that have column_features in their metadata.
+	GetColumnsWithFeaturesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) (map[string][]*models.SchemaColumn, error)
 	// GetColumnsByTables returns columns for multiple tables, grouped by table name.
 	// If selectedOnly is true, only columns with is_selected=true are returned.
 	GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error)
@@ -52,6 +55,9 @@ type SchemaRepository interface {
 	UpdateColumnSelection(ctx context.Context, projectID, columnID uuid.UUID, isSelected bool) error
 	UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64, sampleValues []string) error
 	UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error
+	// UpdateColumnFeatures stores column features (from LLM classification) in the column's metadata field.
+	// The features are stored under the "column_features" key in the metadata JSONB column.
+	UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error
 
 	// Relationships
 	ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error)
@@ -476,6 +482,61 @@ func (r *schemaRepository) ListColumnsByDatasource(ctx context.Context, projectI
 	return columns, nil
 }
 
+func (r *schemaRepository) GetColumnsWithFeaturesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) (map[string][]*models.SchemaColumn, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	// Get columns with features (non-empty metadata), grouped by table name
+	query := `
+		SELECT c.id, c.project_id, c.schema_table_id, c.column_name, c.data_type,
+		       c.is_nullable, c.is_primary_key, c.is_unique, c.is_selected, c.ordinal_position,
+		       c.default_value, c.distinct_count, c.null_count, c.min_length, c.max_length,
+		       c.business_name, c.description, c.metadata,
+		       c.created_at, c.updated_at, c.sample_values,
+		       t.table_name
+		FROM engine_schema_columns c
+		JOIN engine_schema_tables t ON c.schema_table_id = t.id
+		WHERE c.project_id = $1 AND t.datasource_id = $2
+		  AND c.deleted_at IS NULL AND t.deleted_at IS NULL
+		  AND c.metadata ? 'column_features'
+		ORDER BY t.table_name, c.ordinal_position`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get columns with features: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string][]*models.SchemaColumn)
+	for rows.Next() {
+		var c models.SchemaColumn
+		var metadata []byte
+		var tableName string
+		err := rows.Scan(
+			&c.ID, &c.ProjectID, &c.SchemaTableID, &c.ColumnName, &c.DataType,
+			&c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.IsSelected, &c.OrdinalPosition,
+			&c.DefaultValue, &c.DistinctCount, &c.NullCount, &c.MinLength, &c.MaxLength,
+			&c.BusinessName, &c.Description, &metadata,
+			&c.CreatedAt, &c.UpdatedAt, &c.SampleValues,
+			&tableName,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan column: %w", err)
+		}
+		if err := json.Unmarshal(metadata, &c.Metadata); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+		}
+		result[tableName] = append(result[tableName], &c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating columns: %w", err)
+	}
+
+	return result, nil
+}
+
 func (r *schemaRepository) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
@@ -821,6 +882,39 @@ func (r *schemaRepository) UpdateColumnMetadata(ctx context.Context, projectID, 
 	result, err := scope.Conn.Exec(ctx, query, projectID, columnID, businessName, description)
 	if err != nil {
 		return fmt.Errorf("failed to update column metadata: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return apperrors.ErrNotFound
+	}
+
+	return nil
+}
+
+func (r *schemaRepository) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	// Marshal features to JSON
+	featuresJSON, err := json.Marshal(features)
+	if err != nil {
+		return fmt.Errorf("failed to marshal column features: %w", err)
+	}
+
+	// Update the metadata field, merging with existing metadata using jsonb_set
+	// This preserves any existing metadata while adding/updating the column_features key
+	// Use both project_id and id in WHERE clause for defense in depth (in addition to RLS)
+	query := `
+		UPDATE engine_schema_columns
+		SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{column_features}', $3::jsonb),
+		    updated_at = NOW()
+		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
+
+	result, err := scope.Conn.Exec(ctx, query, projectID, columnID, featuresJSON)
+	if err != nil {
+		return fmt.Errorf("failed to update column features: %w", err)
 	}
 
 	if result.RowsAffected() == 0 {
