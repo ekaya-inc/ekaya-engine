@@ -918,8 +918,8 @@ func TestDatasourcesIntegration_DeleteClearsKnowledgeAndGlossary(t *testing.T) {
 
 	// Create knowledge facts (project-level scope, not linked to ontology)
 	_, err = scope.Conn.Exec(ctx, `
-		INSERT INTO engine_project_knowledge (id, project_id, fact_type, key, value, context, source, created_at, updated_at)
-		VALUES ($1, $2, 'terminology', 'active_user', 'A user who logged in within the last 30 days', 'From old datasource', 'manual', NOW(), NOW())
+		INSERT INTO engine_project_knowledge (id, project_id, fact_type, value, context, source, created_at, updated_at)
+		VALUES ($1, $2, 'terminology', 'A user who logged in within the last 30 days', 'From old datasource', 'manual', NOW(), NOW())
 	`, uuid.New(), tc.projectID)
 	if err != nil {
 		t.Fatalf("failed to create test knowledge fact: %v", err)

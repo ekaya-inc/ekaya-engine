@@ -90,47 +90,44 @@ func (m *mockChatService) SaveMessage(ctx context.Context, message *models.ChatM
 
 // mockKnowledgeServiceChat is a mock implementation of KnowledgeService for testing.
 type mockKnowledgeServiceChat struct {
-	storeFunc     func(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error)
+	storeFunc     func(ctx context.Context, projectID uuid.UUID, factType, value, contextInfo string) (*models.KnowledgeFact, error)
 	getAllFunc    func(ctx context.Context, projectID uuid.UUID) ([]*models.KnowledgeFact, error)
 	getByTypeFunc func(ctx context.Context, projectID uuid.UUID, factType string) ([]*models.KnowledgeFact, error)
 	deleteFunc    func(ctx context.Context, id uuid.UUID) error
 }
 
-func (m *mockKnowledgeServiceChat) Store(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error) {
+func (m *mockKnowledgeServiceChat) Store(ctx context.Context, projectID uuid.UUID, factType, value, contextInfo string) (*models.KnowledgeFact, error) {
 	if m.storeFunc != nil {
-		return m.storeFunc(ctx, projectID, factType, key, value, contextInfo)
+		return m.storeFunc(ctx, projectID, factType, value, contextInfo)
 	}
 	return &models.KnowledgeFact{
 		ID:        uuid.New(),
 		ProjectID: projectID,
 		FactType:  factType,
-		Key:       key,
 		Value:     value,
 		Context:   contextInfo,
 	}, nil
 }
 
-func (m *mockKnowledgeServiceChat) StoreWithSource(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo, source string) (*models.KnowledgeFact, error) {
+func (m *mockKnowledgeServiceChat) StoreWithSource(ctx context.Context, projectID uuid.UUID, factType, value, contextInfo, source string) (*models.KnowledgeFact, error) {
 	if m.storeFunc != nil {
-		return m.storeFunc(ctx, projectID, factType, key, value, contextInfo)
+		return m.storeFunc(ctx, projectID, factType, value, contextInfo)
 	}
 	return &models.KnowledgeFact{
 		ID:        uuid.New(),
 		ProjectID: projectID,
 		FactType:  factType,
-		Key:       key,
 		Value:     value,
 		Context:   contextInfo,
 		Source:    source,
 	}, nil
 }
 
-func (m *mockKnowledgeServiceChat) Update(ctx context.Context, projectID, id uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error) {
+func (m *mockKnowledgeServiceChat) Update(ctx context.Context, projectID, id uuid.UUID, factType, value, contextInfo string) (*models.KnowledgeFact, error) {
 	return &models.KnowledgeFact{
 		ID:        id,
 		ProjectID: projectID,
 		FactType:  factType,
-		Key:       key,
 		Value:     value,
 		Context:   contextInfo,
 	}, nil
@@ -568,7 +565,6 @@ func TestChatHandlerIntegration_SendMessage_KnowledgeStored(t *testing.T) {
 		fact := &models.KnowledgeFact{
 			ID:       uuid.New(),
 			FactType: models.FactTypeFiscalYear,
-			Key:      "start_month",
 			Value:    "July",
 		}
 		eventChan <- models.NewTextEvent("I've stored that information.")
@@ -785,13 +781,11 @@ func TestChatHandlerIntegration_GetKnowledge_Success(t *testing.T) {
 			{
 				ID:       uuid.New(),
 				FactType: models.FactTypeFiscalYear,
-				Key:      "start_month",
 				Value:    "July",
 			},
 			{
 				ID:       uuid.New(),
 				FactType: models.FactTypeTerminology,
-				Key:      "MRR",
 				Value:    "Monthly Recurring Revenue",
 			},
 		}, nil
@@ -838,7 +832,6 @@ func TestChatHandlerIntegration_GetKnowledge_FilterByType(t *testing.T) {
 			{
 				ID:       uuid.New(),
 				FactType: factType,
-				Key:      "test",
 				Value:    "value",
 			},
 		}, nil

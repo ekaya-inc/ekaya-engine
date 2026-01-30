@@ -50,7 +50,6 @@ type ChatHistoryResponse struct {
 type KnowledgeFactResponse struct {
 	ID        string `json:"id"`
 	FactType  string `json:"fact_type"`
-	Key       string `json:"key"`
 	Value     string `json:"value"`
 	Context   string `json:"context,omitempty"`
 	CreatedAt string `json:"created_at"`
@@ -334,7 +333,6 @@ func (h *OntologyChatHandler) toKnowledgeFactResponse(f *models.KnowledgeFact) K
 	return KnowledgeFactResponse{
 		ID:        f.ID.String(),
 		FactType:  f.FactType,
-		Key:       f.Key,
 		Value:     f.Value,
 		Context:   f.Context,
 		CreatedAt: f.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),

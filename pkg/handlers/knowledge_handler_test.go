@@ -30,7 +30,7 @@ type mockKnowledgeService struct {
 	deleteAllErr error
 }
 
-func (m *mockKnowledgeService) Store(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error) {
+func (m *mockKnowledgeService) Store(ctx context.Context, projectID uuid.UUID, factType, value, contextInfo string) (*models.KnowledgeFact, error) {
 	if m.storeErr != nil {
 		return nil, m.storeErr
 	}
@@ -41,7 +41,6 @@ func (m *mockKnowledgeService) Store(ctx context.Context, projectID uuid.UUID, f
 		ID:        uuid.New(),
 		ProjectID: projectID,
 		FactType:  factType,
-		Key:       key,
 		Value:     value,
 		Context:   contextInfo,
 		Source:    "manual",
@@ -50,7 +49,7 @@ func (m *mockKnowledgeService) Store(ctx context.Context, projectID uuid.UUID, f
 	}, nil
 }
 
-func (m *mockKnowledgeService) StoreWithSource(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo, source string) (*models.KnowledgeFact, error) {
+func (m *mockKnowledgeService) StoreWithSource(ctx context.Context, projectID uuid.UUID, factType, value, contextInfo, source string) (*models.KnowledgeFact, error) {
 	if m.storeErr != nil {
 		return nil, m.storeErr
 	}
@@ -61,7 +60,6 @@ func (m *mockKnowledgeService) StoreWithSource(ctx context.Context, projectID uu
 		ID:        uuid.New(),
 		ProjectID: projectID,
 		FactType:  factType,
-		Key:       key,
 		Value:     value,
 		Context:   contextInfo,
 		Source:    source,
@@ -70,7 +68,7 @@ func (m *mockKnowledgeService) StoreWithSource(ctx context.Context, projectID uu
 	}, nil
 }
 
-func (m *mockKnowledgeService) Update(ctx context.Context, projectID, id uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error) {
+func (m *mockKnowledgeService) Update(ctx context.Context, projectID, id uuid.UUID, factType, value, contextInfo string) (*models.KnowledgeFact, error) {
 	if m.updateErr != nil {
 		return nil, m.updateErr
 	}
@@ -78,7 +76,6 @@ func (m *mockKnowledgeService) Update(ctx context.Context, projectID, id uuid.UU
 		ID:        id,
 		ProjectID: projectID,
 		FactType:  factType,
-		Key:       key,
 		Value:     value,
 		Context:   contextInfo,
 		Source:    "manual",
@@ -173,7 +170,6 @@ func TestKnowledgeHandler_List(t *testing.T) {
 				ID:        factID,
 				ProjectID: projectID,
 				FactType:  "business_rule",
-				Key:       "timezone_convention",
 				Value:     "All timestamps are stored in UTC",
 				Context:   "Inferred from analysis",
 				Source:    "inference",
@@ -225,8 +221,8 @@ func TestKnowledgeHandler_List(t *testing.T) {
 		if fact.FactType != "business_rule" {
 			t.Errorf("expected fact_type=business_rule, got %s", fact.FactType)
 		}
-		if fact.Key != "timezone_convention" {
-			t.Errorf("expected key=timezone_convention, got %s", fact.Key)
+		if fact.Value != "All timestamps are stored in UTC" {
+			t.Errorf("expected value='All timestamps are stored in UTC', got %s", fact.Value)
 		}
 	})
 
@@ -270,7 +266,6 @@ func TestKnowledgeHandler_Create(t *testing.T) {
 
 		body := CreateKnowledgeRequest{
 			FactType: "business_rule",
-			Key:      "currency_code",
 			Value:    "Amounts are in cents (USD)",
 			Context:  "User specified",
 		}
@@ -302,30 +297,7 @@ func TestKnowledgeHandler_Create(t *testing.T) {
 		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		body := CreateKnowledgeRequest{
-			Key:   "currency_code",
 			Value: "Amounts are in cents (USD)",
-		}
-		bodyBytes, _ := json.Marshal(body)
-
-		req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/project-knowledge", bytes.NewReader(bodyBytes))
-		req.SetPathValue("pid", projectID.String())
-		req.Header.Set("Content-Type", "application/json")
-
-		rec := httptest.NewRecorder()
-		handler.Create(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
-		}
-	})
-
-	t.Run("returns error for missing key", func(t *testing.T) {
-		mockService := &mockKnowledgeService{}
-		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
-
-		body := CreateKnowledgeRequest{
-			FactType: "business_rule",
-			Value:    "Amounts are in cents (USD)",
 		}
 		bodyBytes, _ := json.Marshal(body)
 
@@ -347,7 +319,6 @@ func TestKnowledgeHandler_Create(t *testing.T) {
 
 		body := CreateKnowledgeRequest{
 			FactType: "business_rule",
-			Key:      "currency_code",
 		}
 		bodyBytes, _ := json.Marshal(body)
 
@@ -369,7 +340,6 @@ func TestKnowledgeHandler_Create(t *testing.T) {
 
 		body := CreateKnowledgeRequest{
 			FactType: "business_rule",
-			Key:      "currency_code",
 			Value:    "Amounts are in cents (USD)",
 		}
 		bodyBytes, _ := json.Marshal(body)
@@ -397,7 +367,6 @@ func TestKnowledgeHandler_Update(t *testing.T) {
 
 		body := UpdateKnowledgeRequest{
 			FactType: "business_rule",
-			Key:      "currency_code",
 			Value:    "Amounts are in dollars (USD)",
 			Context:  "Updated by user",
 		}
@@ -431,7 +400,6 @@ func TestKnowledgeHandler_Update(t *testing.T) {
 
 		body := UpdateKnowledgeRequest{
 			FactType: "business_rule",
-			Key:      "currency_code",
 			Value:    "Amounts are in dollars (USD)",
 		}
 		bodyBytes, _ := json.Marshal(body)
@@ -455,7 +423,6 @@ func TestKnowledgeHandler_Update(t *testing.T) {
 
 		body := UpdateKnowledgeRequest{
 			FactType: "business_rule",
-			Key:      "currency_code",
 			Value:    "Amounts are in dollars (USD)",
 		}
 		bodyBytes, _ := json.Marshal(body)
@@ -656,8 +623,7 @@ func TestKnowledgeHandler_GetOverview(t *testing.T) {
 				{
 					ID:        uuid.New(),
 					ProjectID: projectID,
-					FactType:  "overview",
-					Key:       "project_overview",
+					FactType:  "project_overview",
 					Value:     overviewText,
 					Source:    "manual",
 					CreatedAt: time.Now(),
@@ -711,17 +677,15 @@ func TestKnowledgeHandler_GetOverview(t *testing.T) {
 				{
 					ID:        uuid.New(),
 					ProjectID: projectID,
-					FactType:  "overview",
-					Key:       "other_key",
-					Value:     "some other value",
+					FactType:  "project_overview",
+					Value:     overviewText,
 					Source:    "manual",
 				},
 				{
 					ID:        uuid.New(),
 					ProjectID: projectID,
-					FactType:  "overview",
-					Key:       "project_overview",
-					Value:     overviewText,
+					FactType:  "project_overview",
+					Value:     "some other value",
 					Source:    "manual",
 				},
 			},

@@ -86,22 +86,20 @@ type mockKnowledgeServiceUnit struct {
 	getByTypeErr error
 }
 
-func (m *mockKnowledgeServiceUnit) Store(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error) {
+func (m *mockKnowledgeServiceUnit) Store(ctx context.Context, projectID uuid.UUID, factType, value, contextInfo string) (*models.KnowledgeFact, error) {
 	return &models.KnowledgeFact{
 		ID:        uuid.New(),
 		ProjectID: projectID,
 		FactType:  factType,
-		Key:       key,
 		Value:     value,
 	}, nil
 }
 
-func (m *mockKnowledgeServiceUnit) StoreWithSource(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo, source string) (*models.KnowledgeFact, error) {
+func (m *mockKnowledgeServiceUnit) StoreWithSource(ctx context.Context, projectID uuid.UUID, factType, value, contextInfo, source string) (*models.KnowledgeFact, error) {
 	return &models.KnowledgeFact{
 		ID:        uuid.New(),
 		ProjectID: projectID,
 		FactType:  factType,
-		Key:       key,
 		Value:     value,
 		Source:    source,
 	}, nil
@@ -124,12 +122,11 @@ func (m *mockKnowledgeServiceUnit) GetByType(ctx context.Context, projectID uuid
 	return []*models.KnowledgeFact{}, nil
 }
 
-func (m *mockKnowledgeServiceUnit) Update(ctx context.Context, projectID, id uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error) {
+func (m *mockKnowledgeServiceUnit) Update(ctx context.Context, projectID, id uuid.UUID, factType, value, contextInfo string) (*models.KnowledgeFact, error) {
 	return &models.KnowledgeFact{
 		ID:        id,
 		ProjectID: projectID,
 		FactType:  factType,
-		Key:       key,
 		Value:     value,
 	}, nil
 }
@@ -549,16 +546,14 @@ func TestOntologyChatHandler_GetKnowledge_Success(t *testing.T) {
 			ID:        uuid.New(),
 			ProjectID: projectID,
 			FactType:  models.FactTypeFiscalYear,
-			Key:       "start_month",
-			Value:     "July",
+			Value:     "Fiscal year starts in July",
 			CreatedAt: time.Now(),
 		},
 		{
 			ID:        uuid.New(),
 			ProjectID: projectID,
 			FactType:  models.FactTypeTerminology,
-			Key:       "MRR",
-			Value:     "Monthly Recurring Revenue",
+			Value:     "MRR means Monthly Recurring Revenue",
 			CreatedAt: time.Now(),
 		},
 	}
@@ -727,8 +722,7 @@ func TestOntologyChatHandler_toKnowledgeFactResponse(t *testing.T) {
 	fact := &models.KnowledgeFact{
 		ID:        factID,
 		FactType:  models.FactTypeFiscalYear,
-		Key:       "start_month",
-		Value:     "July",
+		Value:     "Fiscal year starts in July",
 		Context:   "User mentioned fiscal year starts in July",
 		CreatedAt: now,
 	}
@@ -741,11 +735,8 @@ func TestOntologyChatHandler_toKnowledgeFactResponse(t *testing.T) {
 	if resp.FactType != models.FactTypeFiscalYear {
 		t.Errorf("expected FactType '%s', got %s", models.FactTypeFiscalYear, resp.FactType)
 	}
-	if resp.Key != "start_month" {
-		t.Errorf("expected Key 'start_month', got %s", resp.Key)
-	}
-	if resp.Value != "July" {
-		t.Errorf("expected Value 'July', got %s", resp.Value)
+	if resp.Value != "Fiscal year starts in July" {
+		t.Errorf("expected Value 'Fiscal year starts in July', got %s", resp.Value)
 	}
 	if resp.Context != "User mentioned fiscal year starts in July" {
 		t.Errorf("expected Context, got %s", resp.Context)
