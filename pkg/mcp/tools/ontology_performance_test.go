@@ -236,6 +236,7 @@ func setupOntologyPerformanceTest(t *testing.T) *ontologyPerformanceTestContext 
 		entityRepo,
 		relationshipRepo,
 		schemaRepo,
+		nil, // tableMetadataRepo
 		projectService,
 		logger,
 	)
