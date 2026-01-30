@@ -57,6 +57,7 @@ type ontologyDAGService struct {
 	fkDiscoveryMethods             dag.FKDiscoveryMethods
 	pkMatchDiscoveryMethods        dag.PKMatchDiscoveryMethods
 	relationshipEnrichmentMethods  dag.RelationshipEnrichmentMethods
+	entityPromotionMethods         dag.EntityPromotionMethods
 	finalizationMethods            dag.OntologyFinalizationMethods
 	columnEnrichmentMethods        dag.ColumnEnrichmentMethods
 	glossaryDiscoveryMethods       dag.GlossaryDiscoveryMethods
@@ -141,6 +142,11 @@ func (s *ontologyDAGService) SetPKMatchDiscoveryMethods(methods dag.PKMatchDisco
 // SetRelationshipEnrichmentMethods sets the relationship enrichment methods interface.
 func (s *ontologyDAGService) SetRelationshipEnrichmentMethods(methods dag.RelationshipEnrichmentMethods) {
 	s.relationshipEnrichmentMethods = methods
+}
+
+// SetEntityPromotionMethods sets the entity promotion methods interface.
+func (s *ontologyDAGService) SetEntityPromotionMethods(methods dag.EntityPromotionMethods) {
+	s.entityPromotionMethods = methods
 }
 
 // SetFinalizationMethods sets the ontology finalization methods interface.
@@ -737,6 +743,13 @@ func (s *ontologyDAGService) getNodeExecutor(nodeName models.DAGNodeName, nodeID
 			return nil, fmt.Errorf("relationship enrichment methods not set")
 		}
 		node := dag.NewRelationshipEnrichmentNode(s.dagRepo, s.relationshipEnrichmentMethods, s.logger)
+		node.SetCurrentNodeID(nodeID)
+		return node, nil
+
+	case models.DAGNodeEntityPromotion:
+		// Entity promotion is optional - operates in no-op mode if not configured.
+		// This allows backward compatibility during the incremental rollout.
+		node := dag.NewEntityPromotionNode(s.dagRepo, s.entityPromotionMethods, s.logger)
 		node.SetCurrentNodeID(nodeID)
 		return node, nil
 

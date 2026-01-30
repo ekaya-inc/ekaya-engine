@@ -247,9 +247,7 @@ PromotionReasons []string `json:"promotion_reasons,omitempty"`
 
 ### Task 3: Integrate Promotion Scoring into DAG
 
-**File:** `pkg/services/dag/entity_promotion_node.go` (new)
-
-Create a new DAG node that runs AFTER RelationshipEnrichment:
+> **Note:** This task has been split into subtasks 3.1, 3.2, and 3.3.
 
 ```
 Current DAG order:
@@ -271,17 +269,125 @@ Proposed change - insert after RelationshipEnrichment:
 9. OntologyFinalization
 ```
 
-The EntityPromotion node:
-1. Gets all entities and relationships
-2. Scores each entity using PromotionScore
-3. Sets `is_promoted=false` for entities below threshold
-4. Logs promotion decisions with reasons
+---
+
+#### Task 3.1: Create EntityPromotion DAG Node Structure and Registration
+
+Create the new DAG node file and register it in the DAG execution order. This subtask focuses on the node skeleton and DAG ordering, not the promotion logic itself.
+
+**Files to create/modify:**
+
+1. **Create `pkg/services/dag/entity_promotion_node.go`:**
+   - Implement `EntityPromotionNode` struct with standard DAG node interface
+   - Include `Name() string` returning "EntityPromotion"
+   - Include `Execute(ctx context.Context, dag *models.OntologyDAG) error` with placeholder that calls the entity service (to be implemented in 3.2)
+   - Follow the pattern established by other nodes like `pkg/services/dag/relationship_enrichment_node.go`
+
+2. **Modify `pkg/services/dag/dag_executor.go` (or wherever nodes are ordered):**
+   - Insert EntityPromotion node AFTER RelationshipEnrichment (currently node 7)
+   - BEFORE OntologyFinalization (currently node 9, will become node 10)
+   - Update any hardcoded node order constants
+
+3. **Modify `pkg/services/dag/node_factory.go` (or node registration):**
+   - Register the new EntityPromotionNode in the factory/registry
+
+**Reference existing nodes for patterns:**
+- `pkg/services/dag/relationship_enrichment_node.go` - similar structure
+- `pkg/services/dag/entity_enrichment_node.go` - for entity iteration patterns
 
 **Acceptance criteria:**
-- DAG node executes after relationships are populated
-- Entities below score threshold are demoted (not deleted)
-- Demoted entities preserve their metadata (can be re-promoted)
-- Promotion decisions logged for transparency
+- [x] DAG executor includes EntityPromotion in the correct position (after node 7, before node 9)
+- [x] Node executes without error (even if promotion logic is placeholder)
+- [x] DAG status shows EntityPromotion node during extraction
+
+---
+
+#### Task 3.2: Implement EntityPromotion Service Method
+
+Create the service method that the DAG node calls to perform actual promotion scoring. This requires Task 1 (PromotionScore function) and Task 2 (is_promoted field) to be completed first.
+
+**Files to create/modify:**
+
+1. **Add method to `pkg/services/entity_service.go`:**
+   ```go
+   // ScoreAndPromoteEntities evaluates all entities for a project and updates is_promoted status.
+   // Returns count of promoted and demoted entities.
+   func (s *entityService) ScoreAndPromoteEntities(ctx context.Context, projectID uuid.UUID) (promoted int, demoted int, err error)
+   ```
+
+   Implementation should:
+   - Fetch all entities for the project via `s.entityRepo.GetByProject(ctx, projectID)`
+   - Fetch all relationships via relationship repository
+   - For each entity, call `PromotionScore()` from `pkg/services/entity_promotion.go` (Task 1)
+   - Update entity with `is_promoted`, `promotion_score`, and `promotion_reasons` fields (Task 2)
+   - Skip entities where `Source == "manual"` (manual promotions/demotions persist)
+   - Log each promotion decision with reasons at INFO level
+
+2. **Add interface method to `pkg/services/interfaces.go`:**
+   ```go
+   // In EntityService interface
+   ScoreAndPromoteEntities(ctx context.Context, projectID uuid.UUID) (promoted int, demoted int, err error)
+   ```
+
+3. **Update `pkg/services/dag/entity_promotion_node.go` (from 3.1):**
+   - Replace placeholder with call to `entityService.ScoreAndPromoteEntities()`
+   - Log summary: "EntityPromotion complete: X promoted, Y demoted"
+
+**Dependencies:**
+- Task 1 (PromotionScore function) must exist at `pkg/services/entity_promotion.go`
+- Task 2 (is_promoted field) must exist in `pkg/models/ontology_entity.go` and database
+
+**Acceptance criteria:**
+- [ ] Running ontology extraction executes EntityPromotion node after RelationshipEnrichment
+- [ ] Entities below threshold (score < 50) have `is_promoted=false`
+- [ ] Entities at or above threshold have `is_promoted=true`
+- [ ] Promotion scores and reasons are persisted to database
+- [ ] Manual promotions/demotions are preserved (not overwritten)
+- [ ] Demoted entities retain all metadata (description, aliases, key_columns, etc.)
+
+---
+
+#### Task 3.3: Add Integration Test for EntityPromotion DAG Node
+
+Create integration tests that verify the EntityPromotion node works correctly within the DAG workflow.
+
+**Files to create/modify:**
+
+1. **Create `pkg/services/dag/entity_promotion_node_test.go`:**
+   - Test that node executes in correct order (after RelationshipEnrichment)
+   - Test with mock entity data that includes:
+     - High-value entity (5+ inbound refs) → should be promoted
+     - Low-value entity (0 refs, no roles) → should be demoted
+     - Manually promoted entity (Source="manual", is_promoted=true) → should stay promoted
+     - Manually demoted entity (Source="manual", is_promoted=false) → should stay demoted
+
+2. **Add test helper in `pkg/testhelpers/` if needed:**
+   - Helper to create test entities with relationships for promotion testing
+
+**Test scenarios:**
+```go
+func TestEntityPromotionNode_Execute(t *testing.T) {
+    // Setup: Create project with entities and relationships
+    // - UserEntity with 6 inbound relationships (hub) → expect promoted
+    // - SessionEntity with 0 relationships → expect demoted
+    // - ManuallyPromotedEntity with Source="manual" → expect unchanged
+
+    // Execute: Run EntityPromotion node
+
+    // Assert: Check is_promoted, promotion_score, promotion_reasons
+}
+
+func TestEntityPromotionNode_PreservesManualDecisions(t *testing.T) {
+    // Setup: Entity manually demoted (is_promoted=false, Source="manual")
+    // Execute: Run promotion (entity would normally score 80+)
+    // Assert: Entity remains demoted (manual overrides automatic)
+}
+```
+
+**Acceptance criteria:**
+- [ ] Tests pass with real database (integration tests use testhelpers.GetEngineDB)
+- [ ] Test coverage for promotion, demotion, and manual override scenarios
+- [ ] Tests document expected behavior for edge cases
 
 ---
 

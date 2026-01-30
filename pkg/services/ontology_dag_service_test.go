@@ -32,6 +32,7 @@ func TestDAGNodes_AllNodesHaveCorrectOrder(t *testing.T) {
 		models.DAGNodeColumnEnrichment,
 		models.DAGNodePKMatchDiscovery,
 		models.DAGNodeRelationshipEnrichment,
+		models.DAGNodeEntityPromotion,
 		models.DAGNodeOntologyFinalization,
 		models.DAGNodeGlossaryDiscovery,
 		models.DAGNodeGlossaryEnrichment,
