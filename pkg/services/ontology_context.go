@@ -59,6 +59,7 @@ func NewOntologyContextService(
 }
 
 // GetDomainContext returns high-level domain information.
+// Only returns promoted entities (is_promoted=true) to filter out low-value entities.
 func (s *ontologyContextService) GetDomainContext(ctx context.Context, projectID uuid.UUID) (*models.OntologyDomainContext, error) {
 	// Get active ontology (only for checking it exists and domain summary)
 	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
@@ -69,8 +70,8 @@ func (s *ontologyContextService) GetDomainContext(ctx context.Context, projectID
 		return nil, fmt.Errorf("no active ontology found")
 	}
 
-	// Get entities from normalized table
-	entities, err := s.entityRepo.GetByProject(ctx, projectID)
+	// Get only promoted entities - demoted entities are filtered out
+	entities, err := s.entityRepo.GetPromotedByProject(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get entities: %w", err)
 	}
@@ -166,6 +167,7 @@ func (s *ontologyContextService) GetDomainContext(ctx context.Context, projectID
 }
 
 // GetEntitiesContext returns entity summaries with occurrences.
+// Only returns promoted entities (is_promoted=true) to filter out low-value entities.
 func (s *ontologyContextService) GetEntitiesContext(ctx context.Context, projectID uuid.UUID) (*models.OntologyEntitiesContext, error) {
 	// Get active ontology
 	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
@@ -176,8 +178,8 @@ func (s *ontologyContextService) GetEntitiesContext(ctx context.Context, project
 		return nil, fmt.Errorf("no active ontology found")
 	}
 
-	// Get entities
-	entities, err := s.entityRepo.GetByProject(ctx, projectID)
+	// Get only promoted entities - demoted entities are filtered out
+	entities, err := s.entityRepo.GetPromotedByProject(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get entities: %w", err)
 	}

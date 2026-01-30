@@ -393,7 +393,7 @@ func TestEntityPromotionNode_PreservesManualDecisions(t *testing.T) {
 
 ---
 
-### Task 4: Filter Demoted Entities in `get_context`
+### Task 4: Filter Demoted Entities in `get_context` ✅ COMPLETE
 
 **File:** `pkg/services/ontology_context.go`
 

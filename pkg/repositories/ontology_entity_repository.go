@@ -19,6 +19,7 @@ type OntologyEntityRepository interface {
 	GetByID(ctx context.Context, entityID uuid.UUID) (*models.OntologyEntity, error)
 	GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error)
 	GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error)
+	GetPromotedByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error)
 	GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error)
 	GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error)
 	DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error
@@ -213,6 +214,47 @@ func (r *ontologyEntityRepository) GetByProject(ctx context.Context, projectID u
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating ontology entities: %w", err)
+	}
+
+	return entities, nil
+}
+
+// GetPromotedByProject returns only promoted entities (is_promoted=true) for the active ontology.
+func (r *ontologyEntityRepository) GetPromotedByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT e.id, e.project_id, e.ontology_id, e.name, e.description, e.domain,
+		       e.primary_schema, e.primary_table, e.primary_column,
+		       e.is_deleted, e.deletion_reason,
+		       e.confidence, e.is_stale,
+		       e.is_promoted, e.promotion_score, e.promotion_reasons,
+		       e.source, e.last_edit_source, e.created_by, e.updated_by, e.created_at, e.updated_at
+		FROM engine_ontology_entities e
+		JOIN engine_ontologies o ON e.ontology_id = o.id
+		WHERE e.project_id = $1 AND o.is_active = true AND NOT e.is_deleted AND e.is_promoted = true
+		ORDER BY e.name`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query promoted ontology entities by project: %w", err)
+	}
+	defer rows.Close()
+
+	var entities []*models.OntologyEntity
+	for rows.Next() {
+		entity, err := scanOntologyEntity(rows)
+		if err != nil {
+			return nil, err
+		}
+		entities = append(entities, entity)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating promoted ontology entities: %w", err)
 	}
 
 	return entities, nil
