@@ -819,6 +819,9 @@ func (m *mockSchemaRepoForFeatureExtraction) GetNonPKColumnsByExactType(ctx cont
 func (m *mockSchemaRepoForFeatureExtraction) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
+func (m *mockSchemaRepoForFeatureExtraction) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
 
 func TestRunPhase1DataCollection(t *testing.T) {
 	projectID := uuid.New()

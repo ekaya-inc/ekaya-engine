@@ -375,6 +375,10 @@ func (m *mockSchemaRepository) SelectAllTablesAndColumns(ctx context.Context, pr
 	return nil
 }
 
+func (m *mockSchemaRepository) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
 // mockDatasourceService is a mock for DatasourceService.
 type mockDatasourceService struct {
 	datasource *models.Datasource

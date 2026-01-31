@@ -458,6 +458,9 @@ func (m *mockSchemaRepository) GetColumnsWithFeaturesByDatasource(ctx context.Co
 func (m *mockSchemaRepository) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
 	return nil
 }
+func (m *mockSchemaRepository) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
 
 // mockColumnMetadataRepository implements repositories.ColumnMetadataRepository for testing.
 type mockColumnMetadataRepository struct {

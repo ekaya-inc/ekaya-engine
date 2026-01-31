@@ -940,6 +940,9 @@ func (m *mockSchemaRepoForRelEnrichment) GetNonPKColumnsByExactType(ctx context.
 func (m *mockSchemaRepoForRelEnrichment) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
+func (m *mockSchemaRepoForRelEnrichment) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
 
 func TestRelationshipEnrichmentResponse_QuestionsDeserialization(t *testing.T) {
 	// Direct test of relationshipEnrichmentResponse JSON parsing

@@ -1305,6 +1305,9 @@ func (m *mockSchemaRepoForGrouping) GetNonPKColumnsByExactType(ctx context.Conte
 func (m *mockSchemaRepoForGrouping) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
+func (m *mockSchemaRepoForGrouping) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
 
 var _ repositories.SchemaRepository = (*mockSchemaRepoForGrouping)(nil)
 

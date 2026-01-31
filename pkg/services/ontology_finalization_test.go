@@ -403,6 +403,9 @@ func (m *mockSchemaRepoForFinalization) GetNonPKColumnsByExactType(ctx context.C
 func (m *mockSchemaRepoForFinalization) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
+func (m *mockSchemaRepoForFinalization) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
 
 type mockLLMClient struct {
 	responseContent string

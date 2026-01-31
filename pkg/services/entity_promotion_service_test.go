@@ -357,6 +357,9 @@ func (m *mockPromotionSchemaRepo) GetNonPKColumnsByExactType(ctx context.Context
 func (m *mockPromotionSchemaRepo) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
+func (m *mockPromotionSchemaRepo) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
 
 func TestEntityPromotionService_ScoreAndPromoteEntities(t *testing.T) {
 	ctx := context.Background()

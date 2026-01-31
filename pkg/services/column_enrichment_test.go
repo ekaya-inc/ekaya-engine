@@ -439,6 +439,10 @@ func (r *testColEnrichmentSchemaRepo) SelectAllTablesAndColumns(ctx context.Cont
 	return nil
 }
 
+func (r *testColEnrichmentSchemaRepo) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
 // Mock datasource service for testing
 type testColEnrichmentDatasourceService struct{}
 
