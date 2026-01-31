@@ -1608,3 +1608,104 @@ func TestSchemaRepository_PerformanceBaseline(t *testing.T) {
 
 	t.Logf("Created 50 tables with 250 columns and listed them in %v", elapsed)
 }
+
+// ============================================================================
+// ClearColumnFeaturesByProject Tests
+// ============================================================================
+
+func TestSchemaRepository_ClearColumnFeaturesByProject(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create test table
+	table := tc.createTestTable(ctx, "public", "test_features")
+
+	// Create test columns with column_features in metadata
+	col1 := tc.createTestColumn(ctx, table.ID, "col1", 1)
+	col2 := tc.createTestColumn(ctx, table.ID, "col2", 2)
+	col3 := tc.createTestColumn(ctx, table.ID, "col3", 3) // without features
+
+	// Set column_features on col1 and col2
+	features1 := &models.ColumnFeatures{
+		SemanticType: "identifier",
+		Role:         "primary_key",
+	}
+	features2 := &models.ColumnFeatures{
+		SemanticType: "attribute",
+		Role:         "dimension",
+	}
+
+	err := tc.repo.UpdateColumnFeatures(ctx, tc.projectID, col1.ID, features1)
+	if err != nil {
+		t.Fatalf("UpdateColumnFeatures for col1 failed: %v", err)
+	}
+
+	err = tc.repo.UpdateColumnFeatures(ctx, tc.projectID, col2.ID, features2)
+	if err != nil {
+		t.Fatalf("UpdateColumnFeatures for col2 failed: %v", err)
+	}
+
+	// Verify features were set
+	retrievedCol1, err := tc.repo.GetColumnByID(ctx, tc.projectID, col1.ID)
+	if err != nil {
+		t.Fatalf("GetColumnByID for col1 failed: %v", err)
+	}
+	if retrievedCol1.GetColumnFeatures() == nil {
+		t.Error("expected col1 to have column_features before clear")
+	}
+
+	// Clear column features for the project
+	err = tc.repo.ClearColumnFeaturesByProject(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("ClearColumnFeaturesByProject failed: %v", err)
+	}
+
+	// Verify col1 features were cleared
+	retrievedCol1, err = tc.repo.GetColumnByID(ctx, tc.projectID, col1.ID)
+	if err != nil {
+		t.Fatalf("GetColumnByID for col1 after clear failed: %v", err)
+	}
+	if retrievedCol1.GetColumnFeatures() != nil {
+		t.Errorf("expected col1 to have no column_features after clear, got %+v", retrievedCol1.GetColumnFeatures())
+	}
+
+	// Verify col2 features were cleared
+	retrievedCol2, err := tc.repo.GetColumnByID(ctx, tc.projectID, col2.ID)
+	if err != nil {
+		t.Fatalf("GetColumnByID for col2 after clear failed: %v", err)
+	}
+	if retrievedCol2.GetColumnFeatures() != nil {
+		t.Errorf("expected col2 to have no column_features after clear, got %+v", retrievedCol2.GetColumnFeatures())
+	}
+
+	// Verify col3 is unaffected (never had features)
+	retrievedCol3, err := tc.repo.GetColumnByID(ctx, tc.projectID, col3.ID)
+	if err != nil {
+		t.Fatalf("GetColumnByID for col3 after clear failed: %v", err)
+	}
+	if retrievedCol3.GetColumnFeatures() != nil {
+		t.Error("expected col3 to still have no column_features")
+	}
+}
+
+func TestSchemaRepository_ClearColumnFeaturesByProject_NoFeatures(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create test table with columns that have no features
+	table := tc.createTestTable(ctx, "public", "test_no_features")
+	tc.createTestColumn(ctx, table.ID, "col1", 1)
+	tc.createTestColumn(ctx, table.ID, "col2", 2)
+
+	// Clear should not fail even when no columns have features
+	err := tc.repo.ClearColumnFeaturesByProject(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("ClearColumnFeaturesByProject failed when no features exist: %v", err)
+	}
+}

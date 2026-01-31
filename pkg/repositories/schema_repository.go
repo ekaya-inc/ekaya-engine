@@ -82,6 +82,10 @@ type SchemaRepository interface {
 	// SelectAllTablesAndColumns marks all tables and columns for a datasource as selected.
 	// Used after schema refresh to auto-select newly discovered tables.
 	SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error
+
+	// ClearColumnFeaturesByProject removes column_features from metadata for all columns in a project.
+	// Used when deleting ontology to clear enrichment data.
+	ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error
 }
 
 type schemaRepository struct{}
@@ -1818,5 +1822,25 @@ func (r *schemaRepository) SelectAllTablesAndColumns(ctx context.Context, projec
 		return fmt.Errorf("failed to select all columns: %w", err)
 	}
 
+	return nil
+}
+
+// ClearColumnFeaturesByProject removes column_features from metadata for all columns in a project.
+// This is used when deleting ontology data to clear enrichment results.
+func (r *schemaRepository) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		UPDATE engine_schema_columns
+		SET metadata = metadata - 'column_features', updated_at = NOW()
+		WHERE project_id = $1 AND metadata ? 'column_features'`
+
+	_, err := scope.Conn.Exec(ctx, query, projectID)
+	if err != nil {
+		return fmt.Errorf("clear column features: %w", err)
+	}
 	return nil
 }
