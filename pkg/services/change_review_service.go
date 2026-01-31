@@ -187,14 +187,10 @@ func (s *changeReviewService) ApproveAllChanges(ctx context.Context, projectID u
 	}
 
 	// Trigger batch incremental LLM enrichment asynchronously if configured
+	// Note: We use ProcessChangesAsync which creates its own background context
+	// to avoid issues with the request context being canceled after HTTP response
 	if s.incrementalDAG != nil && len(approvedChanges) > 0 {
-		go func() {
-			if err := s.incrementalDAG.ProcessChanges(ctx, approvedChanges); err != nil {
-				s.logger.Error("Failed to process approved changes for incremental enrichment",
-					zap.Error(err),
-					zap.Int("change_count", len(approvedChanges)))
-			}
-		}()
+		s.incrementalDAG.ProcessChangesAsync(projectID, approvedChanges)
 	}
 
 	return result, nil

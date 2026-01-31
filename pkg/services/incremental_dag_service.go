@@ -28,6 +28,11 @@ type IncrementalDAGService interface {
 	// Errors are logged but not returned.
 	ProcessChangeAsync(ctx context.Context, change *models.PendingChange)
 
+	// ProcessChangesAsync processes a batch of changes asynchronously in a background goroutine.
+	// Uses a fresh background context to avoid issues with canceled request contexts.
+	// Errors are logged but not returned.
+	ProcessChangesAsync(projectID uuid.UUID, changes []*models.PendingChange)
+
 	// SetChangeReviewService injects the ChangeReviewService for precedence checking.
 	// This breaks the circular dependency: IncrementalDAGService needs ChangeReviewService
 	// for precedence checking, while ChangeReviewService needs IncrementalDAGService for
@@ -108,6 +113,38 @@ func (s *incrementalDAGService) ProcessChangeAsync(ctx context.Context, change *
 			s.logger.Error("Async change processing failed",
 				zap.String("change_id", change.ID.String()),
 				zap.String("change_type", change.ChangeType),
+				zap.Error(err))
+		}
+	}()
+}
+
+// ProcessChangesAsync processes a batch of changes asynchronously.
+// Uses a fresh background context to avoid issues with canceled request contexts.
+func (s *incrementalDAGService) ProcessChangesAsync(projectID uuid.UUID, changes []*models.PendingChange) {
+	if len(changes) == 0 {
+		return
+	}
+
+	go func() {
+		// Use background context since the original request context may be cancelled
+		// by the time this goroutine runs (HTTP response already sent)
+		bgCtx := context.Background()
+
+		// Get tenant context for the background operation
+		tenantCtx, cleanup, err := s.getTenantCtx(bgCtx, projectID)
+		if err != nil {
+			s.logger.Error("Failed to get tenant context for async batch processing",
+				zap.String("project_id", projectID.String()),
+				zap.Int("change_count", len(changes)),
+				zap.Error(err))
+			return
+		}
+		defer cleanup()
+
+		if err := s.ProcessChanges(tenantCtx, changes); err != nil {
+			s.logger.Error("Async batch change processing failed",
+				zap.String("project_id", projectID.String()),
+				zap.Int("change_count", len(changes)),
 				zap.Error(err))
 		}
 	}()
