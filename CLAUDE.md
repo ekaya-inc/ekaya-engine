@@ -151,7 +151,27 @@ type GoodHandler struct {
 
 If a handler needs data, add a method to the appropriate service.
 
-### 2. Customer Datasource Access Must Use Adapters
+### 2. Services Must Not Contain SQL
+
+Services must access the engine database through repositories, never with raw SQL. This maintains the layering: **Handlers → Services → Repositories**.
+
+```go
+// WRONG - service executing raw SQL
+func (s *myService) Delete(ctx context.Context, projectID uuid.UUID) error {
+    scope, _ := database.GetTenantScope(ctx)
+    _, err := scope.Conn.Exec(ctx, "DELETE FROM engine_foo WHERE project_id = $1", projectID)
+    return err
+}
+
+// CORRECT - service delegates to repository
+func (s *myService) Delete(ctx context.Context, projectID uuid.UUID) error {
+    return s.fooRepo.DeleteByProject(ctx, projectID)
+}
+```
+
+If a service needs a new database operation, add a method to the appropriate repository.
+
+### 3. Customer Datasource Access Must Use Adapters
 
 There are two databases in this system:
 - **Engine metadata database** (`ekaya_engine`) - Always PostgreSQL, accessed via `pkg/repositories/` using pgx directly. This is correct.
@@ -172,7 +192,7 @@ Key interfaces in `pkg/adapters/datasource/interfaces.go`:
 - `QueryExecutor` - Query execution, validation, explain plans
 - `ConnectionTester` - Connection testing
 
-### 3. DAG Nodes Must Follow Consistent Patterns
+### 4. DAG Nodes Must Follow Consistent Patterns
 
 All DAG nodes in `pkg/services/dag/` must:
 - Inherit from `BaseNode` (use `*BaseNode` embedding)
@@ -201,7 +221,7 @@ func (n *MyNode) Execute(ctx context.Context, dag *models.OntologyDAG) error {
 }
 ```
 
-### 4. Never Classify Columns by Name Patterns
+### 5. Never Classify Columns by Name Patterns
 
 Do NOT use column/table name patterns (suffixes, prefixes, substrings) to classify or make decisions. This is fragile and breaks across different naming conventions.
 
