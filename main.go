@@ -230,7 +230,7 @@ func main() {
 	ontologyDAGService := services.NewOntologyDAGService(
 		ontologyDAGRepo, ontologyRepo, ontologyEntityRepo, schemaRepo,
 		entityRelationshipRepo, ontologyQuestionRepo, ontologyChatRepo, knowledgeRepo,
-		getTenantCtx, logger)
+		glossaryRepo, getTenantCtx, logger)
 
 	// Wire DAG adapters using setter pattern (avoids import cycles)
 	knowledgeSeedingService := services.NewKnowledgeSeedingService(knowledgeService, schemaService, llmFactory, logger)

@@ -10,7 +10,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
-	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -48,6 +47,7 @@ type ontologyDAGService struct {
 	questionRepo     repositories.OntologyQuestionRepository
 	chatRepo         repositories.OntologyChatRepository
 	knowledgeRepo    repositories.KnowledgeRepository
+	glossaryRepo     repositories.GlossaryRepository
 
 	// Adapted service methods for dag package
 	knowledgeSeedingMethods        dag.KnowledgeSeedingMethods
@@ -85,6 +85,7 @@ func NewOntologyDAGService(
 	questionRepo repositories.OntologyQuestionRepository,
 	chatRepo repositories.OntologyChatRepository,
 	knowledgeRepo repositories.KnowledgeRepository,
+	glossaryRepo repositories.GlossaryRepository,
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) *ontologyDAGService {
@@ -97,6 +98,7 @@ func NewOntologyDAGService(
 		questionRepo:     questionRepo,
 		chatRepo:         chatRepo,
 		knowledgeRepo:    knowledgeRepo,
+		glossaryRepo:     glossaryRepo,
 		getTenantCtx:     getTenantCtx,
 		logger:           logger.Named("ontology-dag"),
 		serverInstanceID: uuid.New(),
@@ -344,7 +346,16 @@ func (s *ontologyDAGService) Cancel(ctx context.Context, dagID uuid.UUID) error 
 
 // Delete deletes all ontology data for a project including DAGs, ontologies, entities, and relationships.
 // This is a destructive operation that removes all extracted knowledge.
-// All deletions are performed in a single transaction to prevent partial state.
+//
+// Deletion order (CASCADE handles entity relationships, entities, and their children automatically):
+//  1. DAGs (cascade deletes dag_nodes)
+//  2. Questions (explicit delete - some may have NULL ontology_id)
+//  3. Chat messages (explicit delete - some may have NULL ontology_id)
+//  4. Inferred glossary terms (preserve manual/mcp terms; cascade deletes aliases)
+//  5. Column features (clear from schema_columns.metadata)
+//  6. Ontologies (cascade deletes: relationships, entities → aliases/key_columns)
+//
+// NOTE: Project knowledge is NOT deleted - it has project-lifecycle scope.
 func (s *ontologyDAGService) Delete(ctx context.Context, projectID uuid.UUID) error {
 	s.logger.Info("Deleting ontology data", zap.String("project_id", projectID.String()))
 
@@ -361,68 +372,22 @@ func (s *ontologyDAGService) Delete(ctx context.Context, projectID uuid.UUID) er
 		return fmt.Errorf("cannot delete ontology while extraction is running")
 	}
 
-	// Get the tenant scope for transaction
-	scope, ok := database.GetTenantScope(ctx)
-	if !ok {
-		return fmt.Errorf("no tenant scope in context")
-	}
-
-	// Start a transaction to ensure atomic deletion
-	tx, err := scope.Conn.Begin(ctx)
-	if err != nil {
-		s.logger.Error("Failed to begin transaction", zap.String("project_id", projectID.String()), zap.Error(err))
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck // rollback on defer is best-effort
-
-	// Delete in order respecting foreign key constraints:
-	// 1. DAG nodes (via CASCADE from DAGs)
-	// 2. DAGs
-	// 3. Entity aliases (via CASCADE from entities)
-	// 4. Entity relationships
-	// 5. Ontology entities
-	// 6. Ontology questions
-	// 7. Chat messages
-	// 8. Inferred glossary terms (preserving manual/client terms)
-	// 9. Ontologies
-	// NOTE: Project knowledge is NOT deleted - it has project-lifecycle scope
-
 	// Delete DAGs (cascade deletes dag_nodes)
-	if _, err := tx.Exec(ctx, "DELETE FROM engine_ontology_dag WHERE project_id = $1", projectID); err != nil {
+	if err := s.dagRepo.DeleteByProject(ctx, projectID); err != nil {
 		s.logger.Error("Failed to delete DAGs", zap.String("project_id", projectID.String()), zap.Error(err))
 		return fmt.Errorf("delete DAGs: %w", err)
 	}
 	s.logger.Debug("Deleted DAGs", zap.String("project_id", projectID.String()))
 
-	// Delete entity relationships (must be before entities due to FK)
-	if _, err := tx.Exec(ctx, `
-		DELETE FROM engine_entity_relationships
-		WHERE ontology_id IN (SELECT id FROM engine_ontologies WHERE project_id = $1)
-	`, projectID); err != nil {
-		s.logger.Error("Failed to delete relationships", zap.String("project_id", projectID.String()), zap.Error(err))
-		return fmt.Errorf("delete relationships: %w", err)
-	}
-	s.logger.Debug("Deleted relationships", zap.String("project_id", projectID.String()))
-
-	// Delete ontology entities (cascade deletes entity_aliases)
-	if _, err := tx.Exec(ctx, `
-		DELETE FROM engine_ontology_entities
-		WHERE ontology_id IN (SELECT id FROM engine_ontologies WHERE project_id = $1)
-	`, projectID); err != nil {
-		s.logger.Error("Failed to delete entities", zap.String("project_id", projectID.String()), zap.Error(err))
-		return fmt.Errorf("delete entities: %w", err)
-	}
-	s.logger.Debug("Deleted entities", zap.String("project_id", projectID.String()))
-
-	// Delete ontology questions
-	if _, err := tx.Exec(ctx, "DELETE FROM engine_ontology_questions WHERE project_id = $1", projectID); err != nil {
+	// Delete ontology questions (explicit delete - some may have NULL ontology_id)
+	if err := s.questionRepo.DeleteByProject(ctx, projectID); err != nil {
 		s.logger.Error("Failed to delete questions", zap.String("project_id", projectID.String()), zap.Error(err))
 		return fmt.Errorf("delete questions: %w", err)
 	}
 	s.logger.Debug("Deleted questions", zap.String("project_id", projectID.String()))
 
-	// Delete chat messages
-	if _, err := tx.Exec(ctx, "DELETE FROM engine_ontology_chat_messages WHERE project_id = $1", projectID); err != nil {
+	// Delete chat messages (explicit delete - some may have NULL ontology_id)
+	if err := s.chatRepo.ClearHistory(ctx, projectID); err != nil {
 		s.logger.Error("Failed to delete chat messages", zap.String("project_id", projectID.String()), zap.Error(err))
 		return fmt.Errorf("delete chat messages: %w", err)
 	}
@@ -432,37 +397,29 @@ func (s *ontologyDAGService) Delete(ctx context.Context, projectID uuid.UUID) er
 	// Knowledge facts have project-lifecycle scope and persist across ontology re-extractions.
 	// They are only deleted when the project itself is deleted (via CASCADE on project_id FK).
 
-	// Delete inferred glossary terms (preserve manual and client terms)
-	// First delete aliases for inferred terms
-	if _, err := tx.Exec(ctx, `
-		DELETE FROM engine_glossary_aliases
-		WHERE glossary_id IN (
-			SELECT id FROM engine_business_glossary
-			WHERE project_id = $1 AND source = 'inferred'
-		)
-	`, projectID); err != nil {
-		s.logger.Error("Failed to delete inferred glossary aliases", zap.String("project_id", projectID.String()), zap.Error(err))
-		return fmt.Errorf("delete inferred glossary aliases: %w", err)
-	}
-	// Then delete the inferred terms
-	if _, err := tx.Exec(ctx, "DELETE FROM engine_business_glossary WHERE project_id = $1 AND source = 'inferred'", projectID); err != nil {
+	// Delete inferred glossary terms (preserve manual and mcp terms; cascade deletes aliases)
+	if err := s.glossaryRepo.DeleteBySource(ctx, projectID, models.SourceInferred); err != nil {
 		s.logger.Error("Failed to delete inferred glossary terms", zap.String("project_id", projectID.String()), zap.Error(err))
 		return fmt.Errorf("delete inferred glossary terms: %w", err)
 	}
 	s.logger.Debug("Deleted inferred glossary terms", zap.String("project_id", projectID.String()))
 
-	// Delete ontologies (must be last due to FK references)
-	if _, err := tx.Exec(ctx, "DELETE FROM engine_ontologies WHERE project_id = $1", projectID); err != nil {
+	// Clear column features from schema columns
+	// Column features are stored in engine_schema_columns.metadata['column_features'] and are
+	// populated during ontology extraction. Although not FK-linked to the ontology, they should
+	// be cleared when the ontology is deleted so the Enrichment UI reflects a clean slate.
+	if err := s.schemaRepo.ClearColumnFeaturesByProject(ctx, projectID); err != nil {
+		s.logger.Error("Failed to clear column features", zap.String("project_id", projectID.String()), zap.Error(err))
+		return fmt.Errorf("clear column features: %w", err)
+	}
+	s.logger.Debug("Cleared column features", zap.String("project_id", projectID.String()))
+
+	// Delete ontologies (CASCADE handles: relationships, entities → aliases/key_columns)
+	if err := s.ontologyRepo.DeleteByProject(ctx, projectID); err != nil {
 		s.logger.Error("Failed to delete ontologies", zap.String("project_id", projectID.String()), zap.Error(err))
 		return fmt.Errorf("delete ontologies: %w", err)
 	}
 	s.logger.Debug("Deleted ontologies", zap.String("project_id", projectID.String()))
-
-	// Commit the transaction
-	if err := tx.Commit(ctx); err != nil {
-		s.logger.Error("Failed to commit transaction", zap.String("project_id", projectID.String()), zap.Error(err))
-		return fmt.Errorf("commit transaction: %w", err)
-	}
 
 	s.logger.Info("Successfully deleted all ontology data", zap.String("project_id", projectID.String()))
 	return nil
