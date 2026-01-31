@@ -137,6 +137,14 @@ func (m *mockEntityRepo) GetStaleEntities(ctx context.Context, ontologyID uuid.U
 	return nil, nil
 }
 
+func (m *mockEntityRepo) TransferAliasesToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockEntityRepo) TransferKeyColumnsToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
 type mockRelationshipRepo struct {
 	relationships       map[uuid.UUID][]*models.EntityRelationship // keyed by target entity ID
 	getByTargetEntityFn func(ctx context.Context, entityID uuid.UUID) ([]*models.EntityRelationship, error)
@@ -210,6 +218,14 @@ func (m *mockRelationshipRepo) GetStaleRelationships(ctx context.Context, ontolo
 
 func (m *mockRelationshipRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
 	return nil
+}
+
+func (m *mockRelationshipRepo) UpdateSourceEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockRelationshipRepo) UpdateTargetEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
 }
 
 type mockOntologyRepo struct {

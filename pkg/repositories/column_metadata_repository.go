@@ -32,6 +32,10 @@ type ColumnMetadataRepository interface {
 
 	// DeleteByTableColumn removes column metadata by table and column name.
 	DeleteByTableColumn(ctx context.Context, projectID uuid.UUID, tableName, columnName string) error
+
+	// UpdateEntityName updates the entity column from one name to another.
+	// Used when merging entities to update column_metadata references.
+	UpdateEntityName(ctx context.Context, projectID uuid.UUID, fromName, toName string) (int, error)
 }
 
 type columnMetadataRepository struct{}
@@ -199,6 +203,29 @@ func (r *columnMetadataRepository) DeleteByTableColumn(ctx context.Context, proj
 	}
 
 	return nil
+}
+
+// UpdateEntityName updates all column_metadata rows where entity matches fromName
+// to use toName instead. Used during entity merging.
+// Returns the number of rows updated.
+func (r *columnMetadataRepository) UpdateEntityName(ctx context.Context, projectID uuid.UUID, fromName, toName string) (int, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return 0, fmt.Errorf("no tenant scope in context")
+	}
+
+	now := time.Now()
+	query := `
+		UPDATE engine_ontology_column_metadata
+		SET entity = $3, updated_at = $4
+		WHERE project_id = $1 AND entity = $2`
+
+	result, err := scope.Conn.Exec(ctx, query, projectID, fromName, toName, now)
+	if err != nil {
+		return 0, fmt.Errorf("failed to update entity name in column metadata: %w", err)
+	}
+
+	return int(result.RowsAffected()), nil
 }
 
 func scanColumnMetadata(row pgx.Row) (*models.ColumnMetadata, error) {

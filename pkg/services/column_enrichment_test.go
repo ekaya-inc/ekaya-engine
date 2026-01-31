@@ -190,6 +190,14 @@ func (r *testColEnrichmentEntityRepo) GetStaleEntities(ctx context.Context, onto
 	return nil, nil
 }
 
+func (r *testColEnrichmentEntityRepo) TransferAliasesToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (r *testColEnrichmentEntityRepo) TransferKeyColumnsToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
 type testColEnrichmentRelRepo struct{}
 
 func (r *testColEnrichmentRelRepo) GetByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) ([]*models.EntityRelationship, error) {
@@ -263,6 +271,14 @@ func (r *testColEnrichmentRelRepo) GetStaleRelationships(ctx context.Context, on
 
 func (r *testColEnrichmentRelRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
 	return nil
+}
+
+func (r *testColEnrichmentRelRepo) UpdateSourceEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (r *testColEnrichmentRelRepo) UpdateTargetEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
 }
 
 type testColEnrichmentSchemaRepo struct {
@@ -1809,6 +1825,14 @@ func (r *testSelfRefRelRepo) GetStaleRelationships(ctx context.Context, ontology
 
 func (r *testSelfRefRelRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
 	return nil
+}
+
+func (r *testSelfRefRelRepo) UpdateSourceEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (r *testSelfRefRelRepo) UpdateTargetEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
 }
 
 // TestColumnEnrichmentService_EnrichTable_IntegerEnumInference tests that integer enum

@@ -106,6 +106,14 @@ func (m *mockEntityDiscoveryEntityRepo) GetStaleEntities(ctx context.Context, on
 	return nil, nil
 }
 
+func (m *mockEntityDiscoveryEntityRepo) TransferAliasesToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockEntityDiscoveryEntityRepo) TransferKeyColumnsToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
 var _ repositories.OntologyEntityRepository = (*mockEntityDiscoveryEntityRepo)(nil)
 
 type mockEntityDiscoveryConversationRepo struct {
@@ -197,6 +205,7 @@ func TestEnrichEntitiesWithLLM_ParseFailure_ReturnsError(t *testing.T) {
 		nil, // ontologyRepo not needed for this test
 		conversationRepo,
 		nil, // questionService not needed for this test
+		nil, // entityMergeSvc not needed for this test
 		mockFactory,
 		nil, // workerPool not needed for this test
 		mockTenantCtx,
@@ -296,6 +305,7 @@ func TestEnrichEntitiesWithLLM_ValidResponse_Success(t *testing.T) {
 		nil,
 		conversationRepo,
 		nil, // questionService not needed for this test
+		nil, // entityMergeSvc not needed for this test
 		mockFactory,
 		nil, // workerPool not needed for this test
 		mockTenantCtx,
@@ -350,6 +360,7 @@ func TestEnrichEntitiesWithLLM_EmptyEntities_ReturnsNil(t *testing.T) {
 		nil,
 		nil,
 		nil, // questionService not needed for this test
+		nil, // entityMergeSvc not needed for this test
 		llm.NewMockClientFactory(),
 		nil, // workerPool not needed for this test
 		mockTenantCtx,
@@ -450,6 +461,7 @@ func TestEnrichEntitiesWithLLM_IncompleteResponse_ReturnsError(t *testing.T) {
 		nil,
 		conversationRepo,
 		nil, // questionService not needed for this test
+		nil, // entityMergeSvc not needed for this test
 		mockFactory,
 		nil, // workerPool not needed for this test
 		mockTenantCtx,
@@ -511,6 +523,7 @@ func TestValidateEnrichment_AllEntitiesHaveDescriptions_ReturnsNil(t *testing.T)
 		nil,
 		nil,
 		nil, // questionService not needed for this test
+		nil, // entityMergeSvc not needed for this test
 		llm.NewMockClientFactory(),
 		nil, // workerPool not needed for this test
 		mockTenantCtx,
@@ -556,6 +569,7 @@ func TestValidateEnrichment_SomeEntitiesLackDescriptions_ReturnsError(t *testing
 		nil,
 		nil,
 		nil, // questionService not needed for this test
+		nil, // entityMergeSvc not needed for this test
 		llm.NewMockClientFactory(),
 		nil, // workerPool not needed for this test
 		mockTenantCtx,
@@ -588,6 +602,7 @@ func TestValidateEnrichment_NoEntities_ReturnsNil(t *testing.T) {
 		nil,
 		nil,
 		nil, // questionService not needed for this test
+		nil, // entityMergeSvc not needed for this test
 		llm.NewMockClientFactory(),
 		nil, // workerPool not needed for this test
 		mockTenantCtx,
@@ -695,6 +710,7 @@ func TestEnrichEntitiesWithLLM_BatchedEnrichment_Success(t *testing.T) {
 		nil, // ontologyRepo not needed
 		conversationRepo,
 		nil, // questionService not needed for this test
+		nil, // entityMergeSvc not needed for this test
 		mockFactory,
 		workerPool,
 		mockTenantCtx,
@@ -809,6 +825,7 @@ func TestEnrichEntitiesWithLLM_BatchedEnrichment_BatchFailure(t *testing.T) {
 		nil,
 		conversationRepo,
 		nil, // questionService not needed for this test
+		nil, // entityMergeSvc not needed for this test
 		mockFactory,
 		workerPool,
 		mockTenantCtx,
@@ -1123,6 +1140,7 @@ func TestEnrichEntitiesWithLLM_SmallEntitySet_NoBatching(t *testing.T) {
 		nil,
 		conversationRepo,
 		nil, // questionService not needed for this test
+		nil, // entityMergeSvc not needed for this test
 		mockFactory,
 		workerPool,
 		mockTenantCtx,
@@ -1337,6 +1355,7 @@ func TestIdentifyEntitiesFromDDL_GroupsSimilarTables(t *testing.T) {
 		nil,
 		nil,
 		nil, // questionService not needed for this test
+		nil, // entityMergeSvc not needed for this test
 		llm.NewMockClientFactory(),
 		nil,
 		mockTenantCtx,
@@ -1421,6 +1440,7 @@ func TestIdentifyEntitiesFromDDL_AllTestTables_UsesFirstAsPrimary(t *testing.T) 
 		nil,
 		nil,
 		nil, // questionService not needed for this test
+		nil, // entityMergeSvc not needed for this test
 		llm.NewMockClientFactory(),
 		nil,
 		mockTenantCtx,
@@ -1485,6 +1505,7 @@ func TestIdentifyEntitiesFromDDL_NoGrouping_UniqueTables(t *testing.T) {
 		nil,
 		nil,
 		nil, // questionService not needed for this test
+		nil, // entityMergeSvc not needed for this test
 		llm.NewMockClientFactory(),
 		nil,
 		mockTenantCtx,
@@ -1591,6 +1612,7 @@ func TestEnrichEntitiesWithLLM_IncludesExistingNamesInPrompt(t *testing.T) {
 		nil,
 		&mockEntityDiscoveryConversationRepo{},
 		nil, // questionService not needed for this test
+		nil, // entityMergeSvc not needed for this test
 		mockFactory,
 		nil,
 		mockTenantCtx,
@@ -1684,6 +1706,7 @@ func TestEnrichEntitiesWithLLM_NoExistingNames_NoExistingNamesSection(t *testing
 		nil,
 		&mockEntityDiscoveryConversationRepo{},
 		nil, // questionService not needed for this test
+		nil, // entityMergeSvc not needed for this test
 		mockFactory,
 		nil,
 		mockTenantCtx,
@@ -1744,6 +1767,7 @@ func TestIdentifyEntitiesFromDDL_SetsConfidence(t *testing.T) {
 		nil,
 		nil,
 		nil, // questionService not needed for this test
+		nil, // entityMergeSvc not needed for this test
 		llm.NewMockClientFactory(),
 		nil,
 		mockTenantCtx,
@@ -1838,6 +1862,7 @@ func TestEnrichEntitiesWithLLM_SetsConfidence(t *testing.T) {
 		nil,
 		nil,
 		nil, // questionService not needed for this test
+		nil, // entityMergeSvc not needed for this test
 		mockFactory,
 		nil,
 		mockTenantCtx,
@@ -1946,6 +1971,7 @@ func TestEnrichEntitiesWithLLM_QuestionsInResponse_Parsed(t *testing.T) {
 		nil,
 		nil,
 		nil, // questionService not needed for this test
+		nil, // entityMergeSvc not needed for this test
 		mockFactory,
 		nil,
 		mockTenantCtx,
@@ -2122,6 +2148,7 @@ func TestEnrichEntitiesWithLLM_DeduplicatesAliases(t *testing.T) {
 		nil,
 		nil,
 		nil, // questionService not needed for this test
+		nil, // entityMergeSvc not needed for this test
 		mockFactory,
 		nil,
 		mockTenantCtx,

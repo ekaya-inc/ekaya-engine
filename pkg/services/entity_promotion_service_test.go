@@ -109,6 +109,14 @@ func (m *mockPromotionEntityRepo) GetOccurrenceTablesByEntity(ctx context.Contex
 	return nil, nil
 }
 
+func (m *mockPromotionEntityRepo) TransferAliasesToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockPromotionEntityRepo) TransferKeyColumnsToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
 // mockPromotionRelationshipRepo implements EntityRelationshipRepository for testing.
 type mockPromotionRelationshipRepo struct {
 	relationships []*models.EntityRelationship
@@ -169,6 +177,14 @@ func (m *mockPromotionRelationshipRepo) ClearStaleFlag(ctx context.Context, rela
 }
 func (m *mockPromotionRelationshipRepo) GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
 	return nil, nil
+}
+
+func (m *mockPromotionRelationshipRepo) UpdateSourceEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockPromotionRelationshipRepo) UpdateTargetEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
 }
 
 // mockPromotionOntologyRepo implements OntologyRepository for testing.

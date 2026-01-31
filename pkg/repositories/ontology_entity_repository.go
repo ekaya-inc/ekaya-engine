@@ -50,6 +50,10 @@ type OntologyEntityRepository interface {
 	// Occurrence operations
 	CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error)
 	GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error)
+
+	// Transfer operations for entity merging
+	TransferAliasesToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error)
+	TransferKeyColumnsToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error)
 }
 
 type ontologyEntityRepository struct{}
@@ -869,4 +873,80 @@ func (r *ontologyEntityRepository) CountOccurrencesByEntity(ctx context.Context,
 func (r *ontologyEntityRepository) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
 	// Table dropped in migration 030 - return empty for interface compatibility
 	return []string{}, nil
+}
+
+// ============================================================================
+// Transfer Operations for Entity Merging
+// ============================================================================
+
+// TransferAliasesToEntity moves aliases from one entity to another.
+// Uses INSERT...SELECT...ON CONFLICT DO NOTHING to skip duplicates.
+// Returns the number of aliases transferred.
+func (r *ontologyEntityRepository) TransferAliasesToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return 0, fmt.Errorf("no tenant scope in context")
+	}
+
+	// Transfer aliases, skipping any that would cause duplicate (entity_id, alias) conflicts
+	query := `
+		WITH moved AS (
+			INSERT INTO engine_ontology_entity_aliases (id, project_id, entity_id, alias, source, created_at)
+			SELECT gen_random_uuid(), project_id, $2, alias, source, created_at
+			FROM engine_ontology_entity_aliases
+			WHERE entity_id = $1
+			ON CONFLICT (entity_id, alias) DO NOTHING
+			RETURNING 1
+		)
+		SELECT COUNT(*) FROM moved`
+
+	var count int
+	err := scope.Conn.QueryRow(ctx, query, fromEntityID, toEntityID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to transfer aliases: %w", err)
+	}
+
+	// Delete the original aliases
+	deleteQuery := `DELETE FROM engine_ontology_entity_aliases WHERE entity_id = $1`
+	if _, err := scope.Conn.Exec(ctx, deleteQuery, fromEntityID); err != nil {
+		return 0, fmt.Errorf("failed to delete original aliases: %w", err)
+	}
+
+	return count, nil
+}
+
+// TransferKeyColumnsToEntity moves key columns from one entity to another.
+// Uses INSERT...SELECT...ON CONFLICT DO NOTHING to skip duplicates.
+// Returns the number of key columns transferred.
+func (r *ontologyEntityRepository) TransferKeyColumnsToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return 0, fmt.Errorf("no tenant scope in context")
+	}
+
+	// Transfer key columns, skipping any that would cause duplicate (entity_id, column_name) conflicts
+	query := `
+		WITH moved AS (
+			INSERT INTO engine_ontology_entity_key_columns (id, entity_id, column_name, synonyms, created_at)
+			SELECT gen_random_uuid(), $2, column_name, synonyms, created_at
+			FROM engine_ontology_entity_key_columns
+			WHERE entity_id = $1
+			ON CONFLICT (entity_id, column_name) DO NOTHING
+			RETURNING 1
+		)
+		SELECT COUNT(*) FROM moved`
+
+	var count int
+	err := scope.Conn.QueryRow(ctx, query, fromEntityID, toEntityID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to transfer key columns: %w", err)
+	}
+
+	// Delete the original key columns
+	deleteQuery := `DELETE FROM engine_ontology_entity_key_columns WHERE entity_id = $1`
+	if _, err := scope.Conn.Exec(ctx, deleteQuery, fromEntityID); err != nil {
+		return 0, fmt.Errorf("failed to delete original key columns: %w", err)
+	}
+
+	return count, nil
 }

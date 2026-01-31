@@ -1510,6 +1510,14 @@ func (m *mockTestEntityRepo) GetStaleEntities(ctx context.Context, ontologyID uu
 	return nil, nil
 }
 
+func (m *mockTestEntityRepo) TransferAliasesToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockTestEntityRepo) TransferKeyColumnsToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
 func (m *mockTestRelationshipRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }
@@ -1582,6 +1590,14 @@ func (m *mockTestRelationshipRepo) GetStaleRelationships(ctx context.Context, on
 
 func (m *mockTestRelationshipRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
 	return nil
+}
+
+func (m *mockTestRelationshipRepo) UpdateSourceEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockTestRelationshipRepo) UpdateTargetEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
 }
 
 func (m *mockTestSchemaRepo) GetJoinableColumns(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {

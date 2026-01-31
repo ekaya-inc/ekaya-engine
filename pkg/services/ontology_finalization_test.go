@@ -182,6 +182,14 @@ func (m *mockEntityRepoForFinalization) GetStaleEntities(ctx context.Context, on
 	return nil, nil
 }
 
+func (m *mockEntityRepoForFinalization) TransferAliasesToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockEntityRepoForFinalization) TransferKeyColumnsToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
 type mockRelationshipRepoForFinalization struct {
 	relationships   []*models.EntityRelationship
 	getByProjectErr error
@@ -264,6 +272,14 @@ func (m *mockRelationshipRepoForFinalization) GetStaleRelationships(ctx context.
 
 func (m *mockRelationshipRepoForFinalization) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
 	return nil
+}
+
+func (m *mockRelationshipRepoForFinalization) UpdateSourceEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockRelationshipRepoForFinalization) UpdateTargetEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
 }
 
 type mockSchemaRepoForFinalization struct {

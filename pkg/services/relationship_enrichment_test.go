@@ -110,6 +110,14 @@ func (r *testRelEnrichmentRelRepo) GetStaleRelationships(ctx context.Context, on
 	return nil, nil
 }
 
+func (r *testRelEnrichmentRelRepo) UpdateSourceEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (r *testRelEnrichmentRelRepo) UpdateTargetEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
 type testRelEnrichmentEntityRepo struct {
 	entities []*models.OntologyEntity
 }
@@ -226,6 +234,14 @@ func (r *testRelEnrichmentEntityRepo) ClearStaleFlag(ctx context.Context, entity
 
 func (r *testRelEnrichmentEntityRepo) GetStaleEntities(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
 	return nil, nil
+}
+
+func (r *testRelEnrichmentEntityRepo) TransferAliasesToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (r *testRelEnrichmentEntityRepo) TransferKeyColumnsToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
 }
 
 // Tests for task 2 changes: validation, retry logic, error handling

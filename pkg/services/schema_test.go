@@ -2478,6 +2478,14 @@ func (m *mockEntityRepository) GetStaleEntities(ctx context.Context, ontologyID 
 	return nil, nil
 }
 
+func (m *mockEntityRepository) TransferAliasesToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockEntityRepository) TransferKeyColumnsToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
 // newTestSchemaServiceWithEntityRepo creates a test schema service with entity repo support.
 func newTestSchemaServiceWithEntityRepo(repo *mockSchemaRepository, entityRepo *mockEntityRepository, dsSvc *mockDatasourceService, factory *mockSchemaAdapterFactory) SchemaService {
 	return NewSchemaService(repo, entityRepo, nil, nil, dsSvc, factory, zap.NewNop())

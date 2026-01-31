@@ -370,6 +370,14 @@ func (m *mockEntityRepoForTask) GetStaleEntities(ctx context.Context, ontologyID
 	return nil, nil
 }
 
+func (m *mockEntityRepoForTask) TransferAliasesToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockEntityRepoForTask) TransferKeyColumnsToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
 var _ repositories.OntologyEntityRepository = (*mockEntityRepoForTask)(nil)
 
 func TestEntityDiscoveryTask_PersistEntities_SetsConfidence(t *testing.T) {

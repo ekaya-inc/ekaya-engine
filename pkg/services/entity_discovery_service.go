@@ -38,6 +38,7 @@ type entityDiscoveryService struct {
 	ontologyRepo     repositories.OntologyRepository
 	conversationRepo repositories.ConversationRepository
 	questionService  OntologyQuestionService
+	entityMergeSvc   EntityMergeService
 	llmFactory       llm.LLMClientFactory
 	workerPool       *llm.WorkerPool
 	getTenantCtx     TenantContextFunc
@@ -51,6 +52,7 @@ func NewEntityDiscoveryService(
 	ontologyRepo repositories.OntologyRepository,
 	conversationRepo repositories.ConversationRepository,
 	questionService OntologyQuestionService,
+	entityMergeSvc EntityMergeService,
 	llmFactory llm.LLMClientFactory,
 	workerPool *llm.WorkerPool,
 	getTenantCtx TenantContextFunc,
@@ -62,6 +64,7 @@ func NewEntityDiscoveryService(
 		ontologyRepo:     ontologyRepo,
 		conversationRepo: conversationRepo,
 		questionService:  questionService,
+		entityMergeSvc:   entityMergeSvc,
 		llmFactory:       llmFactory,
 		workerPool:       workerPool,
 		getTenantCtx:     getTenantCtx,
@@ -574,6 +577,50 @@ func (s *entityDiscoveryService) enrichEntityBatch(
 			continue
 		}
 
+		// Check for name collision before updating the entity
+		// This handles the case where LLM wants to rename "accounts" -> "Account"
+		// but an entity named "Account" already exists (e.g., created via MCP)
+		var targetEntity *models.OntologyEntity = entity
+		if enrichment.EntityName != entity.Name && s.entityMergeSvc != nil {
+			existingEntity, err := s.entityRepo.GetByName(ctx, entity.OntologyID, enrichment.EntityName)
+			if err != nil {
+				s.logger.Error("Failed to check for entity name collision",
+					zap.String("entity_id", entity.ID.String()),
+					zap.String("suggested_name", enrichment.EntityName),
+					zap.Error(err))
+				continue
+			}
+
+			if existingEntity != nil && existingEntity.ID != entity.ID {
+				// Name collision detected - merge inferred entity into existing one
+				s.logger.Info("Entity name collision detected, merging",
+					zap.String("source_entity", entity.Name),
+					zap.String("target_entity", existingEntity.Name),
+					zap.String("suggested_name", enrichment.EntityName))
+
+				// Apply enrichment data to entity before merging (for the merge to copy)
+				entity.Description = enrichment.Description
+				entity.Domain = enrichment.Domain
+				entity.Confidence = 0.8
+
+				mergedEntity, err := s.entityMergeSvc.MergeEntities(ctx, entity, existingEntity)
+				if err != nil {
+					s.logger.Error("Failed to merge entities",
+						zap.String("source_id", entity.ID.String()),
+						zap.String("target_id", existingEntity.ID.String()),
+						zap.Error(err))
+					continue
+				}
+
+				// Use merged entity for creating key columns and aliases
+				targetEntity = mergedEntity
+
+				// Skip to key columns and aliases creation - entity update was handled by merge
+				goto createKeyColumnsAndAliases
+			}
+		}
+
+		// Normal update path (no collision)
 		entity.Name = enrichment.EntityName
 		entity.Description = enrichment.Description
 		entity.Domain = enrichment.Domain
@@ -589,16 +636,17 @@ func (s *entityDiscoveryService) enrichEntityBatch(
 			continue
 		}
 
+	createKeyColumnsAndAliases:
 		// Create key columns with synonyms
 		for _, kc := range enrichment.KeyColumns {
 			keyCol := &models.OntologyEntityKeyColumn{
-				EntityID:   entity.ID,
+				EntityID:   targetEntity.ID,
 				ColumnName: kc.Name,
 				Synonyms:   kc.Synonyms,
 			}
 			if err := s.entityRepo.CreateKeyColumn(ctx, keyCol); err != nil {
 				s.logger.Error("Failed to create key column",
-					zap.String("entity_id", entity.ID.String()),
+					zap.String("entity_id", targetEntity.ID.String()),
 					zap.String("column_name", kc.Name),
 					zap.Error(err))
 				// Continue with other key columns
@@ -614,13 +662,13 @@ func (s *entityDiscoveryService) enrichEntityBatch(
 			}
 			seenAliases[altName] = true
 			alias := &models.OntologyEntityAlias{
-				EntityID: entity.ID,
+				EntityID: targetEntity.ID,
 				Alias:    altName,
 				Source:   &discoverySource,
 			}
 			if err := s.entityRepo.CreateAlias(ctx, alias); err != nil {
 				s.logger.Error("Failed to create entity alias",
-					zap.String("entity_id", entity.ID.String()),
+					zap.String("entity_id", targetEntity.ID.String()),
 					zap.String("alias", altName),
 					zap.Error(err))
 				// Continue with other aliases

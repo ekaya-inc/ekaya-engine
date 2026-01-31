@@ -34,6 +34,10 @@ type EntityRelationshipRepository interface {
 	MarkInferenceRelationshipsStale(ctx context.Context, ontologyID uuid.UUID) error
 	ClearStaleFlag(ctx context.Context, relationshipID uuid.UUID) error
 	GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error)
+
+	// Transfer operations for entity merging
+	UpdateSourceEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error)
+	UpdateTargetEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error)
 }
 
 type entityRelationshipRepository struct{}
@@ -677,6 +681,100 @@ func (r *entityRelationshipRepository) Delete(ctx context.Context, id uuid.UUID)
 	}
 
 	return nil
+}
+
+// ============================================================================
+// Transfer Operations for Entity Merging
+// ============================================================================
+
+// UpdateSourceEntityID updates all relationships that have fromEntityID as source
+// to point to toEntityID instead. Handles duplicate constraint violations by
+// deleting relationships that would conflict after the update.
+// Returns the number of relationships updated.
+func (r *entityRelationshipRepository) UpdateSourceEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return 0, fmt.Errorf("no tenant scope in context")
+	}
+
+	now := time.Now()
+
+	// First, delete relationships that would cause conflicts after update
+	// (same target, source/target columns already exist for toEntityID)
+	deleteConflicts := `
+		DELETE FROM engine_entity_relationships r1
+		USING engine_entity_relationships r2
+		WHERE r1.source_entity_id = $1
+		  AND r2.source_entity_id = $2
+		  AND r1.target_entity_id = r2.target_entity_id
+		  AND r1.source_column_schema = r2.source_column_schema
+		  AND r1.source_column_table = r2.source_column_table
+		  AND r1.source_column_name = r2.source_column_name
+		  AND r1.target_column_schema = r2.target_column_schema
+		  AND r1.target_column_table = r2.target_column_table
+		  AND r1.target_column_name = r2.target_column_name`
+
+	if _, err := scope.Conn.Exec(ctx, deleteConflicts, fromEntityID, toEntityID); err != nil {
+		return 0, fmt.Errorf("failed to delete conflicting relationships: %w", err)
+	}
+
+	// Update remaining relationships
+	updateQuery := `
+		UPDATE engine_entity_relationships
+		SET source_entity_id = $2, updated_at = $3
+		WHERE source_entity_id = $1`
+
+	result, err := scope.Conn.Exec(ctx, updateQuery, fromEntityID, toEntityID, now)
+	if err != nil {
+		return 0, fmt.Errorf("failed to update source entity ID: %w", err)
+	}
+
+	return int(result.RowsAffected()), nil
+}
+
+// UpdateTargetEntityID updates all relationships that have fromEntityID as target
+// to point to toEntityID instead. Handles duplicate constraint violations by
+// deleting relationships that would conflict after the update.
+// Returns the number of relationships updated.
+func (r *entityRelationshipRepository) UpdateTargetEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return 0, fmt.Errorf("no tenant scope in context")
+	}
+
+	now := time.Now()
+
+	// First, delete relationships that would cause conflicts after update
+	// (same source, source/target columns already exist for toEntityID)
+	deleteConflicts := `
+		DELETE FROM engine_entity_relationships r1
+		USING engine_entity_relationships r2
+		WHERE r1.target_entity_id = $1
+		  AND r2.target_entity_id = $2
+		  AND r1.source_entity_id = r2.source_entity_id
+		  AND r1.source_column_schema = r2.source_column_schema
+		  AND r1.source_column_table = r2.source_column_table
+		  AND r1.source_column_name = r2.source_column_name
+		  AND r1.target_column_schema = r2.target_column_schema
+		  AND r1.target_column_table = r2.target_column_table
+		  AND r1.target_column_name = r2.target_column_name`
+
+	if _, err := scope.Conn.Exec(ctx, deleteConflicts, fromEntityID, toEntityID); err != nil {
+		return 0, fmt.Errorf("failed to delete conflicting relationships: %w", err)
+	}
+
+	// Update remaining relationships
+	updateQuery := `
+		UPDATE engine_entity_relationships
+		SET target_entity_id = $2, updated_at = $3
+		WHERE target_entity_id = $1`
+
+	result, err := scope.Conn.Exec(ctx, updateQuery, fromEntityID, toEntityID, now)
+	if err != nil {
+		return 0, fmt.Errorf("failed to update target entity ID: %w", err)
+	}
+
+	return int(result.RowsAffected()), nil
 }
 
 func scanEntityRelationship(row pgx.Row) (*models.EntityRelationship, error) {

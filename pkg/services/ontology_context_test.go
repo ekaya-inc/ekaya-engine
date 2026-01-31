@@ -193,6 +193,14 @@ func (m *mockOntologyEntityRepository) GetStaleEntities(ctx context.Context, ont
 	return nil, nil
 }
 
+func (m *mockOntologyEntityRepository) TransferAliasesToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockOntologyEntityRepository) TransferKeyColumnsToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
 // mockEntityRelationshipRepository is a mock for EntityRelationshipRepository.
 type mockEntityRelationshipRepository struct {
 	relationships         []*models.EntityRelationship
@@ -288,6 +296,14 @@ func (m *mockEntityRelationshipRepository) GetStaleRelationships(ctx context.Con
 
 func (m *mockEntityRelationshipRepository) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
 	return nil
+}
+
+func (m *mockEntityRelationshipRepository) UpdateSourceEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockEntityRelationshipRepository) UpdateTargetEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
 }
 
 // mockProjectServiceForOntology is a mock for ProjectService in ontology context tests.

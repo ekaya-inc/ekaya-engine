@@ -296,6 +296,14 @@ func (m *mockEntityRepoForGlossary) GetStaleEntities(ctx context.Context, ontolo
 	return nil, nil
 }
 
+func (m *mockEntityRepoForGlossary) TransferAliasesToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockEntityRepoForGlossary) TransferKeyColumnsToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
 type mockLLMClientForGlossary struct {
 	responseContent string
 	generateErr     error

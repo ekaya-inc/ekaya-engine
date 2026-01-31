@@ -205,9 +205,14 @@ func main() {
 	workerPoolConfig := llm.DefaultWorkerPoolConfig()
 	llmWorkerPool := llm.NewWorkerPool(workerPoolConfig, logger)
 
+	// Entity merge service handles collisions when LLM suggests renaming an entity
+	// to a name that already exists (e.g., MCP-created entity)
+	entityMergeService := services.NewEntityMergeService(
+		ontologyEntityRepo, entityRelationshipRepo, columnMetadataRepo, logger)
+
 	entityDiscoveryService := services.NewEntityDiscoveryService(
 		ontologyEntityRepo, schemaRepo, ontologyRepo, convRepo, ontologyQuestionService,
-		llmFactory, llmWorkerPool, getTenantCtx, logger)
+		entityMergeService, llmFactory, llmWorkerPool, getTenantCtx, logger)
 
 	// Create circuit breaker for LLM resilience
 	circuitBreakerConfig := llm.DefaultCircuitBreakerConfig()
