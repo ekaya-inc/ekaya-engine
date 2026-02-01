@@ -882,62 +882,300 @@ Create comprehensive unit tests for the LLM-based relationship validation in `pk
 
 ---
 
-#### Task 7.3: Integration tests for RelationshipDiscoveryService [ ]
+#### Task 7.3: Integration tests for RelationshipDiscoveryService
 
-Create integration tests for the full relationship discovery pipeline in `pkg/services/relationship_discovery_service_test.go`.
+Integration tests for the full relationship discovery pipeline. Split into subtasks below.
 
-**Context:** The `RelationshipDiscoveryService` (implemented in Task 4) orchestrates the complete pipeline: preserve DB-declared FKs, preserve ColumnFeatures FKs, collect candidates, validate with LLM, store results. Tests should use real database connections via `testhelpers.GetTestDB(t)` and `testhelpers.GetEngineDB(t)`.
+**File:** `pkg/services/relationship_discovery_service_test.go`
+
+---
+
+##### Task 7.3.1: Integration test infrastructure and DB-declared FK preservation test [x]
+
+Create the integration test file with test infrastructure and the first test case verifying DB-declared FKs are preserved without LLM calls.
+
+**File:** `pkg/services/relationship_discovery_service_test.go`
+
+**Context:** The `RelationshipDiscoveryService` orchestrates the complete relationship discovery pipeline. Integration tests need real database connections via `testhelpers.GetTestDB(t)` for customer datasource simulation and `testhelpers.GetEngineDB(t)` for engine metadata tables.
+
+**Implementation:**
+
+1. Create the test file with imports:
+```go
+package services
+
+import (
+    "context"
+    "testing"
+
+    "github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
+    "github.com/google/uuid"
+    "github.com/stretchr/testify/assert"
+    "github.com/stretchr/testify/require"
+)
+```
+
+2. Create test helper functions:
+   - `setupTestProject(t *testing.T, engineDB, testDB)` - Creates a unique project_id, datasource record, and returns cleanup function
+   - `createTestSchema(t *testing.T, testDB, tables []testTable)` - Creates tables in the test datasource
+   - `seedEngineSchema(t *testing.T, engineDB, projectID, datasourceID, tables)` - Populates engine_schema_tables and engine_schema_columns
+
+3. Create mock LLM service for integration tests:
+```go
+type mockLLMServiceForIntegration struct {
+    calls    []string  // Track what candidates were sent
+    mu       sync.Mutex
+    responses map[string]*RelationshipValidationResult
+}
+```
+
+4. Implement first test case - **DB-declared FK preserved without LLM:**
+```go
+func TestRelationshipDiscoveryService_DBDeclaredFKPreserved(t *testing.T) {
+    // Setup: Create test database with actual FK constraint
+    // CREATE TABLE users (id UUID PRIMARY KEY);
+    // CREATE TABLE orders (id UUID PRIMARY KEY, user_id UUID REFERENCES users(id));
+
+    // Seed engine_schema_columns with is_foreign_key=true for orders.user_id
+    // Seed engine_schema_foreign_keys with the FK relationship
+
+    // Execute: Run DiscoverRelationships with mock LLM
+
+    // Assert: Relationship created for orders.user_id -> users.id
+    // Assert: Mock LLM was NOT called for this relationship (check calls slice is empty)
+    // Assert: result.RelationshipsCreated includes the DB-declared FK
+}
+```
+
+5. Use `t.Cleanup()` to remove test data after each test using the unique project_id
+
+**Dependencies:** Requires `testhelpers` package, `RelationshipDiscoveryService` from Task 4, mock LLM service
+
+---
+
+##### Task 7.3.2: ColumnFeatures FK preservation and LLM validation tests [ ]
+
+Add tests for ColumnFeatures-based FK preservation and basic LLM validation scenarios.
+
+**File:** `pkg/services/relationship_discovery_service_test.go` (continue from 7.3.1)
 
 **Test cases to implement:**
 
-1. **DB-declared FK preserved without LLM:**
-   - Setup: Create schema with actual FK constraint in test database
-   - Execute: Run DiscoverRelationships
-   - Assert: FK relationship is preserved, no LLM call made for this relationship
-   - Assert: `RelationshipsCreated` includes the DB-declared FK
+1. **ColumnFeatures FK preserved without LLM:**
+```go
+func TestRelationshipDiscoveryService_ColumnFeaturesFKPreserved(t *testing.T) {
+    // Setup: Create column with column_features containing:
+    // - role: "foreign_key"
+    // - fk_target_table: "users"
+    // - fk_target_column: "id"
+    // - fk_confidence: 0.95
 
-2. **ColumnFeatures FK preserved without LLM:**
-   - Setup: Create column with `column_features->>'role' = 'foreign_key'` and `column_features->>'fk_target_table'` set
-   - Execute: Run DiscoverRelationships
-   - Assert: Relationship created from ColumnFeatures, no LLM call for this one
+    // Do NOT create actual FK constraint in test DB
+    // Seed engine_schema_columns with the column_features JSON
 
-3. **UUID text → PK text: LLM validates:**
-   - Setup: Create `orders.user_id` (UUID text) and `users.id` (UUID text, PK)
-   - Setup: Populate with matching sample data (realistic UUIDs)
-   - Mock: LLM returns valid FK
-   - Execute: Run DiscoverRelationships
-   - Assert: Relationship created with LLM-provided cardinality
+    // Execute: Run DiscoverRelationships
 
-4. **id → timestamp: LLM rejects:**
-   - Setup: Create column `events.id` (integer) and `logs.created_at` (timestamp)
-   - Mock: LLM returns `is_valid_fk=false` (types semantically incompatible)
-   - Execute: Run DiscoverRelationships
-   - Assert: No relationship created, rejection logged
+    // Assert: Relationship created from ColumnFeatures data
+    // Assert: No LLM call made for this relationship
+}
+```
 
-5. **Orphan rate scenarios - LLM decides based on context:**
-   - Setup A: Low orphan rate (5%) - Mock LLM accepts
-   - Setup B: High orphan rate (50%) - Mock LLM rejects
-   - Setup C: High orphan rate but valid business reason (soft deletes) - Mock LLM accepts
-   - Assert: Orphan data is passed to LLM in prompt, LLM decision is respected
+2. **UUID text → PK text: LLM validates:**
+```go
+func TestRelationshipDiscoveryService_UUIDTextToUUIDPK_LLMValidates(t *testing.T) {
+    // Setup: Create tables without FK constraint
+    // users (id TEXT PRIMARY KEY) - contains UUIDs
+    // orders (id TEXT PRIMARY KEY, user_id TEXT) - user_id contains matching UUIDs
 
-6. **Progress callback invoked correctly:**
-   - Setup: Multiple candidates requiring validation
-   - Execute: Run DiscoverRelationships with progress callback
-   - Assert: Callback invoked with incremental progress values
-   - Assert: Final progress shows completion
+    // Insert sample data with realistic UUIDs that match
+    // INSERT INTO users (id) VALUES ('550e8400-e29b-41d4-a716-446655440000'), ...
+    // INSERT INTO orders (id, user_id) VALUES ('...', '550e8400-e29b-41d4-a716-446655440000'), ...
 
-7. **Result statistics correct:**
-   - Setup: Mix of DB FKs, ColumnFeatures FKs, valid inferences, rejected inferences
-   - Execute: Run DiscoverRelationships
-   - Assert: `CandidatesEvaluated`, `RelationshipsCreated`, `RelationshipsRejected` counts are accurate
+    // Seed engine_schema_columns:
+    // - users.id: is_primary_key=true
+    // - orders.user_id: column_features with role="foreign_key" or purpose="identifier"
 
-**Test infrastructure:**
-- Use `testhelpers.GetTestDB(t)` for customer datasource simulation
-- Use `testhelpers.GetEngineDB(t)` for engine metadata tables
-- Create unique `project_id` per test for isolation
-- Clean up test data in `t.Cleanup()`
+    // Mock LLM: Return is_valid_fk=true, confidence=0.92, cardinality="N:1"
 
-**File:** `pkg/services/relationship_discovery_service_test.go`
+    // Execute: Run DiscoverRelationships
+
+    // Assert: LLM was called with orders.user_id -> users.id candidate
+    // Assert: Relationship created with LLM-provided cardinality "N:1"
+}
+```
+
+3. **id → timestamp: LLM rejects:**
+```go
+func TestRelationshipDiscoveryService_IDToTimestamp_LLMRejects(t *testing.T) {
+    // Setup: Create tables
+    // events (id INTEGER PRIMARY KEY)
+    // logs (id INTEGER PRIMARY KEY, created_at TIMESTAMP)
+
+    // Seed engine_schema_columns:
+    // - events.id: is_primary_key=true
+    // - logs.id: is_primary_key=true
+    // - logs.created_at: normal timestamp column
+
+    // Note: Type filtering in candidate collector should already exclude this,
+    // but if it somehow gets through, LLM should reject
+
+    // Mock LLM: Return is_valid_fk=false, reasoning="timestamp columns are not identifiers"
+
+    // Execute: Run DiscoverRelationships
+
+    // Assert: No relationship created between any column and created_at
+    // Assert: Rejection reason logged
+}
+```
+
+**Key assertions:** Verify mock LLM `calls` slice to confirm which candidates were sent for validation
+
+---
+
+##### Task 7.3.3: Orphan rate scenarios and progress callback tests [ ]
+
+Add tests for orphan rate handling and progress callback verification.
+
+**File:** `pkg/services/relationship_discovery_service_test.go` (continue from 7.3.2)
+
+**Test cases to implement:**
+
+1. **Low orphan rate - LLM accepts:**
+```go
+func TestRelationshipDiscoveryService_LowOrphanRate_LLMAccepts(t *testing.T) {
+    // Setup: Create accounts and transactions tables
+    // All transaction.account_id values exist in accounts.id (0% orphan rate)
+
+    // Insert 100 accounts
+    // Insert 200 transactions, all with valid account_id references
+
+    // Mock LLM: Return is_valid_fk=true, confidence=0.95
+
+    // Execute: Run DiscoverRelationships
+
+    // Assert: Relationship created
+    // Assert: LLM prompt included orphan count=0
+}
+```
+
+2. **High orphan rate - LLM rejects:**
+```go
+func TestRelationshipDiscoveryService_HighOrphanRate_LLMRejects(t *testing.T) {
+    // Setup: Create accounts and transactions tables
+    // 50% of transaction.account_id values don't exist in accounts.id
+
+    // Insert 100 accounts
+    // Insert 200 transactions, 100 with valid references, 100 with invalid
+
+    // Mock LLM: Return is_valid_fk=false, reasoning="50% orphan rate suggests incorrect relationship"
+
+    // Execute: Run DiscoverRelationships
+
+    // Assert: No relationship created
+    // Assert: LLM prompt included orphan statistics showing ~50% orphan rate
+}
+```
+
+3. **Progress callback invoked correctly:**
+```go
+func TestRelationshipDiscoveryService_ProgressCallback(t *testing.T) {
+    // Setup: Create schema with multiple potential FK candidates
+    // At least 5-10 candidates to ensure progress is reported multiple times
+
+    // Track progress callbacks
+    var progressUpdates []struct {
+        current int
+        total   int
+        message string
+    }
+
+    callback := func(current, total int, msg string) {
+        progressUpdates = append(progressUpdates, struct{...}{current, total, msg})
+    }
+
+    // Execute: Run DiscoverRelationships with callback
+
+    // Assert: callback invoked multiple times
+    // Assert: current values are monotonically increasing
+    // Assert: final call shows completion (current == total or near it)
+    // Assert: messages describe phases ("Loading schema", "Validating", etc.)
+}
+```
+
+**Note on orphan rate:** The orphan statistics are passed to LLM in the prompt. These tests verify the data flows correctly and LLM decisions based on that data are respected.
+
+---
+
+##### Task 7.3.4: Result statistics verification test [ ]
+
+Add comprehensive test verifying all result statistics are accurate.
+
+**File:** `pkg/services/relationship_discovery_service_test.go` (continue from 7.3.3)
+
+**Test case:**
+
+```go
+func TestRelationshipDiscoveryService_ResultStatistics(t *testing.T) {
+    // Setup: Create a schema with a mix of relationship types
+
+    // 1. DB-declared FK: orders.user_id REFERENCES users.id
+    //    - Should be preserved without LLM
+
+    // 2. ColumnFeatures FK: payments.order_id with column_features.fk_target_table="orders"
+    //    - Should be preserved without LLM
+
+    // 3. Valid inference candidate: reviews.user_id -> users.id (no constraint, no features)
+    //    - Mock LLM accepts with high confidence
+
+    // 4. Invalid inference candidate: events.data -> configs.id
+    //    - Mock LLM rejects
+
+    // 5. Another valid inference: comments.post_id -> posts.id
+    //    - Mock LLM accepts
+
+    // Setup mock LLM responses for each candidate key
+    mockLLM := &mockLLMServiceForIntegration{
+        responses: map[string]*RelationshipValidationResult{
+            "reviews.user_id->users.id":   {IsValidFK: true, Confidence: 0.9, Cardinality: "N:1"},
+            "events.data->configs.id":     {IsValidFK: false, Confidence: 0.85, Reasoning: "data column is JSON not identifier"},
+            "comments.post_id->posts.id":  {IsValidFK: true, Confidence: 0.88, Cardinality: "N:1"},
+        },
+    }
+
+    // Execute: Run DiscoverRelationships
+    result, err := svc.DiscoverRelationships(ctx, projectID, datasourceID, noopCallback)
+
+    // Assert result statistics
+    require.NoError(t, err)
+
+    // CandidatesEvaluated: Only the inference candidates (3 items)
+    // DB-declared and ColumnFeatures FKs don't count as "candidates evaluated"
+    assert.Equal(t, 3, result.CandidatesEvaluated, "should count only LLM-evaluated candidates")
+
+    // RelationshipsCreated: All accepted (2 DB/Features + 2 LLM-accepted = 4)
+    assert.Equal(t, 4, result.RelationshipsCreated, "should count all created relationships")
+
+    // RelationshipsRejected: Only the LLM-rejected one
+    assert.Equal(t, 1, result.RelationshipsRejected, "should count LLM rejections")
+
+    // Verify DurationMs is positive
+    assert.Greater(t, result.DurationMs, int64(0), "should track duration")
+
+    // Verify relationships were actually stored in engine_entity_relationships
+    // Query the database and count relationships for this project
+    var storedCount int
+    err = engineDB.QueryRow(ctx,
+        "SELECT COUNT(*) FROM engine_entity_relationships WHERE project_id = $1",
+        projectID).Scan(&storedCount)
+    require.NoError(t, err)
+    assert.Equal(t, 4, storedCount, "should store all created relationships in database")
+}
+```
+
+**Additional verification:**
+- Query `engine_entity_relationships` to verify relationships are persisted with correct cardinality
+- Verify the `source_role` field is populated when LLM provides it
+- Verify `provenance` field indicates source (db_constraint, column_features, llm_inference)
 
 ---
 
