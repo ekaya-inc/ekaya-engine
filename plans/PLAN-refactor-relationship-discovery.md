@@ -787,17 +787,157 @@ Keep but simplify:
 
 ### Task 7: Tests
 
-Create comprehensive tests:
-- `relationship_candidate_collector_test.go` - Unit tests for candidate collection
-- `relationship_validator_test.go` - Unit tests with mocked LLM
-- `relationship_discovery_service_test.go` - Integration tests
+This task is split into subtasks below.
 
-Test cases:
-1. DB-declared FK → Preserved without LLM
-2. ColumnFeatures FK (high confidence) → Preserved without LLM
-3. UUID text column → PK text column → LLM validates
-4. id column → timestamp column → LLM rejects
-5. Orphan rate scenarios → LLM decides based on context
+---
+
+#### Task 7.1: Unit tests for RelationshipCandidateCollector [x]
+
+Create comprehensive unit tests for the relationship candidate collection logic in `pkg/services/relationship_candidate_collector_test.go`.
+
+**Context:** The `RelationshipCandidateCollector` (implemented in Task 2) identifies FK sources from ColumnFeatures, identifies FK targets (PKs and unique columns only), generates candidate pairs with type compatibility filtering, and collects join statistics from the customer datasource.
+
+**Test cases to implement:**
+
+1. **FK source identification:**
+   - Columns with `column_features->>'role' = 'foreign_key'` are included
+   - Columns with `column_features->>'purpose' = 'identifier'` are included
+   - Columns with `is_joinable = true` in statistics are included
+   - Primary keys are excluded from FK sources
+   - Timestamps, booleans, JSON types are excluded
+
+2. **FK target identification:**
+   - Only PKs (`is_primary_key = true`) are included as targets
+   - Only unique columns are included as targets
+   - Non-unique, non-PK columns are excluded (even high-cardinality ones)
+
+3. **Candidate pair generation:**
+   - Self-references (same table.column) are skipped
+   - Type-incompatible pairs are skipped (e.g., text→int, bool→uuid)
+   - Type-compatible pairs are included (uuid→uuid, int→int, text→text, int4→int8)
+   - ColumnFeatures-derived fields (SourcePurpose, SourceRole, TargetPurpose, TargetRole) are populated
+
+4. **Join statistics collection:**
+   - JoinCount, OrphanCount, ReverseOrphans, SourceMatched, TargetMatched are populated
+   - Sample values (up to 10) are collected for source and target
+   - Failure to collect stats for one candidate doesn't fail the entire batch
+
+**Mock dependencies:**
+- Mock `SchemaRepository` to return test columns with various ColumnFeatures
+- Mock `ColumnStatisticsRepository` to return joinability data
+- Mock `DataSourceAdapterFactory` and `QueryExecutor` to return join statistics
+
+**File:** `pkg/services/relationship_candidate_collector_test.go`
+
+---
+
+#### Task 7.2: Unit tests for RelationshipValidator with mocked LLM [ ]
+
+Create comprehensive unit tests for the LLM-based relationship validation in `pkg/services/relationship_validator_test.go`.
+
+**Context:** The `RelationshipValidator` (implemented in Task 3) validates relationship candidates using LLM calls. Each candidate gets a focused prompt with source/target info, join statistics, and sample values. The validator returns structured `RelationshipValidationResult` with is_valid_fk, confidence, cardinality, reasoning, and source_role.
+
+**Test cases to implement:**
+
+1. **ValidateCandidate - valid FK:**
+   - Setup: candidate where `orders.user_id` → `users.id`
+   - Mock LLM returns `is_valid_fk=true, confidence=0.95, cardinality="N:1"`
+   - Assert: result matches expected values
+
+2. **ValidateCandidate - invalid FK (bad inference):**
+   - Setup: candidate where `id` → `messages.nonce` (PK pointing to nonce field)
+   - Mock LLM returns `is_valid_fk=false, reasoning="nonce is not an identifier"`
+   - Assert: result correctly rejected
+
+3. **ValidateCandidate - low confidence:**
+   - Setup: ambiguous candidate
+   - Mock LLM returns `is_valid_fk=true` but `confidence=0.4`
+   - Assert: result has low confidence (caller should reject)
+
+4. **ValidateCandidates - parallel execution:**
+   - Setup: 10 candidates
+   - Mock LLM with configurable responses
+   - Assert: all results returned, progress callback called with incremental updates
+
+5. **ValidateCandidates - partial failure:**
+   - Setup: 5 candidates, mock LLM fails on candidate 3
+   - Assert: other 4 candidates still validated
+   - Assert: error returned but results available for successful ones
+
+6. **ValidateCandidates - context cancellation:**
+   - Setup: many candidates, cancel context after a few complete
+   - Assert: workers stop, partial results returned
+
+7. **buildValidationPrompt - includes all data:**
+   - Setup: candidate with all fields populated (samples, stats, ColumnFeatures)
+   - Assert: prompt contains source/target info, join analysis results, sample values
+   - Assert: response format instructions are included
+
+**Mock dependencies:**
+- Create `mockLLMService` implementing `LLMService` interface
+- Map responses by source→target key for predictable behavior
+- Track call count for parallelism verification
+
+**File:** `pkg/services/relationship_validator_test.go`
+
+---
+
+#### Task 7.3: Integration tests for RelationshipDiscoveryService [ ]
+
+Create integration tests for the full relationship discovery pipeline in `pkg/services/relationship_discovery_service_test.go`.
+
+**Context:** The `RelationshipDiscoveryService` (implemented in Task 4) orchestrates the complete pipeline: preserve DB-declared FKs, preserve ColumnFeatures FKs, collect candidates, validate with LLM, store results. Tests should use real database connections via `testhelpers.GetTestDB(t)` and `testhelpers.GetEngineDB(t)`.
+
+**Test cases to implement:**
+
+1. **DB-declared FK preserved without LLM:**
+   - Setup: Create schema with actual FK constraint in test database
+   - Execute: Run DiscoverRelationships
+   - Assert: FK relationship is preserved, no LLM call made for this relationship
+   - Assert: `RelationshipsCreated` includes the DB-declared FK
+
+2. **ColumnFeatures FK preserved without LLM:**
+   - Setup: Create column with `column_features->>'role' = 'foreign_key'` and `column_features->>'fk_target_table'` set
+   - Execute: Run DiscoverRelationships
+   - Assert: Relationship created from ColumnFeatures, no LLM call for this one
+
+3. **UUID text → PK text: LLM validates:**
+   - Setup: Create `orders.user_id` (UUID text) and `users.id` (UUID text, PK)
+   - Setup: Populate with matching sample data (realistic UUIDs)
+   - Mock: LLM returns valid FK
+   - Execute: Run DiscoverRelationships
+   - Assert: Relationship created with LLM-provided cardinality
+
+4. **id → timestamp: LLM rejects:**
+   - Setup: Create column `events.id` (integer) and `logs.created_at` (timestamp)
+   - Mock: LLM returns `is_valid_fk=false` (types semantically incompatible)
+   - Execute: Run DiscoverRelationships
+   - Assert: No relationship created, rejection logged
+
+5. **Orphan rate scenarios - LLM decides based on context:**
+   - Setup A: Low orphan rate (5%) - Mock LLM accepts
+   - Setup B: High orphan rate (50%) - Mock LLM rejects
+   - Setup C: High orphan rate but valid business reason (soft deletes) - Mock LLM accepts
+   - Assert: Orphan data is passed to LLM in prompt, LLM decision is respected
+
+6. **Progress callback invoked correctly:**
+   - Setup: Multiple candidates requiring validation
+   - Execute: Run DiscoverRelationships with progress callback
+   - Assert: Callback invoked with incremental progress values
+   - Assert: Final progress shows completion
+
+7. **Result statistics correct:**
+   - Setup: Mix of DB FKs, ColumnFeatures FKs, valid inferences, rejected inferences
+   - Execute: Run DiscoverRelationships
+   - Assert: `CandidatesEvaluated`, `RelationshipsCreated`, `RelationshipsRejected` counts are accurate
+
+**Test infrastructure:**
+- Use `testhelpers.GetTestDB(t)` for customer datasource simulation
+- Use `testhelpers.GetEngineDB(t)` for engine metadata tables
+- Create unique `project_id` per test for isolation
+- Clean up test data in `t.Cleanup()`
+
+**File:** `pkg/services/relationship_discovery_service_test.go`
 
 ---
 
