@@ -866,6 +866,19 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 				continue
 			}
 
+			// Bidirectional validation: Check for false positives where source has few values
+			// that coincidentally exist in target. Example:
+			// - identity_provider has 3 values {1,2,3}, jobs.id has 83 values {1-83}
+			// - Source→target: all 3 exist → 0 orphans → would pass above check
+			// - Target→source: 80 values (4-83) don't exist in source → 96% reverse orphans
+			// Reject if reverse_orphan_count / target_distinct > 0.5 (>50% of target values are orphans)
+			if joinResult.TargetMatched > 0 && joinResult.ReverseOrphanCount > 0 {
+				reverseOrphanRate := float64(joinResult.ReverseOrphanCount) / float64(joinResult.TargetMatched+joinResult.ReverseOrphanCount)
+				if reverseOrphanRate > 0.5 {
+					continue // Too many target values don't exist in source - likely coincidental match
+				}
+			}
+
 			// Semantic validation: If ALL source values are very small integers (1-10),
 			// likely not a real FK relationship (e.g., rating, score, level columns)
 			if joinResult.MaxSourceValue != nil && *joinResult.MaxSourceValue <= 10 {

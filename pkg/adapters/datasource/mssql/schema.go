@@ -420,9 +420,19 @@ func (s *SchemaDiscoverer) CheckValueOverlap(ctx context.Context,
 }
 
 // AnalyzeJoin performs join analysis between two columns (for relationship inference).
+// Computes both source→target orphans and target→source (reverse) orphans
+// to detect false positive relationships (e.g., identity_provider → jobs.id).
 func (s *SchemaDiscoverer) AnalyzeJoin(ctx context.Context,
 	sourceSchema, sourceTable, sourceColumn,
 	targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+	// Computes:
+	// - orphan_count: source values that don't exist in target (source→target)
+	// - reverse_orphan_count: target values that don't exist in source (target→source)
+	//
+	// The reverse orphan check catches false positives like:
+	// - identity_provider has 3 values {1,2,3}, jobs.id has 83 values {1-83}
+	// - Source→target: all 3 exist in jobs.id → 0 orphans → would PASS
+	// - Target→source: 80 values (4-83) don't exist → reverse_orphan_count = 80 → REJECT
 	query := fmt.Sprintf(`
 	SET NOCOUNT ON;
 	WITH join_result AS (
@@ -433,20 +443,38 @@ func (s *SchemaDiscoverer) AnalyzeJoin(ctx context.Context,
 	    LEFT JOIN %s tgt WITH (NOLOCK)
 	        ON src.%s = tgt.%s
 	    WHERE src.%s IS NOT NULL
+	),
+	reverse_join AS (
+	    SELECT
+	        tgt.%s AS tgt_val,
+	        src.%s AS src_val
+	    FROM %s tgt WITH (NOLOCK)
+	    LEFT JOIN %s src WITH (NOLOCK)
+	        ON tgt.%s = src.%s
+	    WHERE tgt.%s IS NOT NULL
 	)
 	SELECT
-	    COUNT(*) AS join_count,
-	    COUNT(DISTINCT CASE WHEN tgt_val IS NOT NULL THEN src_val END) AS source_matched,
+	    (SELECT COUNT(*) FROM join_result WHERE tgt_val IS NOT NULL) AS join_count,
+	    (SELECT COUNT(DISTINCT src_val) FROM join_result WHERE tgt_val IS NOT NULL) AS source_matched,
 	    (SELECT COUNT(DISTINCT %s) FROM %s WITH (NOLOCK) WHERE %s IS NOT NULL) AS target_matched,
-	    COUNT(CASE WHEN tgt_val IS NULL THEN 1 END) AS orphan_count
-	FROM join_result
+	    (SELECT COUNT(DISTINCT src_val) FROM join_result WHERE tgt_val IS NULL) AS orphan_count,
+	    (SELECT COUNT(DISTINCT tgt_val) FROM reverse_join WHERE src_val IS NULL) AS reverse_orphan_count
 	`,
+		// join_result CTE
 		quoteName(sourceColumn),
 		quoteName(targetColumn),
 		buildFullyQualifiedName(sourceSchema, sourceTable),
 		buildFullyQualifiedName(targetSchema, targetTable),
 		quoteName(sourceColumn), quoteName(targetColumn),
 		quoteName(sourceColumn),
+		// reverse_join CTE
+		quoteName(targetColumn),
+		quoteName(sourceColumn),
+		buildFullyQualifiedName(targetSchema, targetTable),
+		buildFullyQualifiedName(sourceSchema, sourceTable),
+		quoteName(targetColumn), quoteName(sourceColumn),
+		quoteName(targetColumn),
+		// SELECT
 		quoteName(targetColumn),
 		buildFullyQualifiedName(targetSchema, targetTable),
 		quoteName(targetColumn),
@@ -458,6 +486,7 @@ func (s *SchemaDiscoverer) AnalyzeJoin(ctx context.Context,
 		&result.SourceMatched,
 		&result.TargetMatched,
 		&result.OrphanCount,
+		&result.ReverseOrphanCount,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query join analysis: %w", err)

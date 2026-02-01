@@ -865,6 +865,73 @@ func TestSchemaDiscoverer_AnalyzeJoin_CrossTypeComparison(t *testing.T) {
 	if result.OrphanCount != 0 {
 		t.Errorf("expected 0 orphans, got %d", result.OrphanCount)
 	}
+	// Both tables have same values {1, 2, 3}, so reverse orphans should also be 0
+	if result.ReverseOrphanCount != 0 {
+		t.Errorf("expected 0 reverse orphans (tables have same values), got %d", result.ReverseOrphanCount)
+	}
+}
+
+// TestSchemaDiscoverer_AnalyzeJoin_ReverseOrphans tests the bidirectional validation
+// that catches false positive relationships like identity_provider → jobs.id.
+// When source has few values that coincidentally exist in target (which has many more values),
+// the reverse orphan count should be high, indicating this is not a real FK relationship.
+func TestSchemaDiscoverer_AnalyzeJoin_ReverseOrphans(t *testing.T) {
+	tc := setupSchemaDiscovererTest(t)
+	ctx := context.Background()
+
+	// Create temporary tables to simulate the identity_provider → jobs.id false positive:
+	// - "small_lookup" has 3 values: {1, 2, 3} (like identity_provider)
+	// - "large_table" has IDs 1-100 (like jobs.id)
+	// Source→target: all 3 values from small_lookup exist in large_table → 0 orphans
+	// Target→source: 97 values (4-100) don't exist in small_lookup → high reverse orphans
+	setupSQL := `
+		CREATE TEMP TABLE test_small_lookup (id INT PRIMARY KEY);
+		CREATE TEMP TABLE test_large_table (id INT PRIMARY KEY);
+		INSERT INTO test_small_lookup (id) VALUES (1), (2), (3);
+		INSERT INTO test_large_table (id) SELECT generate_series(1, 100);
+	`
+
+	_, err := tc.discoverer.pool.Exec(ctx, setupSQL)
+	if err != nil {
+		t.Fatalf("failed to create test tables: %v", err)
+	}
+
+	// Analyze join from small_lookup.id → large_table.id
+	result, err := tc.discoverer.AnalyzeJoin(ctx,
+		"pg_temp", "test_small_lookup", "id",
+		"pg_temp", "test_large_table", "id")
+	if err != nil {
+		t.Fatalf("AnalyzeJoin failed: %v", err)
+	}
+
+	// Source→target: all 3 values exist in large_table → 0 orphans
+	if result.OrphanCount != 0 {
+		t.Errorf("expected 0 source orphans (all small values exist in large table), got %d", result.OrphanCount)
+	}
+
+	// Target→source: 97 values (4-100) don't exist in small_lookup
+	expectedReverseOrphans := int64(97)
+	if result.ReverseOrphanCount != expectedReverseOrphans {
+		t.Errorf("expected %d reverse orphans (values 4-100), got %d", expectedReverseOrphans, result.ReverseOrphanCount)
+	}
+
+	// Source matched should be 3
+	if result.SourceMatched != 3 {
+		t.Errorf("expected 3 source matched, got %d", result.SourceMatched)
+	}
+
+	// Target matched should be 3 (only values 1-3 from large table match)
+	if result.TargetMatched != 3 {
+		t.Errorf("expected 3 target matched, got %d", result.TargetMatched)
+	}
+
+	// Calculate the reverse orphan rate (97 / 100 = 0.97 = 97%)
+	// This is well above the 50% threshold, so this should be rejected
+	targetDistinct := result.TargetMatched + result.ReverseOrphanCount
+	reverseOrphanRate := float64(result.ReverseOrphanCount) / float64(targetDistinct)
+	if reverseOrphanRate < 0.5 {
+		t.Errorf("expected reverse orphan rate > 50%% for false positive detection, got %.2f%%", reverseOrphanRate*100)
+	}
 }
 
 func TestSchemaDiscoverer_Close(t *testing.T) {

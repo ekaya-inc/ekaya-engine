@@ -392,6 +392,8 @@ func (d *SchemaDiscoverer) CheckValueOverlap(ctx context.Context,
 }
 
 // AnalyzeJoin performs join analysis between two columns.
+// Computes both source→target orphans and target→source (reverse) orphans
+// to detect false positive relationships (e.g., identity_provider → jobs.id).
 func (d *SchemaDiscoverer) AnalyzeJoin(ctx context.Context,
 	sourceSchema, sourceTable, sourceColumn,
 	targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
@@ -405,6 +407,14 @@ func (d *SchemaDiscoverer) AnalyzeJoin(ctx context.Context,
 	tgtCol := pgx.Identifier{targetColumn}.Sanitize()
 
 	// Cast columns to text to handle cross-type comparisons (e.g., text vs bigint)
+	// Computes:
+	// - orphan_count: source values that don't exist in target (source→target)
+	// - reverse_orphan_count: target values that don't exist in source (target→source)
+	//
+	// The reverse orphan check catches false positives like:
+	// - identity_provider has 3 values {1,2,3}, jobs.id has 83 values {1-83}
+	// - Source→target: all 3 exist in jobs.id → 0 orphans → would PASS
+	// - Target→source: 80 values (4-83) don't exist → reverse_orphan_count = 80 → REJECT
 	query := fmt.Sprintf(`
 		WITH join_stats AS (
 			SELECT
@@ -415,31 +425,43 @@ func (d *SchemaDiscoverer) AnalyzeJoin(ctx context.Context,
 			JOIN %s.%s t ON s.%s::text = t.%s::text
 		),
 		orphan_stats AS (
-			SELECT COUNT(*) as orphan_count
+			SELECT COUNT(DISTINCT s.%s) as orphan_count
 			FROM %s.%s s
 			LEFT JOIN %s.%s t ON s.%s::text = t.%s::text
 			WHERE t.%s IS NULL AND s.%s IS NOT NULL
 		),
-		max_target AS (
+		reverse_orphan_stats AS (
+			SELECT COUNT(DISTINCT t.%s) as reverse_orphan_count
+			FROM %s.%s t
+			LEFT JOIN %s.%s s ON t.%s::text = s.%s::text
+			WHERE s.%s IS NULL AND t.%s IS NOT NULL
+		),
+		max_source AS (
 			SELECT MAX(
 				CASE
-					WHEN t.%s::text ~ '^-?[0-9]+(\.[0-9]+)?$'
-					THEN (t.%s::text)::numeric
+					WHEN s.%s::text ~ '^-?[0-9]+(\.[0-9]+)?$'
+					THEN (s.%s::text)::numeric
 					ELSE NULL
 				END
 			) as max_source_value
-			FROM %s.%s t
-			WHERE t.%s IS NOT NULL
+			FROM %s.%s s
+			WHERE s.%s IS NOT NULL
 		)
-		SELECT join_count, source_matched, target_matched, orphan_count, max_source_value
-		FROM join_stats, orphan_stats, max_target
-	`, srcCol, tgtCol, srcSchema, srcTable, tgtSchema, tgtTable, srcCol, tgtCol,
-		srcSchema, srcTable, tgtSchema, tgtTable, srcCol, tgtCol, tgtCol, srcCol,
-		tgtCol, tgtCol, tgtSchema, tgtTable, tgtCol)
+		SELECT join_count, source_matched, target_matched, orphan_count, reverse_orphan_count, max_source_value
+		FROM join_stats, orphan_stats, reverse_orphan_stats, max_source
+	`,
+		// join_stats
+		srcCol, tgtCol, srcSchema, srcTable, tgtSchema, tgtTable, srcCol, tgtCol,
+		// orphan_stats
+		srcCol, srcSchema, srcTable, tgtSchema, tgtTable, srcCol, tgtCol, tgtCol, srcCol,
+		// reverse_orphan_stats
+		tgtCol, tgtSchema, tgtTable, srcSchema, srcTable, tgtCol, srcCol, srcCol, tgtCol,
+		// max_source
+		srcCol, srcCol, srcSchema, srcTable, srcCol)
 
 	var result datasource.JoinAnalysis
 	row := d.pool.QueryRow(ctx, query)
-	if err := row.Scan(&result.JoinCount, &result.SourceMatched, &result.TargetMatched, &result.OrphanCount, &result.MaxSourceValue); err != nil {
+	if err := row.Scan(&result.JoinCount, &result.SourceMatched, &result.TargetMatched, &result.OrphanCount, &result.ReverseOrphanCount, &result.MaxSourceValue); err != nil {
 		return nil, fmt.Errorf("analyze join: %w", err)
 	}
 

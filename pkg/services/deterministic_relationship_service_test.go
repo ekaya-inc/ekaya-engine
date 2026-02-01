@@ -5771,3 +5771,206 @@ func TestPKMatch_PrioritizesForeignKeyRole(t *testing.T) {
 		t.Errorf("expected user_id (Role=foreign_key) to be analyzed before other_user_id, but order was: %v", analyzedColumns)
 	}
 }
+
+// TestPKMatch_RejectsBidirectionalOrphans verifies that PKMatchDiscovery rejects
+// relationships where >50% of target values don't exist in source (reverse orphans).
+// This catches false positives like identity_provider → jobs.id where:
+// - identity_provider has 3 values {1,2,3}
+// - jobs.id has 83 values {1-83}
+// - Source→target: all 3 exist → 0 orphans (would PASS old check)
+// - Target→source: 80 values don't exist → 96% reverse orphans (REJECT)
+func TestPKMatch_RejectsBidirectionalOrphans(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+
+	distinctCountSmall := int64(3)
+	distinctCountLarge := int64(83)
+	rowCountSmall := int64(100)
+	rowCountLarge := int64(1000)
+	isJoinableTrue := true
+
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Configure AnalyzeJoin to simulate the false positive scenario:
+	// - 0 orphans (all source values exist in target)
+	// - High reverse orphans (>50% of target values don't exist in source)
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		// Simulate identity_provider → jobs.id pattern:
+		// Source has 3 values, all exist in target → 0 orphans
+		// Target has 83 values, only 3 exist in source → 80 reverse orphans
+		return &datasource.JoinAnalysis{
+			JoinCount:          3,
+			SourceMatched:      3,
+			TargetMatched:      3,
+			OrphanCount:        0,  // All source values exist in target
+			ReverseOrphanCount: 80, // 80 of 83 target values don't exist in source
+		}, nil
+	}
+
+	// Schema with a small lookup-like column and a large table PK
+	smallTableID := uuid.New()
+	largeTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         smallTableID,
+			SchemaName: "public",
+			TableName:  "small_lookup",
+			RowCount:   &rowCountSmall,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            uuid.New(),
+					SchemaTableID: smallTableID,
+					ColumnName:    "provider_id",
+					DataType:      "int4",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCountSmall,
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+						},
+					},
+				},
+			},
+		},
+		{
+			ID:         largeTableID,
+			SchemaName: "public",
+			TableName:  "large_table",
+			RowCount:   &rowCountLarge,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            uuid.New(),
+					SchemaTableID: largeTableID,
+					ColumnName:    "id",
+					DataType:      "int4",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCountLarge,
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	// Execute PK match discovery
+	_, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: No relationship was created due to high reverse orphan rate (80/83 = 96% > 50%)
+	if len(mocks.schemaRepo.upsertedRelationships) > 0 {
+		t.Errorf("expected relationship to be REJECTED due to high reverse orphan rate (96%%), but %d were created",
+			len(mocks.schemaRepo.upsertedRelationships))
+	}
+}
+
+// TestPKMatch_AcceptsLowReverseOrphans verifies that PKMatchDiscovery accepts
+// relationships with low reverse orphan rates (<=50%).
+func TestPKMatch_AcceptsLowReverseOrphans(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+
+	distinctCount := int64(100)
+	rowCount := int64(1000)
+	isJoinableTrue := true
+
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Configure AnalyzeJoin with low reverse orphan rate (<50%)
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		// Simulate a valid FK: 80 source values match 80 target values
+		// Only 20% of target values are reverse orphans (below 50% threshold)
+		return &datasource.JoinAnalysis{
+			JoinCount:          80,
+			SourceMatched:      80,
+			TargetMatched:      80,
+			OrphanCount:        0,  // All source values exist in target
+			ReverseOrphanCount: 20, // 20% of target values don't exist in source (within threshold)
+		}, nil
+	}
+
+	// Schema with FK candidate column
+	sourceTableID := uuid.New()
+	targetTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         sourceTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            uuid.New(),
+					SchemaTableID: sourceTableID,
+					ColumnName:    "user_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+						},
+					},
+				},
+			},
+		},
+		{
+			ID:         targetTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            uuid.New(),
+					SchemaTableID: targetTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	// Execute PK match discovery
+	_, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: Relationship WAS created because reverse orphan rate (20%) is below 50% threshold
+	if len(mocks.schemaRepo.upsertedRelationships) == 0 {
+		t.Error("expected relationship to be CREATED (reverse orphan rate 20% < 50% threshold), but none were created")
+	}
+}

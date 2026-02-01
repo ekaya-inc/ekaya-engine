@@ -49,11 +49,12 @@ type ValueOverlapResult struct {
 
 // JoinAnalysis contains results from join analysis.
 type JoinAnalysis struct {
-	JoinCount      int64
-	SourceMatched  int64
-	TargetMatched  int64
-	OrphanCount    int64
-	MaxSourceValue *int64 // Maximum value in source column (for semantic validation)
+	JoinCount          int64
+	SourceMatched      int64
+	TargetMatched      int64
+	OrphanCount        int64  // Source values that don't exist in target (source→target orphans)
+	ReverseOrphanCount int64  // Target values that don't exist in source (target→source orphans)
+	MaxSourceValue     *int64 // Maximum value in source column (for semantic validation)
 }
 
 // EnumValueDistribution contains distribution statistics for a single enum value.
