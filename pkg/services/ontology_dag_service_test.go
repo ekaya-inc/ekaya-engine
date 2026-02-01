@@ -23,19 +23,24 @@ import (
 func TestDAGNodes_AllNodesHaveCorrectOrder(t *testing.T) {
 	allNodes := models.AllDAGNodes()
 
+	// NOTE: The current DAG order is designed for schema-first extraction.
+	// FKDiscovery and TableFeatureExtraction run BEFORE entity discovery.
+	// Many nodes are commented out in AllDAGNodes() for testing.
 	expectedOrder := []models.DAGNodeName{
 		models.DAGNodeKnowledgeSeeding,
 		models.DAGNodeColumnFeatureExtraction,
-		models.DAGNodeEntityDiscovery,
-		models.DAGNodeEntityEnrichment,
 		models.DAGNodeFKDiscovery,
-		models.DAGNodeColumnEnrichment,
+		models.DAGNodeTableFeatureExtraction,
 		models.DAGNodePKMatchDiscovery,
-		models.DAGNodeRelationshipEnrichment,
-		models.DAGNodeEntityPromotion,
-		models.DAGNodeOntologyFinalization,
-		models.DAGNodeGlossaryDiscovery,
-		models.DAGNodeGlossaryEnrichment,
+		// TEMPORARILY DISABLED - uncomment after relationship discovery is validated
+		// models.DAGNodeEntityDiscovery,
+		// models.DAGNodeEntityEnrichment,
+		// models.DAGNodeColumnEnrichment,
+		// models.DAGNodeRelationshipEnrichment,
+		// models.DAGNodeEntityPromotion,
+		// models.DAGNodeOntologyFinalization,
+		// models.DAGNodeGlossaryDiscovery,
+		// models.DAGNodeGlossaryEnrichment,
 	}
 
 	assert.Equal(t, len(expectedOrder), len(allNodes))
@@ -85,6 +90,10 @@ func TestNodeExecutorInterfaces_AreWellDefined(t *testing.T) {
 	// ColumnFeatureExtractionMethods
 	var cfm dag.ColumnFeatureExtractionMethods = &testColumnFeatureExtraction{}
 	assert.NotNil(t, cfm)
+
+	// TableFeatureExtractionMethods
+	var tfm dag.TableFeatureExtractionMethods = &testTableFeatureExtraction{}
+	assert.NotNil(t, tfm)
 }
 
 func TestDAGStatus_ValidStatuses(t *testing.T) {
@@ -221,6 +230,12 @@ func (t *testGlossaryDiscovery) DiscoverGlossaryTerms(_ context.Context, _, _ uu
 type testColumnFeatureExtraction struct{}
 
 func (t *testColumnFeatureExtraction) ExtractColumnFeatures(_ context.Context, _, _ uuid.UUID, _ dag.ProgressCallback) (int, error) {
+	return 0, nil
+}
+
+type testTableFeatureExtraction struct{}
+
+func (t *testTableFeatureExtraction) ExtractTableFeatures(_ context.Context, _, _ uuid.UUID, _ dag.ProgressCallback) (int, error) {
 	return 0, nil
 }
 

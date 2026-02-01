@@ -223,7 +223,7 @@ GetRelationshipsByMethod(ctx context.Context, projectID uuid.UUID, method string
 2. [ ] **Step 3.3** - Fix bidirectional validation (critical bug)
 3. [ ] **Step 2** - Refactor FKDiscovery to use SchemaRelationship
 4. [ ] **Step 3.1-3.2** - Refactor PKMatchDiscovery to use SchemaRelationship
-5. [ ] **Step 1** - Add TableFeatureExtraction (new node)
+5. [x] **Step 1** - Add TableFeatureExtraction (new node)
 6. [ ] **Step 3.4** - Use table descriptions in validation
 7. [ ] **Step 5** - Testing
 
