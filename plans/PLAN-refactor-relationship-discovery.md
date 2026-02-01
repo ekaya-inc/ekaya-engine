@@ -831,7 +831,7 @@ Create comprehensive unit tests for the relationship candidate collection logic 
 
 ---
 
-#### Task 7.2: Unit tests for RelationshipValidator with mocked LLM [ ]
+#### Task 7.2: Unit tests for RelationshipValidator with mocked LLM [x]
 
 Create comprehensive unit tests for the LLM-based relationship validation in `pkg/services/relationship_validator_test.go`.
 
