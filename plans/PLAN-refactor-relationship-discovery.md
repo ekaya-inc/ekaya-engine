@@ -286,7 +286,7 @@ func (c *relationshipCandidateCollector) collectSampleValues(
 
 ---
 
-#### Task 2.5: Implement Main CollectCandidates Method [ ]
+#### Task 2.5: Implement Main CollectCandidates Method [x]
 
 Wire together all the components and implement the public `CollectCandidates` method.
 

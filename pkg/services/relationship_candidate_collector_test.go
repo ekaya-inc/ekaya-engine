@@ -58,14 +58,24 @@ func (m *mockSchemaRepoForCandidateCollector) ListTablesByDatasource(ctx context
 }
 
 // mockAdapterFactoryForCandidateCollector is a mock for DatasourceAdapterFactory.
-type mockAdapterFactoryForCandidateCollector struct{}
+type mockAdapterFactoryForCandidateCollector struct {
+	schemaDiscoverer    datasource.SchemaDiscoverer
+	schemaDiscovererErr error
+}
 
 func (m *mockAdapterFactoryForCandidateCollector) NewConnectionTester(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.ConnectionTester, error) {
 	return nil, errors.New("not implemented")
 }
 
 func (m *mockAdapterFactoryForCandidateCollector) NewSchemaDiscoverer(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.SchemaDiscoverer, error) {
-	return nil, errors.New("not implemented")
+	if m.schemaDiscovererErr != nil {
+		return nil, m.schemaDiscovererErr
+	}
+	if m.schemaDiscoverer != nil {
+		return m.schemaDiscoverer, nil
+	}
+	// Return a default no-op mock for tests that don't need full adapter functionality
+	return &mockSchemaDiscovererForJoinStats{}, nil
 }
 
 func (m *mockAdapterFactoryForCandidateCollector) NewQueryExecutor(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.QueryExecutor, error) {
@@ -79,6 +89,27 @@ func (m *mockAdapterFactoryForCandidateCollector) ListTypes() []datasource.Datas
 // mockDatasourceServiceForCandidateCollector is a mock for DatasourceService.
 type mockDatasourceServiceForCandidateCollector struct {
 	DatasourceService
+
+	// Get mock data
+	datasource *models.Datasource
+	getErr     error
+}
+
+func (m *mockDatasourceServiceForCandidateCollector) Get(ctx context.Context, projectID, id uuid.UUID) (*models.Datasource, error) {
+	if m.getErr != nil {
+		return nil, m.getErr
+	}
+	if m.datasource != nil {
+		return m.datasource, nil
+	}
+	// Return a default datasource for tests
+	return &models.Datasource{
+		ID:             id,
+		ProjectID:      projectID,
+		Name:           "test-datasource",
+		DatasourceType: "postgres",
+		Config:         map[string]any{},
+	}, nil
 }
 
 // ============================================================================
@@ -775,8 +806,9 @@ func TestCollectCandidates_GeneratesCandidatePairs(t *testing.T) {
 	assert.Equal(t, "users", result[0].TargetTable)
 	assert.Equal(t, "id", result[0].TargetColumn)
 
-	// Progress callback should be called at least 4 times (steps 0-3)
-	assert.GreaterOrEqual(t, progressCalls, 4, "progress callback should be called for each step")
+	// Progress callback should be called at least 5 times (steps 0, 1, 2, 3, 5)
+	// Step 4 is only called during statistics collection for large candidate sets (>10 candidates)
+	assert.GreaterOrEqual(t, progressCalls, 5, "progress callback should be called for each major step")
 }
 
 func TestCollectCandidates_NoTargets(t *testing.T) {
@@ -1930,7 +1962,11 @@ func (m *mockSchemaDiscovererForJoinStats) AnalyzeJoin(ctx context.Context, sour
 	if m.analyzeJoinErr != nil {
 		return nil, m.analyzeJoinErr
 	}
-	return m.analyzeJoinResult, nil
+	if m.analyzeJoinResult != nil {
+		return m.analyzeJoinResult, nil
+	}
+	// Return a default empty result when not configured
+	return &datasource.JoinAnalysis{}, nil
 }
 
 func (m *mockSchemaDiscovererForJoinStats) GetDistinctValues(ctx context.Context, schemaName, tableName, columnName string, limit int) ([]string, error) {
@@ -2227,4 +2263,226 @@ func TestCollectDistinctCounts_ZeroRowCount(t *testing.T) {
 	// With zero row count, null rate should be 0 (avoid division by zero)
 	assert.Equal(t, int64(0), candidate.SourceDistinctCount)
 	assert.Equal(t, 0.0, candidate.SourceNullRate)
+}
+
+// ============================================================================
+// CollectCandidates Error Handling Tests (Task 2.5)
+// ============================================================================
+
+func TestCollectCandidates_DatasourceGetError(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	repo := &mockSchemaRepoForCandidateCollector{
+		columnsByTable: map[string][]*models.SchemaColumn{},
+		allColumns:     []*models.SchemaColumn{},
+		tables:         []*models.SchemaTable{},
+	}
+
+	dsSvc := &mockDatasourceServiceForCandidateCollector{
+		getErr: errors.New("datasource not found"),
+	}
+
+	collector := NewRelationshipCandidateCollector(repo, &mockAdapterFactoryForCandidateCollector{}, dsSvc, zap.NewNop())
+
+	_, err := collector.CollectCandidates(context.Background(), projectID, datasourceID, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "get datasource")
+}
+
+func TestCollectCandidates_AdapterCreationError(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	repo := &mockSchemaRepoForCandidateCollector{
+		columnsByTable: map[string][]*models.SchemaColumn{},
+		allColumns:     []*models.SchemaColumn{},
+		tables:         []*models.SchemaTable{},
+	}
+
+	adapterFactory := &mockAdapterFactoryForCandidateCollector{
+		schemaDiscovererErr: errors.New("connection failed"),
+	}
+
+	collector := NewRelationshipCandidateCollector(repo, adapterFactory, &mockDatasourceServiceForCandidateCollector{}, zap.NewNop())
+
+	_, err := collector.CollectCandidates(context.Background(), projectID, datasourceID, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "create schema discoverer")
+}
+
+func TestCollectCandidates_CollectsJoinStatistics(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ordersTableID := uuid.New()
+	usersTableID := uuid.New()
+
+	// FK source column
+	userIDCol := &models.SchemaColumn{
+		ID:            uuid.New(),
+		SchemaTableID: ordersTableID,
+		ColumnName:    "user_id",
+		DataType:      "uuid",
+		IsPrimaryKey:  false,
+		Metadata: map[string]any{
+			"column_features": map[string]any{
+				"role":                "foreign_key",
+				"classification_path": "uuid",
+			},
+		},
+	}
+
+	// PK target column
+	usersPKCol := &models.SchemaColumn{
+		ID:            uuid.New(),
+		SchemaTableID: usersTableID,
+		ColumnName:    "id",
+		DataType:      "uuid",
+		IsPrimaryKey:  true,
+	}
+
+	repo := &mockSchemaRepoForCandidateCollector{
+		columnsByTable: map[string][]*models.SchemaColumn{
+			"orders": {userIDCol},
+		},
+		allColumns: []*models.SchemaColumn{userIDCol, usersPKCol},
+		tables: []*models.SchemaTable{
+			{ID: ordersTableID, TableName: "orders"},
+			{ID: usersTableID, TableName: "users"},
+		},
+	}
+
+	// Create a mock adapter with join statistics
+	mockAdapter := &mockSchemaDiscovererForJoinStats{
+		analyzeJoinResult: &datasource.JoinAnalysis{
+			JoinCount:          500,
+			SourceMatched:      100,
+			TargetMatched:      90,
+			OrphanCount:        5,
+			ReverseOrphanCount: 10,
+		},
+		distinctValuesMap: map[string][]string{
+			"orders.user_id": {"uuid-1", "uuid-2", "uuid-3"},
+			"users.id":       {"uuid-1", "uuid-2", "uuid-4"},
+		},
+		columnStatsMap: map[string]datasource.ColumnStats{
+			"orders.user_id": {
+				ColumnName:    "user_id",
+				RowCount:      1000,
+				NonNullCount:  950,
+				DistinctCount: 100,
+			},
+			"users.id": {
+				ColumnName:    "id",
+				RowCount:      200,
+				NonNullCount:  200,
+				DistinctCount: 200,
+			},
+		},
+	}
+
+	adapterFactory := &mockAdapterFactoryForCandidateCollector{
+		schemaDiscoverer: mockAdapter,
+	}
+
+	collector := NewRelationshipCandidateCollector(repo, adapterFactory, &mockDatasourceServiceForCandidateCollector{}, zap.NewNop())
+
+	result, err := collector.CollectCandidates(context.Background(), projectID, datasourceID, nil)
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+
+	candidate := result[0]
+
+	// Verify join statistics were collected
+	assert.Equal(t, int64(500), candidate.JoinCount)
+	assert.Equal(t, int64(100), candidate.SourceMatched)
+	assert.Equal(t, int64(90), candidate.TargetMatched)
+	assert.Equal(t, int64(5), candidate.OrphanCount)
+	assert.Equal(t, int64(10), candidate.ReverseOrphans)
+
+	// Verify sample values were collected
+	assert.Equal(t, []string{"uuid-1", "uuid-2", "uuid-3"}, candidate.SourceSamples)
+	assert.Equal(t, []string{"uuid-1", "uuid-2", "uuid-4"}, candidate.TargetSamples)
+
+	// Verify distinct counts and null rates were collected
+	assert.Equal(t, int64(100), candidate.SourceDistinctCount)
+	assert.InDelta(t, 0.05, candidate.SourceNullRate, 0.001) // (1000-950)/1000 = 5%
+	assert.Equal(t, int64(200), candidate.TargetDistinctCount)
+	assert.Equal(t, 0.0, candidate.TargetNullRate)
+}
+
+func TestCollectCandidates_ContinuesOnNonFatalErrors(t *testing.T) {
+	// Tests that the collector continues processing candidates when
+	// individual statistics collection fails (non-fatal errors)
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ordersTableID := uuid.New()
+	usersTableID := uuid.New()
+
+	// FK source column
+	userIDCol := &models.SchemaColumn{
+		ID:            uuid.New(),
+		SchemaTableID: ordersTableID,
+		ColumnName:    "user_id",
+		DataType:      "uuid",
+		IsPrimaryKey:  false,
+		Metadata: map[string]any{
+			"column_features": map[string]any{
+				"role":                "foreign_key",
+				"classification_path": "uuid",
+			},
+		},
+	}
+
+	// PK target column
+	usersPKCol := &models.SchemaColumn{
+		ID:            uuid.New(),
+		SchemaTableID: usersTableID,
+		ColumnName:    "id",
+		DataType:      "uuid",
+		IsPrimaryKey:  true,
+	}
+
+	repo := &mockSchemaRepoForCandidateCollector{
+		columnsByTable: map[string][]*models.SchemaColumn{
+			"orders": {userIDCol},
+		},
+		allColumns: []*models.SchemaColumn{userIDCol, usersPKCol},
+		tables: []*models.SchemaTable{
+			{ID: ordersTableID, TableName: "orders"},
+			{ID: usersTableID, TableName: "users"},
+		},
+	}
+
+	// Create a mock adapter that returns errors for all stats collection
+	mockAdapter := &mockSchemaDiscovererForJoinStats{
+		analyzeJoinErr:    errors.New("join analysis failed"),
+		distinctValuesErr: errors.New("distinct values failed"),
+		columnStatsErr:    errors.New("column stats failed"),
+	}
+
+	adapterFactory := &mockAdapterFactoryForCandidateCollector{
+		schemaDiscoverer: mockAdapter,
+	}
+
+	collector := NewRelationshipCandidateCollector(repo, adapterFactory, &mockDatasourceServiceForCandidateCollector{}, zap.NewNop())
+
+	// Should still succeed - errors are logged but not fatal
+	result, err := collector.CollectCandidates(context.Background(), projectID, datasourceID, nil)
+	require.NoError(t, err)
+	require.Len(t, result, 1, "should return candidate even if stats collection fails")
+
+	candidate := result[0]
+
+	// Verify basic candidate info is present
+	assert.Equal(t, "orders", candidate.SourceTable)
+	assert.Equal(t, "user_id", candidate.SourceColumn)
+	assert.Equal(t, "users", candidate.TargetTable)
+	assert.Equal(t, "id", candidate.TargetColumn)
+
+	// Statistics fields should be zero (collection failed)
+	assert.Zero(t, candidate.JoinCount)
+	assert.Zero(t, candidate.SourceMatched)
+	assert.Zero(t, candidate.SourceDistinctCount)
+	assert.Empty(t, candidate.SourceSamples)
 }

@@ -617,22 +617,38 @@ func (c *relationshipCandidateCollector) collectDistinctCounts(
 
 // CollectCandidates gathers all potential FK relationship candidates using deterministic criteria.
 // This method orchestrates the full candidate collection process:
-// 1. Identify FK sources (columns that could be foreign keys)
-// 2. Identify FK targets (primary keys and unique columns)
-// 3. Generate candidate pairs with type compatibility checks
-// 4. Collect join statistics and sample values for each candidate
+// 1. Get datasource and create adapter
+// 2. Identify FK sources (columns that could be foreign keys)
+// 3. Identify FK targets (primary keys and unique columns)
+// 4. Generate candidate pairs with type compatibility checks
+// 5. Collect join statistics and sample values for each candidate
 //
-// This implementation is a stub - full implementation is in Task 2.5.
+// Error handling follows the fail-fast policy per CLAUDE.md:
+// - Fatal errors (schema load, adapter creation): Return error immediately
+// - Non-fatal errors (single candidate stats fail): Log warning and continue
 func (c *relationshipCandidateCollector) CollectCandidates(
 	ctx context.Context,
 	projectID, datasourceID uuid.UUID,
 	progressCallback dag.ProgressCallback,
 ) ([]*RelationshipCandidate, error) {
-	// Step 1: Identify FK sources
+	// Step 1: Get datasource and create adapter
 	if progressCallback != nil {
 		progressCallback(0, 5, "Loading schema metadata")
 	}
 
+	ds, err := c.dsSvc.Get(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("get datasource: %w", err)
+	}
+
+	// Create schema discoverer adapter for join analysis and sample value collection
+	adapter, err := c.adapterFactory.NewSchemaDiscoverer(ctx, ds.DatasourceType, ds.Config, projectID, datasourceID, "")
+	if err != nil {
+		return nil, fmt.Errorf("create schema discoverer: %w", err)
+	}
+	defer adapter.Close()
+
+	// Step 2: Identify FK sources
 	sources, err := c.identifyFKSources(ctx, projectID, datasourceID)
 	if err != nil {
 		return nil, fmt.Errorf("identify FK sources: %w", err)
@@ -642,7 +658,7 @@ func (c *relationshipCandidateCollector) CollectCandidates(
 		progressCallback(1, 5, fmt.Sprintf("Found %d potential FK sources", len(sources)))
 	}
 
-	// Step 2: Identify FK targets (PKs and unique columns only)
+	// Step 3: Identify FK targets (PKs and unique columns only)
 	targets, err := c.identifyFKTargets(ctx, projectID, datasourceID)
 	if err != nil {
 		return nil, fmt.Errorf("identify FK targets: %w", err)
@@ -652,17 +668,57 @@ func (c *relationshipCandidateCollector) CollectCandidates(
 		progressCallback(2, 5, fmt.Sprintf("Found %d FK targets (PKs/unique)", len(targets)))
 	}
 
-	// Step 3: Generate candidate pairs with type compatibility
+	// Step 4: Generate candidate pairs with type compatibility
 	candidates := c.generateCandidatePairs(sources, targets)
 
 	if progressCallback != nil {
 		progressCallback(3, 5, fmt.Sprintf("Generated %d candidate pairs", len(candidates)))
 	}
 
-	// TODO: Task 2.4 - Collect join statistics for each candidate
-	// TODO: Task 2.5 - Wire together and complete this method
+	// Step 5: Collect join statistics and sample values for each candidate
+	// Per fail-fast policy: log and continue on individual candidate failures
+	for i, candidate := range candidates {
+		// Collect join statistics (join count, orphans, etc.)
+		if err := c.collectJoinStatistics(ctx, adapter, candidate); err != nil {
+			c.logger.Warn("failed to collect join stats, continuing",
+				zap.String("source", candidate.SourceTable+"."+candidate.SourceColumn),
+				zap.String("target", candidate.TargetTable+"."+candidate.TargetColumn),
+				zap.Error(err),
+			)
+			// Continue - missing join stats is not fatal, LLM can still evaluate
+		}
 
-	c.logger.Info("candidate collection complete (stub)",
+		// Collect sample values for source and target columns
+		if err := c.collectSampleValues(ctx, adapter, candidate); err != nil {
+			c.logger.Warn("failed to collect sample values, continuing",
+				zap.String("source", candidate.SourceTable+"."+candidate.SourceColumn),
+				zap.String("target", candidate.TargetTable+"."+candidate.TargetColumn),
+				zap.Error(err),
+			)
+			// Continue - missing samples is not fatal
+		}
+
+		// Collect distinct counts and null rates
+		if err := c.collectDistinctCounts(ctx, adapter, candidate); err != nil {
+			c.logger.Warn("failed to collect distinct counts, continuing",
+				zap.String("source", candidate.SourceTable+"."+candidate.SourceColumn),
+				zap.String("target", candidate.TargetTable+"."+candidate.TargetColumn),
+				zap.Error(err),
+			)
+			// Continue - missing stats is not fatal
+		}
+
+		// Report progress for large candidate sets (every 10 candidates)
+		if len(candidates) > 10 && i%10 == 0 && progressCallback != nil {
+			progressCallback(4, 5, fmt.Sprintf("Analyzing candidates: %d/%d", i, len(candidates)))
+		}
+	}
+
+	if progressCallback != nil {
+		progressCallback(5, 5, "Candidate collection complete")
+	}
+
+	c.logger.Info("candidate collection complete",
 		zap.Int("sources", len(sources)),
 		zap.Int("targets", len(targets)),
 		zap.Int("candidates", len(candidates)),
