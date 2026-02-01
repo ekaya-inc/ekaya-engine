@@ -1259,3 +1259,516 @@ func (m *mockJoinAnalysisSchemaDiscoverer) GetEnumValueDistribution(ctx context.
 func (m *mockJoinAnalysisSchemaDiscoverer) Close() error {
 	return nil
 }
+
+// TestRelationshipDiscoveryService_ResultStatistics is a comprehensive test that verifies
+// all result statistics are accurate across different relationship types:
+// 1. DB-declared FK (preserved without LLM)
+// 2. ColumnFeatures FK (preserved without LLM)
+// 3. Valid LLM inference (LLM accepts)
+// 4. Invalid LLM inference (LLM rejects)
+//
+// It verifies CandidatesEvaluated, RelationshipsCreated, RelationshipsRejected, DurationMs,
+// and queries engine_entity_relationships to verify persistence with correct metadata.
+func TestRelationshipDiscoveryService_ResultStatistics(t *testing.T) {
+	tc := setupLLMDiscoveryTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// ============================================================================
+	// Step 1: Create schema with multiple tables for comprehensive relationship testing
+	// ============================================================================
+
+	// Create tables: users (User entity), orders (Order entity), payments (Payment entity),
+	// reviews (Review entity), configs (Config entity)
+
+	usersRowCount := int64(100)
+	usersTable := &models.SchemaTable{
+		ProjectID:    tc.projectID,
+		DatasourceID: tc.datasourceID,
+		SchemaName:   "public",
+		TableName:    "stat_test_users",
+		RowCount:     &usersRowCount,
+		IsSelected:   true,
+	}
+	require.NoError(t, tc.schemaRepo.UpsertTable(ctx, usersTable))
+
+	ordersRowCount := int64(500)
+	ordersTable := &models.SchemaTable{
+		ProjectID:    tc.projectID,
+		DatasourceID: tc.datasourceID,
+		SchemaName:   "public",
+		TableName:    "stat_test_orders",
+		RowCount:     &ordersRowCount,
+		IsSelected:   true,
+	}
+	require.NoError(t, tc.schemaRepo.UpsertTable(ctx, ordersTable))
+
+	paymentsRowCount := int64(400)
+	paymentsTable := &models.SchemaTable{
+		ProjectID:    tc.projectID,
+		DatasourceID: tc.datasourceID,
+		SchemaName:   "public",
+		TableName:    "stat_test_payments",
+		RowCount:     &paymentsRowCount,
+		IsSelected:   true,
+	}
+	require.NoError(t, tc.schemaRepo.UpsertTable(ctx, paymentsTable))
+
+	reviewsRowCount := int64(200)
+	reviewsTable := &models.SchemaTable{
+		ProjectID:    tc.projectID,
+		DatasourceID: tc.datasourceID,
+		SchemaName:   "public",
+		TableName:    "stat_test_reviews",
+		RowCount:     &reviewsRowCount,
+		IsSelected:   true,
+	}
+	require.NoError(t, tc.schemaRepo.UpsertTable(ctx, reviewsTable))
+
+	configsRowCount := int64(50)
+	configsTable := &models.SchemaTable{
+		ProjectID:    tc.projectID,
+		DatasourceID: tc.datasourceID,
+		SchemaName:   "public",
+		TableName:    "stat_test_configs",
+		RowCount:     &configsRowCount,
+		IsSelected:   true,
+	}
+	require.NoError(t, tc.schemaRepo.UpsertTable(ctx, configsTable))
+
+	eventsRowCount := int64(1000)
+	eventsTable := &models.SchemaTable{
+		ProjectID:    tc.projectID,
+		DatasourceID: tc.datasourceID,
+		SchemaName:   "public",
+		TableName:    "stat_test_events",
+		RowCount:     &eventsRowCount,
+		IsSelected:   true,
+	}
+	require.NoError(t, tc.schemaRepo.UpsertTable(ctx, eventsTable))
+
+	// ============================================================================
+	// Step 2: Create columns for all tables
+	// ============================================================================
+
+	// users.id (PK)
+	usersIDCol := &models.SchemaColumn{
+		ProjectID:       tc.projectID,
+		SchemaTableID:   usersTable.ID,
+		ColumnName:      "id",
+		DataType:        "uuid",
+		IsNullable:      false,
+		IsPrimaryKey:    true,
+		OrdinalPosition: 1,
+		IsSelected:      true,
+	}
+	require.NoError(t, tc.schemaRepo.UpsertColumn(ctx, usersIDCol))
+
+	// orders.id (PK)
+	ordersIDCol := &models.SchemaColumn{
+		ProjectID:       tc.projectID,
+		SchemaTableID:   ordersTable.ID,
+		ColumnName:      "id",
+		DataType:        "uuid",
+		IsNullable:      false,
+		IsPrimaryKey:    true,
+		OrdinalPosition: 1,
+		IsSelected:      true,
+	}
+	require.NoError(t, tc.schemaRepo.UpsertColumn(ctx, ordersIDCol))
+
+	// orders.user_id (FK to users.id - will be DB-declared FK)
+	ordersUserIDCol := &models.SchemaColumn{
+		ProjectID:       tc.projectID,
+		SchemaTableID:   ordersTable.ID,
+		ColumnName:      "user_id",
+		DataType:        "uuid",
+		IsNullable:      false,
+		IsPrimaryKey:    false,
+		OrdinalPosition: 2,
+		IsSelected:      true,
+	}
+	require.NoError(t, tc.schemaRepo.UpsertColumn(ctx, ordersUserIDCol))
+
+	// payments.id (PK)
+	paymentsIDCol := &models.SchemaColumn{
+		ProjectID:       tc.projectID,
+		SchemaTableID:   paymentsTable.ID,
+		ColumnName:      "id",
+		DataType:        "uuid",
+		IsNullable:      false,
+		IsPrimaryKey:    true,
+		OrdinalPosition: 1,
+		IsSelected:      true,
+	}
+	require.NoError(t, tc.schemaRepo.UpsertColumn(ctx, paymentsIDCol))
+
+	// payments.order_id (FK via ColumnFeatures - high confidence)
+	paymentsOrderIDCol := &models.SchemaColumn{
+		ProjectID:       tc.projectID,
+		SchemaTableID:   paymentsTable.ID,
+		ColumnName:      "order_id",
+		DataType:        "uuid",
+		IsNullable:      false,
+		IsPrimaryKey:    false,
+		OrdinalPosition: 2,
+		IsSelected:      true,
+		Metadata: map[string]any{
+			"column_features": map[string]any{
+				"classification_path": "uuid",
+				"role":                "foreign_key",
+				"purpose":             "identifier",
+				"identifier_features": map[string]any{
+					"fk_target_table":  "stat_test_orders",
+					"fk_target_column": "id",
+					"fk_confidence":    0.95, // High confidence - should be preserved
+				},
+			},
+		},
+	}
+	require.NoError(t, tc.schemaRepo.UpsertColumn(ctx, paymentsOrderIDCol))
+
+	// reviews.id (PK)
+	reviewsIDCol := &models.SchemaColumn{
+		ProjectID:       tc.projectID,
+		SchemaTableID:   reviewsTable.ID,
+		ColumnName:      "id",
+		DataType:        "uuid",
+		IsNullable:      false,
+		IsPrimaryKey:    true,
+		OrdinalPosition: 1,
+		IsSelected:      true,
+	}
+	require.NoError(t, tc.schemaRepo.UpsertColumn(ctx, reviewsIDCol))
+
+	// reviews.user_id (will be LLM-validated - accepted)
+	reviewsUserIDCol := &models.SchemaColumn{
+		ProjectID:       tc.projectID,
+		SchemaTableID:   reviewsTable.ID,
+		ColumnName:      "user_id",
+		DataType:        "uuid",
+		IsNullable:      false,
+		IsPrimaryKey:    false,
+		OrdinalPosition: 2,
+		IsSelected:      true,
+	}
+	require.NoError(t, tc.schemaRepo.UpsertColumn(ctx, reviewsUserIDCol))
+
+	// configs.id (PK)
+	configsIDCol := &models.SchemaColumn{
+		ProjectID:       tc.projectID,
+		SchemaTableID:   configsTable.ID,
+		ColumnName:      "id",
+		DataType:        "uuid",
+		IsNullable:      false,
+		IsPrimaryKey:    true,
+		OrdinalPosition: 1,
+		IsSelected:      true,
+	}
+	require.NoError(t, tc.schemaRepo.UpsertColumn(ctx, configsIDCol))
+
+	// events.id (PK)
+	eventsIDCol := &models.SchemaColumn{
+		ProjectID:       tc.projectID,
+		SchemaTableID:   eventsTable.ID,
+		ColumnName:      "id",
+		DataType:        "uuid",
+		IsNullable:      false,
+		IsPrimaryKey:    true,
+		OrdinalPosition: 1,
+		IsSelected:      true,
+	}
+	require.NoError(t, tc.schemaRepo.UpsertColumn(ctx, eventsIDCol))
+
+	// events.data (will be LLM-validated - rejected)
+	eventsDataCol := &models.SchemaColumn{
+		ProjectID:       tc.projectID,
+		SchemaTableID:   eventsTable.ID,
+		ColumnName:      "data",
+		DataType:        "text",
+		IsNullable:      true,
+		IsPrimaryKey:    false,
+		OrdinalPosition: 2,
+		IsSelected:      true,
+	}
+	require.NoError(t, tc.schemaRepo.UpsertColumn(ctx, eventsDataCol))
+
+	// ============================================================================
+	// Step 3: Create DB-declared FK relationship (orders.user_id -> users.id)
+	// ============================================================================
+
+	tc.createDBDeclaredFK(ctx, ordersTable.ID, ordersUserIDCol.ID, usersTable.ID, usersIDCol.ID)
+
+	// ============================================================================
+	// Step 4: Create ontology and entities
+	// ============================================================================
+
+	tc.createTestOntology(ctx)
+	tc.createTestEntity(ctx, "User", "stat_test_users")
+	tc.createTestEntity(ctx, "Order", "stat_test_orders")
+	tc.createTestEntity(ctx, "Payment", "stat_test_payments")
+	tc.createTestEntity(ctx, "Review", "stat_test_reviews")
+	tc.createTestEntity(ctx, "Config", "stat_test_configs")
+	tc.createTestEntity(ctx, "Event", "stat_test_events")
+
+	// ============================================================================
+	// Step 5: Setup mock LLM with configurable responses
+	// ============================================================================
+
+	mockLLM := newMockLLMServiceForIntegration()
+
+	// Valid inference: reviews.user_id -> users.id (LLM accepts)
+	mockLLM.SetResponse("stat_test_reviews", "user_id", "stat_test_users", "id", &RelationshipValidationResult{
+		IsValidFK:   true,
+		Confidence:  0.92,
+		Cardinality: "N:1",
+		Reasoning:   "reviews.user_id contains UUIDs that match existing user IDs - valid FK relationship",
+		SourceRole:  "reviewer",
+	})
+
+	// Invalid inference: events.data -> configs.id (LLM rejects)
+	mockLLM.SetResponse("stat_test_events", "data", "stat_test_configs", "id", &RelationshipValidationResult{
+		IsValidFK:   false,
+		Confidence:  0.88,
+		Cardinality: "",
+		Reasoning:   "data column contains JSON/text data, not identifiers - not a valid FK",
+		SourceRole:  "",
+	})
+
+	mockValidator := &mockRelationshipValidator{mock: mockLLM, logger: tc.logger}
+
+	// ============================================================================
+	// Step 6: Setup mock services and candidate collector
+	// ============================================================================
+
+	mockDS := &llmTestMockDatasourceService{
+		datasource: &models.Datasource{
+			ID:             tc.datasourceID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{},
+		},
+	}
+
+	adapterFactory := &llmTestMockAdapterFactory{
+		schemaDiscoverer: &mockJoinAnalysisSchemaDiscoverer{
+			joinAnalysis: &datasource.JoinAnalysis{
+				JoinCount:          100,
+				SourceMatched:      95,
+				TargetMatched:      90,
+				OrphanCount:        5,
+				ReverseOrphanCount: 10,
+			},
+		},
+	}
+
+	// Create candidate collector that returns the two LLM-validated candidates
+	// (reviews.user_id -> users.id and events.data -> configs.id)
+	mockCollector := &configurableStatsMockCollector{
+		candidates: []*RelationshipCandidate{
+			// Valid candidate: reviews.user_id -> users.id
+			{
+				SourceTable:         "stat_test_reviews",
+				SourceColumn:        "user_id",
+				SourceDataType:      "uuid",
+				SourceIsPK:          false,
+				SourceDistinctCount: 150,
+				SourceNullRate:      0.0,
+				SourceSamples:       []string{"aaa11111-1111-1111-1111-111111111111", "bbb22222-2222-2222-2222-222222222222"},
+				SourceColumnID:      reviewsUserIDCol.ID,
+				SourcePurpose:       models.PurposeIdentifier,
+				SourceRole:          models.RoleForeignKey,
+
+				TargetTable:         "stat_test_users",
+				TargetColumn:        "id",
+				TargetDataType:      "uuid",
+				TargetIsPK:          true,
+				TargetDistinctCount: 100,
+				TargetNullRate:      0.0,
+				TargetSamples:       []string{"aaa11111-1111-1111-1111-111111111111", "bbb22222-2222-2222-2222-222222222222"},
+				TargetColumnID:      usersIDCol.ID,
+
+				JoinCount:      200,
+				SourceMatched:  150,
+				TargetMatched:  100,
+				OrphanCount:    0,
+				ReverseOrphans: 0,
+			},
+			// Invalid candidate: events.data -> configs.id (LLM should reject)
+			{
+				SourceTable:         "stat_test_events",
+				SourceColumn:        "data",
+				SourceDataType:      "text",
+				SourceIsPK:          false,
+				SourceDistinctCount: 800,
+				SourceNullRate:      0.1,
+				SourceSamples:       []string{`{"type":"click"}`, `{"type":"view"}`},
+				SourceColumnID:      eventsDataCol.ID,
+				SourcePurpose:       "",
+				SourceRole:          "",
+
+				TargetTable:         "stat_test_configs",
+				TargetColumn:        "id",
+				TargetDataType:      "uuid",
+				TargetIsPK:          true,
+				TargetDistinctCount: 50,
+				TargetNullRate:      0.0,
+				TargetSamples:       []string{"ccc33333-3333-3333-3333-333333333333"},
+				TargetColumnID:      configsIDCol.ID,
+
+				JoinCount:      0,  // No matches
+				SourceMatched:  0,
+				TargetMatched:  0,
+				OrphanCount:    800, // All are orphans
+				ReverseOrphans: 50,
+			},
+		},
+	}
+
+	// ============================================================================
+	// Step 7: Create the service and run discovery
+	// ============================================================================
+
+	svc := NewLLMRelationshipDiscoveryService(
+		mockCollector,
+		mockValidator,
+		mockDS,
+		adapterFactory,
+		tc.ontologyRepo,
+		tc.entityRepo,
+		tc.relationshipRepo,
+		tc.schemaRepo,
+		tc.logger,
+	)
+
+	result, err := svc.DiscoverRelationships(ctx, tc.projectID, tc.datasourceID, nil)
+	require.NoError(t, err, "DiscoverRelationships should not return error")
+	require.NotNil(t, result, "Result should not be nil")
+
+	// ============================================================================
+	// Step 8: Verify result statistics
+	// ============================================================================
+
+	// CandidatesEvaluated: Only the inference candidates (2 items)
+	// DB-declared and ColumnFeatures FKs don't count as "candidates evaluated"
+	assert.Equal(t, 2, result.CandidatesEvaluated, "should count only LLM-evaluated candidates")
+
+	// PreservedDBFKs: 1 (orders.user_id -> users.id)
+	assert.Equal(t, 1, result.PreservedDBFKs, "should preserve 1 DB-declared FK")
+
+	// PreservedColumnFKs: 1 (payments.order_id -> orders.id)
+	assert.Equal(t, 1, result.PreservedColumnFKs, "should preserve 1 ColumnFeatures FK")
+
+	// RelationshipsCreated: LLM accepted 1 (reviews.user_id -> users.id)
+	// Total should be PreservedDBFKs + PreservedColumnFKs + LLM-accepted = 1 + 1 + 1 = 3
+	// Note: RelationshipsCreated only counts LLM-accepted ones (not preserved ones)
+	assert.Equal(t, 1, result.RelationshipsCreated, "should create 1 LLM-validated relationship")
+
+	// RelationshipsRejected: LLM rejected 1 (events.data -> configs.id)
+	assert.Equal(t, 1, result.RelationshipsRejected, "should reject 1 LLM candidate")
+
+	// DurationMs should be positive
+	assert.Greater(t, result.DurationMs, int64(0), "should track positive duration")
+
+	// ============================================================================
+	// Step 9: Verify LLM calls were made for inference candidates only
+	// ============================================================================
+
+	llmCalls := mockLLM.GetCalls()
+	assert.Len(t, llmCalls, 2, "LLM should be called for 2 inference candidates")
+
+	callsSet := make(map[string]bool)
+	for _, call := range llmCalls {
+		callsSet[call] = true
+	}
+
+	assert.True(t, callsSet["stat_test_reviews.user_id->stat_test_users.id"],
+		"LLM should validate reviews.user_id -> users.id")
+	assert.True(t, callsSet["stat_test_events.data->stat_test_configs.id"],
+		"LLM should validate events.data -> configs.id")
+
+	// Verify no LLM calls were made for DB-declared or ColumnFeatures FKs
+	assert.False(t, callsSet["stat_test_orders.user_id->stat_test_users.id"],
+		"LLM should NOT be called for DB-declared FK")
+	assert.False(t, callsSet["stat_test_payments.order_id->stat_test_orders.id"],
+		"LLM should NOT be called for ColumnFeatures FK")
+
+	// ============================================================================
+	// Step 10: Verify relationships were persisted in engine_entity_relationships
+	// ============================================================================
+
+	entityRels, err := tc.relationshipRepo.GetByOntology(ctx, tc.ontologyID)
+	require.NoError(t, err, "GetByOntology should not return error")
+
+	// Total relationships: 1 DB FK + 1 ColumnFeatures FK + 1 LLM-accepted = 3
+	assert.Len(t, entityRels, 3, "should have 3 relationships in database")
+
+	// Build a map for easier verification
+	relsBySource := make(map[string]*models.EntityRelationship)
+	for _, rel := range entityRels {
+		key := fmt.Sprintf("%s.%s->%s.%s", rel.SourceColumnTable, rel.SourceColumnName, rel.TargetColumnTable, rel.TargetColumnName)
+		relsBySource[key] = rel
+	}
+
+	// ============================================================================
+	// Step 11: Verify DB-declared FK relationship details
+	// ============================================================================
+
+	dbFKRel := relsBySource["stat_test_orders.user_id->stat_test_users.id"]
+	require.NotNil(t, dbFKRel, "DB-declared FK relationship should exist")
+
+	assert.Equal(t, "stat_test_orders", dbFKRel.SourceColumnTable, "source table should be stat_test_orders")
+	assert.Equal(t, "user_id", dbFKRel.SourceColumnName, "source column should be user_id")
+	assert.Equal(t, "stat_test_users", dbFKRel.TargetColumnTable, "target table should be stat_test_users")
+	assert.Equal(t, "id", dbFKRel.TargetColumnName, "target column should be id")
+	assert.Equal(t, models.DetectionMethodForeignKey, dbFKRel.DetectionMethod, "detection method should be foreign_key")
+	assert.Equal(t, 1.0, dbFKRel.Confidence, "DB FK confidence should be 1.0")
+	assert.Equal(t, models.RelationshipStatusConfirmed, dbFKRel.Status, "status should be confirmed")
+	assert.NotEmpty(t, dbFKRel.Cardinality, "cardinality should be set")
+
+	// ============================================================================
+	// Step 12: Verify ColumnFeatures FK relationship details
+	// ============================================================================
+
+	columnFKRel := relsBySource["stat_test_payments.order_id->stat_test_orders.id"]
+	require.NotNil(t, columnFKRel, "ColumnFeatures FK relationship should exist")
+
+	assert.Equal(t, "stat_test_payments", columnFKRel.SourceColumnTable, "source table should be stat_test_payments")
+	assert.Equal(t, "order_id", columnFKRel.SourceColumnName, "source column should be order_id")
+	assert.Equal(t, "stat_test_orders", columnFKRel.TargetColumnTable, "target table should be stat_test_orders")
+	assert.Equal(t, "id", columnFKRel.TargetColumnName, "target column should be id")
+	assert.Equal(t, models.DetectionMethodDataOverlap, columnFKRel.DetectionMethod, "detection method should be data_overlap")
+	assert.Equal(t, 0.95, columnFKRel.Confidence, "ColumnFeatures FK confidence should match configured value")
+	assert.Equal(t, models.RelationshipStatusConfirmed, columnFKRel.Status, "status should be confirmed")
+
+	// ============================================================================
+	// Step 13: Verify LLM-validated relationship details
+	// ============================================================================
+
+	llmRel := relsBySource["stat_test_reviews.user_id->stat_test_users.id"]
+	require.NotNil(t, llmRel, "LLM-validated relationship should exist")
+
+	assert.Equal(t, "stat_test_reviews", llmRel.SourceColumnTable, "source table should be stat_test_reviews")
+	assert.Equal(t, "user_id", llmRel.SourceColumnName, "source column should be user_id")
+	assert.Equal(t, "stat_test_users", llmRel.TargetColumnTable, "target table should be stat_test_users")
+	assert.Equal(t, "id", llmRel.TargetColumnName, "target column should be id")
+	assert.Equal(t, models.DetectionMethodPKMatch, llmRel.DetectionMethod, "detection method should be pk_match")
+	assert.Equal(t, 0.92, llmRel.Confidence, "LLM confidence should match mock response")
+	assert.Equal(t, "N:1", llmRel.Cardinality, "cardinality should be N:1 from LLM")
+	assert.Equal(t, models.RelationshipStatusConfirmed, llmRel.Status, "status should be confirmed")
+
+	// Verify source_role was populated in description
+	require.NotNil(t, llmRel.Description, "LLM relationship should have description from source_role")
+	assert.Contains(t, *llmRel.Description, "reviewer", "description should contain the source_role")
+
+	// ============================================================================
+	// Step 14: Verify rejected relationship was NOT persisted
+	// ============================================================================
+
+	rejectedRel := relsBySource["stat_test_events.data->stat_test_configs.id"]
+	assert.Nil(t, rejectedRel, "rejected relationship should NOT be in database")
+
+	t.Log("ResultStatistics test passed - all statistics and persistence verified")
+}
