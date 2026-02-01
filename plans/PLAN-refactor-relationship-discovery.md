@@ -93,34 +93,257 @@ type RelationshipValidationResult struct {
 
 ### Task 2: Create `relationship_candidate_collector.go` - Deterministic Collection
 
-Phase 1: Collect relationship candidates using only deterministic criteria:
+Phase 1: Collect relationship candidates using only deterministic criteria. This task is broken into subtasks below.
 
-1. **Get all columns with their features** (ColumnFeatures from Phase 4)
-2. **Identify potential FK sources:**
-   - Columns with `Role=foreign_key` from ColumnFeatures
-   - Columns with `Purpose=identifier` from ColumnFeatures
-   - Columns marked as joinable (from stats collection)
-   - Exclude: PKs (PKs are targets, not sources), timestamps, booleans, JSON
-3. **Identify potential FK targets:**
-   - PKs only (not just any high-cardinality column)
-   - Unique columns explicitly marked in schema
-4. **Generate candidate pairs** - Cross-product of sources × targets with type compatibility
-5. **Run SQL join analysis** for each candidate pair to populate join statistics
+**Files:** `pkg/services/relationship_candidate_collector.go`
 
+---
+
+#### Task 2.1: Create FK Source Identification Logic [x]
+
+Implement the logic to identify columns that are potential FK sources based on ColumnFeatures data.
+
+**File:** `pkg/services/relationship_candidate_collector.go`
+
+**Context:** The relationship discovery pipeline needs to identify which columns could be foreign keys pointing to other tables. This is Phase 1 of the candidate collection process.
+
+**Implementation:**
+
+1. Create the file with package declaration and imports
+2. Define the `RelationshipCandidateCollector` interface:
 ```go
 type RelationshipCandidateCollector interface {
-    // CollectCandidates finds all potential FK relationships via deterministic analysis.
-    // Returns candidates with join statistics populated.
     CollectCandidates(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback dag.ProgressCallback) ([]*RelationshipCandidate, error)
 }
 ```
 
-Key changes from current approach:
-- **Targets are only PKs/unique columns** - Not any column with 20+ distinct values
-- **Sources are guided by ColumnFeatures** - Not arbitrary joinability heuristics
-- **No filtering by thresholds** - All candidates go to LLM for validation
+3. Create the struct with dependencies:
+```go
+type relationshipCandidateCollector struct {
+    schemaRepo      repositories.SchemaRepository
+    columnStatsRepo repositories.ColumnStatisticsRepository
+    adapterFactory  adapters.DataSourceAdapterFactory
+    logger          *slog.Logger
+}
 
-**Files:** `pkg/services/relationship_candidate_collector.go`
+func NewRelationshipCandidateCollector(
+    schemaRepo repositories.SchemaRepository,
+    columnStatsRepo repositories.ColumnStatisticsRepository,
+    adapterFactory adapters.DataSourceAdapterFactory,
+    logger *slog.Logger,
+) RelationshipCandidateCollector
+```
+
+4. Implement `identifyFKSources()` method that returns columns eligible to be FK sources:
+   - Query `engine_schema_columns` for the project/datasource
+   - Include columns where `column_features->>'role' = 'foreign_key'`
+   - Include columns where `column_features->>'purpose' = 'identifier'`
+   - Include columns marked as joinable in `engine_column_statistics` (`is_joinable = true`)
+   - **Exclude:** Primary keys, timestamps, booleans, JSON types
+   - Return `[]*models.SchemaColumn` with their ColumnFeatures populated
+
+**Key constraint per CLAUDE.md rule #5:** Do NOT filter by column name patterns (like `_id` suffix). Use only ColumnFeatures data and explicit schema metadata.
+
+**Test consideration:** This subtask creates the foundation. Tests will be added in Task 7.
+
+---
+
+#### Task 2.2: Create FK Target Identification Logic [ ]
+
+Implement the logic to identify columns that are valid FK targets (primary keys and unique columns only).
+
+**File:** `pkg/services/relationship_candidate_collector.go` (continue from 2.1)
+
+**Context:** FK targets must be restricted to PKs and unique columns. The current buggy implementation allows any high-cardinality column as a target, which causes 90% bad inferences.
+
+**Implementation:**
+
+1. Implement `identifyFKTargets()` method:
+   - Query `engine_schema_columns` for columns where `is_primary_key = true`
+   - Also include columns where a unique constraint exists (check `engine_schema_table_constraints` or `is_unique` flag if available)
+   - Return `[]*models.SchemaColumn`
+
+2. Add type compatibility checking helper:
+```go
+func areTypesCompatible(sourceType, targetType string) bool {
+    // Compatible pairs:
+    // - Same types (uuid→uuid, int→int, text→text)
+    // - int variants (int4→int8, smallint→bigint)
+    // - string variants (varchar→text, char→text)
+    // Return false for clearly incompatible (text→int, bool→uuid)
+}
+```
+
+**Key change from current approach:** Targets are ONLY PKs and unique columns - not "any column with 20+ distinct values" as currently implemented in `deterministic_relationship_service.go`.
+
+---
+
+#### Task 2.3: Generate Candidate Pairs with Type Compatibility [ ]
+
+Implement the cross-product logic to generate all valid source→target pairs.
+
+**File:** `pkg/services/relationship_candidate_collector.go` (continue from 2.2)
+
+**Context:** Once sources and targets are identified, we generate all possible pairs filtered by type compatibility. No threshold-based filtering - all pairs go to LLM validation.
+
+**Implementation:**
+
+1. Implement `generateCandidatePairs()` method:
+```go
+func (c *relationshipCandidateCollector) generateCandidatePairs(
+    sources []*models.SchemaColumn,
+    targets []*models.SchemaColumn,
+) []*RelationshipCandidate {
+    var candidates []*RelationshipCandidate
+    for _, source := range sources {
+        for _, target := range targets {
+            // Skip self-references (same table.column)
+            if source.TableName == target.TableName && source.ColumnName == target.ColumnName {
+                continue
+            }
+            // Skip if types are incompatible
+            if !areTypesCompatible(source.DataType, target.DataType) {
+                continue
+            }
+            candidates = append(candidates, &RelationshipCandidate{
+                SourceTable:    source.TableName,
+                SourceColumn:   source.ColumnName,
+                SourceDataType: source.DataType,
+                SourceIsPK:     source.IsPrimaryKey,
+                // ... populate from source ColumnFeatures
+                TargetTable:    target.TableName,
+                TargetColumn:   target.ColumnName,
+                TargetDataType: target.DataType,
+                TargetIsPK:     target.IsPrimaryKey,
+                // ... populate from target ColumnFeatures
+            })
+        }
+    }
+    return candidates
+}
+```
+
+2. Populate ColumnFeatures-derived fields on each candidate:
+   - `SourcePurpose`, `SourceRole` from `source.ColumnFeatures`
+   - `TargetPurpose`, `TargetRole` from `target.ColumnFeatures`
+
+**Key constraint:** No filtering by thresholds (distinct count, cardinality ratio, etc.). All type-compatible pairs become candidates for LLM validation.
+
+---
+
+#### Task 2.4: Implement Join Statistics Collection [ ]
+
+Implement SQL-based join analysis to populate statistics for each candidate pair.
+
+**File:** `pkg/services/relationship_candidate_collector.go` (continue from 2.3)
+
+**Context:** For each candidate pair, we run SQL queries against the customer datasource to get join statistics. This data helps the LLM make informed decisions.
+
+**Implementation:**
+
+1. Implement `collectJoinStatistics()` method using the datasource adapter:
+```go
+func (c *relationshipCandidateCollector) collectJoinStatistics(
+    ctx context.Context,
+    adapter adapters.QueryExecutor,
+    candidate *RelationshipCandidate,
+) error {
+    // Query 1: Join count and source matched
+    // SELECT COUNT(*) as join_count, COUNT(DISTINCT s.{source_col}) as source_matched
+    // FROM {source_table} s
+    // JOIN {target_table} t ON s.{source_col} = t.{target_col}
+
+    // Query 2: Orphan count (source values not in target)
+    // SELECT COUNT(DISTINCT s.{source_col}) as orphan_count
+    // FROM {source_table} s
+    // LEFT JOIN {target_table} t ON s.{source_col} = t.{target_col}
+    // WHERE t.{target_col} IS NULL AND s.{source_col} IS NOT NULL
+
+    // Query 3: Reverse orphans (target values not referenced)
+    // SELECT COUNT(DISTINCT t.{target_col}) as reverse_orphans
+    // FROM {target_table} t
+    // LEFT JOIN {source_table} s ON t.{target_col} = s.{source_col}
+    // WHERE s.{source_col} IS NULL
+
+    // Populate candidate fields: JoinCount, OrphanCount, ReverseOrphans, SourceMatched, TargetMatched
+}
+```
+
+2. Add sample value collection:
+```go
+func (c *relationshipCandidateCollector) collectSampleValues(
+    ctx context.Context,
+    adapter adapters.QueryExecutor,
+    candidate *RelationshipCandidate,
+) error {
+    // Get up to 10 sample values from source column
+    // Get up to 10 sample values from target column
+    // Populate candidate.SourceSamples and candidate.TargetSamples
+}
+```
+
+**Architecture note per CLAUDE.md rule #3:** Customer datasource access MUST use adapters from `pkg/adapters/datasource/`. Get the adapter via `adapterFactory.NewQueryExecutor(ctx, datasource)`.
+
+---
+
+#### Task 2.5: Implement Main CollectCandidates Method [ ]
+
+Wire together all the components and implement the public `CollectCandidates` method.
+
+**File:** `pkg/services/relationship_candidate_collector.go` (complete the implementation)
+
+**Context:** This is the main entry point that orchestrates the candidate collection process with progress reporting.
+
+**Implementation:**
+
+1. Implement `CollectCandidates()`:
+```go
+func (c *relationshipCandidateCollector) CollectCandidates(
+    ctx context.Context,
+    projectID, datasourceID uuid.UUID,
+    progressCallback dag.ProgressCallback,
+) ([]*RelationshipCandidate, error) {
+    // Step 1: Get datasource and create adapter
+    // progressCallback(0, 5, "Loading schema metadata")
+
+    // Step 2: Identify FK sources
+    sources, err := c.identifyFKSources(ctx, projectID, datasourceID)
+    // progressCallback(1, 5, fmt.Sprintf("Found %d potential FK sources", len(sources)))
+
+    // Step 3: Identify FK targets
+    targets, err := c.identifyFKTargets(ctx, projectID, datasourceID)
+    // progressCallback(2, 5, fmt.Sprintf("Found %d FK targets (PKs/unique)", len(targets)))
+
+    // Step 4: Generate candidate pairs
+    candidates := c.generateCandidatePairs(sources, targets)
+    // progressCallback(3, 5, fmt.Sprintf("Generated %d candidate pairs", len(candidates)))
+
+    // Step 5: Collect join statistics for each candidate (with sub-progress)
+    adapter, err := c.adapterFactory.NewQueryExecutor(ctx, datasource)
+    for i, candidate := range candidates {
+        if err := c.collectJoinStatistics(ctx, adapter, candidate); err != nil {
+            c.logger.Warn("failed to collect join stats", "source", candidate.SourceTable+"."+candidate.SourceColumn, "error", err)
+            // Continue - missing stats is not fatal, LLM can still evaluate
+        }
+        if err := c.collectSampleValues(ctx, adapter, candidate); err != nil {
+            c.logger.Warn("failed to collect samples", "error", err)
+        }
+        // Report progress for large candidate sets
+        if len(candidates) > 10 && i%10 == 0 {
+            progressCallback(4, 5, fmt.Sprintf("Analyzing candidates: %d/%d", i, len(candidates)))
+        }
+    }
+    // progressCallback(5, 5, "Candidate collection complete")
+
+    return candidates, nil
+}
+```
+
+2. Add constructor registration in dependency injection (likely `pkg/server/dependencies.go` or similar)
+
+3. Add logging throughout with structured fields per existing codebase patterns
+
+**Error handling per CLAUDE.md:** Fail fast on fatal errors (can't load schema, can't create adapter). Log and continue on non-fatal errors (single candidate stats collection fails).
 
 ---
 
@@ -294,8 +517,38 @@ Test cases:
 | `relationship_discovery_service.go` | Orchestration |
 | `dag/relationship_discovery_node.go` | DAG integration |
 
-## Open Questions
+## Design Decisions
 
-1. Should we store rejected candidates for debugging/audit? (Currently we do via `RejectionReason`)
-2. Should orphan rate be shown in UI with LLM reasoning?
-3. Do we need a "review" workflow for low-confidence LLM decisions?
+### UUID Columns as High-Priority FK Sources
+
+Columns with `ClassificationPathUUID` should be treated as high-priority FK source candidates in Phase 1 collection. UUID-pattern detection is deterministic and reliable - if a column contains UUIDs, it's very likely an identifier that references something.
+
+### Low-Confidence LLM Decisions
+
+If LLM confidence is not high, **do not create the relationship and do not ask the user**. Given the current state where ~90% of inferred relationships are wrong, we should err on the side of caution. A false negative (missing a real FK) is better than a false positive (showing a stupid relationship).
+
+No "review" workflow for low-confidence decisions - just reject silently.
+
+### Phase 4 FK Resolution Integration
+
+**Trust Phase 4 for target identification, validate with join statistics only.**
+
+| Phase 4 (ColumnFeatures) | Relationship Discovery |
+|-------------------------|------------------------|
+| Answers: "Where does this FK point?" | Answers: "Is this FK relationship valid?" |
+| Semantic inference from samples/context | Validation with actual join data |
+
+For columns where Phase 4 already set `FKTargetTable` with high confidence:
+
+1. **Accept the target** - Don't re-discover, Phase 4 already used LLM for this
+2. **Run join analysis** - Get orphan count, cardinality from actual data
+3. **If join stats pass** (zero orphans, sensible cardinality) → Store relationship without another LLM call
+4. **If join stats fail** (orphans, weird cardinality) → Reject silently (Phase 4 was wrong, but don't ask user about our mistakes)
+
+This saves LLM calls while still catching Phase 4 errors via data validation.
+
+## Resolved Questions
+
+1. **Store rejected candidates for debugging/audit?** - Yes, for internal debugging via `RejectionReason`, but don't surface to user
+2. **Show orphan rate in UI?** - Only for accepted relationships, as context
+3. **Review workflow for low-confidence?** - No, reject silently instead
