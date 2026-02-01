@@ -25,11 +25,12 @@ import (
 // This test verifies that the relationship channels.owner_id → users.user_id is correctly
 // discovered through the complete pipeline:
 // 1. Import schema with proper stats collection
-// 2. Create entities for users and channels
-// 3. Run pk_match discovery
-// 4. Assert the relationship exists
+// 2. Run pk_match discovery (no entities required - schema-first refactor)
+// 3. Assert the relationship exists in engine_schema_relationships
 //
-// This is the golden test for Task 4 of PLAN-fix-relationship-extraction.md
+// NOTE: The schema-first DAG refactor (PLAN-schema-first-dag.md) changed PKMatchDiscovery
+// to write to engine_schema_relationships instead of engine_entity_relationships.
+// Entities are now an optional convenience layer added later in the pipeline.
 func TestPKMatchDiscovery_ChannelsOwnerToUsersUserID(t *testing.T) {
 	// Setup test infrastructure
 	engineDB := testhelpers.GetEngineDB(t)
@@ -92,49 +93,8 @@ func TestPKMatchDiscovery_ChannelsOwnerToUsersUserID(t *testing.T) {
 		}
 	}
 
-	// Step 2: Create ontology and entities
-	ontology := &models.TieredOntology{
-		ProjectID: projectID,
-		Version:   1,
-		IsActive:  true,
-	}
-	if err := ontologyRepo.Create(ctx, ontology); err != nil {
-		t.Fatalf("Failed to create ontology: %v", err)
-	}
-
-	// Add provenance context for entity creation
-	ctx = models.WithInferredProvenance(ctx, uuid.Nil)
-
-	// Create user entity
-	userEntity := &models.OntologyEntity{
-		ProjectID:     projectID,
-		OntologyID:    ontology.ID,
-		Name:          "user",
-		Description:   "User entity",
-		PrimarySchema: "public",
-		PrimaryTable:  "users",
-	}
-	if err := entityRepo.Create(ctx, userEntity); err != nil {
-		t.Fatalf("Failed to create user entity: %v", err)
-	}
-
-	// Create channel entity
-	channelEntity := &models.OntologyEntity{
-		ProjectID:     projectID,
-		OntologyID:    ontology.ID,
-		Name:          "channel",
-		Description:   "Channel entity",
-		PrimarySchema: "public",
-		PrimaryTable:  "channels",
-	}
-	if err := entityRepo.Create(ctx, channelEntity); err != nil {
-		t.Fatalf("Failed to create channel entity: %v", err)
-	}
-
-	// Note: Entity occurrences are now computed at runtime from relationships (task 2.5)
-	// PK match discovery no longer depends on pre-created occurrence records
-
-	// Step 3: Create mock datasource service and adapter factory for pk_match
+	// Step 2: Create mock datasource service and adapter factory for pk_match
+	// Note: No entities required - schema-first refactor removed entity dependency
 	// Get mapped port for test database
 	port, err := testDB.Container.MappedPort(context.Background(), "5432")
 	if err != nil {
@@ -175,61 +135,85 @@ func TestPKMatchDiscovery_ChannelsOwnerToUsersUserID(t *testing.T) {
 		zap.NewNop(),
 	)
 
-	// Step 4: Run pk_match discovery
+	// Step 3: Run pk_match discovery
 	result, err := detRelService.DiscoverPKMatchRelationships(ctx, projectID, datasourceID, nil)
 	if err != nil {
 		t.Fatalf("DiscoverPKMatchRelationships failed: %v", err)
 	}
 
-	// Step 5: Verify relationship was discovered
+	// Step 4: Verify relationship was discovered in engine_schema_relationships
+	// (not engine_entity_relationships - that's the old architecture)
 	if result.InferredRelationships == 0 {
 		t.Error("Expected at least 1 inferred relationship (channels.owner_id → users.user_id), got 0")
 	}
 
-	// Get all entity relationships for verification
-	entityRels, err := relationshipRepo.GetByProject(ctx, projectID)
+	// Get all schema relationships for verification
+	schemaRels, err := schemaRepo.ListRelationshipsByDatasource(ctx, projectID, datasourceID)
 	if err != nil {
-		t.Fatalf("Failed to get entity relationships: %v", err)
+		t.Fatalf("Failed to get schema relationships: %v", err)
+	}
+
+	// Build column lookup for verification
+	columnByID := make(map[uuid.UUID]*models.SchemaColumn)
+	for _, col := range allDbColumns {
+		columnByID[col.ID] = col
 	}
 
 	// Find a channels → users relationship (owner_id is a FK from channels to users)
 	// Note: The actual target column depends on test data - owner_id values may exist
 	// in either user_id or account_id column in the users table
-	var foundRelationship *models.EntityRelationship
-	for _, rel := range entityRels {
-		// The relationship should be: channel entity references user entity via owner_id
-		if rel.SourceEntityID == channelEntity.ID &&
-			rel.TargetEntityID == userEntity.ID &&
-			rel.SourceColumnName == "owner_id" {
-			foundRelationship = rel
-			break
+	var foundRelationship *models.SchemaRelationship
+	for _, rel := range schemaRels {
+		sourceCol := columnByID[rel.SourceColumnID]
+		targetCol := columnByID[rel.TargetColumnID]
+		if sourceCol == nil || targetCol == nil {
+			continue
+		}
+
+		// Check if this is a channels.owner_id → users.* relationship
+		if sourceCol.ColumnName == "owner_id" {
+			// Get table info
+			sourceTable := findTable(importedTables, "channels")
+			targetTable := findTable(importedTables, "users")
+			if sourceTable != nil && targetTable != nil &&
+				rel.SourceTableID == sourceTable.ID &&
+				rel.TargetTableID == targetTable.ID {
+				foundRelationship = rel
+				break
+			}
 		}
 	}
 
 	if foundRelationship == nil {
-		t.Errorf("Expected relationship channels.owner_id → users.* not found")
-		t.Logf("Found %d relationships:", len(entityRels))
-		for i, rel := range entityRels {
-			t.Logf("  %d: %s.%s → %s.%s (method=%s, status=%s)",
+		t.Errorf("Expected relationship channels.owner_id → users.* not found in engine_schema_relationships")
+		t.Logf("Found %d schema relationships:", len(schemaRels))
+		for i, rel := range schemaRels {
+			sourceCol := columnByID[rel.SourceColumnID]
+			targetCol := columnByID[rel.TargetColumnID]
+			var method string
+			if rel.InferenceMethod != nil {
+				method = *rel.InferenceMethod
+			}
+			t.Logf("  %d: %s → %s (method=%s, confidence=%.2f)",
 				i+1,
-				rel.SourceColumnTable, rel.SourceColumnName,
-				rel.TargetColumnTable, rel.TargetColumnName,
-				rel.DetectionMethod, rel.Status)
+				sourceCol.ColumnName, targetCol.ColumnName,
+				method, rel.Confidence)
 		}
 		return
 	}
 
 	// Verify relationship properties
-	if foundRelationship.DetectionMethod != "pk_match" {
-		t.Errorf("Expected detection method 'pk_match', got %q", foundRelationship.DetectionMethod)
+	if foundRelationship.InferenceMethod == nil || *foundRelationship.InferenceMethod != models.InferenceMethodPKMatch {
+		var method string
+		if foundRelationship.InferenceMethod != nil {
+			method = *foundRelationship.InferenceMethod
+		}
+		t.Errorf("Expected inference method 'pk_match', got %q", method)
 	}
 
-	if foundRelationship.Status == "rejected" {
-		t.Errorf("Expected relationship status to not be 'rejected', got %q", foundRelationship.Status)
-	}
-
+	targetCol := columnByID[foundRelationship.TargetColumnID]
 	t.Logf("SUCCESS: Found relationship channels.owner_id → users.%s (confidence=%.2f)",
-		foundRelationship.TargetColumnName, foundRelationship.Confidence)
+		targetCol.ColumnName, foundRelationship.Confidence)
 }
 
 // setupPKMatchTestContext creates a test context with tenant scope and cleanup function.
