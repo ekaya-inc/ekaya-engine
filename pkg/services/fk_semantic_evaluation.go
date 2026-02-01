@@ -35,6 +35,11 @@ type FKCandidate struct {
 	TargetDataType string
 	TargetDistinct *int64 // Distinct values in target column
 
+	// Table descriptions from TableFeatureExtraction
+	// These provide semantic context for the LLM to understand table purposes
+	SourceTableDescription string // What the source table represents
+	TargetTableDescription string // What the target table represents
+
 	// Join validation results
 	JoinCount      int64
 	SourceMatched  int64
@@ -364,12 +369,26 @@ func (s *fkSemanticEvaluationService) buildPrompt(candidates []FKCandidate, know
 	for i, c := range candidates {
 		id := i + 1
 
-		// Only include if we have meaningful additional info
-		if len(c.SourceSamples) == 0 && c.MaxSourceValue == nil {
+		// Include if we have meaningful additional info (table descriptions, samples, or max value)
+		hasTableDescriptions := c.SourceTableDescription != "" || c.TargetTableDescription != ""
+		hasSamplesOrMax := len(c.SourceSamples) > 0 || c.MaxSourceValue != nil
+
+		if !hasTableDescriptions && !hasSamplesOrMax {
 			continue
 		}
 
-		sb.WriteString(fmt.Sprintf("### Candidate %d: %s.%s\n", id, c.SourceTable, c.SourceColumn))
+		sb.WriteString(fmt.Sprintf("### Candidate %d: %s.%s → %s.%s\n", id, c.SourceTable, c.SourceColumn, c.TargetTable, c.TargetColumn))
+
+		// Table descriptions provide crucial semantic context for FK validation
+		// Example: "Does it make sense for identity_provider (enum column in account_authentications,
+		// which tracks authentication methods) to reference jobs.id (PK of jobs table, which tracks
+		// background processing tasks)?" - LLM can immediately see this is nonsensical.
+		if c.SourceTableDescription != "" {
+			sb.WriteString(fmt.Sprintf("- **Source table purpose**: %s\n", c.SourceTableDescription))
+		}
+		if c.TargetTableDescription != "" {
+			sb.WriteString(fmt.Sprintf("- **Target table purpose**: %s\n", c.TargetTableDescription))
+		}
 
 		if len(c.SourceSamples) > 0 {
 			sb.WriteString(fmt.Sprintf("- Sample values: %s\n", strings.Join(c.SourceSamples[:min(5, len(c.SourceSamples))], ", ")))
@@ -386,6 +405,8 @@ func (s *fkSemanticEvaluationService) buildPrompt(candidates []FKCandidate, know
 	sb.WriteString("## Instructions\n\n")
 	sb.WriteString("For each candidate, evaluate:\n\n")
 	sb.WriteString("1. **is_fk**: Is this a genuine foreign key relationship? Consider:\n")
+	sb.WriteString("   - **Table purposes**: Do the source and target table purposes make semantic sense together?\n")
+	sb.WriteString("     (e.g., orders.customer_id → customers.id makes sense; settings.retry_count → jobs.id does NOT)\n")
 	sb.WriteString("   - Does the column name suggest a reference? (user_id, account_ref, parent, owner)\n")
 	sb.WriteString("   - Do the join statistics support a FK relationship? (low orphan count = good)\n")
 	sb.WriteString("   - Is the cardinality reasonable for a FK? (not too low, not 1:1 with all rows)\n")
@@ -429,6 +450,7 @@ func (s *fkSemanticEvaluationService) buildPrompt(candidates []FKCandidate, know
 
 // FKCandidateFromAnalysis creates an FKCandidate from column and join analysis data.
 // This is a helper for integrating with the existing pk_match discovery flow.
+// Table metadata is optional but recommended for semantic context in LLM evaluation.
 func FKCandidateFromAnalysis(
 	sourceCol *models.SchemaColumn,
 	sourceTable *models.SchemaTable,
@@ -436,6 +458,8 @@ func FKCandidateFromAnalysis(
 	targetTable *models.SchemaTable,
 	joinResult *datasource.JoinAnalysis,
 	targetEntity *models.OntologyEntity,
+	sourceTableMeta *models.TableMetadata,
+	targetTableMeta *models.TableMetadata,
 ) FKCandidate {
 	candidate := FKCandidate{
 		SourceSchema:   sourceTable.SchemaName,
@@ -461,6 +485,15 @@ func FKCandidateFromAnalysis(
 	// Add sample values if available
 	if len(sourceCol.SampleValues) > 0 {
 		candidate.SourceSamples = sourceCol.SampleValues
+	}
+
+	// Add table descriptions from TableFeatureExtraction
+	// These help LLM understand if relationship makes semantic sense
+	if sourceTableMeta != nil && sourceTableMeta.Description != nil {
+		candidate.SourceTableDescription = *sourceTableMeta.Description
+	}
+	if targetTableMeta != nil && targetTableMeta.Description != nil {
+		candidate.TargetTableDescription = *targetTableMeta.Description
 	}
 
 	// Add entity context if available

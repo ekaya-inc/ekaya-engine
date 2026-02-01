@@ -224,7 +224,7 @@ GetRelationshipsByMethod(ctx context.Context, projectID uuid.UUID, method string
 3. [x] **Step 2** - Refactor FKDiscovery to use SchemaRelationship
 4. [x] **Step 3.1-3.2** - Refactor PKMatchDiscovery to use SchemaRelationship
 5. [x] **Step 1** - Add TableFeatureExtraction (new node)
-6. [ ] **Step 3.4** - Use table descriptions in validation
+6. [x] **Step 3.4** - Use table descriptions in validation
 7. [ ] **Step 5** - Testing
 
 ---

@@ -528,8 +528,8 @@ func TestFKCandidateFromAnalysis(t *testing.T) {
 		Description: "A platform user account",
 	}
 
-	// Execute
-	candidate := FKCandidateFromAnalysis(sourceCol, sourceTable, targetCol, targetTable, joinResult, targetEntity)
+	// Execute (nil table metadata for backward compatibility)
+	candidate := FKCandidateFromAnalysis(sourceCol, sourceTable, targetCol, targetTable, joinResult, targetEntity, nil, nil)
 
 	// Assert
 	assert.Equal(t, "public", candidate.SourceSchema)
@@ -577,12 +577,149 @@ func TestFKCandidateFromAnalysis_NilEntity(t *testing.T) {
 		OrphanCount: 0,
 	}
 
-	// Execute with nil entity
-	candidate := FKCandidateFromAnalysis(sourceCol, sourceTable, targetCol, targetTable, joinResult, nil)
+	// Execute with nil entity and nil table metadata
+	candidate := FKCandidateFromAnalysis(sourceCol, sourceTable, targetCol, targetTable, joinResult, nil, nil, nil)
 
 	// Assert - entity fields should be empty
 	assert.Equal(t, "", candidate.TargetEntityName)
 	assert.Equal(t, "", candidate.TargetEntityDescription)
+}
+
+func TestFKCandidateFromAnalysis_WithTableDescriptions(t *testing.T) {
+	sourceCol := &models.SchemaColumn{
+		ColumnName: "identity_provider",
+		DataType:   "integer",
+	}
+	sourceTable := &models.SchemaTable{
+		SchemaName: "public",
+		TableName:  "account_authentications",
+	}
+	targetCol := &models.SchemaColumn{
+		ColumnName: "id",
+		DataType:   "integer",
+	}
+	targetTable := &models.SchemaTable{
+		SchemaName: "public",
+		TableName:  "jobs",
+	}
+	joinResult := &datasource.JoinAnalysis{
+		OrphanCount:   0,
+		SourceMatched: 3,
+		TargetMatched: 83,
+	}
+
+	// Table metadata from TableFeatureExtraction
+	sourceTableMeta := &models.TableMetadata{
+		TableName:   "account_authentications",
+		Description: ptr("Tracks authentication methods and identity providers for user accounts"),
+	}
+	targetTableMeta := &models.TableMetadata{
+		TableName:   "jobs",
+		Description: ptr("Background processing tasks and job queue entries"),
+	}
+
+	// Execute with table metadata
+	candidate := FKCandidateFromAnalysis(sourceCol, sourceTable, targetCol, targetTable, joinResult, nil, sourceTableMeta, targetTableMeta)
+
+	// Assert - table descriptions should be populated
+	assert.Equal(t, "Tracks authentication methods and identity providers for user accounts", candidate.SourceTableDescription)
+	assert.Equal(t, "Background processing tasks and job queue entries", candidate.TargetTableDescription)
+}
+
+func TestFKCandidateFromAnalysis_TableDescriptionsNilDescription(t *testing.T) {
+	sourceCol := &models.SchemaColumn{
+		ColumnName: "user_id",
+		DataType:   "uuid",
+	}
+	sourceTable := &models.SchemaTable{
+		SchemaName: "public",
+		TableName:  "orders",
+	}
+	targetCol := &models.SchemaColumn{
+		ColumnName: "id",
+		DataType:   "uuid",
+	}
+	targetTable := &models.SchemaTable{
+		SchemaName: "public",
+		TableName:  "users",
+	}
+	joinResult := &datasource.JoinAnalysis{
+		OrphanCount: 0,
+	}
+
+	// Table metadata with nil description
+	sourceTableMeta := &models.TableMetadata{
+		TableName:   "orders",
+		Description: nil, // No description extracted yet
+	}
+	targetTableMeta := &models.TableMetadata{
+		TableName:   "users",
+		Description: ptr("Platform user accounts"),
+	}
+
+	// Execute
+	candidate := FKCandidateFromAnalysis(sourceCol, sourceTable, targetCol, targetTable, joinResult, nil, sourceTableMeta, targetTableMeta)
+
+	// Assert - source description should be empty, target should be populated
+	assert.Equal(t, "", candidate.SourceTableDescription)
+	assert.Equal(t, "Platform user accounts", candidate.TargetTableDescription)
+}
+
+func TestFKSemanticEvaluationService_PromptIncludesTableDescriptions(t *testing.T) {
+	projectID := uuid.New()
+
+	// Create a candidate with table descriptions - this is the false positive scenario
+	// where identity_provider (an enum) coincidentally has values {1,2,3} matching jobs.id
+	candidates := []FKCandidate{
+		{
+			SourceSchema:           "public",
+			SourceTable:            "account_authentications",
+			SourceColumn:           "identity_provider",
+			SourceDataType:         "integer",
+			SourceDistinct:         ptr(int64(3)),
+			SourceRowCount:         ptr(int64(1000)),
+			SourceTableDescription: "Tracks authentication methods and identity providers for user accounts",
+
+			TargetSchema:           "public",
+			TargetTable:            "jobs",
+			TargetColumn:           "id",
+			TargetDataType:         "integer",
+			TargetDistinct:         ptr(int64(83)),
+			TargetTableDescription: "Background processing tasks and job queue entries",
+
+			JoinCount:     1000,
+			SourceMatched: 1000,
+			TargetMatched: 3,
+			OrphanCount:   0, // All 3 values exist in jobs.id (1,2,3)
+		},
+	}
+
+	var capturedPrompt string
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.MockClient.GenerateResponseFunc = func(ctx context.Context, prompt, systemMsg string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		capturedPrompt = prompt
+		return &llm.GenerateResponseResult{
+			Content: `{"evaluations": [{"id": 1, "is_fk": false, "confidence": 0.95, "semantic_role": "", "reasoning": "identity_provider is an enum column for auth methods, jobs table is for background processing - these tables have no business relationship", "should_include": false}]}`,
+		}, nil
+	}
+
+	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
+	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
+
+	svc := NewFKSemanticEvaluationService(nil, nil, mockFactory, testPool, circuitBreaker, zap.NewNop())
+
+	// Execute
+	_, err := svc.EvaluateCandidates(context.Background(), projectID, candidates)
+	require.NoError(t, err)
+
+	// Verify prompt includes table descriptions
+	assert.Contains(t, capturedPrompt, "Source table purpose", "prompt should include source table description section")
+	assert.Contains(t, capturedPrompt, "Tracks authentication methods and identity providers", "prompt should include source table description")
+	assert.Contains(t, capturedPrompt, "Target table purpose", "prompt should include target table description section")
+	assert.Contains(t, capturedPrompt, "Background processing tasks", "prompt should include target table description")
+
+	// Verify instructions mention table purposes
+	assert.Contains(t, capturedPrompt, "Table purposes", "instructions should emphasize table purposes")
 }
 
 // mockKnowledgeRepoForFKEval is a test mock for KnowledgeRepository.
