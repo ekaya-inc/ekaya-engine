@@ -219,7 +219,7 @@ GetRelationshipsByMethod(ctx context.Context, projectID uuid.UUID, method string
 
 ## Implementation Order
 
-1. [x] **Step 4.1** - Add repository methods (foundation)
+1. [x] **Step 4** - Add repository methods (foundation, including query by inference_method)
 2. [x] **Step 3.3** - Fix bidirectional validation (critical bug)
 3. [x] **Step 2** - Refactor FKDiscovery to use SchemaRelationship
 4. [x] **Step 3.1-3.2** - Refactor PKMatchDiscovery to use SchemaRelationship
