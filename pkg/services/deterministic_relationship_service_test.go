@@ -902,12 +902,14 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 		}
 	})
 
-	t.Run("IsJoinable_nil_allowed_for_id_columns", func(t *testing.T) {
-		// Test verifies that _id columns with IsJoinable=nil ARE included as FK candidates.
-		// This is the new behavior: for text UUID columns, IsJoinable may be nil initially
-		// before stats collection, so _id columns should be included for validation.
+	t.Run("IsJoinable_nil_skipped_even_for_id_columns", func(t *testing.T) {
+		// Test verifies that columns with IsJoinable=nil are skipped, even if they have
+		// an _id suffix. After the data-driven refactoring (commit 2d2d30f), column name
+		// patterns are no longer used - joinability must be explicitly set via stats or
+		// ColumnFeatures must indicate the column is an identifier/FK.
 		//
-		// Non-_id columns (like "buyer") with IsJoinable=nil are still skipped.
+		// This is the current behavior: IsJoinable=nil means no joinability data,
+		// so the column is skipped regardless of its name.
 
 		projectID := uuid.New()
 		datasourceID := uuid.New()
@@ -929,10 +931,11 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 			PrimaryTable:  "orders",
 		})
 
-		// Track AnalyzeJoin calls - we expect it to be called for user_id
-		var joinAnalysisCalls int
+		// Track AnalyzeJoin calls - should NOT be called since user_id has IsJoinable=nil
 		mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
-			joinAnalysisCalls++
+			t.Errorf("AnalyzeJoin should not be called for column with IsJoinable=nil: %s.%s.%s -> %s.%s.%s",
+				sourceSchema, sourceTable, sourceColumn,
+				targetSchema, targetTable, targetColumn)
 			return &datasource.JoinAnalysis{OrphanCount: 0}, nil
 		}
 
@@ -972,11 +975,11 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 					},
 					{
 						SchemaTableID: ordersTableID,
-						ColumnName:    "user_id", // _id column - should be included even with nil IsJoinable
+						ColumnName:    "user_id", // _id column but IsJoinable=nil, should be SKIPPED
 						DataType:      "uuid",
 						IsPrimaryKey:  false,
-						IsJoinable:    nil,           // nil joinability - but should be included for _id columns
-						DistinctCount: &highDistinct, // Sufficient distinct count
+						IsJoinable:    nil, // nil joinability = not a candidate
+						DistinctCount: &highDistinct,
 					},
 				},
 			},
@@ -998,14 +1001,9 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		// Verify: AnalyzeJoin WAS called because user_id (with _id suffix) is included
-		if joinAnalysisCalls == 0 {
-			t.Errorf("expected AnalyzeJoin to be called for user_id column with nil IsJoinable, but it wasn't")
-		}
-
-		// Verify: relationships were created
-		if result.InferredRelationships == 0 {
-			t.Errorf("expected at least 1 inferred relationship (user_id with nil IsJoinable should be included), got %d", result.InferredRelationships)
+		// Verify: NO relationships created because user_id has IsJoinable=nil
+		if result.InferredRelationships != 0 {
+			t.Errorf("expected 0 inferred relationships (IsJoinable=nil should be skipped), got %d", result.InferredRelationships)
 		}
 	})
 }
@@ -2435,6 +2433,234 @@ func TestPKMatch_NoGarbageRelationships(t *testing.T) {
 		t.Errorf("GOLDEN TEST FAILED: expected 0 relationships to be created, got %d relationships", len(mocks.relationshipRepo.created))
 		for i, rel := range mocks.relationshipRepo.created {
 			t.Logf("  Relationship %d: %s.%s -> %s.%s", i+1, rel.SourceColumnTable, rel.SourceColumnName, rel.TargetColumnTable, rel.TargetColumnName)
+		}
+	}
+}
+
+// TestPKMatch_PKColumnNeverFKSource verifies that primary key columns are NEVER
+// used as FK sources, regardless of data overlap. This prevents false positives like:
+//   - account_password_resets.id → marketing_acquisitions.id
+//   - users.id → orders.id
+//
+// PKs are reference targets, not sources. They don't "point to" other tables;
+// other tables point to them.
+func TestPKMatch_PKColumnNeverFKSource(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+
+	highDistinct := int64(1000)
+	rowCount := int64(5000)
+	isJoinableTrue := true
+
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+	mocks.entityRepo.entities[0].Name = "user"
+	mocks.entityRepo.entities[0].PrimaryTable = "users"
+
+	// Track if AnalyzeJoin is called with users.id as source
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		// If users.id (a PK) is used as source, that's a bug
+		if sourceTable == "users" && sourceColumn == "id" {
+			t.Errorf("BUG: AnalyzeJoin called with PK column as source: %s.%s.%s -> %s.%s.%s",
+				sourceSchema, sourceTable, sourceColumn,
+				targetSchema, targetTable, targetColumn)
+		}
+		// Return perfect match - would create relationship if we got here
+		return &datasource.JoinAnalysis{
+			SourceMatched: 1000,
+			TargetMatched: 1000,
+			OrphanCount:   0, // Perfect match
+		}, nil
+	}
+
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+	usersIDColumnID := uuid.New()
+	ordersIDColumnID := uuid.New()
+	ordersUserIDColumnID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            usersIDColumnID,
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "bigint",
+					IsPrimaryKey:  true, // PK - should NEVER be FK source
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+			},
+		},
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            ordersIDColumnID,
+					SchemaTableID: ordersTableID,
+					ColumnName:    "id",
+					DataType:      "bigint",
+					IsPrimaryKey:  true, // Also a PK
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+				{
+					ID:            ordersUserIDColumnID,
+					SchemaTableID: ordersTableID,
+					ColumnName:    "user_id",
+					DataType:      "bigint",
+					IsPrimaryKey:  false, // Not a PK - valid FK candidate
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: Only orders.user_id -> users.id should be discovered (non-PK to PK)
+	// NOT: users.id -> orders.id (PK to PK)
+	// NOT: users.id -> anything (PK as source)
+	if result.InferredRelationships > 1 {
+		t.Errorf("expected at most 1 inferred relationship (orders.user_id -> users.id), got %d", result.InferredRelationships)
+	}
+
+	// Check that no relationship has a PK as source
+	for _, rel := range mocks.relationshipRepo.created {
+		if rel.SourceColumnName == "id" && rel.SourceColumnTable == "users" {
+			t.Errorf("BUG: Created relationship with PK as source: %s.%s -> %s.%s",
+				rel.SourceColumnTable, rel.SourceColumnName,
+				rel.TargetColumnTable, rel.TargetColumnName)
+		}
+		if rel.SourceColumnName == "id" && rel.SourceColumnTable == "orders" {
+			t.Errorf("BUG: Created relationship with PK as source: %s.%s -> %s.%s",
+				rel.SourceColumnTable, rel.SourceColumnName,
+				rel.TargetColumnTable, rel.TargetColumnName)
+		}
+	}
+}
+
+// TestPKMatch_PKToNonPKStillBlocked verifies that even when the target is NOT a PK,
+// a source PK is still blocked. This catches the exact bug where:
+//
+//	account_password_resets.id (PK) -> marketing_acquisitions.id (non-PK)
+//
+// was incorrectly discovered because the old check only blocked PK-to-PK.
+// Both columns are marked as PKs to ensure neither can be a source.
+func TestPKMatch_PKToNonPKStillBlocked(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+
+	highDistinct := int64(1000)
+	rowCount := int64(5000)
+	isJoinableTrue := true
+
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Track ALL AnalyzeJoin calls - none should happen since both columns are PKs
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		t.Errorf("BUG: AnalyzeJoin should not be called when both columns are PKs: %s.%s.%s -> %s.%s.%s",
+			sourceSchema, sourceTable, sourceColumn,
+			targetSchema, targetTable, targetColumn)
+		return &datasource.JoinAnalysis{
+			SourceMatched: 1000,
+			TargetMatched: 1000,
+			OrphanCount:   0,
+		}, nil
+	}
+
+	accountPasswordResetsTableID := uuid.New()
+	marketingTouchesTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         accountPasswordResetsTableID,
+			SchemaName: "public",
+			TableName:  "account_password_resets",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            uuid.New(),
+					SchemaTableID: accountPasswordResetsTableID,
+					ColumnName:    "id",
+					DataType:      "bigint",
+					IsPrimaryKey:  true, // PK - should NEVER be FK source
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+			},
+		},
+		{
+			ID:         marketingTouchesTableID,
+			SchemaName: "public",
+			TableName:  "marketing_touches",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            uuid.New(),
+					SchemaTableID: marketingTouchesTableID,
+					ColumnName:    "id",
+					DataType:      "bigint",
+					IsPrimaryKey:  true, // Also a PK - should NEVER be FK source
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: NO relationships created (both tables only have PK columns)
+	// Since PKs can never be FK sources, no candidates exist
+	if result.InferredRelationships != 0 {
+		t.Errorf("expected 0 inferred relationships, got %d", result.InferredRelationships)
+	}
+
+	if len(mocks.relationshipRepo.created) != 0 {
+		t.Errorf("expected 0 relationships created, got %d:", len(mocks.relationshipRepo.created))
+		for _, rel := range mocks.relationshipRepo.created {
+			t.Logf("  %s.%s -> %s.%s", rel.SourceColumnTable, rel.SourceColumnName, rel.TargetColumnTable, rel.TargetColumnName)
 		}
 	}
 }

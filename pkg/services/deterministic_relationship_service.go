@@ -847,8 +847,9 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 				continue
 			}
 
-			// Skip PK-to-PK matches (both auto-increment)
-			if target.column.IsPrimaryKey && candidate.column.IsPrimaryKey {
+			// Skip if source is a PK - PKs are never FK sources, they are FK targets.
+			// A PK column references nothing; other columns reference it.
+			if candidate.column.IsPrimaryKey {
 				continue
 			}
 
