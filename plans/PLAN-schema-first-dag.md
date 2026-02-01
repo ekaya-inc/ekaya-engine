@@ -198,10 +198,99 @@ GetRelationshipsByMethod(ctx context.Context, projectID uuid.UUID, method string
 
 ### 5.1 Unit tests
 
-- TableFeatureExtraction service tests
-- FKDiscovery writing to SchemaRelationship
-- PKMatchDiscovery without entities
-- Bidirectional join validation logic
+#### 5.1.1 Unit tests for TableFeatureExtraction service
+
+Write unit tests for the TableFeatureExtraction service in `pkg/services/table_feature_extraction.go`. The service generates table-level descriptions based on column features already extracted.
+
+**File to create:** `pkg/services/table_feature_extraction_test.go`
+
+**Test cases needed:**
+1. [ ] **Happy path**: Given a table with columns that have ColumnFeatures (PKs, FKs, enums, semantic types), verify the service calls the LLM with the correct prompt and stores results in `engine_table_metadata`
+2. [ ] **Empty columns**: Table with no columns should handle gracefully
+3. [ ] **LLM error handling**: Verify errors from LLM client are propagated correctly (fail-fast pattern)
+4. [ ] **Progress callback**: Verify the progress callback is invoked after each table completes
+5. [ ] **Parallel execution**: Verify multiple tables are processed concurrently via worker pool
+6. [ ] **Output validation**: Verify the service correctly populates `description`, `usage_notes`, and `is_ephemeral` fields
+
+**Dependencies to mock:**
+- `TableMetadataRepository` interface (for storing results)
+- `SchemaRepository` interface (for fetching columns with features)
+- LLM client interface
+- Progress callback function
+
+**Reference implementation:** See `pkg/services/column_feature_extraction_test.go` for similar service test patterns in this codebase.
+
+---
+
+#### 5.1.2 Unit tests for FKDiscovery writing to SchemaRelationship
+
+Write unit tests verifying that FKDiscovery (in `pkg/services/deterministic_relationship_service.go`) correctly writes to `engine_schema_relationships` instead of entity relationships.
+
+**File to create/update:** `pkg/services/deterministic_relationship_service_test.go`
+
+**Test cases needed:**
+1. [ ] **FK from ColumnFeatures**: When a column has `Role=foreign_key` in its ColumnFeatures, verify a SchemaRelationship is created with `inference_method='column_features'`
+2. [ ] **No entity dependency**: Verify the service does NOT require entities to exist (should not return early when no entities found)
+3. [ ] **Relationship fields**: Verify created SchemaRelationship has correct fields: `source_table`, `source_column`, `target_table`, `target_column`, `inference_method`, `confidence`
+4. [ ] **Upsert behavior**: If relationship already exists, verify it's updated not duplicated
+5. [ ] **Error propagation**: Verify repository errors are propagated (fail-fast)
+
+**Key change context:** The refactor removed entity lookup/requirement from FKDiscovery. It now calls `schemaRepo.CreateInferredRelationship()` or `UpsertRelationship()` instead of `relationshipRepo.Create()`.
+
+**Dependencies to mock:**
+- `SchemaRepository` interface (new methods: `CreateInferredRelationship`, `UpsertRelationship`)
+- `ColumnFeatureRepository` (to return columns with FK role)
+
+---
+
+#### 5.1.3 Unit tests for PKMatchDiscovery without entity dependency
+
+Write unit tests verifying that PKMatchDiscovery (in `pkg/services/deterministic_relationship_service.go`) works without requiring entities to exist.
+
+**File to create/update:** `pkg/services/deterministic_relationship_service_test.go`
+
+**Test cases needed:**
+1. [ ] **No entities exist**: When `entityRepo.GetByOntology()` returns empty, PKMatchDiscovery should still proceed (not return empty result)
+2. [ ] **Build candidates from schema**: Verify candidate columns are built from PKs, unique columns, and high-cardinality columns from schema (not from entities)
+3. [ ] **Build references from ColumnFeatures**: Verify reference columns are built from ColumnFeatures with `Role=foreign_key` or `Purpose=identifier`
+4. [ ] **Write to SchemaRelationship**: Verify discovered matches are written to `engine_schema_relationships` with `inference_method='pk_match'`
+5. [ ] **Validation metrics stored**: Verify `validation_results` field contains match_rate, source_distinct, target_distinct, orphan_count
+
+**Key change context:** Lines 711-717 previously returned early if no entities existed. The refactor removed this dependency, building candidates directly from schema metadata.
+
+**Dependencies to mock:**
+- `SchemaRepository` (for candidate columns and relationship storage)
+- `ColumnFeatureRepository` (for reference columns)
+- `DatasourceAdapter` (for AnalyzeJoin validation)
+
+---
+
+#### 5.1.4 Unit tests for bidirectional join validation logic
+
+Write unit tests for the bidirectional join validation fix in `pkg/adapters/datasource/postgres/schema.go` (AnalyzeJoin method).
+
+**File to create/update:** `pkg/adapters/datasource/postgres/schema_test.go`
+
+**Bug context:** The previous implementation only checked orphans in source→target direction. This caused false positives like `identity_provider` (3 distinct values: {1,2,3}) appearing to reference `jobs.id` (83 distinct values) because all 3 source values existed in the target.
+
+**Test cases needed:**
+1. [ ] **Reject asymmetric cardinality**: Source has 3 distinct values, target has 83. Source→target has 0 orphans, but target→source has 80 orphans. Should REJECT this relationship.
+2. [ ] **Accept valid FK**: Source column references target PK with high match rate in both directions. Should ACCEPT.
+3. [ ] **Accept partial FK**: Source has some orphans but reverse check passes (target values mostly exist in source). Should ACCEPT based on thresholds.
+4. [ ] **Reverse orphan threshold**: If `reverse_orphan_count / target_distinct > 0.5`, should reject
+5. [ ] **Both directions checked**: Verify the SQL includes the `reverse_orphans` CTE that counts target values not found in source
+
+**Expected SQL pattern in fix:**
+```sql
+reverse_orphans AS (
+    SELECT COUNT(DISTINCT t.target_col) as reverse_orphan_count
+    FROM target_table t
+    LEFT JOIN source_table s ON t.target_col = s.source_col
+    WHERE s.source_col IS NULL
+)
+```
+
+**Dependencies:** These tests need a test database connection. Use `testhelpers.GetTestDB(t)` from `pkg/testhelpers/containers.go` to get a containerized PostgreSQL connection. Create test tables with controlled data to verify the validation logic.
 
 ### 5.2 Integration tests
 
