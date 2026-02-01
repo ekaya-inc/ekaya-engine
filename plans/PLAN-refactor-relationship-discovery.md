@@ -1032,7 +1032,7 @@ func TestRelationshipDiscoveryService_IDToTimestamp_LLMRejects(t *testing.T) {
 
 ---
 
-##### Task 7.3.3: Orphan rate scenarios and progress callback tests [ ]
+##### Task 7.3.3: Orphan rate scenarios and progress callback tests [x]
 
 Add tests for orphan rate handling and progress callback verification.
 

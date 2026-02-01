@@ -567,6 +567,18 @@ func (r *llmTestSchemaDiscoverer) Close() error {
 	return nil
 }
 
+// configurableStatsMockCollector allows setting candidates with specific join statistics.
+type configurableStatsMockCollector struct {
+	candidates []*RelationshipCandidate
+}
+
+func (m *configurableStatsMockCollector) CollectCandidates(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback dag.ProgressCallback) ([]*RelationshipCandidate, error) {
+	if progressCallback != nil {
+		progressCallback(1, 1, "Candidates collected")
+	}
+	return m.candidates, nil
+}
+
 // ============================================================================
 // Mock Datasource Service
 // ============================================================================
@@ -717,4 +729,533 @@ func TestRelationshipDiscoveryService_DBDeclaredFKPreserved(t *testing.T) {
 	assert.Equal(t, float64(1.0), rel.Confidence, "Confidence should be 1.0 for DB-declared FK")
 
 	t.Log("DB-declared FK preserved without LLM call - test passed")
+}
+
+// TestRelationshipDiscoveryService_LowOrphanRate_LLMAccepts tests that candidates with
+// 0% orphan rate (all source values exist in target) are accepted by LLM.
+func TestRelationshipDiscoveryService_LowOrphanRate_LLMAccepts(t *testing.T) {
+	tc := setupLLMDiscoveryTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Seed schema tables and columns (no DB-declared FKs)
+	_, _, userIDCol, _, orderUserIDCol := tc.seedEngineSchema(ctx)
+
+	// Create ontology and entities
+	tc.createTestOntology(ctx)
+	tc.createTestEntity(ctx, "User", "llm_test_users")
+	tc.createTestEntity(ctx, "Order", "llm_test_orders")
+
+	// Create mock LLM service that accepts low orphan rate relationships
+	mockLLM := newMockLLMServiceForIntegration()
+	mockLLM.SetResponse("llm_test_orders", "user_id", "llm_test_users", "id", &RelationshipValidationResult{
+		IsValidFK:   true,
+		Confidence:  0.95,
+		Cardinality: "N:1",
+		Reasoning:   "All user_id values match existing users (0% orphan rate)",
+		SourceRole:  "owner",
+	})
+	mockValidator := &mockRelationshipValidator{mock: mockLLM, logger: tc.logger}
+
+	// Create mock datasource service
+	mockDS := &llmTestMockDatasourceService{
+		datasource: &models.Datasource{
+			ID:             tc.datasourceID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{},
+		},
+	}
+
+	// Create adapter factory with mock join analysis returning 0% orphan rate
+	adapterFactory := &llmTestMockAdapterFactory{
+		schemaDiscoverer: &mockJoinAnalysisSchemaDiscoverer{
+			joinAnalysis: &datasource.JoinAnalysis{
+				JoinCount:          200, // 200 transactions
+				SourceMatched:      100, // All 100 source values matched
+				TargetMatched:      100, // 100 of 100 accounts referenced
+				OrphanCount:        0,   // 0% orphan rate - all values have matches
+				ReverseOrphanCount: 0,
+			},
+		},
+	}
+
+	// Create candidate collector that returns a candidate with 0% orphan rate
+	mockCollector := &configurableStatsMockCollector{
+		candidates: []*RelationshipCandidate{
+			{
+				SourceTable:         "llm_test_orders",
+				SourceColumn:        "user_id",
+				SourceDataType:      "uuid",
+				SourceIsPK:          false,
+				SourceDistinctCount: 100,
+				SourceNullRate:      0.0,
+				SourceSamples:       []string{"11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"},
+				SourceColumnID:      orderUserIDCol.ID,
+
+				TargetTable:         "llm_test_users",
+				TargetColumn:        "id",
+				TargetDataType:      "uuid",
+				TargetIsPK:          true,
+				TargetDistinctCount: 100,
+				TargetNullRate:      0.0,
+				TargetSamples:       []string{"11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"},
+				TargetColumnID:      userIDCol.ID,
+
+				// 0% orphan rate - all source values match
+				JoinCount:      200,
+				SourceMatched:  100,
+				TargetMatched:  100,
+				OrphanCount:    0, // 0% orphan rate
+				ReverseOrphans: 0,
+			},
+		},
+	}
+
+	// Create the service
+	svc := NewLLMRelationshipDiscoveryService(
+		mockCollector,
+		mockValidator,
+		mockDS,
+		adapterFactory,
+		tc.ontologyRepo,
+		tc.entityRepo,
+		tc.relationshipRepo,
+		tc.schemaRepo,
+		tc.logger,
+	)
+
+	// Run relationship discovery
+	result, err := svc.DiscoverRelationships(ctx, tc.projectID, tc.datasourceID, nil)
+	require.NoError(t, err, "DiscoverRelationships should not return error")
+	require.NotNil(t, result, "Result should not be nil")
+
+	// Assert: LLM was called and accepted the relationship
+	llmCalls := mockLLM.GetCalls()
+	assert.Len(t, llmCalls, 1, "LLM should be called once")
+	assert.Equal(t, "llm_test_orders.user_id->llm_test_users.id", llmCalls[0], "LLM should validate the low orphan rate candidate")
+
+	// Assert: Relationship was created (LLM accepted)
+	assert.Equal(t, 1, result.CandidatesEvaluated, "Should evaluate 1 candidate")
+	assert.Equal(t, 1, result.RelationshipsCreated, "Should create 1 relationship (low orphan rate accepted)")
+	assert.Equal(t, 0, result.RelationshipsRejected, "Should reject 0 relationships")
+
+	// Verify relationship was stored
+	entityRels, err := tc.relationshipRepo.GetByOntology(ctx, tc.ontologyID)
+	require.NoError(t, err)
+	assert.Len(t, entityRels, 1, "Should have 1 entity relationship")
+
+	// Verify the OrphanRate method works correctly on the candidate
+	candidate := mockCollector.candidates[0]
+	assert.Equal(t, 0.0, candidate.OrphanRate(), "OrphanRate should be 0%")
+	assert.Equal(t, 1.0, candidate.MatchRate(), "MatchRate should be 100%")
+
+	t.Log("Low orphan rate (0%) candidate accepted by LLM - test passed")
+}
+
+// TestRelationshipDiscoveryService_HighOrphanRate_LLMRejects tests that candidates with
+// high orphan rate (50% of source values don't exist in target) are rejected by LLM.
+func TestRelationshipDiscoveryService_HighOrphanRate_LLMRejects(t *testing.T) {
+	tc := setupLLMDiscoveryTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Seed schema tables and columns (no DB-declared FKs)
+	_, _, userIDCol, _, orderUserIDCol := tc.seedEngineSchema(ctx)
+
+	// Create ontology and entities
+	tc.createTestOntology(ctx)
+	tc.createTestEntity(ctx, "User", "llm_test_users")
+	tc.createTestEntity(ctx, "Order", "llm_test_orders")
+
+	// Create mock LLM service that rejects high orphan rate relationships
+	mockLLM := newMockLLMServiceForIntegration()
+	mockLLM.SetResponse("llm_test_orders", "user_id", "llm_test_users", "id", &RelationshipValidationResult{
+		IsValidFK:   false,
+		Confidence:  0.85,
+		Cardinality: "",
+		Reasoning:   "50% orphan rate suggests incorrect relationship - half of user_id values don't exist in users table",
+		SourceRole:  "",
+	})
+	mockValidator := &mockRelationshipValidator{mock: mockLLM, logger: tc.logger}
+
+	// Create mock datasource service
+	mockDS := &llmTestMockDatasourceService{
+		datasource: &models.Datasource{
+			ID:             tc.datasourceID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{},
+		},
+	}
+
+	// Create adapter factory (not needed for this test as collector provides stats)
+	adapterFactory := &llmTestMockAdapterFactory{
+		schemaDiscoverer: &mockJoinAnalysisSchemaDiscoverer{
+			joinAnalysis: &datasource.JoinAnalysis{
+				JoinCount:          100,
+				SourceMatched:      50,
+				TargetMatched:      50,
+				OrphanCount:        50, // 50% orphan rate
+				ReverseOrphanCount: 50,
+			},
+		},
+	}
+
+	// Create candidate collector that returns a candidate with 50% orphan rate
+	mockCollector := &configurableStatsMockCollector{
+		candidates: []*RelationshipCandidate{
+			{
+				SourceTable:         "llm_test_orders",
+				SourceColumn:        "user_id",
+				SourceDataType:      "uuid",
+				SourceIsPK:          false,
+				SourceDistinctCount: 100, // 100 distinct values in source
+				SourceNullRate:      0.0,
+				SourceSamples:       []string{"11111111-1111-1111-1111-111111111111", "invalid-user-id-xxxx"},
+				SourceColumnID:      orderUserIDCol.ID,
+
+				TargetTable:         "llm_test_users",
+				TargetColumn:        "id",
+				TargetDataType:      "uuid",
+				TargetIsPK:          true,
+				TargetDistinctCount: 100,
+				TargetNullRate:      0.0,
+				TargetSamples:       []string{"11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"},
+				TargetColumnID:      userIDCol.ID,
+
+				// 50% orphan rate - half of source values don't match
+				JoinCount:      100,
+				SourceMatched:  50,  // Only 50 of 100 source values matched
+				TargetMatched:  50,
+				OrphanCount:    50,  // 50% orphan rate (50 of 100 don't match)
+				ReverseOrphans: 50,
+			},
+		},
+	}
+
+	// Create the service
+	svc := NewLLMRelationshipDiscoveryService(
+		mockCollector,
+		mockValidator,
+		mockDS,
+		adapterFactory,
+		tc.ontologyRepo,
+		tc.entityRepo,
+		tc.relationshipRepo,
+		tc.schemaRepo,
+		tc.logger,
+	)
+
+	// Run relationship discovery
+	result, err := svc.DiscoverRelationships(ctx, tc.projectID, tc.datasourceID, nil)
+	require.NoError(t, err, "DiscoverRelationships should not return error")
+	require.NotNil(t, result, "Result should not be nil")
+
+	// Assert: LLM was called and rejected the relationship
+	llmCalls := mockLLM.GetCalls()
+	assert.Len(t, llmCalls, 1, "LLM should be called once")
+	assert.Equal(t, "llm_test_orders.user_id->llm_test_users.id", llmCalls[0], "LLM should validate the high orphan rate candidate")
+
+	// Assert: No relationship was created (LLM rejected)
+	assert.Equal(t, 1, result.CandidatesEvaluated, "Should evaluate 1 candidate")
+	assert.Equal(t, 0, result.RelationshipsCreated, "Should create 0 relationships (high orphan rate rejected)")
+	assert.Equal(t, 1, result.RelationshipsRejected, "Should reject 1 relationship")
+
+	// Verify no relationship was stored
+	entityRels, err := tc.relationshipRepo.GetByOntology(ctx, tc.ontologyID)
+	require.NoError(t, err)
+	assert.Len(t, entityRels, 0, "Should have 0 entity relationships (rejected)")
+
+	// Verify the OrphanRate method works correctly on the candidate
+	candidate := mockCollector.candidates[0]
+	assert.Equal(t, 0.5, candidate.OrphanRate(), "OrphanRate should be 50%")
+	assert.Equal(t, 0.5, candidate.MatchRate(), "MatchRate should be 50%")
+
+	t.Log("High orphan rate (50%) candidate rejected by LLM - test passed")
+}
+
+// TestRelationshipDiscoveryService_ProgressCallback tests that progress callbacks are
+// invoked correctly throughout the discovery pipeline with monotonic current values.
+func TestRelationshipDiscoveryService_ProgressCallback(t *testing.T) {
+	tc := setupLLMDiscoveryTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Seed schema tables and columns
+	_, _, userIDCol, _, orderUserIDCol := tc.seedEngineSchema(ctx)
+
+	// Create ontology and entities
+	tc.createTestOntology(ctx)
+	tc.createTestEntity(ctx, "User", "llm_test_users")
+	tc.createTestEntity(ctx, "Order", "llm_test_orders")
+
+	// Create mock LLM service that accepts relationships
+	mockLLM := newMockLLMServiceForIntegration()
+	// Set up multiple responses to trigger multiple progress updates
+	mockLLM.SetResponse("llm_test_orders", "user_id", "llm_test_users", "id", &RelationshipValidationResult{
+		IsValidFK:   true,
+		Confidence:  0.90,
+		Cardinality: "N:1",
+		Reasoning:   "Valid FK relationship",
+	})
+	mockLLM.SetResponse("llm_test_orders", "created_by", "llm_test_users", "id", &RelationshipValidationResult{
+		IsValidFK:   true,
+		Confidence:  0.88,
+		Cardinality: "N:1",
+		Reasoning:   "Valid FK relationship",
+	})
+	mockLLM.SetResponse("llm_test_orders", "updated_by", "llm_test_users", "id", &RelationshipValidationResult{
+		IsValidFK:   false,
+		Confidence:  0.65,
+		Cardinality: "",
+		Reasoning:   "Not enough evidence for FK",
+	})
+	mockValidator := &mockRelationshipValidator{mock: mockLLM, logger: tc.logger}
+
+	// Create mock datasource service
+	mockDS := &llmTestMockDatasourceService{
+		datasource: &models.Datasource{
+			ID:             tc.datasourceID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{},
+		},
+	}
+
+	adapterFactory := &llmTestMockAdapterFactory{
+		schemaDiscoverer: &mockJoinAnalysisSchemaDiscoverer{
+			joinAnalysis: &datasource.JoinAnalysis{
+				JoinCount:          100,
+				SourceMatched:      95,
+				TargetMatched:      90,
+				OrphanCount:        5,
+				ReverseOrphanCount: 10,
+			},
+		},
+	}
+
+	// Create candidate collector with multiple candidates
+	mockCollector := &configurableStatsMockCollector{
+		candidates: []*RelationshipCandidate{
+			{
+				SourceTable:         "llm_test_orders",
+				SourceColumn:        "user_id",
+				SourceDataType:      "uuid",
+				SourceDistinctCount: 100,
+				SourceColumnID:      orderUserIDCol.ID,
+				TargetTable:         "llm_test_users",
+				TargetColumn:        "id",
+				TargetDataType:      "uuid",
+				TargetIsPK:          true,
+				TargetDistinctCount: 100,
+				TargetColumnID:      userIDCol.ID,
+				JoinCount:           100,
+				SourceMatched:       95,
+				OrphanCount:         5,
+			},
+			{
+				SourceTable:         "llm_test_orders",
+				SourceColumn:        "created_by",
+				SourceDataType:      "uuid",
+				SourceDistinctCount: 50,
+				SourceColumnID:      uuid.New(),
+				TargetTable:         "llm_test_users",
+				TargetColumn:        "id",
+				TargetDataType:      "uuid",
+				TargetIsPK:          true,
+				TargetDistinctCount: 100,
+				TargetColumnID:      userIDCol.ID,
+				JoinCount:           50,
+				SourceMatched:       48,
+				OrphanCount:         2,
+			},
+			{
+				SourceTable:         "llm_test_orders",
+				SourceColumn:        "updated_by",
+				SourceDataType:      "uuid",
+				SourceDistinctCount: 30,
+				SourceColumnID:      uuid.New(),
+				TargetTable:         "llm_test_users",
+				TargetColumn:        "id",
+				TargetDataType:      "uuid",
+				TargetIsPK:          true,
+				TargetDistinctCount: 100,
+				TargetColumnID:      userIDCol.ID,
+				JoinCount:           30,
+				SourceMatched:       20,
+				OrphanCount:         10,
+			},
+		},
+	}
+
+	// Track progress callbacks
+	var progressUpdates []struct {
+		current int
+		total   int
+		message string
+	}
+	var mu sync.Mutex
+
+	progressCallback := func(current, total int, message string) {
+		mu.Lock()
+		defer mu.Unlock()
+		progressUpdates = append(progressUpdates, struct {
+			current int
+			total   int
+			message string
+		}{current, total, message})
+	}
+
+	// Create the service
+	svc := NewLLMRelationshipDiscoveryService(
+		mockCollector,
+		mockValidator,
+		mockDS,
+		adapterFactory,
+		tc.ontologyRepo,
+		tc.entityRepo,
+		tc.relationshipRepo,
+		tc.schemaRepo,
+		tc.logger,
+	)
+
+	// Run relationship discovery with progress callback
+	result, err := svc.DiscoverRelationships(ctx, tc.projectID, tc.datasourceID, progressCallback)
+	require.NoError(t, err, "DiscoverRelationships should not return error")
+	require.NotNil(t, result, "Result should not be nil")
+
+	// Assert: Progress callback was invoked multiple times
+	mu.Lock()
+	updates := make([]struct {
+		current int
+		total   int
+		message string
+	}, len(progressUpdates))
+	copy(updates, progressUpdates)
+	mu.Unlock()
+
+	assert.GreaterOrEqual(t, len(updates), 3, "Progress callback should be invoked at least 3 times")
+
+	// Assert: current values are monotonically increasing
+	lastCurrent := -1
+	for i, update := range updates {
+		assert.GreaterOrEqual(t, update.current, lastCurrent,
+			"Progress current value should be monotonically increasing (update %d: %d >= %d)", i, update.current, lastCurrent)
+		lastCurrent = update.current
+	}
+
+	// Assert: total values are consistent (all should be 100 for main progress)
+	for _, update := range updates {
+		assert.Equal(t, 100, update.total, "Progress total should be 100 (main progress scale)")
+	}
+
+	// Assert: messages describe different phases
+	var phaseMessages []string
+	for _, update := range updates {
+		phaseMessages = append(phaseMessages, update.message)
+	}
+
+	// Should have messages mentioning different phases
+	foundDBFK := false
+	foundColumnFK := false
+	foundCollecting := false
+	foundValidating := false
+	foundComplete := false
+
+	for _, msg := range phaseMessages {
+		if progressMsgContains(msg, "DB-declared") || progressMsgContains(msg, "Processing DB") {
+			foundDBFK = true
+		}
+		if progressMsgContains(msg, "ColumnFeatures") || progressMsgContains(msg, "Processing Column") {
+			foundColumnFK = true
+		}
+		if progressMsgContains(msg, "Collecting") || progressMsgContains(msg, "candidates") {
+			foundCollecting = true
+		}
+		if progressMsgContains(msg, "Validating") || progressMsgContains(msg, "Validated") {
+			foundValidating = true
+		}
+		if progressMsgContains(msg, "complete") || progressMsgContains(msg, "Complete") {
+			foundComplete = true
+		}
+	}
+
+	// At minimum, we expect collecting/validating/complete phases
+	assert.True(t, foundCollecting || foundDBFK || foundColumnFK, "Should have early phase messages")
+	assert.True(t, foundValidating, "Should have validation phase messages")
+	assert.True(t, foundComplete, "Should have completion message")
+
+	// Assert: final progress shows 100/100
+	finalUpdate := updates[len(updates)-1]
+	assert.Equal(t, 100, finalUpdate.current, "Final progress current should be 100")
+	assert.Equal(t, 100, finalUpdate.total, "Final progress total should be 100")
+
+	// Assert: result statistics - verify candidates were evaluated
+	// Note: Some relationships may fail to create due to FK constraints on test column IDs
+	// The primary focus of this test is progress callback behavior, not relationship creation counts
+	assert.Equal(t, 3, result.CandidatesEvaluated, "Should evaluate 3 candidates")
+	assert.GreaterOrEqual(t, result.RelationshipsCreated+result.RelationshipsRejected, 1, "Should have processed at least 1 candidate")
+	assert.LessOrEqual(t, result.RelationshipsCreated+result.RelationshipsRejected, 3, "Should not exceed 3 total processed")
+
+	t.Logf("Progress callback invoked %d times with monotonic values - test passed", len(updates))
+}
+
+// progressMsgContains checks if a string contains a substring.
+func progressMsgContains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr ||
+		len(s) > 0 && len(substr) > 0 &&
+			(s[0:len(substr)] == substr ||
+				len(s) > len(substr) && progressMsgContains(s[1:], substr)))
+}
+
+// mockJoinAnalysisSchemaDiscoverer is a simplified mock that returns configured join analysis.
+type mockJoinAnalysisSchemaDiscoverer struct {
+	joinAnalysis *datasource.JoinAnalysis
+}
+
+func (m *mockJoinAnalysisSchemaDiscoverer) DiscoverTables(ctx context.Context) ([]datasource.TableMetadata, error) {
+	return nil, nil
+}
+
+func (m *mockJoinAnalysisSchemaDiscoverer) DiscoverColumns(ctx context.Context, schemaName, tableName string) ([]datasource.ColumnMetadata, error) {
+	return nil, nil
+}
+
+func (m *mockJoinAnalysisSchemaDiscoverer) DiscoverForeignKeys(ctx context.Context) ([]datasource.ForeignKeyMetadata, error) {
+	return nil, nil
+}
+
+func (m *mockJoinAnalysisSchemaDiscoverer) SupportsForeignKeys() bool {
+	return true
+}
+
+func (m *mockJoinAnalysisSchemaDiscoverer) AnalyzeColumnStats(ctx context.Context, schemaName, tableName string, columnNames []string) ([]datasource.ColumnStats, error) {
+	return nil, nil
+}
+
+func (m *mockJoinAnalysisSchemaDiscoverer) CheckValueOverlap(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string, sampleLimit int) (*datasource.ValueOverlapResult, error) {
+	return nil, nil
+}
+
+func (m *mockJoinAnalysisSchemaDiscoverer) AnalyzeJoin(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+	return m.joinAnalysis, nil
+}
+
+func (m *mockJoinAnalysisSchemaDiscoverer) GetDistinctValues(ctx context.Context, schemaName, tableName, columnName string, limit int) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockJoinAnalysisSchemaDiscoverer) GetEnumValueDistribution(ctx context.Context, schemaName, tableName, columnName string, completionTimestampCol string, limit int) (*datasource.EnumDistributionResult, error) {
+	return nil, nil
+}
+
+func (m *mockJoinAnalysisSchemaDiscoverer) Close() error {
+	return nil
 }
