@@ -621,31 +621,6 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 	startTime := time.Now()
 	s.logger.Info("Starting PK-match relationship discovery")
 
-	// Get active ontology for the project
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("get active ontology: %w", err)
-	}
-	if ontology == nil {
-		return nil, fmt.Errorf("no active ontology found for project")
-	}
-
-	// Get all entities for this ontology
-	entities, err := s.entityRepo.GetByOntology(ctx, ontology.ID)
-	if err != nil {
-		return nil, fmt.Errorf("get entities: %w", err)
-	}
-	if len(entities) == 0 {
-		return &PKMatchDiscoveryResult{}, nil // No entities, no relationships to discover
-	}
-
-	// entityByPrimaryTable: maps "schema.table" to the entity that owns that table
-	entityByPrimaryTable := make(map[string]*models.OntologyEntity)
-	for _, entity := range entities {
-		key := fmt.Sprintf("%s.%s", entity.PrimarySchema, entity.PrimaryTable)
-		entityByPrimaryTable[key] = entity
-	}
-
 	// Load tables and columns
 	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
 	if err != nil {
@@ -661,20 +636,18 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 		return nil, fmt.Errorf("list columns: %w", err)
 	}
 
-	// Build a map of column IDs that already have relationships created by FKDiscovery/Phase 4.
+	// Build a map of column IDs that already have SchemaRelationships (from FKDiscovery).
 	// This avoids running redundant SQL join analysis for columns we've already processed.
-	existingRelationships, err := s.relationshipRepo.GetByOntology(ctx, ontology.ID)
+	existingSchemaRels, err := s.schemaRepo.ListRelationshipsByDatasource(ctx, projectID, datasourceID)
 	if err != nil {
-		return nil, fmt.Errorf("get existing relationships: %w", err)
+		return nil, fmt.Errorf("get existing schema relationships: %w", err)
 	}
 	columnsWithRelationships := make(map[uuid.UUID]bool)
-	for _, rel := range existingRelationships {
-		if rel.SourceColumnID != nil {
-			columnsWithRelationships[*rel.SourceColumnID] = true
-		}
+	for _, rel := range existingSchemaRels {
+		columnsWithRelationships[rel.SourceColumnID] = true
 	}
-	s.logger.Debug("Loaded existing relationships for deduplication",
-		zap.Int("existing_count", len(existingRelationships)),
+	s.logger.Debug("Loaded existing schema relationships for deduplication",
+		zap.Int("existing_count", len(existingSchemaRels)),
 		zap.Int("columns_with_relationships", len(columnsWithRelationships)))
 
 	// Get datasource to create schema discoverer for join analysis
@@ -689,65 +662,53 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 	}
 	defer discoverer.Close()
 
-	// Build list of "entity reference columns" - columns in entity tables that could be
-	// join targets (PKs, unique columns, *_id naming, high cardinality)
-	type entityRefColumn struct {
-		entity *models.OntologyEntity
+	// Build list of "target columns" - columns that could be join targets
+	// These are PKs, unique columns, or high cardinality columns
+	// (No entity dependency - built from schema metadata)
+	type targetColumn struct {
 		column *models.SchemaColumn
-		schema string
-		table  string
+		table  *models.SchemaTable
 	}
-	var entityRefColumns []entityRefColumn
+	var targetColumns []targetColumn
 
-	for _, entity := range entities {
-		// Find all columns in this entity's primary table
-		for _, col := range columns {
-			table, ok := tableByID[col.SchemaTableID]
-			if !ok {
-				continue
-			}
-			if table.SchemaName != entity.PrimarySchema || table.TableName != entity.PrimaryTable {
-				continue
-			}
-
-			// Include if: PK, unique, or high cardinality (potential join target)
-			// Note: PurposeIdentifier columns are included as FK candidates (below),
-			// but not as entity ref columns unless they're PK/unique, since identifier
-			// columns are often FKs that reference other entities.
-			isCandidate := col.IsPrimaryKey || col.IsUnique ||
-				(col.DistinctCount != nil && *col.DistinctCount >= 20)
-
-			if !isCandidate {
-				continue
-			}
-
-			// Get column features for exclusion checks
-			features := col.GetColumnFeatures()
-
-			// Exclude types unlikely to be join keys
-			if isPKMatchExcludedType(col) {
-				continue
-			}
-
-			// Exclude columns based on stored purpose (timestamp, flag, measure, etc.)
-			if features != nil {
-				switch features.Purpose {
-				case models.PurposeTimestamp, models.PurposeFlag, models.PurposeMeasure, models.PurposeEnum:
-					continue
-				}
-			}
-
-			entityRefColumns = append(entityRefColumns, entityRefColumn{
-				entity: entity,
-				column: col,
-				schema: table.SchemaName,
-				table:  table.TableName,
-			})
+	for _, col := range columns {
+		table, ok := tableByID[col.SchemaTableID]
+		if !ok {
+			continue
 		}
+
+		// Include if: PK, unique, or high cardinality (potential join target)
+		isCandidate := col.IsPrimaryKey || col.IsUnique ||
+			(col.DistinctCount != nil && *col.DistinctCount >= 20)
+
+		if !isCandidate {
+			continue
+		}
+
+		// Get column features for exclusion checks
+		features := col.GetColumnFeatures()
+
+		// Exclude types unlikely to be join keys
+		if isPKMatchExcludedType(col) {
+			continue
+		}
+
+		// Exclude columns based on stored purpose (timestamp, flag, measure, etc.)
+		if features != nil {
+			switch features.Purpose {
+			case models.PurposeTimestamp, models.PurposeFlag, models.PurposeMeasure, models.PurposeEnum:
+				continue
+			}
+		}
+
+		targetColumns = append(targetColumns, targetColumn{
+			column: col,
+			table:  table,
+		})
 	}
 
-	// Build list of filtered FK candidate columns (columns that could reference entity columns)
-	// We track priority candidates (Role=foreign_key) separately to process them first.
+	// Build list of FK candidate columns (columns that could reference target columns)
+	// Priority: Role=foreign_key or Purpose=identifier from ColumnFeatures
 	var priorityCandidates []*pkMatchCandidate
 	var regularCandidates []*pkMatchCandidate
 	var skippedHighConfidence int
@@ -799,26 +760,34 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 			}
 		}
 
-		// Require explicit joinability determination
-		// All columns must have explicit joinability determination from feature extraction.
-		// Columns with is_joinable=true (or purpose=identifier) proceed to validation.
-		if col.IsJoinable == nil {
-			// Allow identifier columns even without explicit joinability
-			if features != nil && features.Purpose == models.PurposeIdentifier {
-				// Identifier columns proceed to validation
-			} else {
-				continue // No joinability info = skip
+		// Determine if this column is a FK candidate based on ColumnFeatures
+		isFKCandidate := false
+		isPriorityCandidate := false
+
+		// Priority: Role=foreign_key indicates a likely FK
+		if features != nil && features.Role == models.RoleForeignKey {
+			isFKCandidate = true
+			isPriorityCandidate = true
+		}
+
+		// Also include Purpose=identifier columns (likely FKs even without explicit Role)
+		if features != nil && features.Purpose == models.PurposeIdentifier {
+			isFKCandidate = true
+		}
+
+		// For columns without ColumnFeatures or without explicit Role/Purpose,
+		// fall back to joinability check
+		if !isFKCandidate {
+			if col.IsJoinable == nil || !*col.IsJoinable {
+				continue // No joinability info or not joinable = skip
 			}
-		} else if !*col.IsJoinable {
-			continue
+			isFKCandidate = true
 		}
 
 		// Apply cardinality filters only if stats exist
-		// Columns with is_joinable=true but no stats proceed to join validation
-		// where CheckValueOverlap will determine actual FK validity.
-		// Identifier columns (as determined by feature extraction) skip cardinality checks
-		// since they are often valid FK columns even with low cardinality.
-		skipCardinalityCheck := features != nil && features.Purpose == models.PurposeIdentifier
+		// Identifier columns skip cardinality checks since they are often valid FKs
+		// even with low cardinality (e.g., user_id with only a few users)
+		skipCardinalityCheck := features != nil && (features.Purpose == models.PurposeIdentifier || features.Role == models.RoleForeignKey)
 		if col.DistinctCount != nil && !skipCardinalityCheck {
 			// Check cardinality threshold
 			if *col.DistinctCount < 20 {
@@ -831,8 +800,8 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 					continue
 				}
 			}
-		} else {
-			// Columns without stats but with is_joinable=true proceed to validation
+		} else if col.DistinctCount == nil && !skipCardinalityCheck {
+			// Columns without stats and without FK indicators proceed to validation
 			// Join validation will determine actual FK validity via CheckValueOverlap
 			s.logger.Debug("Including column with NULL stats for validation",
 				zap.String("table", table.TableName),
@@ -846,8 +815,7 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 			table:  table.TableName,
 		}
 
-		// Prioritize columns with Role=foreign_key - they're more likely to be valid FKs
-		if features != nil && features.Role == models.RoleForeignKey {
+		if isPriorityCandidate {
 			priorityCandidates = append(priorityCandidates, candidate)
 		} else {
 			regularCandidates = append(regularCandidates, candidate)
@@ -858,47 +826,36 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 	allCandidates := append(priorityCandidates, regularCandidates...)
 
 	s.logger.Info("PK-match discovery setup complete",
-		zap.Int("entity_ref_columns", len(entityRefColumns)),
+		zap.Int("target_columns", len(targetColumns)),
 		zap.Int("priority_candidates", len(priorityCandidates)),
 		zap.Int("regular_candidates", len(regularCandidates)),
 		zap.Int("total_candidates", len(allCandidates)),
 		zap.Int("skipped_high_confidence", skippedHighConfidence),
 		zap.Int("skipped_existing_relationship", skippedExistingRelationship))
 
-	// For each entity reference column, find candidates with compatible types and test joins
+	// For each target column, find candidates with compatible types and test joins
 	var inferredCount int
-	processedRefs := 0
-	for _, ref := range entityRefColumns {
+	processedTargets := 0
+	for _, target := range targetColumns {
 		for _, candidate := range allCandidates {
 			// Skip if types are incompatible (handles text ↔ uuid, int variants, etc.)
-			if !areTypesCompatibleForFK(candidate.column.DataType, ref.column.DataType) {
+			if !areTypesCompatibleForFK(candidate.column.DataType, target.column.DataType) {
 				continue
 			}
-			// Skip if same table (self-reference)
-			if candidate.schema == ref.schema && candidate.table == ref.table {
+			// Skip if same table (self-reference handled differently)
+			if candidate.column.SchemaTableID == target.column.SchemaTableID {
 				continue
 			}
 
 			// Skip PK-to-PK matches (both auto-increment)
-			if ref.column.IsPrimaryKey && candidate.column.IsPrimaryKey {
-				continue
-			}
-
-			// Find source entity for candidate's table (by primary table ownership)
-			sourceEntity := entityByPrimaryTable[fmt.Sprintf("%s.%s", candidate.schema, candidate.table)]
-			if sourceEntity == nil {
-				continue
-			}
-
-			// Don't create self-referencing entity relationships
-			if sourceEntity.ID == ref.entity.ID {
+			if target.column.IsPrimaryKey && candidate.column.IsPrimaryKey {
 				continue
 			}
 
 			// Run join analysis
 			joinResult, err := discoverer.AnalyzeJoin(ctx,
 				candidate.schema, candidate.table, candidate.column.ColumnName,
-				ref.schema, ref.table, ref.column.ColumnName)
+				target.table.SchemaName, target.table.TableName, target.column.ColumnName)
 			if err != nil {
 				// Skip this candidate on join error
 				continue
@@ -918,61 +875,59 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 				}
 			}
 
-			// Semantic validation: If source column has very low cardinality relative to row count,
-			// it's likely a status/type column, not a FK
-			table := tableByID[ref.column.SchemaTableID]
-			if ref.column.DistinctCount != nil && table.RowCount != nil && *table.RowCount > 0 {
-				ratio := float64(*ref.column.DistinctCount) / float64(*table.RowCount)
+			// Semantic validation: If target column has very low cardinality relative to row count,
+			// it's likely a status/type column, not a valid FK target
+			if target.column.DistinctCount != nil && target.table.RowCount != nil && *target.table.RowCount > 0 {
+				ratio := float64(*target.column.DistinctCount) / float64(*target.table.RowCount)
 				if ratio < 0.01 { // Less than 1% unique values
-					continue // Likely a status/type column, not a FK
+					continue // Likely a status/type column, not a valid FK target
 				}
 			}
 
-			status := models.RelationshipStatusConfirmed
 			confidence := 0.9
 
 			// Calculate cardinality from join analysis
 			cardinality := InferCardinality(joinResult)
 
-			// Create bidirectional relationship (both forward and reverse)
-			rel := &models.EntityRelationship{
-				OntologyID:         ontology.ID,
-				SourceEntityID:     sourceEntity.ID,
-				TargetEntityID:     ref.entity.ID,
-				SourceColumnSchema: candidate.schema,
-				SourceColumnTable:  candidate.table,
-				SourceColumnName:   candidate.column.ColumnName,
-				SourceColumnID:     &candidate.column.ID,
-				TargetColumnSchema: ref.schema,
-				TargetColumnTable:  ref.table,
-				TargetColumnName:   ref.column.ColumnName,
-				TargetColumnID:     &ref.column.ID,
-				DetectionMethod:    models.DetectionMethodPKMatch,
-				Confidence:         confidence,
-				Status:             status,
-				Cardinality:        cardinality,
+			// Create SchemaRelationship (unidirectional, source→target)
+			inferenceMethod := models.InferenceMethodPKMatch
+			rel := &models.SchemaRelationship{
+				ProjectID:        projectID,
+				SourceTableID:    candidate.column.SchemaTableID,
+				SourceColumnID:   candidate.column.ID,
+				TargetTableID:    target.column.SchemaTableID,
+				TargetColumnID:   target.column.ID,
+				RelationshipType: models.RelationshipTypeInferred,
+				Cardinality:      cardinality,
+				Confidence:       confidence,
+				InferenceMethod:  &inferenceMethod,
+				IsValidated:      true,
 			}
 
-			err = s.createBidirectionalRelationship(ctx, rel)
-			if err != nil {
-				return nil, fmt.Errorf("create bidirectional pk-match relationship: %w", err)
+			if err := s.schemaRepo.UpsertRelationship(ctx, rel); err != nil {
+				return nil, fmt.Errorf("upsert pk-match SchemaRelationship: %w", err)
 			}
 
 			inferredCount++
+			s.logger.Debug("Created pk-match SchemaRelationship",
+				zap.String("source", fmt.Sprintf("%s.%s.%s", candidate.schema, candidate.table, candidate.column.ColumnName)),
+				zap.String("target", fmt.Sprintf("%s.%s.%s", target.table.SchemaName, target.table.TableName, target.column.ColumnName)),
+				zap.Float64("confidence", confidence),
+				zap.String("cardinality", cardinality))
 		}
 
-		processedRefs++
-		if processedRefs%10 == 0 || processedRefs == len(entityRefColumns) {
+		processedTargets++
+		if processedTargets%10 == 0 || processedTargets == len(targetColumns) {
 			s.logger.Debug("PK-match discovery progress",
-				zap.Int("processed", processedRefs),
-				zap.Int("total", len(entityRefColumns)),
+				zap.Int("processed", processedTargets),
+				zap.Int("total", len(targetColumns)),
 				zap.Int("inferred_so_far", inferredCount))
 		}
 
 		// Report progress to UI
 		if progressCallback != nil {
-			msg := fmt.Sprintf("Testing join candidates (%d/%d)", processedRefs, len(entityRefColumns))
-			progressCallback(processedRefs, len(entityRefColumns), msg)
+			msg := fmt.Sprintf("Testing join candidates (%d/%d)", processedTargets, len(targetColumns))
+			progressCallback(processedTargets, len(targetColumns), msg)
 		}
 	}
 
