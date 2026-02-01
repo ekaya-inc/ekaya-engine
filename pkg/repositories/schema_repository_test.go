@@ -1709,3 +1709,156 @@ func TestSchemaRepository_ClearColumnFeaturesByProject_NoFeatures(t *testing.T) 
 		t.Fatalf("ClearColumnFeaturesByProject failed when no features exist: %v", err)
 	}
 }
+
+// ============================================================================
+// GetRelationshipsByMethod Tests
+// ============================================================================
+
+func TestSchemaRepository_GetRelationshipsByMethod(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create tables and columns for relationships
+	usersTable := tc.createTestTable(ctx, "public", "users")
+	userIDCol := tc.createTestColumn(ctx, usersTable.ID, "id", 1)
+
+	ordersTable := tc.createTestTable(ctx, "public", "orders")
+	orderUserIDCol := tc.createTestColumn(ctx, ordersTable.ID, "user_id", 1)
+
+	productsTable := tc.createTestTable(ctx, "public", "products")
+	productIDCol := tc.createTestColumn(ctx, productsTable.ID, "id", 1)
+
+	orderItemsTable := tc.createTestTable(ctx, "public", "order_items")
+	itemProductIDCol := tc.createTestColumn(ctx, orderItemsTable.ID, "product_id", 1)
+
+	// Create relationship with foreign_key method
+	fkMethod := models.InferenceMethodForeignKey
+	fkRel := &models.SchemaRelationship{
+		ProjectID:        tc.projectID,
+		SourceTableID:    ordersTable.ID,
+		SourceColumnID:   orderUserIDCol.ID,
+		TargetTableID:    usersTable.ID,
+		TargetColumnID:   userIDCol.ID,
+		RelationshipType: models.RelationshipTypeFK,
+		Cardinality:      models.CardinalityNTo1,
+		Confidence:       1.0,
+		InferenceMethod:  &fkMethod,
+	}
+	if err := tc.repo.UpsertRelationship(ctx, fkRel); err != nil {
+		t.Fatalf("UpsertRelationship (FK) failed: %v", err)
+	}
+
+	// Create relationship with value_overlap method
+	valueOverlapMethod := models.InferenceMethodValueOverlap
+	inferredRel := &models.SchemaRelationship{
+		ProjectID:        tc.projectID,
+		SourceTableID:    orderItemsTable.ID,
+		SourceColumnID:   itemProductIDCol.ID,
+		TargetTableID:    productsTable.ID,
+		TargetColumnID:   productIDCol.ID,
+		RelationshipType: models.RelationshipTypeInferred,
+		Cardinality:      models.CardinalityNTo1,
+		Confidence:       0.85,
+		InferenceMethod:  &valueOverlapMethod,
+	}
+	if err := tc.repo.UpsertRelationship(ctx, inferredRel); err != nil {
+		t.Fatalf("UpsertRelationship (value_overlap) failed: %v", err)
+	}
+
+	// Query by foreign_key method
+	fkRels, err := tc.repo.GetRelationshipsByMethod(ctx, tc.projectID, tc.dsID, models.InferenceMethodForeignKey)
+	if err != nil {
+		t.Fatalf("GetRelationshipsByMethod (foreign_key) failed: %v", err)
+	}
+	if len(fkRels) != 1 {
+		t.Errorf("expected 1 FK relationship, got %d", len(fkRels))
+	}
+	if fkRels[0].ID != fkRel.ID {
+		t.Errorf("expected FK relationship ID %s, got %s", fkRel.ID, fkRels[0].ID)
+	}
+
+	// Query by value_overlap method
+	inferredRels, err := tc.repo.GetRelationshipsByMethod(ctx, tc.projectID, tc.dsID, models.InferenceMethodValueOverlap)
+	if err != nil {
+		t.Fatalf("GetRelationshipsByMethod (value_overlap) failed: %v", err)
+	}
+	if len(inferredRels) != 1 {
+		t.Errorf("expected 1 value_overlap relationship, got %d", len(inferredRels))
+	}
+	if inferredRels[0].ID != inferredRel.ID {
+		t.Errorf("expected inferred relationship ID %s, got %s", inferredRel.ID, inferredRels[0].ID)
+	}
+
+	// Query by non-existent method should return empty
+	noRels, err := tc.repo.GetRelationshipsByMethod(ctx, tc.projectID, tc.dsID, "nonexistent_method")
+	if err != nil {
+		t.Fatalf("GetRelationshipsByMethod (nonexistent) failed: %v", err)
+	}
+	if len(noRels) != 0 {
+		t.Errorf("expected 0 relationships for nonexistent method, got %d", len(noRels))
+	}
+}
+
+func TestSchemaRepository_GetRelationshipsByMethod_IncludesDiscoveryMetrics(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create tables and columns
+	table1 := tc.createTestTable(ctx, "public", "source_table")
+	col1 := tc.createTestColumn(ctx, table1.ID, "fk_col", 1)
+
+	table2 := tc.createTestTable(ctx, "public", "target_table")
+	col2 := tc.createTestColumn(ctx, table2.ID, "pk_col", 1)
+
+	// Create relationship with metrics using UpsertRelationshipWithMetrics
+	pkMatchMethod := "pk_match"
+	rel := &models.SchemaRelationship{
+		ProjectID:        tc.projectID,
+		SourceTableID:    table1.ID,
+		SourceColumnID:   col1.ID,
+		TargetTableID:    table2.ID,
+		TargetColumnID:   col2.ID,
+		RelationshipType: models.RelationshipTypeInferred,
+		Cardinality:      models.CardinalityNTo1,
+		Confidence:       0.95,
+		InferenceMethod:  &pkMatchMethod,
+	}
+	metrics := &models.DiscoveryMetrics{
+		MatchRate:      0.95,
+		SourceDistinct: 100,
+		TargetDistinct: 50,
+		MatchedCount:   95,
+	}
+	if err := tc.repo.UpsertRelationshipWithMetrics(ctx, rel, metrics); err != nil {
+		t.Fatalf("UpsertRelationshipWithMetrics failed: %v", err)
+	}
+
+	// Query and verify discovery metrics are returned
+	rels, err := tc.repo.GetRelationshipsByMethod(ctx, tc.projectID, tc.dsID, "pk_match")
+	if err != nil {
+		t.Fatalf("GetRelationshipsByMethod failed: %v", err)
+	}
+	if len(rels) != 1 {
+		t.Fatalf("expected 1 relationship, got %d", len(rels))
+	}
+
+	retrieved := rels[0]
+	if retrieved.MatchRate == nil || *retrieved.MatchRate != 0.95 {
+		t.Errorf("expected MatchRate 0.95, got %v", retrieved.MatchRate)
+	}
+	if retrieved.SourceDistinct == nil || *retrieved.SourceDistinct != 100 {
+		t.Errorf("expected SourceDistinct 100, got %v", retrieved.SourceDistinct)
+	}
+	if retrieved.TargetDistinct == nil || *retrieved.TargetDistinct != 50 {
+		t.Errorf("expected TargetDistinct 50, got %v", retrieved.TargetDistinct)
+	}
+	if retrieved.MatchedCount == nil || *retrieved.MatchedCount != 95 {
+		t.Errorf("expected MatchedCount 95, got %v", retrieved.MatchedCount)
+	}
+}

@@ -68,6 +68,10 @@ type SchemaRepository interface {
 	SoftDeleteRelationship(ctx context.Context, projectID, relationshipID uuid.UUID) error
 	SoftDeleteOrphanedRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (int64, error)
 
+	// GetRelationshipsByMethod returns relationships filtered by inference method.
+	// Use this to query relationships discovered by a specific algorithm (e.g., "pk_match", "column_features", "fk").
+	GetRelationshipsByMethod(ctx context.Context, projectID, datasourceID uuid.UUID, method string) ([]*models.SchemaRelationship, error)
+
 	// Relationship Discovery
 	GetRelationshipDetails(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.RelationshipDetail, error)
 	GetEmptyTables(ctx context.Context, projectID, datasourceID uuid.UUID) ([]string, error)
@@ -1198,6 +1202,46 @@ func (r *schemaRepository) SoftDeleteOrphanedRelationships(ctx context.Context, 
 	return result.RowsAffected(), nil
 }
 
+func (r *schemaRepository) GetRelationshipsByMethod(ctx context.Context, projectID, datasourceID uuid.UUID, method string) ([]*models.SchemaRelationship, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT r.id, r.project_id, r.source_table_id, r.source_column_id,
+		       r.target_table_id, r.target_column_id, r.relationship_type,
+		       r.cardinality, r.confidence, r.inference_method, r.is_validated,
+		       r.validation_results, r.is_approved, r.created_at, r.updated_at,
+		       r.match_rate, r.source_distinct, r.target_distinct, r.matched_count, r.rejection_reason
+		FROM engine_schema_relationships r
+		JOIN engine_schema_tables st ON r.source_table_id = st.id
+		WHERE r.project_id = $1 AND st.datasource_id = $2
+		  AND r.inference_method = $3
+		  AND r.deleted_at IS NULL AND st.deleted_at IS NULL
+		ORDER BY r.created_at`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID, datasourceID, method)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get relationships by method: %w", err)
+	}
+	defer rows.Close()
+
+	relationships := make([]*models.SchemaRelationship, 0)
+	for rows.Next() {
+		rel, err := scanSchemaRelationshipWithDiscovery(rows)
+		if err != nil {
+			return nil, err
+		}
+		relationships = append(relationships, rel)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating relationships: %w", err)
+	}
+
+	return relationships, nil
+}
+
 // ============================================================================
 // Relationship Discovery Methods
 // ============================================================================
@@ -1737,6 +1781,29 @@ func scanSchemaRelationshipRow(row pgx.Row) (*models.SchemaRelationship, error) 
 	)
 	if err != nil {
 		return nil, err
+	}
+	if len(validationResultsJSON) > 0 {
+		rel.ValidationResults = &models.ValidationResults{}
+		if err := json.Unmarshal(validationResultsJSON, rel.ValidationResults); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal validation_results: %w", err)
+		}
+	}
+	return &rel, nil
+}
+
+// scanSchemaRelationshipWithDiscovery scans a relationship from rows including discovery fields.
+func scanSchemaRelationshipWithDiscovery(rows pgx.Rows) (*models.SchemaRelationship, error) {
+	var rel models.SchemaRelationship
+	var validationResultsJSON []byte
+	err := rows.Scan(
+		&rel.ID, &rel.ProjectID, &rel.SourceTableID, &rel.SourceColumnID,
+		&rel.TargetTableID, &rel.TargetColumnID, &rel.RelationshipType,
+		&rel.Cardinality, &rel.Confidence, &rel.InferenceMethod, &rel.IsValidated,
+		&validationResultsJSON, &rel.IsApproved, &rel.CreatedAt, &rel.UpdatedAt,
+		&rel.MatchRate, &rel.SourceDistinct, &rel.TargetDistinct, &rel.MatchedCount, &rel.RejectionReason,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan relationship with discovery: %w", err)
 	}
 	if len(validationResultsJSON) > 0 {
 		rel.ValidationResults = &models.ValidationResults{}
