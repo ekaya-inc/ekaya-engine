@@ -334,7 +334,7 @@ Write unit tests for the bidirectional join validation fix in the PostgreSQL ada
 
 ---
 
-### 5.4 Integration tests for full DAG relationship discovery
+### 5.4 Integration tests for full DAG relationship discovery ✓
 
 Write integration tests that run the DAG through PKMatchDiscovery and verify correct relationship discovery without false positives.
 
@@ -344,24 +344,24 @@ Write integration tests that run the DAG through PKMatchDiscovery and verify cor
 
 **Test cases:**
 
-1. [ ] **Full DAG run through PKMatchDiscovery**:
+1. [x] **Full DAG run through PKMatchDiscovery**:
    - Setup: Create a test project with schema containing:
      - A clear FK relationship (e.g., `orders.customer_id` → `customers.id`)
      - A false positive candidate (e.g., `settings.identity_provider` with values {1,2,3} and a `jobs` table with id 1-100)
    - Execute: Run DAG nodes in order: KnowledgeSeeding → ColumnFeatureExtraction → FKDiscovery → TableFeatureExtraction → PKMatchDiscovery
    - Verify: DAG completes successfully
 
-2. [ ] **Verify no false positives like identity_provider → jobs.id**:
+2. [x] **Verify no false positives like identity_provider → jobs.id**:
    - Query `engine_schema_relationships` after DAG completion
    - Assert: No relationship exists between `identity_provider` column and `jobs.id`
    - This validates the bidirectional join fix is working
 
-3. [ ] **Verify legitimate relationships discovered**:
+3. [x] **Verify legitimate relationships discovered**:
    - Assert: The `orders.customer_id` → `customers.id` relationship IS discovered
    - Verify: `inference_method` is correctly set ('fk', 'column_features', or 'pk_match' depending on discovery path)
    - Verify: `validation_results` contains expected metrics
 
-4. [ ] **Verify SchemaRelationship not EntityRelationship**:
+4. [x] **Verify SchemaRelationship not EntityRelationship**:
    - Assert: Relationships are in `engine_schema_relationships` table
    - Assert: `engine_entity_relationships` is NOT populated by these discovery steps
 
