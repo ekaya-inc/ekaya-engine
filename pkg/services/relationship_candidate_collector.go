@@ -417,6 +417,76 @@ func categorizeDataType(dataType string) string {
 	return ""
 }
 
+// generateCandidatePairs creates relationship candidates for all valid source→target pairs.
+// For each source column, it pairs with each target column if:
+//   - They are not the same column (no self-references)
+//   - Their data types are compatible (uuid→uuid, int→int, etc.)
+//
+// The method populates ColumnFeatures-derived fields (SourcePurpose, SourceRole, etc.)
+// from the source's ColumnFeatures data.
+//
+// No threshold-based filtering is applied - all type-compatible pairs become candidates
+// for LLM validation in the next phase.
+func (c *relationshipCandidateCollector) generateCandidatePairs(
+	sources []*FKSourceColumn,
+	targets []*FKTargetColumn,
+) []*RelationshipCandidate {
+	var candidates []*RelationshipCandidate
+
+	for _, source := range sources {
+		for _, target := range targets {
+			// Skip self-references (same table.column)
+			if source.TableName == target.TableName && source.Column.ColumnName == target.Column.ColumnName {
+				continue
+			}
+
+			// Skip if data types are incompatible
+			if !areTypesCompatible(source.Column.DataType, target.Column.DataType) {
+				continue
+			}
+
+			candidate := &RelationshipCandidate{
+				// Source column info
+				SourceTable:    source.TableName,
+				SourceColumn:   source.Column.ColumnName,
+				SourceDataType: source.Column.DataType,
+				SourceIsPK:     source.Column.IsPrimaryKey,
+				SourceColumnID: source.Column.ID,
+
+				// Target column info
+				TargetTable:    target.TableName,
+				TargetColumn:   target.Column.ColumnName,
+				TargetDataType: target.Column.DataType,
+				TargetIsPK:     target.Column.IsPrimaryKey,
+				TargetColumnID: target.Column.ID,
+			}
+
+			// Populate ColumnFeatures-derived fields for source
+			if source.Features != nil {
+				candidate.SourcePurpose = source.Features.Purpose
+				candidate.SourceRole = source.Features.Role
+			}
+
+			// Populate ColumnFeatures-derived fields for target
+			targetFeatures := target.Column.GetColumnFeatures()
+			if targetFeatures != nil {
+				candidate.TargetPurpose = targetFeatures.Purpose
+				candidate.TargetRole = targetFeatures.Role
+			}
+
+			candidates = append(candidates, candidate)
+		}
+	}
+
+	c.logger.Debug("generated candidate pairs",
+		zap.Int("source_count", len(sources)),
+		zap.Int("target_count", len(targets)),
+		zap.Int("candidate_count", len(candidates)),
+	)
+
+	return candidates
+}
+
 // CollectCandidates gathers all potential FK relationship candidates using deterministic criteria.
 // This method orchestrates the full candidate collection process:
 // 1. Identify FK sources (columns that could be foreign keys)
@@ -454,15 +524,22 @@ func (c *relationshipCandidateCollector) CollectCandidates(
 		progressCallback(2, 5, fmt.Sprintf("Found %d FK targets (PKs/unique)", len(targets)))
 	}
 
-	// TODO: Task 2.3 - Generate candidate pairs with type compatibility
+	// Step 3: Generate candidate pairs with type compatibility
+	candidates := c.generateCandidatePairs(sources, targets)
+
+	if progressCallback != nil {
+		progressCallback(3, 5, fmt.Sprintf("Generated %d candidate pairs", len(candidates)))
+	}
+
 	// TODO: Task 2.4 - Collect join statistics for each candidate
 	// TODO: Task 2.5 - Wire together and complete this method
 
 	c.logger.Info("candidate collection complete (stub)",
 		zap.Int("sources", len(sources)),
 		zap.Int("targets", len(targets)),
+		zap.Int("candidates", len(candidates)),
 		zap.String("project_id", projectID.String()),
 	)
 
-	return nil, nil
+	return candidates, nil
 }

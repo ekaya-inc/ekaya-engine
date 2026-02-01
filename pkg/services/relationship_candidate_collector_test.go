@@ -707,14 +707,78 @@ func TestFKSourceColumn_Fields(t *testing.T) {
 }
 
 // ============================================================================
-// CollectCandidates Tests (Stub behavior)
+// CollectCandidates Tests
 // ============================================================================
 
-func TestCollectCandidates_CallsIdentifyFKSources(t *testing.T) {
+func TestCollectCandidates_GeneratesCandidatePairs(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ordersTableID := uuid.New()
+	usersTableID := uuid.New()
+
+	// FK source column
+	userIDCol := &models.SchemaColumn{
+		ID:            uuid.New(),
+		SchemaTableID: ordersTableID,
+		ColumnName:    "user_id",
+		DataType:      "uuid",
+		IsPrimaryKey:  false,
+		Metadata: map[string]any{
+			"column_features": map[string]any{
+				"role":                "foreign_key",
+				"classification_path": "uuid",
+			},
+		},
+	}
+
+	// PK target column
+	usersPKCol := &models.SchemaColumn{
+		ID:            uuid.New(),
+		SchemaTableID: usersTableID,
+		ColumnName:    "id",
+		DataType:      "uuid",
+		IsPrimaryKey:  true,
+	}
+
+	repo := &mockSchemaRepoForCandidateCollector{
+		columnsByTable: map[string][]*models.SchemaColumn{
+			"orders": {userIDCol},
+		},
+		allColumns: []*models.SchemaColumn{userIDCol, usersPKCol},
+		tables: []*models.SchemaTable{
+			{ID: ordersTableID, TableName: "orders"},
+			{ID: usersTableID, TableName: "users"},
+		},
+	}
+
+	collector := NewRelationshipCandidateCollector(repo, &mockAdapterFactoryForCandidateCollector{}, zap.NewNop())
+
+	// Track progress callbacks
+	progressCalls := 0
+	progressCallback := func(current, total int, message string) {
+		progressCalls++
+	}
+
+	result, err := collector.CollectCandidates(context.Background(), projectID, datasourceID, progressCallback)
+	require.NoError(t, err)
+
+	// Should have 1 candidate: orders.user_id → users.id
+	require.Len(t, result, 1, "expected 1 candidate pair")
+	assert.Equal(t, "orders", result[0].SourceTable)
+	assert.Equal(t, "user_id", result[0].SourceColumn)
+	assert.Equal(t, "users", result[0].TargetTable)
+	assert.Equal(t, "id", result[0].TargetColumn)
+
+	// Progress callback should be called at least 4 times (steps 0-3)
+	assert.GreaterOrEqual(t, progressCalls, 4, "progress callback should be called for each step")
+}
+
+func TestCollectCandidates_NoTargets(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 	ordersTableID := uuid.New()
 
+	// FK source column but no PK/unique target columns
 	userIDCol := &models.SchemaColumn{
 		ID:            uuid.New(),
 		SchemaTableID: ordersTableID,
@@ -741,21 +805,11 @@ func TestCollectCandidates_CallsIdentifyFKSources(t *testing.T) {
 
 	collector := NewRelationshipCandidateCollector(repo, &mockAdapterFactoryForCandidateCollector{}, zap.NewNop())
 
-	// Track progress callbacks
-	progressCalls := 0
-	progressCallback := func(current, total int, message string) {
-		progressCalls++
-	}
-
-	// Currently returns nil as it's a stub - test that it doesn't error
-	result, err := collector.CollectCandidates(context.Background(), projectID, datasourceID, progressCallback)
+	result, err := collector.CollectCandidates(context.Background(), projectID, datasourceID, nil)
 	require.NoError(t, err)
 
-	// Stub returns nil
-	assert.Nil(t, result, "stub should return nil")
-
-	// Progress callback should be called at least twice (start and after FK source identification)
-	assert.GreaterOrEqual(t, progressCalls, 2, "progress callback should be called")
+	// No targets = no candidates
+	assert.Empty(t, result, "no FK targets means no candidates")
 }
 
 func TestCollectCandidates_PropagatesError(t *testing.T) {
@@ -1316,4 +1370,532 @@ func TestCategorizeDataType_Categories(t *testing.T) {
 				"categorizeDataType(%s) should return %q", tt.dataType, tt.expected)
 		})
 	}
+}
+
+// ============================================================================
+// generateCandidatePairs Tests
+// ============================================================================
+
+func TestGenerateCandidatePairs_BasicPairing(t *testing.T) {
+	collector := newTestCandidateCollector(nil)
+
+	// Create source columns
+	sources := []*FKSourceColumn{
+		{
+			Column: &models.SchemaColumn{
+				ID:           uuid.New(),
+				ColumnName:   "user_id",
+				DataType:     "uuid",
+				IsPrimaryKey: false,
+			},
+			Features: &models.ColumnFeatures{
+				Role:    models.RoleForeignKey,
+				Purpose: models.PurposeIdentifier,
+			},
+			TableName: "orders",
+		},
+		{
+			Column: &models.SchemaColumn{
+				ID:           uuid.New(),
+				ColumnName:   "account_id",
+				DataType:     "uuid",
+				IsPrimaryKey: false,
+			},
+			Features: &models.ColumnFeatures{
+				Role:    models.RoleForeignKey,
+				Purpose: models.PurposeIdentifier,
+			},
+			TableName: "orders",
+		},
+	}
+
+	// Create target columns
+	targets := []*FKTargetColumn{
+		{
+			Column: &models.SchemaColumn{
+				ID:           uuid.New(),
+				ColumnName:   "id",
+				DataType:     "uuid",
+				IsPrimaryKey: true,
+			},
+			TableName: "users",
+			IsUnique:  true,
+		},
+		{
+			Column: &models.SchemaColumn{
+				ID:           uuid.New(),
+				ColumnName:   "id",
+				DataType:     "uuid",
+				IsPrimaryKey: true,
+			},
+			TableName: "accounts",
+			IsUnique:  true,
+		},
+	}
+
+	candidates := collector.generateCandidatePairs(sources, targets)
+
+	// 2 sources × 2 targets = 4 candidates
+	assert.Len(t, candidates, 4, "expected 4 candidate pairs (2 sources × 2 targets)")
+
+	// Verify all candidates have correct source/target info
+	for _, c := range candidates {
+		assert.Equal(t, "orders", c.SourceTable, "all sources are from orders table")
+		assert.Contains(t, []string{"users", "accounts"}, c.TargetTable)
+		assert.Equal(t, "uuid", c.SourceDataType)
+		assert.Equal(t, "uuid", c.TargetDataType)
+	}
+}
+
+func TestGenerateCandidatePairs_SkipsSelfReferences(t *testing.T) {
+	collector := newTestCandidateCollector(nil)
+
+	colID := uuid.New()
+
+	// Source and target are the same column
+	sources := []*FKSourceColumn{
+		{
+			Column: &models.SchemaColumn{
+				ID:           colID,
+				ColumnName:   "id",
+				DataType:     "uuid",
+				IsPrimaryKey: false,
+			},
+			TableName: "items",
+		},
+	}
+
+	targets := []*FKTargetColumn{
+		{
+			Column: &models.SchemaColumn{
+				ID:           colID, // Same ID
+				ColumnName:   "id",
+				DataType:     "uuid",
+				IsPrimaryKey: true,
+			},
+			TableName: "items", // Same table
+			IsUnique:  true,
+		},
+	}
+
+	candidates := collector.generateCandidatePairs(sources, targets)
+
+	// Self-reference should be skipped
+	assert.Len(t, candidates, 0, "self-reference (same table.column) should be skipped")
+}
+
+func TestGenerateCandidatePairs_SkipsIncompatibleTypes(t *testing.T) {
+	collector := newTestCandidateCollector(nil)
+
+	// UUID source
+	sources := []*FKSourceColumn{
+		{
+			Column: &models.SchemaColumn{
+				ID:           uuid.New(),
+				ColumnName:   "user_id",
+				DataType:     "uuid",
+				IsPrimaryKey: false,
+			},
+			TableName: "orders",
+		},
+	}
+
+	// Integer target - incompatible with UUID
+	targets := []*FKTargetColumn{
+		{
+			Column: &models.SchemaColumn{
+				ID:           uuid.New(),
+				ColumnName:   "id",
+				DataType:     "integer",
+				IsPrimaryKey: true,
+			},
+			TableName: "users",
+			IsUnique:  true,
+		},
+	}
+
+	candidates := collector.generateCandidatePairs(sources, targets)
+
+	// Incompatible types should be skipped
+	assert.Len(t, candidates, 0, "uuid → integer should be skipped (incompatible types)")
+}
+
+func TestGenerateCandidatePairs_PopulatesColumnFeatures(t *testing.T) {
+	collector := newTestCandidateCollector(nil)
+
+	// Source with features
+	sources := []*FKSourceColumn{
+		{
+			Column: &models.SchemaColumn{
+				ID:           uuid.New(),
+				ColumnName:   "user_id",
+				DataType:     "uuid",
+				IsPrimaryKey: false,
+			},
+			Features: &models.ColumnFeatures{
+				Role:    models.RoleForeignKey,
+				Purpose: models.PurposeIdentifier,
+			},
+			TableName: "orders",
+		},
+	}
+
+	// Target with features (stored in metadata)
+	targetCol := &models.SchemaColumn{
+		ID:           uuid.New(),
+		ColumnName:   "id",
+		DataType:     "uuid",
+		IsPrimaryKey: true,
+		Metadata: map[string]any{
+			"column_features": map[string]any{
+				"role":    "primary_key",
+				"purpose": "identifier",
+			},
+		},
+	}
+	targets := []*FKTargetColumn{
+		{
+			Column:    targetCol,
+			TableName: "users",
+			IsUnique:  true,
+		},
+	}
+
+	candidates := collector.generateCandidatePairs(sources, targets)
+
+	require.Len(t, candidates, 1)
+
+	// Verify source features are populated
+	assert.Equal(t, models.RoleForeignKey, candidates[0].SourceRole)
+	assert.Equal(t, models.PurposeIdentifier, candidates[0].SourcePurpose)
+
+	// Verify target features are populated from metadata
+	assert.Equal(t, "primary_key", candidates[0].TargetRole)
+	assert.Equal(t, "identifier", candidates[0].TargetPurpose)
+}
+
+func TestGenerateCandidatePairs_HandlesNilFeatures(t *testing.T) {
+	collector := newTestCandidateCollector(nil)
+
+	// Source without features
+	sources := []*FKSourceColumn{
+		{
+			Column: &models.SchemaColumn{
+				ID:           uuid.New(),
+				ColumnName:   "user_id",
+				DataType:     "uuid",
+				IsPrimaryKey: false,
+			},
+			Features:  nil, // No features
+			TableName: "orders",
+		},
+	}
+
+	// Target without features
+	targets := []*FKTargetColumn{
+		{
+			Column: &models.SchemaColumn{
+				ID:           uuid.New(),
+				ColumnName:   "id",
+				DataType:     "uuid",
+				IsPrimaryKey: true,
+				// No Metadata
+			},
+			TableName: "users",
+			IsUnique:  true,
+		},
+	}
+
+	candidates := collector.generateCandidatePairs(sources, targets)
+
+	require.Len(t, candidates, 1)
+
+	// Features should be empty strings when nil
+	assert.Empty(t, candidates[0].SourceRole)
+	assert.Empty(t, candidates[0].SourcePurpose)
+	assert.Empty(t, candidates[0].TargetRole)
+	assert.Empty(t, candidates[0].TargetPurpose)
+}
+
+func TestGenerateCandidatePairs_PopulatesColumnIDs(t *testing.T) {
+	collector := newTestCandidateCollector(nil)
+
+	sourceColID := uuid.New()
+	targetColID := uuid.New()
+
+	sources := []*FKSourceColumn{
+		{
+			Column: &models.SchemaColumn{
+				ID:           sourceColID,
+				ColumnName:   "user_id",
+				DataType:     "uuid",
+				IsPrimaryKey: false,
+			},
+			TableName: "orders",
+		},
+	}
+
+	targets := []*FKTargetColumn{
+		{
+			Column: &models.SchemaColumn{
+				ID:           targetColID,
+				ColumnName:   "id",
+				DataType:     "uuid",
+				IsPrimaryKey: true,
+			},
+			TableName: "users",
+			IsUnique:  true,
+		},
+	}
+
+	candidates := collector.generateCandidatePairs(sources, targets)
+
+	require.Len(t, candidates, 1)
+
+	// Verify column IDs are populated (for internal tracking)
+	assert.Equal(t, sourceColID, candidates[0].SourceColumnID)
+	assert.Equal(t, targetColID, candidates[0].TargetColumnID)
+}
+
+func TestGenerateCandidatePairs_EmptyInputs(t *testing.T) {
+	collector := newTestCandidateCollector(nil)
+
+	t.Run("empty sources", func(t *testing.T) {
+		targets := []*FKTargetColumn{
+			{
+				Column: &models.SchemaColumn{
+					ID:           uuid.New(),
+					ColumnName:   "id",
+					DataType:     "uuid",
+					IsPrimaryKey: true,
+				},
+				TableName: "users",
+				IsUnique:  true,
+			},
+		}
+
+		candidates := collector.generateCandidatePairs([]*FKSourceColumn{}, targets)
+		assert.Len(t, candidates, 0, "empty sources should produce no candidates")
+	})
+
+	t.Run("empty targets", func(t *testing.T) {
+		sources := []*FKSourceColumn{
+			{
+				Column: &models.SchemaColumn{
+					ID:           uuid.New(),
+					ColumnName:   "user_id",
+					DataType:     "uuid",
+					IsPrimaryKey: false,
+				},
+				TableName: "orders",
+			},
+		}
+
+		candidates := collector.generateCandidatePairs(sources, []*FKTargetColumn{})
+		assert.Len(t, candidates, 0, "empty targets should produce no candidates")
+	})
+
+	t.Run("both empty", func(t *testing.T) {
+		candidates := collector.generateCandidatePairs([]*FKSourceColumn{}, []*FKTargetColumn{})
+		assert.Len(t, candidates, 0, "empty inputs should produce no candidates")
+	})
+}
+
+func TestGenerateCandidatePairs_MixedTypeCompatibility(t *testing.T) {
+	collector := newTestCandidateCollector(nil)
+
+	// Sources with different types
+	sources := []*FKSourceColumn{
+		{
+			Column: &models.SchemaColumn{
+				ID:           uuid.New(),
+				ColumnName:   "user_id",
+				DataType:     "uuid",
+				IsPrimaryKey: false,
+			},
+			TableName: "orders",
+		},
+		{
+			Column: &models.SchemaColumn{
+				ID:           uuid.New(),
+				ColumnName:   "order_number",
+				DataType:     "integer",
+				IsPrimaryKey: false,
+			},
+			TableName: "order_items",
+		},
+		{
+			Column: &models.SchemaColumn{
+				ID:           uuid.New(),
+				ColumnName:   "category_code",
+				DataType:     "text",
+				IsPrimaryKey: false,
+			},
+			TableName: "products",
+		},
+	}
+
+	// Targets with different types
+	targets := []*FKTargetColumn{
+		{
+			Column: &models.SchemaColumn{
+				ID:           uuid.New(),
+				ColumnName:   "id",
+				DataType:     "uuid",
+				IsPrimaryKey: true,
+			},
+			TableName: "users",
+			IsUnique:  true,
+		},
+		{
+			Column: &models.SchemaColumn{
+				ID:           uuid.New(),
+				ColumnName:   "id",
+				DataType:     "bigint", // Compatible with integer
+				IsPrimaryKey: true,
+			},
+			TableName: "orders",
+			IsUnique:  true,
+		},
+		{
+			Column: &models.SchemaColumn{
+				ID:           uuid.New(),
+				ColumnName:   "code",
+				DataType:     "varchar(10)",
+				IsPrimaryKey: true,
+			},
+			TableName: "categories",
+			IsUnique:  true,
+		},
+	}
+
+	candidates := collector.generateCandidatePairs(sources, targets)
+
+	// Expected pairs (only type-compatible):
+	// - user_id (uuid) → users.id (uuid) ✓
+	// - user_id (uuid) → orders.id (bigint) ✗ (uuid vs integer)
+	// - user_id (uuid) → categories.code (varchar) ✗ (uuid vs string)
+	// - order_number (integer) → users.id (uuid) ✗
+	// - order_number (integer) → orders.id (bigint) ✓ (integer vs integer)
+	// - order_number (integer) → categories.code (varchar) ✗
+	// - category_code (text) → users.id (uuid) ✗
+	// - category_code (text) → orders.id (bigint) ✗
+	// - category_code (text) → categories.code (varchar) ✓ (string vs string)
+
+	assert.Len(t, candidates, 3, "expected 3 type-compatible pairs")
+
+	// Verify the correct pairs exist
+	pairKeys := make(map[string]bool)
+	for _, c := range candidates {
+		key := c.SourceTable + "." + c.SourceColumn + " → " + c.TargetTable + "." + c.TargetColumn
+		pairKeys[key] = true
+	}
+
+	assert.True(t, pairKeys["orders.user_id → users.id"], "uuid → uuid should be included")
+	assert.True(t, pairKeys["order_items.order_number → orders.id"], "integer → bigint should be included")
+	assert.True(t, pairKeys["products.category_code → categories.code"], "text → varchar should be included")
+}
+
+func TestGenerateCandidatePairs_SameTableDifferentColumns(t *testing.T) {
+	collector := newTestCandidateCollector(nil)
+
+	// Source column in the same table as target, but different column (e.g., self-referential FK)
+	sources := []*FKSourceColumn{
+		{
+			Column: &models.SchemaColumn{
+				ID:           uuid.New(),
+				ColumnName:   "parent_id",
+				DataType:     "uuid",
+				IsPrimaryKey: false,
+			},
+			TableName: "categories",
+		},
+	}
+
+	targets := []*FKTargetColumn{
+		{
+			Column: &models.SchemaColumn{
+				ID:           uuid.New(), // Different ID
+				ColumnName:   "id",       // Different column name
+				DataType:     "uuid",
+				IsPrimaryKey: true,
+			},
+			TableName: "categories", // Same table
+			IsUnique:  true,
+		},
+	}
+
+	candidates := collector.generateCandidatePairs(sources, targets)
+
+	// Same table but different column should NOT be skipped
+	// (This is a valid self-referential FK pattern)
+	assert.Len(t, candidates, 1, "same table, different column should be allowed (self-referential FK)")
+	assert.Equal(t, "parent_id", candidates[0].SourceColumn)
+	assert.Equal(t, "id", candidates[0].TargetColumn)
+	assert.Equal(t, "categories", candidates[0].SourceTable)
+	assert.Equal(t, "categories", candidates[0].TargetTable)
+}
+
+func TestGenerateCandidatePairs_PopulatesAllFields(t *testing.T) {
+	collector := newTestCandidateCollector(nil)
+
+	sourceColID := uuid.New()
+	targetColID := uuid.New()
+
+	sources := []*FKSourceColumn{
+		{
+			Column: &models.SchemaColumn{
+				ID:           sourceColID,
+				ColumnName:   "user_id",
+				DataType:     "uuid",
+				IsPrimaryKey: false,
+			},
+			Features: &models.ColumnFeatures{
+				Role:    models.RoleForeignKey,
+				Purpose: models.PurposeIdentifier,
+			},
+			TableName: "orders",
+		},
+	}
+
+	targets := []*FKTargetColumn{
+		{
+			Column: &models.SchemaColumn{
+				ID:           targetColID,
+				ColumnName:   "id",
+				DataType:     "uuid",
+				IsPrimaryKey: true,
+			},
+			TableName: "users",
+			IsUnique:  true,
+		},
+	}
+
+	candidates := collector.generateCandidatePairs(sources, targets)
+
+	require.Len(t, candidates, 1)
+	c := candidates[0]
+
+	// Verify all source fields
+	assert.Equal(t, "orders", c.SourceTable)
+	assert.Equal(t, "user_id", c.SourceColumn)
+	assert.Equal(t, "uuid", c.SourceDataType)
+	assert.False(t, c.SourceIsPK)
+	assert.Equal(t, sourceColID, c.SourceColumnID)
+	assert.Equal(t, models.RoleForeignKey, c.SourceRole)
+	assert.Equal(t, models.PurposeIdentifier, c.SourcePurpose)
+
+	// Verify all target fields
+	assert.Equal(t, "users", c.TargetTable)
+	assert.Equal(t, "id", c.TargetColumn)
+	assert.Equal(t, "uuid", c.TargetDataType)
+	assert.True(t, c.TargetIsPK)
+	assert.Equal(t, targetColID, c.TargetColumnID)
+
+	// Join stats should be zero (not yet collected)
+	assert.Zero(t, c.JoinCount)
+	assert.Zero(t, c.OrphanCount)
+	assert.Zero(t, c.ReverseOrphans)
+	assert.Zero(t, c.SourceMatched)
+	assert.Zero(t, c.TargetMatched)
 }

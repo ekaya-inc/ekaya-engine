@@ -178,7 +178,7 @@ func areTypesCompatible(sourceType, targetType string) bool {
 
 ---
 
-#### Task 2.3: Generate Candidate Pairs with Type Compatibility [ ]
+#### Task 2.3: Generate Candidate Pairs with Type Compatibility [x]
 
 Implement the cross-product logic to generate all valid source→target pairs.
 
