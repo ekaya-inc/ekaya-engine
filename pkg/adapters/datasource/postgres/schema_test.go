@@ -1081,7 +1081,7 @@ func TestSchemaDiscoverer_AnalyzeJoin_BoundaryThreshold(t *testing.T) {
 	}{
 		{
 			name:                      "exactly 50% reverse orphans",
-			sourceValues:              "(1), (2), (3), (4), (5)",                          // 5 values
+			sourceValues:              "(1), (2), (3), (4), (5)",                           // 5 values
 			targetValues:              "(1), (2), (3), (4), (5), (6), (7), (8), (9), (10)", // 10 values
 			expectedReverseOrphans:    5,                                                   // 6,7,8,9,10 don't exist in source
 			expectedTargetMatched:     5,                                                   // 1-5 exist in both
@@ -1089,7 +1089,7 @@ func TestSchemaDiscoverer_AnalyzeJoin_BoundaryThreshold(t *testing.T) {
 		},
 		{
 			name:                      "just under 50% reverse orphans",
-			sourceValues:              "(1), (2), (3), (4), (5), (6)",                     // 6 values
+			sourceValues:              "(1), (2), (3), (4), (5), (6)",                      // 6 values
 			targetValues:              "(1), (2), (3), (4), (5), (6), (7), (8), (9), (10)", // 10 values
 			expectedReverseOrphans:    4,                                                   // 7,8,9,10 don't exist in source
 			expectedTargetMatched:     6,                                                   // 1-6 exist in both
@@ -1097,7 +1097,7 @@ func TestSchemaDiscoverer_AnalyzeJoin_BoundaryThreshold(t *testing.T) {
 		},
 		{
 			name:                      "just over 50% reverse orphans",
-			sourceValues:              "(1), (2), (3), (4)",                               // 4 values
+			sourceValues:              "(1), (2), (3), (4)",                                // 4 values
 			targetValues:              "(1), (2), (3), (4), (5), (6), (7), (8), (9), (10)", // 10 values
 			expectedReverseOrphans:    6,                                                   // 5,6,7,8,9,10 don't exist in source
 			expectedTargetMatched:     4,                                                   // 1-4 exist in both

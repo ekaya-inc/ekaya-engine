@@ -3020,9 +3020,9 @@ func TestPKMatch_EmailColumnsExcluded(t *testing.T) {
 
 	rowCount := int64(1000)
 	authRowCount := int64(500)
-	idDistinctCount := int64(1000)      // High cardinality for id columns
-	authIdDistinctCount := int64(500)   // High cardinality for id columns
-	emailDistinctCount := int64(10)     // Low cardinality so email isn't a target column
+	idDistinctCount := int64(1000)    // High cardinality for id columns
+	authIdDistinctCount := int64(500) // High cardinality for id columns
+	emailDistinctCount := int64(10)   // Low cardinality so email isn't a target column
 	isJoinableTrue := true
 	isJoinableFalse := false
 
@@ -3051,7 +3051,7 @@ func TestPKMatch_EmailColumnsExcluded(t *testing.T) {
 					ColumnName:    "email",
 					DataType:      "varchar",
 					IsPrimaryKey:  false,
-					IsJoinable:    &isJoinableFalse, // Email columns are not joinable
+					IsJoinable:    &isJoinableFalse,    // Email columns are not joinable
 					DistinctCount: &emailDistinctCount, // Low cardinality - won't be target column
 					// Email columns are classified as "text" by ColumnFeatureExtraction
 					Metadata: map[string]any{
@@ -3083,7 +3083,7 @@ func TestPKMatch_EmailColumnsExcluded(t *testing.T) {
 					ColumnName:    "email",
 					DataType:      "varchar",
 					IsPrimaryKey:  false,
-					IsJoinable:    &isJoinableFalse, // Email columns are not joinable
+					IsJoinable:    &isJoinableFalse,    // Email columns are not joinable
 					DistinctCount: &emailDistinctCount, // Low cardinality - won't be target column
 					// Email columns are classified as "text" by ColumnFeatureExtraction
 					Metadata: map[string]any{
@@ -6136,8 +6136,8 @@ func TestFKDiscovery_UpsertBehavior(t *testing.T) {
 					IsPrimaryKey:  false,
 					Metadata: map[string]any{
 						"column_features": map[string]any{
-							"purpose":       "identifier",
-							"role":          "foreign_key",
+							"purpose": "identifier",
+							"role":    "foreign_key",
 							"identifier_features": map[string]any{
 								"fk_target_table":  "users",
 								"fk_target_column": "id",
@@ -6246,8 +6246,8 @@ func TestFKDiscovery_ErrorPropagation(t *testing.T) {
 					IsPrimaryKey:  false,
 					Metadata: map[string]any{
 						"column_features": map[string]any{
-							"purpose":       "identifier",
-							"role":          "foreign_key",
+							"purpose": "identifier",
+							"role":    "foreign_key",
 							"identifier_features": map[string]any{
 								"fk_target_table":  "users",
 								"fk_target_column": "id",

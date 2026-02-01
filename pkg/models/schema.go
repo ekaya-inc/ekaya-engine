@@ -340,8 +340,8 @@ const (
 	RejectionJoinFailed        = "join_failed"
 	RejectionTypeMismatch      = "type_mismatch"
 	RejectionAlreadyExists     = "already_exists"
-	RejectionWrongDirection    = "wrong_direction"    // Source has more distinct values than target (reversed FK)
-	RejectionOrphanIntegrity   = "orphan_integrity"   // More than 5% orphan values (FK integrity violation)
+	RejectionWrongDirection    = "wrong_direction"     // Source has more distinct values than target (reversed FK)
+	RejectionOrphanIntegrity   = "orphan_integrity"    // More than 5% orphan values (FK integrity violation)
 	RejectionReverseOrphanHigh = "reverse_orphan_high" // >50% of target values don't exist in source (coincidental overlap)
 )
 
