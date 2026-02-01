@@ -437,6 +437,9 @@ func (m *mockSchemaRepository) GetOrphanTables(ctx context.Context, projectID, d
 func (m *mockSchemaRepository) UpsertRelationshipWithMetrics(ctx context.Context, rel *models.SchemaRelationship, metrics *models.DiscoveryMetrics) error {
 	return nil
 }
+func (m *mockSchemaRepository) GetRelationshipsByMethod(ctx context.Context, projectID, datasourceID uuid.UUID, method string) ([]*models.SchemaRelationship, error) {
+	return nil, nil
+}
 func (m *mockSchemaRepository) GetJoinableColumns(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }

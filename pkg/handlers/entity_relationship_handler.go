@@ -13,34 +13,29 @@ import (
 // Request/Response Types
 // ============================================================================
 
-// EntityRelationshipResponse represents a relationship between two entities.
+// SchemaRelationshipResponse represents a relationship between two columns.
 // Uses field names compatible with the UI's RelationshipDetail type.
-type EntityRelationshipResponse struct {
+type SchemaRelationshipResponse struct {
 	ID               string  `json:"id"`
-	SourceEntityID   string  `json:"source_entity_id,omitempty"`
-	TargetEntityID   string  `json:"target_entity_id,omitempty"`
 	SourceTableName  string  `json:"source_table_name"`
 	SourceColumnName string  `json:"source_column_name"`
 	SourceColumnType string  `json:"source_column_type,omitempty"`
 	TargetTableName  string  `json:"target_table_name"`
 	TargetColumnName string  `json:"target_column_name"`
 	TargetColumnType string  `json:"target_column_type,omitempty"`
-	RelationshipType string  `json:"relationship_type"` // "fk" or "inferred"
+	RelationshipType string  `json:"relationship_type"` // "fk", "inferred", or "manual"
 	Cardinality      string  `json:"cardinality,omitempty"`
 	Confidence       float64 `json:"confidence"`
+	InferenceMethod  string  `json:"inference_method,omitempty"`
 	IsValidated      bool    `json:"is_validated"`
 	IsApproved       *bool   `json:"is_approved,omitempty"`
-	Status           string  `json:"status,omitempty"` // "confirmed" or "pending"
-	Description      string  `json:"description,omitempty"`
-	// Provenance fields
-	IsStale   bool    `json:"is_stale"`
-	CreatedBy string  `json:"created_by"`           // 'manual', 'mcp', 'inference'
-	UpdatedBy *string `json:"updated_by,omitempty"` // nil if never updated
+	CreatedAt        string  `json:"created_at"`
+	UpdatedAt        string  `json:"updated_at"`
 }
 
-// EntityRelationshipListResponse for GET /relationships
-type EntityRelationshipListResponse struct {
-	Relationships []EntityRelationshipResponse `json:"relationships"`
+// SchemaRelationshipListResponse for GET /relationships
+type SchemaRelationshipListResponse struct {
+	Relationships []SchemaRelationshipResponse `json:"relationships"`
 	TotalCount    int                          `json:"total_count"`
 	EmptyTables   []string                     `json:"empty_tables,omitempty"`
 	OrphanTables  []string                     `json:"orphan_tables,omitempty"`
@@ -57,30 +52,39 @@ type DiscoverEntityRelationshipsResponse struct {
 // Handler
 // ============================================================================
 
-// EntityRelationshipHandler handles entity relationship HTTP requests.
+// EntityRelationshipHandler handles relationship HTTP requests.
+// List reads from engine_schema_relationships (schema layer).
+// Discover writes to engine_schema_relationships via DeterministicRelationshipService.
 type EntityRelationshipHandler struct {
 	relationshipService services.DeterministicRelationshipService
+	schemaService       services.SchemaService
+	projectService      services.ProjectService
 	logger              *zap.Logger
 }
 
-// NewEntityRelationshipHandler creates a new entity relationship handler.
+// NewEntityRelationshipHandler creates a new relationship handler.
 func NewEntityRelationshipHandler(
 	relationshipService services.DeterministicRelationshipService,
+	schemaService services.SchemaService,
+	projectService services.ProjectService,
 	logger *zap.Logger,
 ) *EntityRelationshipHandler {
 	return &EntityRelationshipHandler{
 		relationshipService: relationshipService,
+		schemaService:       schemaService,
+		projectService:      projectService,
 		logger:              logger,
 	}
 }
 
-// RegisterRoutes registers the entity relationship handler's routes on the given mux.
+// RegisterRoutes registers the relationship handler's routes on the given mux.
 func (h *EntityRelationshipHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.Middleware, tenantMiddleware TenantMiddleware) {
 	// Discovery endpoint - per datasource (write operation, requires provenance)
 	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/relationships/discover",
 		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Discover)))
 
 	// List endpoint - per project (read-only, no provenance needed)
+	// Reads from engine_schema_relationships via SchemaService
 	mux.HandleFunc("GET /api/projects/{pid}/relationships",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.List)))
 }
@@ -135,16 +139,36 @@ func (h *EntityRelationshipHandler) Discover(w http.ResponseWriter, r *http.Requ
 }
 
 // List handles GET /api/projects/{pid}/relationships
+// Returns relationships from engine_schema_relationships (schema layer).
 func (h *EntityRelationshipHandler) List(w http.ResponseWriter, r *http.Request) {
 	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
 
-	relationships, err := h.relationshipService.GetByProject(r.Context(), projectID)
+	// Get default datasource for the project
+	datasourceID, err := h.projectService.GetDefaultDatasourceID(r.Context(), projectID)
+	if err != nil {
+		h.logger.Error("Failed to get default datasource",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		// Return empty response if no datasource configured
+		response := SchemaRelationshipListResponse{
+			Relationships: []SchemaRelationshipResponse{},
+			TotalCount:    0,
+		}
+		if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {
+			h.logger.Error("Failed to write response", zap.Error(err))
+		}
+		return
+	}
+
+	// Get relationships from schema layer
+	relResponse, err := h.schemaService.GetRelationshipsResponse(r.Context(), projectID, datasourceID)
 	if err != nil {
 		h.logger.Error("Failed to list relationships",
 			zap.String("project_id", projectID.String()),
+			zap.String("datasource_id", datasourceID.String()),
 			zap.Error(err))
 		if err := ErrorResponse(w, http.StatusInternalServerError, "list_relationships_failed", err.Error()); err != nil {
 			h.logger.Error("Failed to write error response", zap.Error(err))
@@ -153,50 +177,45 @@ func (h *EntityRelationshipHandler) List(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Convert to response format compatible with UI's RelationshipDetail type
-	relResponses := make([]EntityRelationshipResponse, 0, len(relationships))
-	for _, rel := range relationships {
-		// Map detection_method to relationship_type
-		relType := "inferred"
-		switch rel.DetectionMethod {
-		case "foreign_key":
-			relType = "fk"
-		case "manual":
-			relType = "manual"
+	relResponses := make([]SchemaRelationshipResponse, 0, len(relResponse.Relationships))
+	for _, rel := range relResponse.Relationships {
+		// Map inference_method to relationship_type
+		relType := mapInferenceMethodToType(rel.InferenceMethod)
+
+		var cardinality string
+		if rel.Cardinality != "" {
+			cardinality = rel.Cardinality
 		}
 
-		// Map status to is_approved
-		var isApproved *bool
-		if rel.Status == "confirmed" {
-			t := true
-			isApproved = &t
+		var inferenceMethod string
+		if rel.InferenceMethod != nil {
+			inferenceMethod = *rel.InferenceMethod
 		}
 
-		relResponses = append(relResponses, EntityRelationshipResponse{
+		relResponses = append(relResponses, SchemaRelationshipResponse{
 			ID:               rel.ID.String(),
-			SourceEntityID:   rel.SourceEntityID.String(),
-			TargetEntityID:   rel.TargetEntityID.String(),
-			SourceTableName:  rel.SourceColumnTable,
+			SourceTableName:  rel.SourceTableName,
 			SourceColumnName: rel.SourceColumnName,
 			SourceColumnType: rel.SourceColumnType,
-			TargetTableName:  rel.TargetColumnTable,
+			TargetTableName:  rel.TargetTableName,
 			TargetColumnName: rel.TargetColumnName,
 			TargetColumnType: rel.TargetColumnType,
 			RelationshipType: relType,
+			Cardinality:      cardinality,
 			Confidence:       rel.Confidence,
-			IsValidated:      rel.Status == "confirmed",
-			IsApproved:       isApproved,
-			Status:           rel.Status,
-			Description:      deref(rel.Description),
-			// Provenance fields - map Source/LastEditSource (method tracking) to API fields
-			IsStale:   rel.IsStale,
-			CreatedBy: rel.Source,
-			UpdatedBy: rel.LastEditSource,
+			InferenceMethod:  inferenceMethod,
+			IsValidated:      rel.IsValidated,
+			IsApproved:       rel.IsApproved,
+			CreatedAt:        rel.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			UpdatedAt:        rel.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		})
 	}
 
-	response := EntityRelationshipListResponse{
+	response := SchemaRelationshipListResponse{
 		Relationships: relResponses,
-		TotalCount:    len(relResponses),
+		TotalCount:    relResponse.TotalCount,
+		EmptyTables:   relResponse.EmptyTables,
+		OrphanTables:  relResponse.OrphanTables,
 	}
 
 	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {
@@ -208,10 +227,18 @@ func (h *EntityRelationshipHandler) List(w http.ResponseWriter, r *http.Request)
 // Helper Functions
 // ============================================================================
 
-// deref safely dereferences a string pointer, returning empty string if nil.
-func deref(s *string) string {
-	if s == nil {
-		return ""
+// mapInferenceMethodToType maps inference_method from schema layer to relationship_type for UI.
+func mapInferenceMethodToType(inferenceMethod *string) string {
+	if inferenceMethod == nil {
+		return "inferred"
 	}
-	return *s
+	switch *inferenceMethod {
+	case "fk", "foreign_key":
+		return "fk"
+	case "manual":
+		return "manual"
+	default:
+		// pk_match, column_features, etc. are all "inferred"
+		return "inferred"
+	}
 }

@@ -3,9 +3,11 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -14,103 +16,157 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
-// mockDeterministicRelationshipService is a mock for testing entity relationship handler.
+// ============================================================================
+// Mock Services
+// ============================================================================
+
+// mockDeterministicRelationshipService is a mock for discovery operations.
 type mockDeterministicRelationshipService struct {
-	relationships []*models.EntityRelationship
 	fkResult      *services.FKDiscoveryResult
 	pkMatchResult *services.PKMatchDiscoveryResult
 	err           error
 }
 
-func (m *mockDeterministicRelationshipService) DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, _ services.RelationshipProgressCallback) (*services.FKDiscoveryResult, error) {
+func (m *mockDeterministicRelationshipService) DiscoverFKRelationships(_ context.Context, _, _ uuid.UUID, _ services.RelationshipProgressCallback) (*services.FKDiscoveryResult, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
 	return m.fkResult, nil
 }
 
-func (m *mockDeterministicRelationshipService) DiscoverPKMatchRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, _ services.RelationshipProgressCallback) (*services.PKMatchDiscoveryResult, error) {
+func (m *mockDeterministicRelationshipService) DiscoverPKMatchRelationships(_ context.Context, _, _ uuid.UUID, _ services.RelationshipProgressCallback) (*services.PKMatchDiscoveryResult, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
 	return m.pkMatchResult, nil
 }
 
-func (m *mockDeterministicRelationshipService) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error) {
+func (m *mockDeterministicRelationshipService) GetByProject(_ context.Context, _ uuid.UUID) ([]*models.EntityRelationship, error) {
+	// No longer used by List, but kept for interface compliance
+	return nil, nil
+}
+
+// mockSchemaServiceForRelationships mocks SchemaService for relationship listing.
+type mockSchemaServiceForRelationships struct {
+	services.SchemaService
+	response *models.RelationshipsResponse
+	err      error
+}
+
+func (m *mockSchemaServiceForRelationships) GetRelationshipsResponse(_ context.Context, _, _ uuid.UUID) (*models.RelationshipsResponse, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
-	return m.relationships, nil
+	return m.response, nil
 }
 
-// TestEntityRelationshipHandler_List_DetectionMethodMapping tests that detection_method
-// is correctly mapped to relationship_type in the API response.
-func TestEntityRelationshipHandler_List_DetectionMethodMapping(t *testing.T) {
+// mockProjectServiceForRelationships mocks ProjectService for getting default datasource.
+type mockProjectServiceForRelationships struct {
+	services.ProjectService
+	datasourceID uuid.UUID
+	err          error
+}
+
+func (m *mockProjectServiceForRelationships) GetDefaultDatasourceID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	if m.err != nil {
+		return uuid.Nil, m.err
+	}
+	return m.datasourceID, nil
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+func ptrString(s string) *string { return &s }
+func ptrBool(b bool) *bool       { return &b }
+
+// ============================================================================
+// Tests for List Endpoint (reads from engine_schema_relationships)
+// ============================================================================
+
+// TestEntityRelationshipHandler_List_InferenceMethodMapping tests that inference_method
+// from schema relationships is correctly mapped to relationship_type in the API response.
+func TestEntityRelationshipHandler_List_InferenceMethodMapping(t *testing.T) {
 	projectID := uuid.New()
-	ontologyID := uuid.New()
+	datasourceID := uuid.New()
 
 	testCases := []struct {
-		name             string
-		detectionMethod  string
-		expectedRelType  string
-		expectedStatus   string
-		isValidated      bool
-		isApprovedNotNil bool
+		name            string
+		inferenceMethod *string
+		expectedRelType string
 	}{
 		{
-			name:             "foreign_key maps to fk",
-			detectionMethod:  models.DetectionMethodForeignKey,
-			expectedRelType:  "fk",
-			expectedStatus:   "confirmed",
-			isValidated:      true,
-			isApprovedNotNil: true,
+			name:            "fk maps to fk",
+			inferenceMethod: ptrString("fk"),
+			expectedRelType: "fk",
 		},
 		{
-			name:             "manual maps to manual",
-			detectionMethod:  models.DetectionMethodManual,
-			expectedRelType:  "manual",
-			expectedStatus:   "confirmed",
-			isValidated:      true,
-			isApprovedNotNil: true,
+			name:            "foreign_key maps to fk",
+			inferenceMethod: ptrString("foreign_key"),
+			expectedRelType: "fk",
 		},
 		{
-			name:             "pk_match maps to inferred",
-			detectionMethod:  models.DetectionMethodPKMatch,
-			expectedRelType:  "inferred",
-			expectedStatus:   "pending",
-			isValidated:      false,
-			isApprovedNotNil: false,
+			name:            "manual maps to manual",
+			inferenceMethod: ptrString("manual"),
+			expectedRelType: "manual",
+		},
+		{
+			name:            "pk_match maps to inferred",
+			inferenceMethod: ptrString("pk_match"),
+			expectedRelType: "inferred",
+		},
+		{
+			name:            "column_features maps to inferred",
+			inferenceMethod: ptrString("column_features"),
+			expectedRelType: "inferred",
+		},
+		{
+			name:            "nil inference_method maps to inferred",
+			inferenceMethod: nil,
+			expectedRelType: "inferred",
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			status := "pending"
-			if tc.expectedStatus == "confirmed" {
-				status = "confirmed"
-			}
-
-			mockService := &mockDeterministicRelationshipService{
-				relationships: []*models.EntityRelationship{
-					{
-						ID:                uuid.New(),
-						OntologyID:        ontologyID,
-						SourceEntityID:    uuid.New(),
-						TargetEntityID:    uuid.New(),
-						SourceColumnTable: "users",
-						SourceColumnName:  "id",
-						TargetColumnTable: "orders",
-						TargetColumnName:  "user_id",
-						DetectionMethod:   tc.detectionMethod,
-						Status:            status,
-						Confidence:        1.0,
+			now := time.Now()
+			mockSchemaService := &mockSchemaServiceForRelationships{
+				response: &models.RelationshipsResponse{
+					Relationships: []*models.RelationshipDetail{
+						{
+							ID:               uuid.New(),
+							SourceTableName:  "users",
+							SourceColumnName: "id",
+							SourceColumnType: "uuid",
+							TargetTableName:  "orders",
+							TargetColumnName: "user_id",
+							TargetColumnType: "uuid",
+							RelationshipType: "user_defined",
+							Cardinality:      "N:1",
+							Confidence:       1.0,
+							InferenceMethod:  tc.inferenceMethod,
+							IsValidated:      true,
+							IsApproved:       ptrBool(true),
+							CreatedAt:        now,
+							UpdatedAt:        now,
+						},
 					},
+					TotalCount: 1,
 				},
 			}
 
-			handler := NewEntityRelationshipHandler(mockService, zap.NewNop())
+			mockProjectService := &mockProjectServiceForRelationships{
+				datasourceID: datasourceID,
+			}
 
-			// Create request with project ID in path
+			handler := NewEntityRelationshipHandler(
+				&mockDeterministicRelationshipService{},
+				mockSchemaService,
+				mockProjectService,
+				zap.NewNop(),
+			)
+
 			req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/relationships", nil)
 			req.SetPathValue("pid", projectID.String())
 
@@ -135,7 +191,7 @@ func TestEntityRelationshipHandler_List_DetectionMethodMapping(t *testing.T) {
 				t.Fatalf("failed to marshal data: %v", err)
 			}
 
-			var listResponse EntityRelationshipListResponse
+			var listResponse SchemaRelationshipListResponse
 			if err := json.Unmarshal(dataBytes, &listResponse); err != nil {
 				t.Fatalf("failed to unmarshal list response: %v", err)
 			}
@@ -145,306 +201,280 @@ func TestEntityRelationshipHandler_List_DetectionMethodMapping(t *testing.T) {
 			}
 
 			rel := listResponse.Relationships[0]
-
-			// Verify relationship_type mapping
 			if rel.RelationshipType != tc.expectedRelType {
 				t.Errorf("expected RelationshipType=%q, got %q", tc.expectedRelType, rel.RelationshipType)
 			}
-
-			// Verify status
-			if rel.Status != tc.expectedStatus {
-				t.Errorf("expected Status=%q, got %q", tc.expectedStatus, rel.Status)
-			}
-
-			// Verify is_validated
-			if rel.IsValidated != tc.isValidated {
-				t.Errorf("expected IsValidated=%v, got %v", tc.isValidated, rel.IsValidated)
-			}
-
-			// Verify is_approved
-			if tc.isApprovedNotNil {
-				if rel.IsApproved == nil {
-					t.Error("expected IsApproved to be non-nil")
-				} else if !*rel.IsApproved {
-					t.Error("expected IsApproved=true for confirmed status")
-				}
-			} else {
-				if rel.IsApproved != nil {
-					t.Errorf("expected IsApproved=nil, got %v", *rel.IsApproved)
-				}
-			}
 		})
 	}
 }
 
-// TestEntityRelationshipHandler_List_DescriptionMapping tests that relationship descriptions
-// are correctly included in the API response.
-func TestEntityRelationshipHandler_List_DescriptionMapping(t *testing.T) {
+// TestEntityRelationshipHandler_List_ColumnTypes tests that column types are included.
+func TestEntityRelationshipHandler_List_ColumnTypes(t *testing.T) {
 	projectID := uuid.New()
-	ontologyID := uuid.New()
+	datasourceID := uuid.New()
+	now := time.Now()
 
-	description1 := "Links a user to their account"
-	description2 := "Links a user to the channels they own"
-
-	testCases := []struct {
-		name               string
-		description        *string
-		expectedInResponse string
-	}{
-		{
-			name:               "description present",
-			description:        &description1,
-			expectedInResponse: description1,
-		},
-		{
-			name:               "description null",
-			description:        nil,
-			expectedInResponse: "",
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			mockService := &mockDeterministicRelationshipService{
-				relationships: []*models.EntityRelationship{
-					{
-						ID:                uuid.New(),
-						OntologyID:        ontologyID,
-						SourceEntityID:    uuid.New(),
-						TargetEntityID:    uuid.New(),
-						SourceColumnTable: "users",
-						SourceColumnName:  "id",
-						TargetColumnTable: "orders",
-						TargetColumnName:  "user_id",
-						DetectionMethod:   models.DetectionMethodForeignKey,
-						Status:            "confirmed",
-						Confidence:        1.0,
-						Description:       tc.description,
-					},
-				},
-			}
-
-			handler := NewEntityRelationshipHandler(mockService, zap.NewNop())
-
-			// Create request with project ID in path
-			req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/relationships", nil)
-			req.SetPathValue("pid", projectID.String())
-
-			rec := httptest.NewRecorder()
-			handler.List(rec, req)
-
-			if rec.Code != http.StatusOK {
-				t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
-			}
-
-			var response ApiResponse
-			if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-				t.Fatalf("failed to decode response: %v", err)
-			}
-
-			if !response.Success {
-				t.Fatal("expected success=true")
-			}
-
-			dataBytes, err := json.Marshal(response.Data)
-			if err != nil {
-				t.Fatalf("failed to marshal data: %v", err)
-			}
-
-			var listResponse EntityRelationshipListResponse
-			if err := json.Unmarshal(dataBytes, &listResponse); err != nil {
-				t.Fatalf("failed to unmarshal list response: %v", err)
-			}
-
-			if len(listResponse.Relationships) != 1 {
-				t.Fatalf("expected 1 relationship, got %d", len(listResponse.Relationships))
-			}
-
-			rel := listResponse.Relationships[0]
-
-			// Verify description mapping
-			if rel.Description != tc.expectedInResponse {
-				t.Errorf("expected Description=%q, got %q", tc.expectedInResponse, rel.Description)
-			}
-		})
-	}
-
-	// Test with multiple relationships having different descriptions
-	t.Run("multiple relationships with descriptions", func(t *testing.T) {
-		mockService := &mockDeterministicRelationshipService{
-			relationships: []*models.EntityRelationship{
+	mockSchemaService := &mockSchemaServiceForRelationships{
+		response: &models.RelationshipsResponse{
+			Relationships: []*models.RelationshipDetail{
 				{
-					ID:                uuid.New(),
-					OntologyID:        ontologyID,
-					SourceEntityID:    uuid.New(),
-					TargetEntityID:    uuid.New(),
-					SourceColumnTable: "users",
-					SourceColumnName:  "account_id",
-					TargetColumnTable: "accounts",
-					TargetColumnName:  "id",
-					DetectionMethod:   models.DetectionMethodForeignKey,
-					Status:            "confirmed",
-					Confidence:        1.0,
-					Description:       &description1,
-				},
-				{
-					ID:                uuid.New(),
-					OntologyID:        ontologyID,
-					SourceEntityID:    uuid.New(),
-					TargetEntityID:    uuid.New(),
-					SourceColumnTable: "users",
-					SourceColumnName:  "id",
-					TargetColumnTable: "channels",
-					TargetColumnName:  "owner_id",
-					DetectionMethod:   models.DetectionMethodPKMatch,
-					Status:            "pending",
-					Confidence:        0.85,
-					Description:       &description2,
+					ID:               uuid.New(),
+					SourceTableName:  "users",
+					SourceColumnName: "id",
+					SourceColumnType: "bigint",
+					TargetTableName:  "orders",
+					TargetColumnName: "user_id",
+					TargetColumnType: "integer",
+					RelationshipType: "user_defined",
+					Cardinality:      "N:1",
+					Confidence:       1.0,
+					InferenceMethod:  ptrString("fk"),
+					IsValidated:      true,
+					IsApproved:       ptrBool(true),
+					CreatedAt:        now,
+					UpdatedAt:        now,
 				},
 			},
-		}
-
-		handler := NewEntityRelationshipHandler(mockService, zap.NewNop())
-
-		req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/relationships", nil)
-		req.SetPathValue("pid", projectID.String())
-
-		rec := httptest.NewRecorder()
-		handler.List(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
-		}
-
-		var response ApiResponse
-		if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
-
-		dataBytes, err := json.Marshal(response.Data)
-		if err != nil {
-			t.Fatalf("failed to marshal data: %v", err)
-		}
-
-		var listResponse EntityRelationshipListResponse
-		if err := json.Unmarshal(dataBytes, &listResponse); err != nil {
-			t.Fatalf("failed to unmarshal list response: %v", err)
-		}
-
-		if len(listResponse.Relationships) != 2 {
-			t.Fatalf("expected 2 relationships, got %d", len(listResponse.Relationships))
-		}
-
-		// Verify both descriptions are present
-		if listResponse.Relationships[0].Description != description1 {
-			t.Errorf("expected first relationship Description=%q, got %q", description1, listResponse.Relationships[0].Description)
-		}
-		if listResponse.Relationships[1].Description != description2 {
-			t.Errorf("expected second relationship Description=%q, got %q", description2, listResponse.Relationships[1].Description)
-		}
-	})
-}
-
-// TestEntityRelationshipHandler_List_ColumnTypeMapping tests that column types
-// are correctly included in the API response.
-func TestEntityRelationshipHandler_List_ColumnTypeMapping(t *testing.T) {
-	projectID := uuid.New()
-	ontologyID := uuid.New()
-
-	testCases := []struct {
-		name                     string
-		sourceColumnType         string
-		targetColumnType         string
-		expectedSourceColumnType string
-		expectedTargetColumnType string
-	}{
-		{
-			name:                     "both column types present",
-			sourceColumnType:         "uuid",
-			targetColumnType:         "uuid",
-			expectedSourceColumnType: "uuid",
-			expectedTargetColumnType: "uuid",
-		},
-		{
-			name:                     "different column types",
-			sourceColumnType:         "bigint",
-			targetColumnType:         "integer",
-			expectedSourceColumnType: "bigint",
-			expectedTargetColumnType: "integer",
-		},
-		{
-			name:                     "empty column types",
-			sourceColumnType:         "",
-			targetColumnType:         "",
-			expectedSourceColumnType: "",
-			expectedTargetColumnType: "",
+			TotalCount: 1,
 		},
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			mockService := &mockDeterministicRelationshipService{
-				relationships: []*models.EntityRelationship{
-					{
-						ID:                uuid.New(),
-						OntologyID:        ontologyID,
-						SourceEntityID:    uuid.New(),
-						TargetEntityID:    uuid.New(),
-						SourceColumnTable: "users",
-						SourceColumnName:  "id",
-						SourceColumnType:  tc.sourceColumnType,
-						TargetColumnTable: "orders",
-						TargetColumnName:  "user_id",
-						TargetColumnType:  tc.targetColumnType,
-						DetectionMethod:   models.DetectionMethodForeignKey,
-						Status:            "confirmed",
-						Confidence:        1.0,
-					},
+	mockProjectService := &mockProjectServiceForRelationships{
+		datasourceID: datasourceID,
+	}
+
+	handler := NewEntityRelationshipHandler(
+		&mockDeterministicRelationshipService{},
+		mockSchemaService,
+		mockProjectService,
+		zap.NewNop(),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/relationships", nil)
+	req.SetPathValue("pid", projectID.String())
+
+	rec := httptest.NewRecorder()
+	handler.List(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	var response ApiResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	dataBytes, err := json.Marshal(response.Data)
+	if err != nil {
+		t.Fatalf("failed to marshal data: %v", err)
+	}
+
+	var listResponse SchemaRelationshipListResponse
+	if err := json.Unmarshal(dataBytes, &listResponse); err != nil {
+		t.Fatalf("failed to unmarshal list response: %v", err)
+	}
+
+	if len(listResponse.Relationships) != 1 {
+		t.Fatalf("expected 1 relationship, got %d", len(listResponse.Relationships))
+	}
+
+	rel := listResponse.Relationships[0]
+	if rel.SourceColumnType != "bigint" {
+		t.Errorf("expected SourceColumnType=bigint, got %q", rel.SourceColumnType)
+	}
+	if rel.TargetColumnType != "integer" {
+		t.Errorf("expected TargetColumnType=integer, got %q", rel.TargetColumnType)
+	}
+}
+
+// TestEntityRelationshipHandler_List_EmptyAndOrphanTables tests that empty/orphan tables are returned.
+func TestEntityRelationshipHandler_List_EmptyAndOrphanTables(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	now := time.Now()
+
+	mockSchemaService := &mockSchemaServiceForRelationships{
+		response: &models.RelationshipsResponse{
+			Relationships: []*models.RelationshipDetail{
+				{
+					ID:               uuid.New(),
+					SourceTableName:  "users",
+					SourceColumnName: "id",
+					SourceColumnType: "uuid",
+					TargetTableName:  "orders",
+					TargetColumnName: "user_id",
+					TargetColumnType: "uuid",
+					RelationshipType: "user_defined",
+					Cardinality:      "N:1",
+					Confidence:       1.0,
+					InferenceMethod:  ptrString("fk"),
+					IsValidated:      true,
+					CreatedAt:        now,
+					UpdatedAt:        now,
 				},
-			}
+			},
+			TotalCount:   1,
+			EmptyTables:  []string{"audit_logs", "temp_data"},
+			OrphanTables: []string{"settings", "config"},
+		},
+	}
 
-			handler := NewEntityRelationshipHandler(mockService, zap.NewNop())
+	mockProjectService := &mockProjectServiceForRelationships{
+		datasourceID: datasourceID,
+	}
 
-			req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/relationships", nil)
-			req.SetPathValue("pid", projectID.String())
+	handler := NewEntityRelationshipHandler(
+		&mockDeterministicRelationshipService{},
+		mockSchemaService,
+		mockProjectService,
+		zap.NewNop(),
+	)
 
-			rec := httptest.NewRecorder()
-			handler.List(rec, req)
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/relationships", nil)
+	req.SetPathValue("pid", projectID.String())
 
-			if rec.Code != http.StatusOK {
-				t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
-			}
+	rec := httptest.NewRecorder()
+	handler.List(rec, req)
 
-			var response ApiResponse
-			if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-				t.Fatalf("failed to decode response: %v", err)
-			}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
 
-			if !response.Success {
-				t.Fatal("expected success=true")
-			}
+	var response ApiResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 
-			dataBytes, err := json.Marshal(response.Data)
-			if err != nil {
-				t.Fatalf("failed to marshal data: %v", err)
-			}
+	dataBytes, err := json.Marshal(response.Data)
+	if err != nil {
+		t.Fatalf("failed to marshal data: %v", err)
+	}
 
-			var listResponse EntityRelationshipListResponse
-			if err := json.Unmarshal(dataBytes, &listResponse); err != nil {
-				t.Fatalf("failed to unmarshal list response: %v", err)
-			}
+	var listResponse SchemaRelationshipListResponse
+	if err := json.Unmarshal(dataBytes, &listResponse); err != nil {
+		t.Fatalf("failed to unmarshal list response: %v", err)
+	}
 
-			if len(listResponse.Relationships) != 1 {
-				t.Fatalf("expected 1 relationship, got %d", len(listResponse.Relationships))
-			}
+	if len(listResponse.EmptyTables) != 2 {
+		t.Errorf("expected 2 empty tables, got %d", len(listResponse.EmptyTables))
+	}
+	if len(listResponse.OrphanTables) != 2 {
+		t.Errorf("expected 2 orphan tables, got %d", len(listResponse.OrphanTables))
+	}
+}
 
-			rel := listResponse.Relationships[0]
+// TestEntityRelationshipHandler_List_NoDatasource tests behavior when no datasource is configured.
+func TestEntityRelationshipHandler_List_NoDatasource(t *testing.T) {
+	projectID := uuid.New()
 
-			if rel.SourceColumnType != tc.expectedSourceColumnType {
-				t.Errorf("expected SourceColumnType=%q, got %q", tc.expectedSourceColumnType, rel.SourceColumnType)
-			}
-			if rel.TargetColumnType != tc.expectedTargetColumnType {
-				t.Errorf("expected TargetColumnType=%q, got %q", tc.expectedTargetColumnType, rel.TargetColumnType)
+	mockProjectService := &mockProjectServiceForRelationships{
+		err: errors.New("no default datasource configured"),
+	}
+
+	handler := NewEntityRelationshipHandler(
+		&mockDeterministicRelationshipService{},
+		&mockSchemaServiceForRelationships{},
+		mockProjectService,
+		zap.NewNop(),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/relationships", nil)
+	req.SetPathValue("pid", projectID.String())
+
+	rec := httptest.NewRecorder()
+	handler.List(rec, req)
+
+	// Should return empty response, not error
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	var response ApiResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if !response.Success {
+		t.Fatal("expected success=true")
+	}
+
+	dataBytes, err := json.Marshal(response.Data)
+	if err != nil {
+		t.Fatalf("failed to marshal data: %v", err)
+	}
+
+	var listResponse SchemaRelationshipListResponse
+	if err := json.Unmarshal(dataBytes, &listResponse); err != nil {
+		t.Fatalf("failed to unmarshal list response: %v", err)
+	}
+
+	if len(listResponse.Relationships) != 0 {
+		t.Errorf("expected 0 relationships when no datasource, got %d", len(listResponse.Relationships))
+	}
+	if listResponse.TotalCount != 0 {
+		t.Errorf("expected TotalCount=0, got %d", listResponse.TotalCount)
+	}
+}
+
+// TestEntityRelationshipHandler_List_SchemaServiceError tests error handling.
+func TestEntityRelationshipHandler_List_SchemaServiceError(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	mockSchemaService := &mockSchemaServiceForRelationships{
+		err: errors.New("database connection failed"),
+	}
+
+	mockProjectService := &mockProjectServiceForRelationships{
+		datasourceID: datasourceID,
+	}
+
+	handler := NewEntityRelationshipHandler(
+		&mockDeterministicRelationshipService{},
+		mockSchemaService,
+		mockProjectService,
+		zap.NewNop(),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/relationships", nil)
+	req.SetPathValue("pid", projectID.String())
+
+	rec := httptest.NewRecorder()
+	handler.List(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+	}
+}
+
+// ============================================================================
+// Tests for mapInferenceMethodToType helper
+// ============================================================================
+
+func TestMapInferenceMethodToType(t *testing.T) {
+	testCases := []struct {
+		input    *string
+		expected string
+	}{
+		{nil, "inferred"},
+		{ptrString("fk"), "fk"},
+		{ptrString("foreign_key"), "fk"},
+		{ptrString("manual"), "manual"},
+		{ptrString("pk_match"), "inferred"},
+		{ptrString("column_features"), "inferred"},
+		{ptrString("unknown"), "inferred"},
+	}
+
+	for _, tc := range testCases {
+		name := "nil"
+		if tc.input != nil {
+			name = *tc.input
+		}
+		t.Run(name, func(t *testing.T) {
+			result := mapInferenceMethodToType(tc.input)
+			if result != tc.expected {
+				t.Errorf("mapInferenceMethodToType(%v) = %q, want %q", tc.input, result, tc.expected)
 			}
 		})
 	}

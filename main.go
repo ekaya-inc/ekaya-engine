@@ -434,8 +434,9 @@ func main() {
 	entityHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register entity relationship handler (protected)
+	// List reads from engine_schema_relationships, Discover writes to it
 	entityRelationshipHandler := handlers.NewEntityRelationshipHandler(
-		deterministicRelationshipService, logger)
+		deterministicRelationshipService, schemaService, projectService, logger)
 	entityRelationshipHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register ontology DAG handler (protected) - unified workflow execution
