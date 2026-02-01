@@ -375,11 +375,11 @@ Write integration tests that run the DAG through PKMatchDiscovery and verify cor
 
 ---
 
-### 5.5 Manual testing
+### 5.5 Manual testing ✓
 
-- Run DAG on test project
-- Review relationships in UI
-- Verify table descriptions are generated and useful
+- [x] Run DAG on test project
+- [x] Review relationships in UI
+- [x] Verify table descriptions are generated and useful
 
 ---
 
@@ -391,7 +391,7 @@ Write integration tests that run the DAG through PKMatchDiscovery and verify cor
 4. [x] **Step 3.1-3.2** - Refactor PKMatchDiscovery to use SchemaRelationship
 5. [x] **Step 1** - Add TableFeatureExtraction (new node)
 6. [x] **Step 3.4** - Use table descriptions in validation
-7. [ ] **Step 5** - Testing
+7. [x] **Step 5** - Testing
 
 ---
 
