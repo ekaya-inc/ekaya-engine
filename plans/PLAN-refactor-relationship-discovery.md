@@ -953,7 +953,7 @@ func TestRelationshipDiscoveryService_DBDeclaredFKPreserved(t *testing.T) {
 
 ---
 
-##### Task 7.3.2: ColumnFeatures FK preservation and LLM validation tests [ ]
+##### Task 7.3.2: ColumnFeatures FK preservation and LLM validation tests [x]
 
 Add tests for ColumnFeatures-based FK preservation and basic LLM validation scenarios.
 
