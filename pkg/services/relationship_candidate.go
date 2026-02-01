@@ -51,10 +51,12 @@ type RelationshipValidationResult struct {
 	SourceRole  string  `json:"source_role"` // "owner", "creator", etc. (optional)
 }
 
-// ValidatedRelationship combines a candidate with its validation result.
+// ValidatedRelationship combines a candidate with its LLM validation result.
+// Only candidates where Result.IsValidFK=true become relationships.
 type ValidatedRelationship struct {
 	Candidate *RelationshipCandidate
 	Result    *RelationshipValidationResult
+	Validated bool // true if LLM was called, false if skipped (e.g., DB-declared FK)
 }
 
 // OrphanRate calculates the percentage of source values that have no match in the target.

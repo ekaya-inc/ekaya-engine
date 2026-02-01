@@ -423,7 +423,7 @@ func NewRelationshipValidator(llmService LLMService, logger *slog.Logger) Relati
 
 ---
 
-#### Task 3.2: Implement ValidateCandidate with LLM Prompt [ ]
+#### Task 3.2: Implement ValidateCandidate with LLM Prompt [x]
 
 Implement the single-candidate validation method with a carefully designed LLM prompt.
 
