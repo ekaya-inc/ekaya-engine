@@ -1632,6 +1632,8 @@ func (m *mockTestSchemaRepo) GetRelationshipDetails(ctx context.Context, project
 }
 
 func (m *mockTestSchemaRepo) UpsertRelationshipWithMetrics(ctx context.Context, rel *models.SchemaRelationship, metrics *models.DiscoveryMetrics) error {
+	// Track upserted relationships (same as UpsertRelationship for test verification)
+	m.upsertedRelationships = append(m.upsertedRelationships, rel)
 	return nil
 }
 

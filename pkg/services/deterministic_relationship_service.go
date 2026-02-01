@@ -904,7 +904,22 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 				IsValidated:      true,
 			}
 
-			if err := s.schemaRepo.UpsertRelationship(ctx, rel); err != nil {
+			// Compute discovery metrics from join analysis
+			// SourceDistinct = matched + orphans (total distinct source values)
+			// Since we only save relationships with 0 orphans, MatchRate is 1.0
+			sourceDistinct := joinResult.SourceMatched + joinResult.OrphanCount
+			var matchRate float64
+			if sourceDistinct > 0 {
+				matchRate = float64(joinResult.SourceMatched) / float64(sourceDistinct)
+			}
+			metrics := &models.DiscoveryMetrics{
+				MatchRate:      matchRate,
+				SourceDistinct: sourceDistinct,
+				TargetDistinct: joinResult.TargetMatched,
+				MatchedCount:   joinResult.SourceMatched,
+			}
+
+			if err := s.schemaRepo.UpsertRelationshipWithMetrics(ctx, rel, metrics); err != nil {
 				return nil, fmt.Errorf("upsert pk-match SchemaRelationship: %w", err)
 			}
 
