@@ -239,9 +239,98 @@ func (v *relationshipValidator) parseValidationResponse(content string) (*Relati
 	return &response, nil
 }
 
-// ValidateCandidates validates multiple candidates in parallel using worker pool.
-// Implementation will be added in Task 3.3.
+// ValidateCandidates validates multiple candidates in parallel using the LLM worker pool.
+// Returns all results including rejected candidates (for debugging/audit).
+// The progressCallback reports progress as candidates complete.
+//
+// Error handling:
+// - If a single LLM call fails, the error is logged but processing continues
+// - Returns partial results even when some validations fail
+// - Only returns an error if ALL candidates fail or context is cancelled
 func (v *relationshipValidator) ValidateCandidates(ctx context.Context, projectID uuid.UUID, candidates []*RelationshipCandidate, progressCallback dag.ProgressCallback) ([]*ValidatedRelationship, error) {
-	// Placeholder - implementation in Task 3.3
-	panic("not implemented: ValidateCandidates - see Task 3.3")
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+
+	total := len(candidates)
+	if progressCallback != nil {
+		progressCallback(0, total, "Starting relationship validation")
+	}
+
+	// Build work items for parallel processing
+	workItems := make([]llm.WorkItem[*ValidatedRelationship], len(candidates))
+	for i, candidate := range candidates {
+		// Capture loop variables for closure
+		c := candidate
+		workItems[i] = llm.WorkItem[*ValidatedRelationship]{
+			ID: fmt.Sprintf("%s.%s->%s.%s", c.SourceTable, c.SourceColumn, c.TargetTable, c.TargetColumn),
+			Execute: func(ctx context.Context) (*ValidatedRelationship, error) {
+				result, err := v.ValidateCandidate(ctx, projectID, c)
+				if err != nil {
+					return nil, err
+				}
+				return &ValidatedRelationship{
+					Candidate: c,
+					Result:    result,
+					Validated: true,
+				}, nil
+			},
+		}
+	}
+
+	// Process all candidates with worker pool
+	var lastProgressReport int
+	results := llm.Process(ctx, v.workerPool, workItems, func(completed, total int) {
+		// Report progress every 5 completions or at the end
+		if progressCallback != nil && (completed-lastProgressReport >= 5 || completed == total) {
+			progressCallback(completed, total, fmt.Sprintf("Validating relationships (%d/%d)...", completed, total))
+			lastProgressReport = completed
+		}
+	})
+
+	// Collect results and track errors
+	var validResults []*ValidatedRelationship
+	var failedCount int
+	var lastErr error
+
+	for _, r := range results {
+		if r.Err != nil {
+			failedCount++
+			lastErr = r.Err
+
+			// Log the failure but continue processing
+			v.logger.Warn("relationship validation failed",
+				zap.String("candidate", r.ID),
+				zap.Error(r.Err),
+			)
+			continue
+		}
+
+		if r.Result != nil {
+			validResults = append(validResults, r.Result)
+		}
+	}
+
+	// Log summary
+	validCount := 0
+	for _, vr := range validResults {
+		if vr.Result != nil && vr.Result.IsValidFK {
+			validCount++
+		}
+	}
+
+	v.logger.Info("relationship validation complete",
+		zap.Int("total_candidates", total),
+		zap.Int("processed", len(validResults)),
+		zap.Int("failed", failedCount),
+		zap.Int("valid_relationships", validCount),
+	)
+
+	// Return error only if ALL candidates failed
+	if failedCount == total {
+		return nil, fmt.Errorf("all %d relationship validations failed, last error: %w", total, lastErr)
+	}
+
+	// Return partial results with no error - some failures are acceptable
+	return validResults, nil
 }

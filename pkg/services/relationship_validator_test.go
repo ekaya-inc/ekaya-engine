@@ -2,7 +2,11 @@ package services
 
 import (
 	"context"
+	"fmt"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -734,4 +738,460 @@ func TestBuildValidationPrompt_HandlesZeroDistinctCount(t *testing.T) {
 
 	assert.Contains(t, prompt, "empty_table.ref_id")
 	assert.Contains(t, prompt, "targets.id")
+}
+
+// ============================================================================
+// ValidateCandidates Tests (Task 3.3 - Worker Pool Parallel Validation)
+// ============================================================================
+
+// mockParallelLLMClient tracks calls to allow testing parallel execution
+type mockParallelLLMClient struct {
+	responseFunc func(candidate string) (string, error)
+	callCount    int
+	mu           sync.Mutex
+	callOrder    []string // Records order of calls for parallelism testing
+}
+
+func (m *mockParallelLLMClient) GenerateResponse(_ context.Context, prompt string, _ string, _ float64, _ bool) (*llm.GenerateResponseResult, error) {
+	m.mu.Lock()
+	m.callCount++
+	// Extract candidate ID from prompt for tracking
+	m.callOrder = append(m.callOrder, prompt[:50]) // First 50 chars as identifier
+	m.mu.Unlock()
+
+	response, err := m.responseFunc(prompt)
+	if err != nil {
+		return nil, err
+	}
+	return &llm.GenerateResponseResult{
+		Content:          response,
+		PromptTokens:     100,
+		CompletionTokens: 50,
+		TotalTokens:      150,
+	}, nil
+}
+
+func (m *mockParallelLLMClient) CreateEmbedding(_ context.Context, _ string, _ string) ([]float32, error) {
+	return nil, nil
+}
+
+func (m *mockParallelLLMClient) CreateEmbeddings(_ context.Context, _ []string, _ string) ([][]float32, error) {
+	return nil, nil
+}
+
+func (m *mockParallelLLMClient) GetModel() string {
+	return "test-model"
+}
+
+func (m *mockParallelLLMClient) GetEndpoint() string {
+	return "https://test.endpoint"
+}
+
+var _ llm.LLMClient = (*mockParallelLLMClient)(nil)
+
+type mockParallelLLMClientFactory struct {
+	client *mockParallelLLMClient
+}
+
+func (m *mockParallelLLMClientFactory) CreateForProject(_ context.Context, _ uuid.UUID) (llm.LLMClient, error) {
+	return m.client, nil
+}
+
+func (m *mockParallelLLMClientFactory) CreateEmbeddingClient(_ context.Context, _ uuid.UUID) (llm.LLMClient, error) {
+	return m.client, nil
+}
+
+func (m *mockParallelLLMClientFactory) CreateStreamingClient(_ context.Context, _ uuid.UUID) (*llm.StreamingClient, error) {
+	return nil, nil
+}
+
+var _ llm.LLMClientFactory = (*mockParallelLLMClientFactory)(nil)
+
+func TestValidateCandidates_EmptySlice(t *testing.T) {
+	validator := NewRelationshipValidator(
+		nil,
+		nil,
+		nil,
+		nil,
+		zap.NewNop(),
+	)
+
+	results, err := validator.ValidateCandidates(context.Background(), uuid.New(), nil, nil)
+
+	require.NoError(t, err)
+	assert.Nil(t, results)
+}
+
+func TestValidateCandidates_SingleCandidate(t *testing.T) {
+	mockClient := &mockParallelLLMClient{
+		responseFunc: func(_ string) (string, error) {
+			return `{
+				"is_valid_fk": true,
+				"confidence": 0.95,
+				"cardinality": "N:1",
+				"reasoning": "Valid FK relationship",
+				"source_role": "owner"
+			}`, nil
+		},
+	}
+
+	logger := zap.NewNop()
+	workerPool := llm.NewWorkerPool(llm.DefaultWorkerPoolConfig(), logger)
+
+	validator := NewRelationshipValidator(
+		&mockParallelLLMClientFactory{client: mockClient},
+		workerPool,
+		nil,
+		nil,
+		logger,
+	)
+
+	candidates := []*RelationshipCandidate{
+		{
+			SourceTable:  "orders",
+			SourceColumn: "user_id",
+			TargetTable:  "users",
+			TargetColumn: "id",
+		},
+	}
+
+	var progressCalls []string
+	progressCallback := func(current, total int, msg string) {
+		progressCalls = append(progressCalls, fmt.Sprintf("%d/%d: %s", current, total, msg))
+	}
+
+	results, err := validator.ValidateCandidates(context.Background(), uuid.New(), candidates, progressCallback)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.True(t, results[0].Result.IsValidFK)
+	assert.True(t, results[0].Validated)
+	assert.Equal(t, 1, mockClient.callCount)
+
+	// Verify progress was reported
+	assert.NotEmpty(t, progressCalls)
+}
+
+func TestValidateCandidates_MultipleCandidates(t *testing.T) {
+	mockClient := &mockParallelLLMClient{
+		responseFunc: func(prompt string) (string, error) {
+			// Return different results based on prompt content
+			if strings.Contains(prompt, "user_id") {
+				return `{"is_valid_fk": true, "confidence": 0.95, "cardinality": "N:1", "reasoning": "Valid user FK"}`, nil
+			}
+			if strings.Contains(prompt, "product_id") {
+				return `{"is_valid_fk": true, "confidence": 0.9, "cardinality": "N:1", "reasoning": "Valid product FK"}`, nil
+			}
+			if strings.Contains(prompt, "invalid_ref") {
+				return `{"is_valid_fk": false, "confidence": 0.85, "cardinality": "", "reasoning": "Not a valid FK"}`, nil
+			}
+			return `{"is_valid_fk": false, "confidence": 0.5, "cardinality": "", "reasoning": "Unknown"}`, nil
+		},
+	}
+
+	logger := zap.NewNop()
+	workerPool := llm.NewWorkerPool(llm.DefaultWorkerPoolConfig(), logger)
+
+	validator := NewRelationshipValidator(
+		&mockParallelLLMClientFactory{client: mockClient},
+		workerPool,
+		nil,
+		nil,
+		logger,
+	)
+
+	candidates := []*RelationshipCandidate{
+		{SourceTable: "orders", SourceColumn: "user_id", TargetTable: "users", TargetColumn: "id"},
+		{SourceTable: "orders", SourceColumn: "product_id", TargetTable: "products", TargetColumn: "id"},
+		{SourceTable: "logs", SourceColumn: "invalid_ref", TargetTable: "entities", TargetColumn: "id"},
+	}
+
+	results, err := validator.ValidateCandidates(context.Background(), uuid.New(), candidates, nil)
+
+	require.NoError(t, err)
+	require.Len(t, results, 3)
+	assert.Equal(t, 3, mockClient.callCount)
+
+	// Count valid FKs
+	validCount := 0
+	for _, r := range results {
+		if r.Result.IsValidFK {
+			validCount++
+		}
+	}
+	assert.Equal(t, 2, validCount, "should have 2 valid FKs")
+}
+
+func TestValidateCandidates_PartialFailure(t *testing.T) {
+	// Test that partial failures don't fail the entire batch
+	callNum := 0
+	mockClient := &mockParallelLLMClient{
+		responseFunc: func(_ string) (string, error) {
+			callNum++
+			if callNum == 2 {
+				// Fail the second call
+				return "", fmt.Errorf("LLM service unavailable")
+			}
+			return `{"is_valid_fk": true, "confidence": 0.9, "cardinality": "N:1", "reasoning": "Valid"}`, nil
+		},
+	}
+
+	logger := zap.NewNop()
+	workerPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, logger) // Single worker to ensure order
+
+	validator := NewRelationshipValidator(
+		&mockParallelLLMClientFactory{client: mockClient},
+		workerPool,
+		nil,
+		nil,
+		logger,
+	)
+
+	candidates := []*RelationshipCandidate{
+		{SourceTable: "t1", SourceColumn: "c1", TargetTable: "t_target", TargetColumn: "id"},
+		{SourceTable: "t2", SourceColumn: "c2", TargetTable: "t_target", TargetColumn: "id"}, // This one fails
+		{SourceTable: "t3", SourceColumn: "c3", TargetTable: "t_target", TargetColumn: "id"},
+	}
+
+	results, err := validator.ValidateCandidates(context.Background(), uuid.New(), candidates, nil)
+
+	// Should NOT return error when some candidates fail
+	require.NoError(t, err)
+	// Should have 2 successful results (not 3)
+	require.Len(t, results, 2)
+}
+
+func TestValidateCandidates_AllFailures(t *testing.T) {
+	// Test that ALL failures returns an error
+	mockClient := &mockParallelLLMClient{
+		responseFunc: func(_ string) (string, error) {
+			return "", fmt.Errorf("LLM service unavailable")
+		},
+	}
+
+	logger := zap.NewNop()
+	workerPool := llm.NewWorkerPool(llm.DefaultWorkerPoolConfig(), logger)
+
+	validator := NewRelationshipValidator(
+		&mockParallelLLMClientFactory{client: mockClient},
+		workerPool,
+		nil,
+		nil,
+		logger,
+	)
+
+	candidates := []*RelationshipCandidate{
+		{SourceTable: "t1", SourceColumn: "c1", TargetTable: "t_target", TargetColumn: "id"},
+		{SourceTable: "t2", SourceColumn: "c2", TargetTable: "t_target", TargetColumn: "id"},
+	}
+
+	results, err := validator.ValidateCandidates(context.Background(), uuid.New(), candidates, nil)
+
+	// Should return error when ALL candidates fail
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "all 2 relationship validations failed")
+	assert.Nil(t, results)
+}
+
+func TestValidateCandidates_ContextCancellation(t *testing.T) {
+	// Create a slow mock that will be interrupted
+	mockClient := &mockParallelLLMClient{
+		responseFunc: func(_ string) (string, error) {
+			// Simulate slow LLM call
+			time.Sleep(100 * time.Millisecond)
+			return `{"is_valid_fk": true, "confidence": 0.9, "cardinality": "N:1", "reasoning": "Valid"}`, nil
+		},
+	}
+
+	logger := zap.NewNop()
+	workerPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 2}, logger)
+
+	validator := NewRelationshipValidator(
+		&mockParallelLLMClientFactory{client: mockClient},
+		workerPool,
+		nil,
+		nil,
+		logger,
+	)
+
+	// Create many candidates
+	var candidates []*RelationshipCandidate
+	for i := 0; i < 10; i++ {
+		candidates = append(candidates, &RelationshipCandidate{
+			SourceTable:  fmt.Sprintf("t%d", i),
+			SourceColumn: "ref_id",
+			TargetTable:  "target",
+			TargetColumn: "id",
+		})
+	}
+
+	// Cancel context after short delay
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	results, err := validator.ValidateCandidates(ctx, uuid.New(), candidates, nil)
+
+	// Should complete with partial or no results due to cancellation
+	// The exact behavior depends on timing, but should not panic
+	_ = results
+	_ = err
+	// Just verify it doesn't hang or panic
+}
+
+func TestValidateCandidates_ProgressCallback(t *testing.T) {
+	mockClient := &mockParallelLLMClient{
+		responseFunc: func(_ string) (string, error) {
+			return `{"is_valid_fk": true, "confidence": 0.9, "cardinality": "N:1", "reasoning": "Valid"}`, nil
+		},
+	}
+
+	logger := zap.NewNop()
+	workerPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 2}, logger)
+
+	validator := NewRelationshipValidator(
+		&mockParallelLLMClientFactory{client: mockClient},
+		workerPool,
+		nil,
+		nil,
+		logger,
+	)
+
+	// Create 10 candidates to test progress reporting
+	var candidates []*RelationshipCandidate
+	for i := 0; i < 10; i++ {
+		candidates = append(candidates, &RelationshipCandidate{
+			SourceTable:  fmt.Sprintf("t%d", i),
+			SourceColumn: "ref_id",
+			TargetTable:  "target",
+			TargetColumn: "id",
+		})
+	}
+
+	var progressCalls []struct {
+		current int
+		total   int
+		msg     string
+	}
+	var mu sync.Mutex
+
+	progressCallback := func(current, total int, msg string) {
+		mu.Lock()
+		defer mu.Unlock()
+		progressCalls = append(progressCalls, struct {
+			current int
+			total   int
+			msg     string
+		}{current, total, msg})
+	}
+
+	results, err := validator.ValidateCandidates(context.Background(), uuid.New(), candidates, progressCallback)
+
+	require.NoError(t, err)
+	require.Len(t, results, 10)
+
+	// Verify progress was reported
+	mu.Lock()
+	defer mu.Unlock()
+
+	assert.NotEmpty(t, progressCalls, "progress should be reported")
+
+	// First call should be at 0
+	if len(progressCalls) > 0 {
+		assert.Equal(t, 0, progressCalls[0].current)
+		assert.Equal(t, 10, progressCalls[0].total)
+	}
+
+	// Last call should be at 10/10
+	if len(progressCalls) > 1 {
+		lastCall := progressCalls[len(progressCalls)-1]
+		assert.Equal(t, 10, lastCall.current)
+		assert.Equal(t, 10, lastCall.total)
+	}
+}
+
+func TestValidateCandidates_NilProgressCallback(t *testing.T) {
+	// Ensure nil progress callback doesn't cause panic
+	mockClient := &mockParallelLLMClient{
+		responseFunc: func(_ string) (string, error) {
+			return `{"is_valid_fk": true, "confidence": 0.9, "cardinality": "N:1", "reasoning": "Valid"}`, nil
+		},
+	}
+
+	logger := zap.NewNop()
+	workerPool := llm.NewWorkerPool(llm.DefaultWorkerPoolConfig(), logger)
+
+	validator := NewRelationshipValidator(
+		&mockParallelLLMClientFactory{client: mockClient},
+		workerPool,
+		nil,
+		nil,
+		logger,
+	)
+
+	candidates := []*RelationshipCandidate{
+		{SourceTable: "orders", SourceColumn: "user_id", TargetTable: "users", TargetColumn: "id"},
+	}
+
+	// Should not panic with nil progress callback
+	results, err := validator.ValidateCandidates(context.Background(), uuid.New(), candidates, nil)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+}
+
+func TestValidateCandidates_ResultsMatchCandidates(t *testing.T) {
+	// Verify that results can be correlated back to their candidates
+	mockClient := &mockParallelLLMClient{
+		responseFunc: func(prompt string) (string, error) {
+			if strings.Contains(prompt, "orders") {
+				return `{"is_valid_fk": true, "confidence": 0.95, "cardinality": "N:1", "reasoning": "orders FK", "source_role": "buyer"}`, nil
+			}
+			return `{"is_valid_fk": false, "confidence": 0.8, "cardinality": "", "reasoning": "not a FK"}`, nil
+		},
+	}
+
+	logger := zap.NewNop()
+	workerPool := llm.NewWorkerPool(llm.DefaultWorkerPoolConfig(), logger)
+
+	validator := NewRelationshipValidator(
+		&mockParallelLLMClientFactory{client: mockClient},
+		workerPool,
+		nil,
+		nil,
+		logger,
+	)
+
+	orderCandidate := &RelationshipCandidate{
+		SourceTable:  "orders",
+		SourceColumn: "customer_id",
+		TargetTable:  "customers",
+		TargetColumn: "id",
+	}
+	logCandidate := &RelationshipCandidate{
+		SourceTable:  "logs",
+		SourceColumn: "ref_id",
+		TargetTable:  "entities",
+		TargetColumn: "id",
+	}
+
+	candidates := []*RelationshipCandidate{orderCandidate, logCandidate}
+
+	results, err := validator.ValidateCandidates(context.Background(), uuid.New(), candidates, nil)
+
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+
+	// Find the orders result
+	var ordersResult *ValidatedRelationship
+	for _, r := range results {
+		if r.Candidate.SourceTable == "orders" {
+			ordersResult = r
+			break
+		}
+	}
+
+	require.NotNil(t, ordersResult, "should find orders result")
+	assert.True(t, ordersResult.Result.IsValidFK)
+	assert.Equal(t, "buyer", ordersResult.Result.SourceRole)
+	assert.True(t, ordersResult.Validated)
 }
