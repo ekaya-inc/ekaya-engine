@@ -751,7 +751,7 @@ Orchestration flow:
 
 ---
 
-### Task 5: Update DAG Node
+### Task 5: Update DAG Node [x]
 
 Update `pk_match_discovery_node.go` to use the new service (or rename to `relationship_discovery_node.go`):
 

@@ -242,6 +242,15 @@ func main() {
 	ontologyDAGService.SetEntityEnrichmentMethods(services.NewEntityEnrichmentAdapter(entityDiscoveryService, schemaRepo, getTenantCtx))
 	ontologyDAGService.SetFKDiscoveryMethods(services.NewFKDiscoveryAdapter(deterministicRelationshipService))
 	ontologyDAGService.SetPKMatchDiscoveryMethods(services.NewPKMatchDiscoveryAdapter(deterministicRelationshipService))
+	// LLM-validated relationship discovery (replaces threshold-based PKMatch when configured)
+	relationshipCandidateCollector := services.NewRelationshipCandidateCollector(
+		schemaRepo, adapterFactory, datasourceService, logger)
+	relationshipValidator := services.NewRelationshipValidator(
+		llmFactory, llmWorkerPool, llmCircuitBreaker, convRepo, logger)
+	llmRelationshipDiscoveryService := services.NewLLMRelationshipDiscoveryService(
+		relationshipCandidateCollector, relationshipValidator, datasourceService, adapterFactory,
+		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, logger)
+	ontologyDAGService.SetLLMRelationshipDiscoveryMethods(services.NewLLMRelationshipDiscoveryAdapter(llmRelationshipDiscoveryService))
 	ontologyDAGService.SetRelationshipEnrichmentMethods(services.NewRelationshipEnrichmentAdapter(relationshipEnrichmentService))
 	entityPromotionService := services.NewEntityPromotionService(
 		ontologyEntityRepo, entityRelationshipRepo, schemaRepo, ontologyRepo, logger)

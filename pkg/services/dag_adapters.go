@@ -117,6 +117,32 @@ func (a *PKMatchDiscoveryAdapter) DiscoverPKMatchRelationships(ctx context.Conte
 	}, nil
 }
 
+// LLMRelationshipDiscoveryAdapter adapts LLMRelationshipDiscoveryService for the dag package.
+// This is the new LLM-validated relationship discovery that replaces the threshold-based approach.
+type LLMRelationshipDiscoveryAdapter struct {
+	svc LLMRelationshipDiscoveryService
+}
+
+// NewLLMRelationshipDiscoveryAdapter creates a new adapter.
+func NewLLMRelationshipDiscoveryAdapter(svc LLMRelationshipDiscoveryService) dag.LLMRelationshipDiscoveryMethods {
+	return &LLMRelationshipDiscoveryAdapter{svc: svc}
+}
+
+func (a *LLMRelationshipDiscoveryAdapter) DiscoverRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback dag.ProgressCallback) (*dag.LLMRelationshipDiscoveryResult, error) {
+	result, err := a.svc.DiscoverRelationships(ctx, projectID, datasourceID, progressCallback)
+	if err != nil {
+		return nil, err
+	}
+	return &dag.LLMRelationshipDiscoveryResult{
+		CandidatesEvaluated:   result.CandidatesEvaluated,
+		RelationshipsCreated:  result.RelationshipsCreated,
+		RelationshipsRejected: result.RelationshipsRejected,
+		PreservedDBFKs:        result.PreservedDBFKs,
+		PreservedColumnFKs:    result.PreservedColumnFKs,
+		DurationMs:            result.DurationMs,
+	}, nil
+}
+
 // RelationshipEnrichmentAdapter adapts RelationshipEnrichmentService for the dag package.
 type RelationshipEnrichmentAdapter struct {
 	svc RelationshipEnrichmentService

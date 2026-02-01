@@ -55,9 +55,10 @@ type ontologyDAGService struct {
 	tableFeatureExtractionMethods  dag.TableFeatureExtractionMethods
 	entityDiscoveryMethods         dag.EntityDiscoveryMethods
 	entityEnrichmentMethods        dag.EntityEnrichmentMethods
-	fkDiscoveryMethods             dag.FKDiscoveryMethods
-	pkMatchDiscoveryMethods        dag.PKMatchDiscoveryMethods
-	relationshipEnrichmentMethods  dag.RelationshipEnrichmentMethods
+	fkDiscoveryMethods                dag.FKDiscoveryMethods
+	pkMatchDiscoveryMethods           dag.PKMatchDiscoveryMethods
+	llmRelationshipDiscoveryMethods   dag.LLMRelationshipDiscoveryMethods
+	relationshipEnrichmentMethods     dag.RelationshipEnrichmentMethods
 	entityPromotionMethods         dag.EntityPromotionMethods
 	finalizationMethods            dag.OntologyFinalizationMethods
 	columnEnrichmentMethods        dag.ColumnEnrichmentMethods
@@ -144,8 +145,16 @@ func (s *ontologyDAGService) SetFKDiscoveryMethods(methods dag.FKDiscoveryMethod
 }
 
 // SetPKMatchDiscoveryMethods sets the pk_match discovery methods interface.
+// Deprecated: Use SetLLMRelationshipDiscoveryMethods for LLM-validated relationship discovery.
 func (s *ontologyDAGService) SetPKMatchDiscoveryMethods(methods dag.PKMatchDiscoveryMethods) {
 	s.pkMatchDiscoveryMethods = methods
+}
+
+// SetLLMRelationshipDiscoveryMethods sets the LLM-validated relationship discovery methods interface.
+// This replaces the threshold-based PKMatchDiscovery with LLM validation for semantic accuracy.
+// If set, this takes precedence over pkMatchDiscoveryMethods.
+func (s *ontologyDAGService) SetLLMRelationshipDiscoveryMethods(methods dag.LLMRelationshipDiscoveryMethods) {
+	s.llmRelationshipDiscoveryMethods = methods
 }
 
 // SetRelationshipEnrichmentMethods sets the relationship enrichment methods interface.
@@ -702,8 +711,15 @@ func (s *ontologyDAGService) getNodeExecutor(nodeName models.DAGNodeName, nodeID
 		return node, nil
 
 	case models.DAGNodePKMatchDiscovery:
+		// Prefer LLM-validated relationship discovery if configured
+		if s.llmRelationshipDiscoveryMethods != nil {
+			node := dag.NewRelationshipDiscoveryNode(s.dagRepo, s.llmRelationshipDiscoveryMethods, s.logger)
+			node.SetCurrentNodeID(nodeID)
+			return node, nil
+		}
+		// Fall back to legacy threshold-based PKMatch discovery
 		if s.pkMatchDiscoveryMethods == nil {
-			return nil, fmt.Errorf("pk_match discovery methods not set")
+			return nil, fmt.Errorf("relationship discovery methods not set (neither LLM nor PKMatch)")
 		}
 		node := dag.NewPKMatchDiscoveryNode(s.dagRepo, s.pkMatchDiscoveryMethods, s.logger)
 		node.SetCurrentNodeID(nodeID)
