@@ -274,7 +274,7 @@ Write unit tests verifying that both FKDiscovery and PKMatchDiscovery correctly 
 
 ---
 
-### 5.3 Unit tests for bidirectional join validation
+### 5.3 Unit tests for bidirectional join validation ✓
 
 Write unit tests for the bidirectional join validation fix in the PostgreSQL adapter's AnalyzeJoin method.
 
@@ -289,25 +289,25 @@ Write unit tests for the bidirectional join validation fix in the PostgreSQL ada
 
 **Test cases to implement:**
 
-1. [ ] **Reject asymmetric cardinality**:
+1. [x] **Reject asymmetric cardinality**:
    - Setup: Source column has 3 distinct values {1,2,3}, target has 83 values {1..83}
    - Source→target: 0 orphans (all 3 exist in 83)
    - Target→source: 80 orphans (values 4-83 don't exist in source)
    - Expected: REJECT this relationship
 
-2. [ ] **Accept valid FK**:
+2. [x] **Accept valid FK**:
    - Setup: Source column references target PK with high match rate in both directions
    - Expected: ACCEPT
 
-3. [ ] **Accept partial FK based on thresholds**:
+3. [x] **Accept partial FK based on thresholds**:
    - Setup: Source has some orphans but reverse check passes (target values mostly exist in source)
    - Expected: ACCEPT based on configurable thresholds
 
-4. [ ] **Reverse orphan threshold enforcement**:
+4. [x] **Reverse orphan threshold enforcement**:
    - Verify: If `reverse_orphan_count / target_distinct > 0.5`, should reject
    - Test boundary conditions around the threshold
 
-5. [ ] **Verify SQL includes reverse_orphans CTE**:
+5. [x] **Verify SQL includes reverse_orphans CTE**:
    - The fix added a CTE like:
    ```sql
    reverse_orphans AS (

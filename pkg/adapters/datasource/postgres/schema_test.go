@@ -4,6 +4,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -932,6 +933,310 @@ func TestSchemaDiscoverer_AnalyzeJoin_ReverseOrphans(t *testing.T) {
 	if reverseOrphanRate < 0.5 {
 		t.Errorf("expected reverse orphan rate > 50%% for false positive detection, got %.2f%%", reverseOrphanRate*100)
 	}
+}
+
+// TestSchemaDiscoverer_AnalyzeJoin_ValidFK tests that a valid FK relationship is correctly
+// identified with low orphan counts in both directions.
+func TestSchemaDiscoverer_AnalyzeJoin_ValidFK(t *testing.T) {
+	tc := setupSchemaDiscovererTest(t)
+	ctx := context.Background()
+
+	// Create a valid FK relationship:
+	// - orders table references customers table
+	// - All order.customer_id values exist in customers.id
+	// - Most customers have at least one order
+	setupSQL := `
+		CREATE TEMP TABLE test_customers (id INT PRIMARY KEY);
+		CREATE TEMP TABLE test_orders (id SERIAL PRIMARY KEY, customer_id INT);
+		-- 10 customers
+		INSERT INTO test_customers (id) SELECT generate_series(1, 10);
+		-- 30 orders spread across customers 1-10 (3 orders per customer on average)
+		INSERT INTO test_orders (customer_id) VALUES
+			(1), (1), (1), (2), (2), (3), (3), (3), (4), (4),
+			(5), (5), (6), (6), (6), (7), (7), (8), (8), (8),
+			(9), (9), (10), (10), (10), (1), (2), (3), (4), (5);
+	`
+
+	_, err := tc.discoverer.pool.Exec(ctx, setupSQL)
+	if err != nil {
+		t.Fatalf("failed to create test tables: %v", err)
+	}
+
+	// Analyze join from orders.customer_id → customers.id
+	result, err := tc.discoverer.AnalyzeJoin(ctx,
+		"pg_temp", "test_orders", "customer_id",
+		"pg_temp", "test_customers", "id")
+	if err != nil {
+		t.Fatalf("AnalyzeJoin failed: %v", err)
+	}
+
+	// Source→target: all orders reference valid customers → 0 orphans
+	if result.OrphanCount != 0 {
+		t.Errorf("expected 0 source orphans (all orders have valid customer), got %d", result.OrphanCount)
+	}
+
+	// Target→source: all 10 customers have at least one order → 0 reverse orphans
+	if result.ReverseOrphanCount != 0 {
+		t.Errorf("expected 0 reverse orphans (all customers have orders), got %d", result.ReverseOrphanCount)
+	}
+
+	// Join count should be 30 (one per order)
+	if result.JoinCount != 30 {
+		t.Errorf("expected 30 joined rows, got %d", result.JoinCount)
+	}
+
+	// Source matched should be 10 (10 distinct customer_ids in orders)
+	if result.SourceMatched != 10 {
+		t.Errorf("expected 10 source matched (distinct customer_ids), got %d", result.SourceMatched)
+	}
+
+	// Target matched should be 10 (all customers referenced)
+	if result.TargetMatched != 10 {
+		t.Errorf("expected 10 target matched, got %d", result.TargetMatched)
+	}
+
+	// Reverse orphan rate should be 0% - well below 50% threshold
+	if result.TargetMatched > 0 {
+		reverseOrphanRate := float64(result.ReverseOrphanCount) / float64(result.TargetMatched+result.ReverseOrphanCount)
+		if reverseOrphanRate >= 0.5 {
+			t.Errorf("expected reverse orphan rate < 50%% for valid FK, got %.2f%%", reverseOrphanRate*100)
+		}
+	}
+}
+
+// TestSchemaDiscoverer_AnalyzeJoin_PartialFK tests a partial FK where source has some orphans
+// but the reverse check still passes (most target values exist in source).
+func TestSchemaDiscoverer_AnalyzeJoin_PartialFK(t *testing.T) {
+	tc := setupSchemaDiscovererTest(t)
+	ctx := context.Background()
+
+	// Create a partial FK relationship:
+	// - Most source values exist in target (high match rate)
+	// - A few source values are orphans (new customers not yet in lookup)
+	// - Most target values are referenced (low reverse orphan rate)
+	setupSQL := `
+		CREATE TEMP TABLE test_customer_types (id INT PRIMARY KEY, name TEXT);
+		CREATE TEMP TABLE test_customer_records (id SERIAL PRIMARY KEY, type_id INT);
+		-- 5 customer types
+		INSERT INTO test_customer_types (id, name) VALUES
+			(1, 'Individual'), (2, 'Business'), (3, 'Enterprise'), (4, 'Partner'), (5, 'Reseller');
+		-- 50 customers, mostly using types 1-5, but 2 have type_id=6 (orphan)
+		INSERT INTO test_customer_records (type_id) VALUES
+			(1), (1), (1), (1), (1), (1), (1), (1), (1), (1),
+			(2), (2), (2), (2), (2), (2), (2), (2), (2), (2),
+			(3), (3), (3), (3), (3), (3), (3), (3), (3), (3),
+			(4), (4), (4), (4), (4), (4), (4), (4),
+			(5), (5), (5), (5), (5), (5), (5), (5),
+			(6), (6);  -- Orphans: type 6 doesn't exist in customer_types
+	`
+
+	_, err := tc.discoverer.pool.Exec(ctx, setupSQL)
+	if err != nil {
+		t.Fatalf("failed to create test tables: %v", err)
+	}
+
+	result, err := tc.discoverer.AnalyzeJoin(ctx,
+		"pg_temp", "test_customer_records", "type_id",
+		"pg_temp", "test_customer_types", "id")
+	if err != nil {
+		t.Fatalf("AnalyzeJoin failed: %v", err)
+	}
+
+	// Source→target: 1 orphan value (type_id=6 doesn't exist in customer_types)
+	if result.OrphanCount != 1 {
+		t.Errorf("expected 1 source orphan (type_id=6), got %d", result.OrphanCount)
+	}
+
+	// Source matched: 5 distinct values (1-5) that exist in target
+	if result.SourceMatched != 5 {
+		t.Errorf("expected 5 source matched, got %d", result.SourceMatched)
+	}
+
+	// Target→source: 0 reverse orphans (all 5 types are referenced in records)
+	if result.ReverseOrphanCount != 0 {
+		t.Errorf("expected 0 reverse orphans (all types have records), got %d", result.ReverseOrphanCount)
+	}
+
+	// Reverse orphan rate: 0 / 5 = 0% - well below 50% threshold
+	// This partial FK should still be accepted by the service layer
+	if result.TargetMatched > 0 {
+		reverseOrphanRate := float64(result.ReverseOrphanCount) / float64(result.TargetMatched+result.ReverseOrphanCount)
+		if reverseOrphanRate >= 0.5 {
+			t.Errorf("expected reverse orphan rate < 50%% for partial FK, got %.2f%%", reverseOrphanRate*100)
+		}
+	}
+}
+
+// TestSchemaDiscoverer_AnalyzeJoin_BoundaryThreshold tests boundary conditions around
+// the reverse orphan rate threshold. This helps verify the metrics are correct for
+// edge cases that the service layer uses for rejection decisions.
+func TestSchemaDiscoverer_AnalyzeJoin_BoundaryThreshold(t *testing.T) {
+	testCases := []struct {
+		name                      string
+		sourceValues              string // SQL VALUES list
+		targetValues              string // SQL VALUES list
+		expectedReverseOrphans    int64
+		expectedTargetMatched     int64
+		expectedReverseOrphanRate float64
+	}{
+		{
+			name:                      "exactly 50% reverse orphans",
+			sourceValues:              "(1), (2), (3), (4), (5)",                          // 5 values
+			targetValues:              "(1), (2), (3), (4), (5), (6), (7), (8), (9), (10)", // 10 values
+			expectedReverseOrphans:    5,                                                   // 6,7,8,9,10 don't exist in source
+			expectedTargetMatched:     5,                                                   // 1-5 exist in both
+			expectedReverseOrphanRate: 0.5,                                                 // 5/10 = 50%
+		},
+		{
+			name:                      "just under 50% reverse orphans",
+			sourceValues:              "(1), (2), (3), (4), (5), (6)",                     // 6 values
+			targetValues:              "(1), (2), (3), (4), (5), (6), (7), (8), (9), (10)", // 10 values
+			expectedReverseOrphans:    4,                                                   // 7,8,9,10 don't exist in source
+			expectedTargetMatched:     6,                                                   // 1-6 exist in both
+			expectedReverseOrphanRate: 0.4,                                                 // 4/10 = 40%
+		},
+		{
+			name:                      "just over 50% reverse orphans",
+			sourceValues:              "(1), (2), (3), (4)",                               // 4 values
+			targetValues:              "(1), (2), (3), (4), (5), (6), (7), (8), (9), (10)", // 10 values
+			expectedReverseOrphans:    6,                                                   // 5,6,7,8,9,10 don't exist in source
+			expectedTargetMatched:     4,                                                   // 1-4 exist in both
+			expectedReverseOrphanRate: 0.6,                                                 // 6/10 = 60%
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			tc := setupSchemaDiscovererTest(t)
+			ctx := context.Background()
+
+			// Use unique table names per test case to avoid conflicts
+			setupSQL := fmt.Sprintf(`
+				DROP TABLE IF EXISTS test_boundary_source CASCADE;
+				DROP TABLE IF EXISTS test_boundary_target CASCADE;
+				CREATE TEMP TABLE test_boundary_source (val INT);
+				CREATE TEMP TABLE test_boundary_target (val INT PRIMARY KEY);
+				INSERT INTO test_boundary_source (val) VALUES %s;
+				INSERT INTO test_boundary_target (val) VALUES %s;
+			`, testCase.sourceValues, testCase.targetValues)
+
+			_, err := tc.discoverer.pool.Exec(ctx, setupSQL)
+			if err != nil {
+				t.Fatalf("failed to create test tables: %v", err)
+			}
+
+			result, err := tc.discoverer.AnalyzeJoin(ctx,
+				"pg_temp", "test_boundary_source", "val",
+				"pg_temp", "test_boundary_target", "val")
+			if err != nil {
+				t.Fatalf("AnalyzeJoin failed: %v", err)
+			}
+
+			if result.ReverseOrphanCount != testCase.expectedReverseOrphans {
+				t.Errorf("expected %d reverse orphans, got %d", testCase.expectedReverseOrphans, result.ReverseOrphanCount)
+			}
+
+			if result.TargetMatched != testCase.expectedTargetMatched {
+				t.Errorf("expected %d target matched, got %d", testCase.expectedTargetMatched, result.TargetMatched)
+			}
+
+			// Verify the reverse orphan rate calculation
+			totalTarget := result.TargetMatched + result.ReverseOrphanCount
+			actualRate := float64(result.ReverseOrphanCount) / float64(totalTarget)
+			tolerance := 0.01 // 1% tolerance for floating point comparison
+			if actualRate < testCase.expectedReverseOrphanRate-tolerance || actualRate > testCase.expectedReverseOrphanRate+tolerance {
+				t.Errorf("expected reverse orphan rate ~%.2f, got %.2f", testCase.expectedReverseOrphanRate, actualRate)
+			}
+		})
+	}
+}
+
+// TestSchemaDiscoverer_AnalyzeJoin_MaxSourceValue tests that the MaxSourceValue field
+// is correctly populated for semantic validation (detecting small integer columns like ratings).
+func TestSchemaDiscoverer_AnalyzeJoin_MaxSourceValue(t *testing.T) {
+	testCases := []struct {
+		name         string
+		sourceValues string
+		targetValues string
+		expectedMax  *int64
+	}{
+		{
+			name:         "small integers (likely rating)",
+			sourceValues: "(1), (2), (3), (4), (5)",
+			targetValues: "(1), (2), (3), (4), (5), (6), (7), (8), (9), (10)",
+			expectedMax:  ptrInt64(5),
+		},
+		{
+			name:         "larger integers (likely FK)",
+			sourceValues: "(100), (200), (300)",
+			targetValues: "(100), (200), (300), (400), (500)",
+			expectedMax:  ptrInt64(300),
+		},
+		{
+			name:         "non-numeric values",
+			sourceValues: "('abc'), ('def'), ('ghi')",
+			targetValues: "('abc'), ('def'), ('ghi'), ('jkl')",
+			expectedMax:  nil, // Non-numeric should return NULL
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			tc := setupSchemaDiscovererTest(t)
+			ctx := context.Background()
+
+			// Create tables with appropriate types
+			var setupSQL string
+			if testCase.name == "non-numeric values" {
+				setupSQL = fmt.Sprintf(`
+					DROP TABLE IF EXISTS test_max_source CASCADE;
+					DROP TABLE IF EXISTS test_max_target CASCADE;
+					CREATE TEMP TABLE test_max_source (val TEXT);
+					CREATE TEMP TABLE test_max_target (val TEXT);
+					INSERT INTO test_max_source (val) VALUES %s;
+					INSERT INTO test_max_target (val) VALUES %s;
+				`, testCase.sourceValues, testCase.targetValues)
+			} else {
+				setupSQL = fmt.Sprintf(`
+					DROP TABLE IF EXISTS test_max_source CASCADE;
+					DROP TABLE IF EXISTS test_max_target CASCADE;
+					CREATE TEMP TABLE test_max_source (val INT);
+					CREATE TEMP TABLE test_max_target (val INT);
+					INSERT INTO test_max_source (val) VALUES %s;
+					INSERT INTO test_max_target (val) VALUES %s;
+				`, testCase.sourceValues, testCase.targetValues)
+			}
+
+			_, err := tc.discoverer.pool.Exec(ctx, setupSQL)
+			if err != nil {
+				t.Fatalf("failed to create test tables: %v", err)
+			}
+
+			result, err := tc.discoverer.AnalyzeJoin(ctx,
+				"pg_temp", "test_max_source", "val",
+				"pg_temp", "test_max_target", "val")
+			if err != nil {
+				t.Fatalf("AnalyzeJoin failed: %v", err)
+			}
+
+			if testCase.expectedMax == nil {
+				if result.MaxSourceValue != nil {
+					t.Errorf("expected nil MaxSourceValue for non-numeric, got %d", *result.MaxSourceValue)
+				}
+			} else {
+				if result.MaxSourceValue == nil {
+					t.Errorf("expected MaxSourceValue %d, got nil", *testCase.expectedMax)
+				} else if *result.MaxSourceValue != *testCase.expectedMax {
+					t.Errorf("expected MaxSourceValue %d, got %d", *testCase.expectedMax, *result.MaxSourceValue)
+				}
+			}
+		})
+	}
+}
+
+// ptrInt64 is a helper to create *int64 from int64 value
+func ptrInt64(v int64) *int64 {
+	return &v
 }
 
 func TestSchemaDiscoverer_Close(t *testing.T) {
