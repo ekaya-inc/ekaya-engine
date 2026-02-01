@@ -1309,6 +1309,10 @@ func (m *mockSchemaRepoForGrouping) ClearColumnFeaturesByProject(ctx context.Con
 	return nil
 }
 
+func (m *mockSchemaRepoForGrouping) GetRelationshipsByMethod(ctx context.Context, projectID, datasourceID uuid.UUID, method string) ([]*models.SchemaRelationship, error) {
+	return nil, nil
+}
+
 var _ repositories.SchemaRepository = (*mockSchemaRepoForGrouping)(nil)
 
 func TestIdentifyEntitiesFromDDL_GroupsSimilarTables(t *testing.T) {

@@ -443,6 +443,10 @@ func (r *testColEnrichmentSchemaRepo) ClearColumnFeaturesByProject(ctx context.C
 	return nil
 }
 
+func (r *testColEnrichmentSchemaRepo) GetRelationshipsByMethod(ctx context.Context, projectID, datasourceID uuid.UUID, method string) ([]*models.SchemaRelationship, error) {
+	return nil, nil
+}
+
 // Mock datasource service for testing
 type testColEnrichmentDatasourceService struct{}
 

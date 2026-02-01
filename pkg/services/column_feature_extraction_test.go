@@ -823,6 +823,10 @@ func (m *mockSchemaRepoForFeatureExtraction) ClearColumnFeaturesByProject(ctx co
 	return nil
 }
 
+func (m *mockSchemaRepoForFeatureExtraction) GetRelationshipsByMethod(ctx context.Context, projectID, datasourceID uuid.UUID, method string) ([]*models.SchemaRelationship, error) {
+	return nil, nil
+}
+
 func TestRunPhase1DataCollection(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()

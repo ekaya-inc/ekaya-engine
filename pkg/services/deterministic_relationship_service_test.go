@@ -1392,9 +1392,10 @@ func (m *mockTestRelationshipRepo) Delete(ctx context.Context, id uuid.UUID) err
 }
 
 type mockTestSchemaRepo struct {
-	tables        []*models.SchemaTable
-	columns       []*models.SchemaColumn
-	relationships []*models.SchemaRelationship
+	tables                []*models.SchemaTable
+	columns               []*models.SchemaColumn
+	relationships         []*models.SchemaRelationship
+	upsertedRelationships []*models.SchemaRelationship // Tracks relationships upserted via UpsertRelationship
 }
 
 func (m *mockTestSchemaRepo) GetTables(ctx context.Context, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
@@ -1629,6 +1630,8 @@ func (m *mockTestSchemaRepo) GetRelationshipByColumns(ctx context.Context, sourc
 }
 
 func (m *mockTestSchemaRepo) UpsertRelationship(ctx context.Context, rel *models.SchemaRelationship) error {
+	// Track upserted relationships
+	m.upsertedRelationships = append(m.upsertedRelationships, rel)
 	return nil
 }
 
@@ -1697,6 +1700,10 @@ func (m *mockTestSchemaRepo) SelectAllTablesAndColumns(ctx context.Context, proj
 }
 func (m *mockTestSchemaRepo) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
 	return nil
+}
+
+func (m *mockTestSchemaRepo) GetRelationshipsByMethod(ctx context.Context, projectID, datasourceID uuid.UUID, method string) ([]*models.SchemaRelationship, error) {
+	return nil, nil
 }
 
 // TestPKMatch_SmallIntegerValues tests that columns with all small integer values (1-10)
@@ -2447,32 +2454,23 @@ func TestPKMatch_NoGarbageRelationships(t *testing.T) {
 }
 
 // TestFKDiscovery_ManualRelationshipType tests that schema relationships with
-// relationship_type="manual" create entity relationships with detection_method="manual"
+// relationship_type="manual" are skipped by Phase 2 (only FK relationships are processed).
+// Manual relationships retain their original type and are not updated during FK discovery.
 func TestFKDiscovery_ManualRelationshipType(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 	ontologyID := uuid.New()
 	userEntityID := uuid.New()
-	channelEntityID := uuid.New()
 
 	// Create mocks
 	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
-
-	// Add channel entity
-	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
-		ID:            channelEntityID,
-		OntologyID:    ontologyID,
-		Name:          "channel",
-		PrimarySchema: "public",
-		PrimaryTable:  "channels",
-	})
 
 	usersTableID := uuid.New()
 	channelsTableID := uuid.New()
 	userIDColumnID := uuid.New()
 	ownerIDColumnID := uuid.New()
 
-	// Setup tables with columns
+	// Setup tables with columns (entities not required since FKDiscovery no longer depends on them)
 	mocks.schemaRepo.tables = []*models.SchemaTable{
 		{
 			ID:         usersTableID,
@@ -2504,7 +2502,9 @@ func TestFKDiscovery_ManualRelationshipType(t *testing.T) {
 		},
 	}
 
-	// Add manual schema relationship
+	// Add manual schema relationship (no inference_method set, but has RelationshipType=manual)
+	// Phase 2 only processes FK relationships (inference_method='foreign_key'), so manual ones are skipped
+	manualMethod := models.RelationshipTypeManual
 	mocks.schemaRepo.relationships = []*models.SchemaRelationship{
 		{
 			ID:               uuid.New(),
@@ -2514,6 +2514,7 @@ func TestFKDiscovery_ManualRelationshipType(t *testing.T) {
 			TargetTableID:    channelsTableID,
 			TargetColumnID:   ownerIDColumnID,
 			RelationshipType: models.RelationshipTypeManual, // Manual relationship
+			InferenceMethod:  &manualMethod,                 // Manual inference method
 		},
 	}
 
@@ -2533,49 +2534,28 @@ func TestFKDiscovery_ManualRelationshipType(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify: 1 FK relationship discovered (creates 2 rows: forward + reverse)
-	if result.FKRelationships != 1 {
-		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
+	// Verify: 0 FK relationships discovered (manual relationships are skipped by Phase 2)
+	if result.FKRelationships != 0 {
+		t.Errorf("expected 0 FK relationships (manual should be skipped), got %d", result.FKRelationships)
 	}
 
-	// Bidirectional: 2 relationships created (forward + reverse)
-	if len(mocks.relationshipRepo.created) != 2 {
-		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
-	}
-
-	// Verify: forward relationship has detection_method="manual"
-	forwardRel := mocks.relationshipRepo.created[0]
-	if forwardRel.DetectionMethod != models.DetectionMethodManual {
-		t.Errorf("expected forward DetectionMethod=%q, got %q", models.DetectionMethodManual, forwardRel.DetectionMethod)
-	}
-
-	// Verify: reverse relationship also has detection_method="manual"
-	reverseRel := mocks.relationshipRepo.created[1]
-	if reverseRel.DetectionMethod != models.DetectionMethodManual {
-		t.Errorf("expected reverse DetectionMethod=%q, got %q", models.DetectionMethodManual, reverseRel.DetectionMethod)
+	// Verify: no SchemaRelationships were upserted (manual relationships are not processed)
+	if len(mocks.schemaRepo.upsertedRelationships) != 0 {
+		t.Fatalf("expected 0 SchemaRelationships to be upserted, got %d", len(mocks.schemaRepo.upsertedRelationships))
 	}
 }
 
 // TestFKDiscovery_ForeignKeyRelationshipType tests that schema relationships with
-// relationship_type="fk" create entity relationships with detection_method="foreign_key"
+// inference_method="foreign_key" are processed by Phase 2 and updated with cardinality.
+// These relationships are created during schema import and updated during FK discovery.
 func TestFKDiscovery_ForeignKeyRelationshipType(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 	ontologyID := uuid.New()
 	userEntityID := uuid.New()
-	orderEntityID := uuid.New()
 
-	// Create mocks
+	// Create mocks (entities not required since FKDiscovery no longer depends on them)
 	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
-
-	// Add order entity
-	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
-		ID:            orderEntityID,
-		OntologyID:    ontologyID,
-		Name:          "order",
-		PrimarySchema: "public",
-		PrimaryTable:  "orders",
-	})
 
 	usersTableID := uuid.New()
 	ordersTableID := uuid.New()
@@ -2614,7 +2594,8 @@ func TestFKDiscovery_ForeignKeyRelationshipType(t *testing.T) {
 		},
 	}
 
-	// Add FK schema relationship
+	// Add FK schema relationship with inference_method='foreign_key'
+	fkMethod := models.InferenceMethodForeignKey
 	mocks.schemaRepo.relationships = []*models.SchemaRelationship{
 		{
 			ID:               uuid.New(),
@@ -2624,6 +2605,7 @@ func TestFKDiscovery_ForeignKeyRelationshipType(t *testing.T) {
 			TargetTableID:    usersTableID,
 			TargetColumnID:   userIDColumnID,
 			RelationshipType: models.RelationshipTypeFK, // FK from DDL
+			InferenceMethod:  &fkMethod,
 		},
 	}
 
@@ -2643,31 +2625,28 @@ func TestFKDiscovery_ForeignKeyRelationshipType(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify: 1 FK relationship discovered (creates 2 rows: forward + reverse)
+	// Verify: 1 FK relationship processed
 	if result.FKRelationships != 1 {
 		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
 	}
 
-	// Bidirectional: 2 relationships created (forward + reverse)
-	if len(mocks.relationshipRepo.created) != 2 {
-		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
+	// Verify: 1 SchemaRelationship upserted (unidirectional, not bidirectional)
+	if len(mocks.schemaRepo.upsertedRelationships) != 1 {
+		t.Fatalf("expected 1 SchemaRelationship to be upserted, got %d", len(mocks.schemaRepo.upsertedRelationships))
 	}
 
-	// Verify: forward relationship has detection_method="foreign_key"
-	forwardRel := mocks.relationshipRepo.created[0]
-	if forwardRel.DetectionMethod != models.DetectionMethodForeignKey {
-		t.Errorf("expected forward DetectionMethod=%q, got %q", models.DetectionMethodForeignKey, forwardRel.DetectionMethod)
+	// Verify: upserted relationship has IsValidated=true and cardinality computed
+	updatedRel := mocks.schemaRepo.upsertedRelationships[0]
+	if !updatedRel.IsValidated {
+		t.Errorf("expected IsValidated=true, got false")
 	}
-
-	// Verify: reverse relationship also has detection_method="foreign_key"
-	reverseRel := mocks.relationshipRepo.created[1]
-	if reverseRel.DetectionMethod != models.DetectionMethodForeignKey {
-		t.Errorf("expected reverse DetectionMethod=%q, got %q", models.DetectionMethodForeignKey, reverseRel.DetectionMethod)
+	if updatedRel.Cardinality == "" {
+		t.Errorf("expected Cardinality to be set, got empty string")
 	}
 }
 
 // TestFKDiscovery_SelfReferentialRelationship tests that self-referential FK constraints
-// (e.g., employee.manager_id → employee.id) are discovered as entity relationships.
+// (e.g., employee.manager_id → employee.id) are processed correctly.
 // These represent hierarchies/trees and are intentional design patterns.
 func TestFKDiscovery_SelfReferentialRelationship(t *testing.T) {
 	projectID := uuid.New()
@@ -2675,19 +2654,8 @@ func TestFKDiscovery_SelfReferentialRelationship(t *testing.T) {
 	ontologyID := uuid.New()
 	employeeEntityID := uuid.New()
 
-	// Create mocks
+	// Create mocks (entities not required since FKDiscovery no longer depends on them)
 	mocks := setupMocks(projectID, ontologyID, datasourceID, employeeEntityID)
-
-	// Replace default user entity with employee entity that owns the employees table
-	mocks.entityRepo.entities = []*models.OntologyEntity{
-		{
-			ID:            employeeEntityID,
-			OntologyID:    ontologyID,
-			Name:          "employee",
-			PrimarySchema: "public",
-			PrimaryTable:  "employees",
-		},
-	}
 
 	employeesTableID := uuid.New()
 	idColumnID := uuid.New()
@@ -2719,6 +2687,7 @@ func TestFKDiscovery_SelfReferentialRelationship(t *testing.T) {
 	}
 
 	// Add self-referential FK schema relationship (manager_id → id in same table)
+	fkMethod := models.InferenceMethodForeignKey
 	mocks.schemaRepo.relationships = []*models.SchemaRelationship{
 		{
 			ID:               uuid.New(),
@@ -2728,6 +2697,7 @@ func TestFKDiscovery_SelfReferentialRelationship(t *testing.T) {
 			TargetTableID:    employeesTableID, // Same table
 			TargetColumnID:   idColumnID,       // References own PK
 			RelationshipType: models.RelationshipTypeFK,
+			InferenceMethod:  &fkMethod,
 		},
 	}
 
@@ -2747,40 +2717,32 @@ func TestFKDiscovery_SelfReferentialRelationship(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify: 1 FK relationship discovered (creates 2 rows: forward + reverse)
+	// Verify: 1 FK relationship processed
 	if result.FKRelationships != 1 {
 		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
 	}
 
-	// Bidirectional: 2 relationships created (forward + reverse)
-	if len(mocks.relationshipRepo.created) != 2 {
-		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
+	// Verify: 1 SchemaRelationship upserted (unidirectional)
+	if len(mocks.schemaRepo.upsertedRelationships) != 1 {
+		t.Fatalf("expected 1 SchemaRelationship to be upserted, got %d", len(mocks.schemaRepo.upsertedRelationships))
 	}
 
-	// Verify: both source and target are the same entity (self-reference)
-	forwardRel := mocks.relationshipRepo.created[0]
-	if forwardRel.SourceEntityID != employeeEntityID {
-		t.Errorf("expected forward source entity to be employee, got %v", forwardRel.SourceEntityID)
+	// Verify: self-referential relationship is correctly stored
+	updatedRel := mocks.schemaRepo.upsertedRelationships[0]
+	if updatedRel.SourceTableID != employeesTableID {
+		t.Errorf("expected source table to be employees, got %v", updatedRel.SourceTableID)
 	}
-	if forwardRel.TargetEntityID != employeeEntityID {
-		t.Errorf("expected forward target entity to be employee, got %v", forwardRel.TargetEntityID)
+	if updatedRel.TargetTableID != employeesTableID {
+		t.Errorf("expected target table to be employees (self-reference), got %v", updatedRel.TargetTableID)
 	}
-
-	// Verify columns
-	if forwardRel.SourceColumnName != "manager_id" {
-		t.Errorf("expected forward source column 'manager_id', got %q", forwardRel.SourceColumnName)
+	if updatedRel.SourceColumnID != managerIDColumnID {
+		t.Errorf("expected source column to be manager_id, got %v", updatedRel.SourceColumnID)
 	}
-	if forwardRel.TargetColumnName != "id" {
-		t.Errorf("expected forward target column 'id', got %q", forwardRel.TargetColumnName)
+	if updatedRel.TargetColumnID != idColumnID {
+		t.Errorf("expected target column to be id, got %v", updatedRel.TargetColumnID)
 	}
-
-	// Verify reverse relationship
-	reverseRel := mocks.relationshipRepo.created[1]
-	if reverseRel.SourceEntityID != employeeEntityID || reverseRel.TargetEntityID != employeeEntityID {
-		t.Errorf("expected reverse to be self-referential, got source=%v target=%v", reverseRel.SourceEntityID, reverseRel.TargetEntityID)
-	}
-	if reverseRel.SourceColumnName != "id" || reverseRel.TargetColumnName != "manager_id" {
-		t.Errorf("expected reverse columns id→manager_id, got %s→%s", reverseRel.SourceColumnName, reverseRel.TargetColumnName)
+	if !updatedRel.IsValidated {
+		t.Errorf("expected IsValidated=true, got false")
 	}
 }
 
@@ -2892,7 +2854,6 @@ func TestPKMatch_LowCardinalityRatio(t *testing.T) {
 // TestFKDiscovery_LegitimateFK_EmailNotDiscovered verifies that:
 // 1. Actual DB FK constraints are discovered (account_authentications.account_id → accounts.account_id)
 // 2. email→email is NOT discovered (FK discovery only follows FK constraints, not column name patterns)
-// 3. Reversed direction is NOT discovered (FK relationships preserve the constraint direction)
 //
 // This is the end-to-end validation test for BUG-4 fixes.
 func TestFKDiscovery_LegitimateFK_EmailNotDiscovered(t *testing.T) {
@@ -2900,28 +2861,9 @@ func TestFKDiscovery_LegitimateFK_EmailNotDiscovered(t *testing.T) {
 	datasourceID := uuid.New()
 	ontologyID := uuid.New()
 	accountEntityID := uuid.New()
-	authEntityID := uuid.New()
 
-	// Create mocks
+	// Create mocks (entities not required since FKDiscovery no longer depends on them)
 	mocks := setupMocks(projectID, ontologyID, datasourceID, accountEntityID)
-
-	// FK discovery requires entities for BOTH tables (source and target)
-	mocks.entityRepo.entities = []*models.OntologyEntity{
-		{
-			ID:            accountEntityID,
-			OntologyID:    ontologyID,
-			Name:          "account",
-			PrimarySchema: "public",
-			PrimaryTable:  "accounts",
-		},
-		{
-			ID:            authEntityID,
-			OntologyID:    ontologyID,
-			Name:          "account_authentication",
-			PrimarySchema: "public",
-			PrimaryTable:  "account_authentications",
-		},
-	}
 
 	accountsTableID := uuid.New()
 	accountAuthTableID := uuid.New()
@@ -2996,6 +2938,7 @@ func TestFKDiscovery_LegitimateFK_EmailNotDiscovered(t *testing.T) {
 
 	// Add actual FK schema relationship: account_authentications.account_id → accounts.account_id
 	// This simulates what the schema discovery would find from a FOREIGN KEY constraint
+	fkMethod := models.InferenceMethodForeignKey
 	mocks.schemaRepo.relationships = []*models.SchemaRelationship{
 		{
 			ID:               uuid.New(),
@@ -3005,8 +2948,13 @@ func TestFKDiscovery_LegitimateFK_EmailNotDiscovered(t *testing.T) {
 			TargetTableID:    accountsTableID,       // PK holder
 			TargetColumnID:   accountIDColumnID,     // PK column
 			RelationshipType: models.RelationshipTypeFK,
+			InferenceMethod:  &fkMethod,
 		},
 	}
+
+	// Suppress unused variable warnings for email column IDs used in test setup
+	_ = accountEmailColumnID
+	_ = authEmailColumnID
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
@@ -3025,51 +2973,32 @@ func TestFKDiscovery_LegitimateFK_EmailNotDiscovered(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify: 1 FK relationship discovered (the legitimate one)
+	// Verify: 1 FK relationship processed
 	if result.FKRelationships != 1 {
 		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
 	}
 
-	// Bidirectional: 2 relationships created (forward + reverse)
-	if len(mocks.relationshipRepo.created) != 2 {
-		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
+	// Verify: 1 SchemaRelationship upserted (unidirectional)
+	if len(mocks.schemaRepo.upsertedRelationships) != 1 {
+		t.Fatalf("expected 1 SchemaRelationship to be upserted, got %d", len(mocks.schemaRepo.upsertedRelationships))
 	}
 
-	// Verify: forward relationship is account_authentications.account_id → accounts.account_id
-	forwardRel := mocks.relationshipRepo.created[0]
-	if forwardRel.SourceColumnName != "account_id" {
-		t.Errorf("expected forward source column 'account_id', got %q", forwardRel.SourceColumnName)
+	// Verify: upserted relationship is account_authentications.account_id → accounts.account_id
+	updatedRel := mocks.schemaRepo.upsertedRelationships[0]
+	if updatedRel.SourceTableID != accountAuthTableID {
+		t.Errorf("expected source table 'account_authentications', got table ID %v", updatedRel.SourceTableID)
 	}
-	if forwardRel.TargetColumnName != "account_id" {
-		t.Errorf("expected forward target column 'account_id', got %q", forwardRel.TargetColumnName)
+	if updatedRel.TargetTableID != accountsTableID {
+		t.Errorf("expected target table 'accounts', got table ID %v", updatedRel.TargetTableID)
 	}
-	if forwardRel.SourceColumnTable != "account_authentications" {
-		t.Errorf("expected forward source table 'account_authentications', got %q", forwardRel.SourceColumnTable)
+	if updatedRel.SourceColumnID != authAccountIDColumnID {
+		t.Errorf("expected source column 'account_id', got column ID %v", updatedRel.SourceColumnID)
 	}
-	if forwardRel.TargetColumnTable != "accounts" {
-		t.Errorf("expected forward target table 'accounts', got %q", forwardRel.TargetColumnTable)
+	if updatedRel.TargetColumnID != accountIDColumnID {
+		t.Errorf("expected target column 'account_id', got column ID %v", updatedRel.TargetColumnID)
 	}
-	if forwardRel.DetectionMethod != models.DetectionMethodForeignKey {
-		t.Errorf("expected DetectionMethod=%q, got %q", models.DetectionMethodForeignKey, forwardRel.DetectionMethod)
-	}
-
-	// Verify: NO email→email relationships were created
-	// FK discovery only follows actual FK constraints from DDL, so email columns
-	// without FK constraints won't be discovered - this validates BUG-4a
-	for _, rel := range mocks.relationshipRepo.created {
-		if rel.SourceColumnName == "email" && rel.TargetColumnName == "email" {
-			t.Errorf("email→email relationship should NOT be discovered (BUG-4a): %s.%s → %s.%s",
-				rel.SourceColumnTable, rel.SourceColumnName,
-				rel.TargetColumnTable, rel.TargetColumnName)
-		}
-	}
-
-	// Verify: The reverse relationship is the correct direction for bidirectional navigation
-	// (not a spurious "reversed FK direction" relationship)
-	reverseRel := mocks.relationshipRepo.created[1]
-	if reverseRel.SourceColumnTable != "accounts" || reverseRel.TargetColumnTable != "account_authentications" {
-		t.Errorf("expected reverse to be accounts → account_authentications, got %s → %s",
-			reverseRel.SourceColumnTable, reverseRel.TargetColumnTable)
+	if !updatedRel.IsValidated {
+		t.Errorf("expected IsValidated=true, got false")
 	}
 }
 
@@ -4491,15 +4420,14 @@ func TestPKMatch_IdentifierColumnsExemptFromCardinalityFilter(t *testing.T) {
 }
 
 // TestFKDiscovery_Cardinality verifies that FK relationships compute cardinality
-// from actual data (via AnalyzeJoin) and reverse relationships get inverted cardinality.
+// from actual data (via AnalyzeJoin) and store it in SchemaRelationship.
 func TestFKDiscovery_Cardinality(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 	ontologyID := uuid.New()
 	userEntityID := uuid.New()
-	orderEntityID := uuid.New()
 
-	// Create mocks
+	// Create mocks (entities not required since FKDiscovery no longer depends on them)
 	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
 
 	// Configure AnalyzeJoin to return N:1 cardinality pattern
@@ -4515,15 +4443,6 @@ func TestFKDiscovery_Cardinality(t *testing.T) {
 			OrphanCount:   0,   // All FK values have matching PKs
 		}, nil
 	}
-
-	// Add order entity
-	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
-		ID:            orderEntityID,
-		OntologyID:    ontologyID,
-		Name:          "order",
-		PrimarySchema: "public",
-		PrimaryTable:  "orders",
-	})
 
 	usersTableID := uuid.New()
 	ordersTableID := uuid.New()
@@ -4562,7 +4481,8 @@ func TestFKDiscovery_Cardinality(t *testing.T) {
 		},
 	}
 
-	// Add FK relationship: orders.user_id → users.id
+	// Add FK relationship: orders.user_id → users.id with inference_method='foreign_key'
+	fkMethod := models.InferenceMethodForeignKey
 	mocks.schemaRepo.relationships = []*models.SchemaRelationship{
 		{
 			ID:               uuid.New(),
@@ -4572,6 +4492,7 @@ func TestFKDiscovery_Cardinality(t *testing.T) {
 			TargetTableID:    usersTableID,
 			TargetColumnID:   userIDColumnID,
 			RelationshipType: models.RelationshipTypeFK,
+			InferenceMethod:  &fkMethod,
 		},
 	}
 
@@ -4591,28 +4512,23 @@ func TestFKDiscovery_Cardinality(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify: 1 FK relationship discovered (creates 2 rows: forward + reverse)
+	// Verify: 1 FK relationship processed
 	if result.FKRelationships != 1 {
 		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
 	}
 
-	// Bidirectional: 2 relationships created (forward + reverse)
-	if len(mocks.relationshipRepo.created) != 2 {
-		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
+	// Verify: 1 SchemaRelationship upserted (unidirectional)
+	if len(mocks.schemaRepo.upsertedRelationships) != 1 {
+		t.Fatalf("expected 1 SchemaRelationship to be upserted, got %d", len(mocks.schemaRepo.upsertedRelationships))
 	}
 
-	// Verify forward relationship: orders → users has cardinality N:1
-	// (many orders belong to one user, computed from AnalyzeJoin data)
-	forwardRel := mocks.relationshipRepo.created[0]
-	if forwardRel.Cardinality != models.CardinalityNTo1 {
-		t.Errorf("expected forward cardinality=%q, got %q", models.CardinalityNTo1, forwardRel.Cardinality)
+	// Verify: relationship has cardinality N:1 (many orders belong to one user)
+	updatedRel := mocks.schemaRepo.upsertedRelationships[0]
+	if updatedRel.Cardinality != models.CardinalityNTo1 {
+		t.Errorf("expected cardinality=%q, got %q", models.CardinalityNTo1, updatedRel.Cardinality)
 	}
-
-	// Verify reverse relationship: users → orders has cardinality 1:N
-	// (one user has many orders, inverse of forward cardinality)
-	reverseRel := mocks.relationshipRepo.created[1]
-	if reverseRel.Cardinality != models.Cardinality1ToN {
-		t.Errorf("expected reverse cardinality=%q, got %q", models.Cardinality1ToN, reverseRel.Cardinality)
+	if !updatedRel.IsValidated {
+		t.Errorf("expected IsValidated=true, got false")
 	}
 }
 
@@ -4623,9 +4539,8 @@ func TestFKDiscovery_Cardinality_1to1(t *testing.T) {
 	datasourceID := uuid.New()
 	ontologyID := uuid.New()
 	userEntityID := uuid.New()
-	profileEntityID := uuid.New()
 
-	// Create mocks
+	// Create mocks (entities not required since FKDiscovery no longer depends on them)
 	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
 
 	// Configure AnalyzeJoin to return 1:1 cardinality pattern
@@ -4641,15 +4556,6 @@ func TestFKDiscovery_Cardinality_1to1(t *testing.T) {
 			OrphanCount:   0,  // All FK values have matching PKs
 		}, nil
 	}
-
-	// Add profile entity
-	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
-		ID:            profileEntityID,
-		OntologyID:    ontologyID,
-		Name:          "profile",
-		PrimarySchema: "public",
-		PrimaryTable:  "profiles",
-	})
 
 	usersTableID := uuid.New()
 	profilesTableID := uuid.New()
@@ -4688,7 +4594,8 @@ func TestFKDiscovery_Cardinality_1to1(t *testing.T) {
 		},
 	}
 
-	// Add FK relationship: profiles.user_id → users.id
+	// Add FK relationship: profiles.user_id → users.id with inference_method='foreign_key'
+	fkMethod := models.InferenceMethodForeignKey
 	mocks.schemaRepo.relationships = []*models.SchemaRelationship{
 		{
 			ID:               uuid.New(),
@@ -4698,6 +4605,7 @@ func TestFKDiscovery_Cardinality_1to1(t *testing.T) {
 			TargetTableID:    usersTableID,
 			TargetColumnID:   userIDColumnID,
 			RelationshipType: models.RelationshipTypeFK,
+			InferenceMethod:  &fkMethod,
 		},
 	}
 
@@ -4721,48 +4629,32 @@ func TestFKDiscovery_Cardinality_1to1(t *testing.T) {
 		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
 	}
 
-	if len(mocks.relationshipRepo.created) != 2 {
-		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
+	if len(mocks.schemaRepo.upsertedRelationships) != 1 {
+		t.Fatalf("expected 1 SchemaRelationship to be upserted, got %d", len(mocks.schemaRepo.upsertedRelationships))
 	}
 
-	// Verify forward relationship: profiles → users has cardinality 1:1
-	forwardRel := mocks.relationshipRepo.created[0]
-	if forwardRel.Cardinality != models.Cardinality1To1 {
-		t.Errorf("expected forward cardinality=%q, got %q", models.Cardinality1To1, forwardRel.Cardinality)
-	}
-
-	// Verify reverse relationship: users → profiles has cardinality 1:1 (symmetric)
-	reverseRel := mocks.relationshipRepo.created[1]
-	if reverseRel.Cardinality != models.Cardinality1To1 {
-		t.Errorf("expected reverse cardinality=%q, got %q", models.Cardinality1To1, reverseRel.Cardinality)
+	// Verify: relationship has cardinality 1:1 (unique on both sides)
+	updatedRel := mocks.schemaRepo.upsertedRelationships[0]
+	if updatedRel.Cardinality != models.Cardinality1To1 {
+		t.Errorf("expected cardinality=%q, got %q", models.Cardinality1To1, updatedRel.Cardinality)
 	}
 }
 
 // TestFKDiscovery_Cardinality_FallbackOnError verifies that when AnalyzeJoin fails,
-// the FK relationship still gets created with the default N:1 cardinality.
+// the FK relationship still gets updated with the default N:1 cardinality.
 func TestFKDiscovery_Cardinality_FallbackOnError(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 	ontologyID := uuid.New()
 	userEntityID := uuid.New()
-	orderEntityID := uuid.New()
 
-	// Create mocks
+	// Create mocks (entities not required since FKDiscovery no longer depends on them)
 	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
 
 	// Configure AnalyzeJoin to return an error (e.g., table doesn't exist, permission denied)
 	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
 		return nil, fmt.Errorf("permission denied on table")
 	}
-
-	// Add order entity
-	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
-		ID:            orderEntityID,
-		OntologyID:    ontologyID,
-		Name:          "order",
-		PrimarySchema: "public",
-		PrimaryTable:  "orders",
-	})
 
 	usersTableID := uuid.New()
 	ordersTableID := uuid.New()
@@ -4801,7 +4693,8 @@ func TestFKDiscovery_Cardinality_FallbackOnError(t *testing.T) {
 		},
 	}
 
-	// Add FK relationship: orders.user_id → users.id
+	// Add FK relationship: orders.user_id → users.id with inference_method='foreign_key'
+	fkMethod := models.InferenceMethodForeignKey
 	mocks.schemaRepo.relationships = []*models.SchemaRelationship{
 		{
 			ID:               uuid.New(),
@@ -4811,6 +4704,7 @@ func TestFKDiscovery_Cardinality_FallbackOnError(t *testing.T) {
 			TargetTableID:    usersTableID,
 			TargetColumnID:   userIDColumnID,
 			RelationshipType: models.RelationshipTypeFK,
+			InferenceMethod:  &fkMethod,
 		},
 	}
 
@@ -4835,20 +4729,14 @@ func TestFKDiscovery_Cardinality_FallbackOnError(t *testing.T) {
 		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
 	}
 
-	if len(mocks.relationshipRepo.created) != 2 {
-		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
+	if len(mocks.schemaRepo.upsertedRelationships) != 1 {
+		t.Fatalf("expected 1 SchemaRelationship to be upserted, got %d", len(mocks.schemaRepo.upsertedRelationships))
 	}
 
-	// Verify forward relationship: falls back to N:1 when AnalyzeJoin fails
-	forwardRel := mocks.relationshipRepo.created[0]
-	if forwardRel.Cardinality != models.CardinalityNTo1 {
-		t.Errorf("expected forward cardinality=%q (fallback), got %q", models.CardinalityNTo1, forwardRel.Cardinality)
-	}
-
-	// Verify reverse relationship: falls back to 1:N (inverse of N:1)
-	reverseRel := mocks.relationshipRepo.created[1]
-	if reverseRel.Cardinality != models.Cardinality1ToN {
-		t.Errorf("expected reverse cardinality=%q (fallback), got %q", models.Cardinality1ToN, reverseRel.Cardinality)
+	// Verify: relationship falls back to N:1 when AnalyzeJoin fails
+	updatedRel := mocks.schemaRepo.upsertedRelationships[0]
+	if updatedRel.Cardinality != models.CardinalityNTo1 {
+		t.Errorf("expected cardinality=%q (fallback), got %q", models.CardinalityNTo1, updatedRel.Cardinality)
 	}
 }
 
@@ -5150,26 +5038,16 @@ func TestPKMatch_InfersCardinalityFromJoinAnalysis(t *testing.T) {
 	}
 }
 
-// TestFKDiscovery_FromColumnFeatures tests that FK relationships are created from
+// TestFKDiscovery_FromColumnFeatures tests that SchemaRelationship records are created from
 // columns where ColumnFeatureExtraction Phase 4 has already resolved FK targets.
 func TestFKDiscovery_FromColumnFeatures(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 	ontologyID := uuid.New()
 	userEntityID := uuid.New()
-	orderEntityID := uuid.New()
 
-	// Create mocks
+	// Create mocks (entities not required since FKDiscovery no longer depends on them)
 	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
-
-	// Add order entity
-	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
-		ID:            orderEntityID,
-		OntologyID:    ontologyID,
-		Name:          "order",
-		PrimarySchema: "public",
-		PrimaryTable:  "orders",
-	})
 
 	usersTableID := uuid.New()
 	ordersTableID := uuid.New()
@@ -5253,71 +5131,59 @@ func TestFKDiscovery_FromColumnFeatures(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify: 1 FK relationship discovered from ColumnFeatures (creates 2 rows: forward + reverse)
+	// Verify: 1 FK relationship discovered from ColumnFeatures
 	if result.FKRelationships != 1 {
 		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
 	}
 
-	// Bidirectional: 2 relationships created (forward + reverse)
-	if len(mocks.relationshipRepo.created) != 2 {
-		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
+	// Verify: 1 SchemaRelationship upserted (unidirectional)
+	if len(mocks.schemaRepo.upsertedRelationships) != 1 {
+		t.Fatalf("expected 1 SchemaRelationship to be upserted, got %d", len(mocks.schemaRepo.upsertedRelationships))
 	}
 
-	// Find the forward relationship (order -> user via buyer_id)
-	var forwardRel *models.EntityRelationship
-	for _, rel := range mocks.relationshipRepo.created {
-		if rel.SourceEntityID == orderEntityID && rel.TargetEntityID == userEntityID {
-			forwardRel = rel
-			break
+	// Verify the upserted relationship
+	rel := mocks.schemaRepo.upsertedRelationships[0]
+
+	// Verify: inference_method="column_features"
+	if rel.InferenceMethod == nil || *rel.InferenceMethod != models.InferenceMethodColumnFeatures {
+		var method string
+		if rel.InferenceMethod != nil {
+			method = *rel.InferenceMethod
 		}
-	}
-
-	if forwardRel == nil {
-		t.Fatal("forward relationship (order -> user) not found")
-	}
-
-	// Verify: forward relationship has detection_method="data_overlap"
-	if forwardRel.DetectionMethod != models.DetectionMethodDataOverlap {
-		t.Errorf("expected forward DetectionMethod=%q, got %q", models.DetectionMethodDataOverlap, forwardRel.DetectionMethod)
+		t.Errorf("expected InferenceMethod=%q, got %q", models.InferenceMethodColumnFeatures, method)
 	}
 
 	// Verify: confidence matches the ColumnFeatures FK confidence
-	if forwardRel.Confidence != 0.95 {
-		t.Errorf("expected confidence=0.95, got %f", forwardRel.Confidence)
+	if rel.Confidence != 0.95 {
+		t.Errorf("expected confidence=0.95, got %f", rel.Confidence)
 	}
 
-	// Verify: source column info
-	if forwardRel.SourceColumnTable != "orders" || forwardRel.SourceColumnName != "buyer_id" {
-		t.Errorf("expected source=orders.buyer_id, got %s.%s", forwardRel.SourceColumnTable, forwardRel.SourceColumnName)
+	// Verify: source/target table/column IDs
+	if rel.SourceTableID != ordersTableID {
+		t.Errorf("expected source table ID=%v, got %v", ordersTableID, rel.SourceTableID)
 	}
-
-	// Verify: target column info
-	if forwardRel.TargetColumnTable != "users" || forwardRel.TargetColumnName != "id" {
-		t.Errorf("expected target=users.id, got %s.%s", forwardRel.TargetColumnTable, forwardRel.TargetColumnName)
+	if rel.SourceColumnID != buyerIDColumnID {
+		t.Errorf("expected source column ID=%v, got %v", buyerIDColumnID, rel.SourceColumnID)
+	}
+	if rel.TargetTableID != usersTableID {
+		t.Errorf("expected target table ID=%v, got %v", usersTableID, rel.TargetTableID)
+	}
+	if rel.TargetColumnID != userIDColumnID {
+		t.Errorf("expected target column ID=%v, got %v", userIDColumnID, rel.TargetColumnID)
 	}
 }
 
 // TestFKDiscovery_ColumnFeaturesAndSchemaFK_Deduplication tests that when both
 // ColumnFeatures and schema FK constraints point to the same relationship,
-// only one relationship is created (via upsert semantics).
+// both are processed (via upsert semantics, the DB would deduplicate them).
 func TestFKDiscovery_ColumnFeaturesAndSchemaFK_Deduplication(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 	ontologyID := uuid.New()
 	userEntityID := uuid.New()
-	orderEntityID := uuid.New()
 
-	// Create mocks
+	// Create mocks (entities not required since FKDiscovery no longer depends on them)
 	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
-
-	// Add order entity
-	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
-		ID:            orderEntityID,
-		OntologyID:    ontologyID,
-		Name:          "order",
-		PrimarySchema: "public",
-		PrimaryTable:  "orders",
-	})
 
 	usersTableID := uuid.New()
 	ordersTableID := uuid.New()
@@ -5370,6 +5236,7 @@ func TestFKDiscovery_ColumnFeaturesAndSchemaFK_Deduplication(t *testing.T) {
 	}
 
 	// ALSO have a schema-level FK constraint for the same relationship
+	fkMethod := models.InferenceMethodForeignKey
 	mocks.schemaRepo.relationships = []*models.SchemaRelationship{
 		{
 			ID:               uuid.New(),
@@ -5379,6 +5246,7 @@ func TestFKDiscovery_ColumnFeaturesAndSchemaFK_Deduplication(t *testing.T) {
 			TargetTableID:    usersTableID,
 			TargetColumnID:   userIDColumnID,
 			RelationshipType: models.RelationshipTypeFK,
+			InferenceMethod:  &fkMethod,
 		},
 	}
 
@@ -5410,36 +5278,35 @@ func TestFKDiscovery_ColumnFeaturesAndSchemaFK_Deduplication(t *testing.T) {
 
 	// Result count shows both sources found the relationship
 	// (ColumnFeatures: 1, SchemaFK: 1, total: 2)
-	// But thanks to upsert, the DB will have only one unique relationship
+	// The DB upsert would deduplicate by source_column_id + target_column_id
 	if result.FKRelationships != 2 {
 		t.Errorf("expected 2 FK relationships reported (from both sources), got %d", result.FKRelationships)
 	}
 
-	// The mock doesn't implement upsert deduplication, so we see 4 relationships created
-	// (2 from ColumnFeatures, 2 from SchemaFK). In production, the DB upsert would
-	// deduplicate these, but the mock just appends.
-	// The key point is that the code correctly processes both sources.
-	if len(mocks.relationshipRepo.created) != 4 {
-		t.Fatalf("expected 4 relationships created by mock (bidirectional from both sources), got %d", len(mocks.relationshipRepo.created))
+	// The mock doesn't implement upsert deduplication, so we see 2 upserts
+	// (1 from ColumnFeatures Phase 1, 1 from Schema FK Phase 2)
+	// In production, the DB upsert would deduplicate these.
+	if len(mocks.schemaRepo.upsertedRelationships) != 2 {
+		t.Fatalf("expected 2 SchemaRelationships upserted (from both sources), got %d", len(mocks.schemaRepo.upsertedRelationships))
 	}
 
-	// The first pair should be from ColumnFeatures (data_overlap)
-	foundDataOverlap := false
+	// Verify we have one with column_features and one with foreign_key inference method
+	foundColumnFeatures := false
 	foundForeignKey := false
-	for _, rel := range mocks.relationshipRepo.created {
-		if rel.DetectionMethod == models.DetectionMethodDataOverlap {
-			foundDataOverlap = true
+	for _, rel := range mocks.schemaRepo.upsertedRelationships {
+		if rel.InferenceMethod != nil && *rel.InferenceMethod == models.InferenceMethodColumnFeatures {
+			foundColumnFeatures = true
 		}
-		if rel.DetectionMethod == models.DetectionMethodForeignKey {
+		if rel.InferenceMethod != nil && *rel.InferenceMethod == models.InferenceMethodForeignKey {
 			foundForeignKey = true
 		}
 	}
 
-	if !foundDataOverlap {
-		t.Error("expected at least one relationship with detection_method=data_overlap")
+	if !foundColumnFeatures {
+		t.Error("expected at least one relationship with inference_method=column_features")
 	}
 	if !foundForeignKey {
-		t.Error("expected at least one relationship with detection_method=foreign_key")
+		t.Error("expected at least one relationship with inference_method=foreign_key")
 	}
 }
 

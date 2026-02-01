@@ -361,6 +361,10 @@ func (m *mockPromotionSchemaRepo) ClearColumnFeaturesByProject(ctx context.Conte
 	return nil
 }
 
+func (m *mockPromotionSchemaRepo) GetRelationshipsByMethod(ctx context.Context, projectID, datasourceID uuid.UUID, method string) ([]*models.SchemaRelationship, error) {
+	return nil, nil
+}
+
 func TestEntityPromotionService_ScoreAndPromoteEntities(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()

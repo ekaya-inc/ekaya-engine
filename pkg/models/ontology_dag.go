@@ -97,19 +97,19 @@ func (s DAGNodeStatus) IsTerminal() bool {
 type DAGNodeName string
 
 const (
-	DAGNodeKnowledgeSeeding         DAGNodeName = "KnowledgeSeeding"
-	DAGNodeColumnFeatureExtraction  DAGNodeName = "ColumnFeatureExtraction"
-	DAGNodeEntityDiscovery          DAGNodeName = "EntityDiscovery"
-	DAGNodeEntityEnrichment         DAGNodeName = "EntityEnrichment"
-	DAGNodeFKDiscovery              DAGNodeName = "FKDiscovery"
-	DAGNodeTableFeatureExtraction   DAGNodeName = "TableFeatureExtraction"
-	DAGNodeColumnEnrichment         DAGNodeName = "ColumnEnrichment"
-	DAGNodePKMatchDiscovery         DAGNodeName = "PKMatchDiscovery"
-	DAGNodeRelationshipEnrichment   DAGNodeName = "RelationshipEnrichment"
-	DAGNodeEntityPromotion          DAGNodeName = "EntityPromotion"
-	DAGNodeOntologyFinalization     DAGNodeName = "OntologyFinalization"
-	DAGNodeGlossaryDiscovery        DAGNodeName = "GlossaryDiscovery"
-	DAGNodeGlossaryEnrichment       DAGNodeName = "GlossaryEnrichment"
+	DAGNodeKnowledgeSeeding        DAGNodeName = "KnowledgeSeeding"
+	DAGNodeColumnFeatureExtraction DAGNodeName = "ColumnFeatureExtraction"
+	DAGNodeEntityDiscovery         DAGNodeName = "EntityDiscovery"
+	DAGNodeEntityEnrichment        DAGNodeName = "EntityEnrichment"
+	DAGNodeFKDiscovery             DAGNodeName = "FKDiscovery"
+	DAGNodeTableFeatureExtraction  DAGNodeName = "TableFeatureExtraction"
+	DAGNodeColumnEnrichment        DAGNodeName = "ColumnEnrichment"
+	DAGNodePKMatchDiscovery        DAGNodeName = "PKMatchDiscovery"
+	DAGNodeRelationshipEnrichment  DAGNodeName = "RelationshipEnrichment"
+	DAGNodeEntityPromotion         DAGNodeName = "EntityPromotion"
+	DAGNodeOntologyFinalization    DAGNodeName = "OntologyFinalization"
+	DAGNodeGlossaryDiscovery       DAGNodeName = "GlossaryDiscovery"
+	DAGNodeGlossaryEnrichment      DAGNodeName = "GlossaryEnrichment"
 )
 
 // DAGNodeOrder defines the execution order for each node.

@@ -117,38 +117,7 @@ func (s *deterministicRelationshipService) createBidirectionalRelationship(ctx c
 }
 
 func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback RelationshipProgressCallback) (*FKDiscoveryResult, error) {
-	// Get active ontology for the project
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("get active ontology: %w", err)
-	}
-	if ontology == nil {
-		return nil, fmt.Errorf("no active ontology found for project")
-	}
-
-	// Get all entities for this ontology
-	entities, err := s.entityRepo.GetByOntology(ctx, ontology.ID)
-	if err != nil {
-		return nil, fmt.Errorf("get entities: %w", err)
-	}
-	if len(entities) == 0 {
-		return &FKDiscoveryResult{}, nil // No entities, no relationships to discover
-	}
-
-	// entityByPrimaryTable: maps "schema.table" to the entity that owns that table
-	entityByPrimaryTable := make(map[string]*models.OntologyEntity)
-	for _, entity := range entities {
-		key := fmt.Sprintf("%s.%s", entity.PrimarySchema, entity.PrimaryTable)
-		entityByPrimaryTable[key] = entity
-	}
-
-	// Get all schema relationships (FKs) for this datasource
-	schemaRels, err := s.schemaRepo.ListRelationshipsByDatasource(ctx, projectID, datasourceID)
-	if err != nil {
-		return nil, fmt.Errorf("list schema relationships: %w", err)
-	}
-
-	// Load tables and columns to resolve IDs to names
+	// Load tables and columns
 	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
 	if err != nil {
 		return nil, fmt.Errorf("list tables: %w", err)
@@ -181,24 +150,34 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 	}
 	defer discoverer.Close()
 
-	// Phase 1: Create relationships from ColumnFeatures (pre-resolved FKs from Phase 4)
+	// Phase 1: Create SchemaRelationship records from ColumnFeatures (pre-resolved FKs from Phase 4)
 	// These are data-driven FK discoveries from ColumnFeatureExtraction
-	columnFeaturesCount, err := s.discoverFKRelationshipsFromColumnFeatures(
-		ctx, ontology, columns, tableByID, tableByName, entityByPrimaryTable, discoverer, progressCallback,
+	columnFeaturesCount, err := s.discoverSchemaRelationshipsFromColumnFeatures(
+		ctx, projectID, columns, tableByID, tableByName, discoverer, progressCallback,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("discover FK relationships from column features: %w", err)
 	}
 	if columnFeaturesCount > 0 {
-		s.logger.Info("Created relationships from ColumnFeatures",
+		s.logger.Info("Created SchemaRelationships from ColumnFeatures",
 			zap.Int("count", columnFeaturesCount))
 	}
 
-	// Phase 2: Process each FK from schema relationships (PostgreSQL foreign keys)
-	// These relationships have confidence=1.0 since they're defined in the schema.
-	// The upsert will update any overlapping relationships from Phase 1.
+	// Phase 2: Update existing schema FK relationships with cardinality analysis
+	// These relationships were created during schema import with inference_method='foreign_key'.
+	// We update them with computed cardinality from join analysis.
+	schemaRels, err := s.schemaRepo.ListRelationshipsByDatasource(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("list schema relationships: %w", err)
+	}
+
 	var schemaFKCount int
 	for i, schemaRel := range schemaRels {
+		// Only process FK relationships (skip inferred ones from Phase 1)
+		if schemaRel.InferenceMethod != nil && *schemaRel.InferenceMethod != models.InferenceMethodForeignKey {
+			continue
+		}
+
 		// Resolve source column/table
 		sourceCol := columnByID[schemaRel.SourceColumnID]
 		sourceTable := tableByID[schemaRel.SourceTableID]
@@ -213,29 +192,9 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 			continue
 		}
 
-		// Find source entity by primary table
-		sourceKey := fmt.Sprintf("%s.%s", sourceTable.SchemaName, sourceTable.TableName)
-		sourceEntity := entityByPrimaryTable[sourceKey]
-		if sourceEntity == nil {
-			continue // No entity owns this table
-		}
-
-		// Find target entity by primary table
-		targetKey := fmt.Sprintf("%s.%s", targetTable.SchemaName, targetTable.TableName)
-		targetEntity := entityByPrimaryTable[targetKey]
-		if targetEntity == nil {
-			continue // No entity owns this table
-		}
-
 		// Self-referential relationships are allowed here - they represent hierarchies/trees
 		// (e.g., employee.manager_id → employee.id, category.parent_id → category.id).
 		// These come from explicit FK constraints in the schema and are intentional.
-
-		// Determine detection method based on schema relationship type
-		detectionMethod := models.DetectionMethodForeignKey
-		if schemaRel.RelationshipType == models.RelationshipTypeManual {
-			detectionMethod = models.DetectionMethodManual
-		}
 
 		// Compute cardinality from actual data using join analysis
 		// This determines if the relationship is 1:1, N:1, 1:N, or N:M
@@ -268,28 +227,12 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 			progressCallback(i+1, len(schemaRels), msg)
 		}
 
-		// Create bidirectional relationship (both forward and reverse)
-		rel := &models.EntityRelationship{
-			OntologyID:         ontology.ID,
-			SourceEntityID:     sourceEntity.ID,
-			TargetEntityID:     targetEntity.ID,
-			SourceColumnSchema: sourceTable.SchemaName,
-			SourceColumnTable:  sourceTable.TableName,
-			SourceColumnName:   sourceCol.ColumnName,
-			SourceColumnID:     &sourceCol.ID,
-			TargetColumnSchema: targetTable.SchemaName,
-			TargetColumnTable:  targetTable.TableName,
-			TargetColumnName:   targetCol.ColumnName,
-			TargetColumnID:     &targetCol.ID,
-			DetectionMethod:    detectionMethod,
-			Confidence:         1.0,
-			Status:             models.RelationshipStatusConfirmed,
-			Cardinality:        cardinality,
-		}
+		// Update the existing SchemaRelationship with computed cardinality
+		schemaRel.Cardinality = cardinality
+		schemaRel.IsValidated = true
 
-		err = s.createBidirectionalRelationship(ctx, rel)
-		if err != nil {
-			return nil, fmt.Errorf("create bidirectional FK relationship: %w", err)
+		if err := s.schemaRepo.UpsertRelationship(ctx, schemaRel); err != nil {
+			return nil, fmt.Errorf("update FK relationship cardinality: %w", err)
 		}
 
 		schemaFKCount++
@@ -315,16 +258,17 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 	}, nil
 }
 
-// discoverFKRelationshipsFromColumnFeatures creates entity relationships from columns
+// discoverSchemaRelationshipsFromColumnFeatures creates SchemaRelationship records from columns
 // where ColumnFeatureExtraction Phase 4 has already resolved FK targets.
 // This avoids redundant SQL queries for FKs that were already discovered via data overlap analysis.
-func (s *deterministicRelationshipService) discoverFKRelationshipsFromColumnFeatures(
+// Unlike the old entity-based approach, this writes directly to engine_schema_relationships
+// with inference_method='column_features'.
+func (s *deterministicRelationshipService) discoverSchemaRelationshipsFromColumnFeatures(
 	ctx context.Context,
-	ontology *models.TieredOntology,
+	projectID uuid.UUID,
 	columns []*models.SchemaColumn,
 	tableByID map[uuid.UUID]*models.SchemaTable,
 	tableByName map[string]*models.SchemaTable,
-	entityByPrimaryTable map[string]*models.OntologyEntity,
 	discoverer datasource.SchemaDiscoverer,
 	progressCallback RelationshipProgressCallback,
 ) (int, error) {
@@ -361,15 +305,6 @@ func (s *deterministicRelationshipService) discoverFKRelationshipsFromColumnFeat
 			continue
 		}
 
-		// Find source entity by primary table
-		sourceKey := fmt.Sprintf("%s.%s", sourceTable.SchemaName, sourceTable.TableName)
-		sourceEntity := entityByPrimaryTable[sourceKey]
-		if sourceEntity == nil {
-			s.logger.Debug("No entity owns source table",
-				zap.String("table", sourceKey))
-			continue
-		}
-
 		// Resolve target table from FK target info
 		// FKTargetTable may be just the table name or "schema.table"
 		targetTableKey := idFeatures.FKTargetTable
@@ -383,14 +318,6 @@ func (s *deterministicRelationshipService) discoverFKRelationshipsFromColumnFeat
 			s.logger.Debug("Target table not found",
 				zap.String("target_table", targetTableKey),
 				zap.String("source_column", col.ColumnName))
-			continue
-		}
-
-		// Find target entity by primary table
-		targetEntity := entityByPrimaryTable[targetTableKey]
-		if targetEntity == nil {
-			s.logger.Debug("No entity owns target table",
-				zap.String("table", targetTableKey))
 			continue
 		}
 
@@ -445,31 +372,27 @@ func (s *deterministicRelationshipService) discoverFKRelationshipsFromColumnFeat
 			confidence = 0.9 // Default high confidence for data-driven FK discovery
 		}
 
-		// Create bidirectional relationship
-		rel := &models.EntityRelationship{
-			OntologyID:         ontology.ID,
-			SourceEntityID:     sourceEntity.ID,
-			TargetEntityID:     targetEntity.ID,
-			SourceColumnSchema: sourceTable.SchemaName,
-			SourceColumnTable:  sourceTable.TableName,
-			SourceColumnName:   col.ColumnName,
-			SourceColumnID:     &col.ID,
-			TargetColumnSchema: targetTable.SchemaName,
-			TargetColumnTable:  targetTable.TableName,
-			TargetColumnName:   targetCol.ColumnName,
-			TargetColumnID:     &targetCol.ID,
-			DetectionMethod:    models.DetectionMethodDataOverlap, // Indicates data-driven discovery
-			Confidence:         confidence,
-			Status:             models.RelationshipStatusConfirmed,
-			Cardinality:        cardinality,
+		// Create SchemaRelationship (unidirectional, source→target)
+		inferenceMethod := models.InferenceMethodColumnFeatures
+		rel := &models.SchemaRelationship{
+			ProjectID:        projectID,
+			SourceTableID:    sourceTable.ID,
+			SourceColumnID:   col.ID,
+			TargetTableID:    targetTable.ID,
+			TargetColumnID:   targetCol.ID,
+			RelationshipType: models.RelationshipTypeInferred,
+			Cardinality:      cardinality,
+			Confidence:       confidence,
+			InferenceMethod:  &inferenceMethod,
+			IsValidated:      true,
 		}
 
-		if err := s.createBidirectionalRelationship(ctx, rel); err != nil {
-			return createdCount, fmt.Errorf("create bidirectional relationship from ColumnFeatures: %w", err)
+		if err := s.schemaRepo.UpsertRelationship(ctx, rel); err != nil {
+			return createdCount, fmt.Errorf("upsert SchemaRelationship from ColumnFeatures: %w", err)
 		}
 
 		createdCount++
-		s.logger.Debug("Created relationship from ColumnFeatures",
+		s.logger.Debug("Created SchemaRelationship from ColumnFeatures",
 			zap.String("source", fmt.Sprintf("%s.%s.%s", sourceTable.SchemaName, sourceTable.TableName, col.ColumnName)),
 			zap.String("target", fmt.Sprintf("%s.%s.%s", targetTable.SchemaName, targetTable.TableName, targetCol.ColumnName)),
 			zap.Float64("confidence", confidence),

@@ -42,9 +42,9 @@ func TestTableFeatureExtraction_BuildPrompt(t *testing.T) {
 			IsPrimaryKey: true,
 			Metadata: map[string]any{
 				"column_features": map[string]any{
-					"purpose":      "identifier",
-					"role":         "primary_key",
-					"description":  "Unique user identifier",
+					"purpose":       "identifier",
+					"role":          "primary_key",
+					"description":   "Unique user identifier",
 					"semantic_type": "uuid",
 				},
 			},
@@ -55,9 +55,9 @@ func TestTableFeatureExtraction_BuildPrompt(t *testing.T) {
 			DataType:   "varchar(255)",
 			Metadata: map[string]any{
 				"column_features": map[string]any{
-					"purpose":      "identifier",
-					"role":         "attribute",
-					"description":  "User email address",
+					"purpose":       "identifier",
+					"role":          "attribute",
+					"description":   "User email address",
 					"semantic_type": "email",
 				},
 			},
@@ -68,9 +68,9 @@ func TestTableFeatureExtraction_BuildPrompt(t *testing.T) {
 			DataType:   "timestamp",
 			Metadata: map[string]any{
 				"column_features": map[string]any{
-					"purpose":      "timestamp",
-					"role":         "attribute",
-					"description":  "When the user account was created",
+					"purpose":       "timestamp",
+					"role":          "attribute",
+					"description":   "When the user account was created",
 					"semantic_type": "audit_created",
 				},
 			},
@@ -81,9 +81,9 @@ func TestTableFeatureExtraction_BuildPrompt(t *testing.T) {
 			DataType:   "varchar(50)",
 			Metadata: map[string]any{
 				"column_features": map[string]any{
-					"purpose":      "enum",
-					"role":         "attribute",
-					"description":  "Account status",
+					"purpose":       "enum",
+					"role":          "attribute",
+					"description":   "Account status",
 					"semantic_type": "status_enum",
 				},
 			},
@@ -469,9 +469,9 @@ func TestTableFeatureExtraction_WriteColumnSummary(t *testing.T) {
 				DataType:   "varchar(255)",
 				Metadata: map[string]any{
 					"column_features": map[string]any{
-						"purpose":      "identifier",
+						"purpose":       "identifier",
 						"semantic_type": "email",
-						"description":  "User email address",
+						"description":   "User email address",
 					},
 				},
 			},
@@ -518,10 +518,10 @@ func TestTableFeatureExtraction_WriteColumnSummary(t *testing.T) {
 // mockSchemaRepoForTableFeatures provides mock schema data for table feature extraction.
 type mockSchemaRepoForTableFeatures struct {
 	repositories.SchemaRepository
-	tables                   []*models.SchemaTable
-	columnsByTable           map[string][]*models.SchemaColumn
-	relationshipDetails      []*models.RelationshipDetail
-	listTablesErr            error
+	tables                    []*models.SchemaTable
+	columnsByTable            map[string][]*models.SchemaColumn
+	relationshipDetails       []*models.RelationshipDetail
+	listTablesErr             error
 	getColumnsWithFeaturesErr error
 	getRelationshipDetailsErr error
 }

@@ -944,6 +944,10 @@ func (m *mockSchemaRepoForRelEnrichment) ClearColumnFeaturesByProject(ctx contex
 	return nil
 }
 
+func (m *mockSchemaRepoForRelEnrichment) GetRelationshipsByMethod(ctx context.Context, projectID, datasourceID uuid.UUID, method string) ([]*models.SchemaRelationship, error) {
+	return nil, nil
+}
+
 func TestRelationshipEnrichmentResponse_QuestionsDeserialization(t *testing.T) {
 	// Direct test of relationshipEnrichmentResponse JSON parsing
 
