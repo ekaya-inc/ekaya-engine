@@ -26,6 +26,7 @@ type RelationshipCandidateCollector interface {
 type relationshipCandidateCollector struct {
 	schemaRepo     repositories.SchemaRepository
 	adapterFactory datasource.DatasourceAdapterFactory
+	dsSvc          DatasourceService
 	logger         *zap.Logger
 }
 
@@ -33,11 +34,13 @@ type relationshipCandidateCollector struct {
 func NewRelationshipCandidateCollector(
 	schemaRepo repositories.SchemaRepository,
 	adapterFactory datasource.DatasourceAdapterFactory,
+	dsSvc DatasourceService,
 	logger *zap.Logger,
 ) RelationshipCandidateCollector {
 	return &relationshipCandidateCollector{
 		schemaRepo:     schemaRepo,
 		adapterFactory: adapterFactory,
+		dsSvc:          dsSvc,
 		logger:         logger.Named("relationship-candidate-collector"),
 	}
 }
@@ -485,6 +488,131 @@ func (c *relationshipCandidateCollector) generateCandidatePairs(
 	)
 
 	return candidates
+}
+
+// collectJoinStatistics uses the datasource adapter to collect join analysis statistics
+// for a relationship candidate. It populates the JoinCount, OrphanCount, ReverseOrphans,
+// SourceMatched, and TargetMatched fields on the candidate.
+//
+// This uses the SchemaDiscoverer.AnalyzeJoin method which performs:
+// - Join count and source matched count
+// - Orphan count (source values not in target)
+// - Reverse orphan count (target values not in source)
+func (c *relationshipCandidateCollector) collectJoinStatistics(
+	ctx context.Context,
+	adapter datasource.SchemaDiscoverer,
+	candidate *RelationshipCandidate,
+) error {
+	// Use the adapter's AnalyzeJoin method which handles the SQL generation
+	// We pass empty schema name since our tables may be in different schemas
+	// or the datasource may not use schemas
+	joinAnalysis, err := adapter.AnalyzeJoin(
+		ctx,
+		"", candidate.SourceTable, candidate.SourceColumn,
+		"", candidate.TargetTable, candidate.TargetColumn,
+	)
+	if err != nil {
+		return fmt.Errorf("analyze join for %s.%s -> %s.%s: %w",
+			candidate.SourceTable, candidate.SourceColumn,
+			candidate.TargetTable, candidate.TargetColumn, err)
+	}
+
+	// Populate candidate fields from join analysis
+	candidate.JoinCount = joinAnalysis.JoinCount
+	candidate.SourceMatched = joinAnalysis.SourceMatched
+	candidate.TargetMatched = joinAnalysis.TargetMatched
+	candidate.OrphanCount = joinAnalysis.OrphanCount
+	candidate.ReverseOrphans = joinAnalysis.ReverseOrphanCount
+
+	return nil
+}
+
+// collectSampleValues uses the datasource adapter to collect sample values
+// for both source and target columns of a relationship candidate.
+// It populates the SourceSamples, SourceDistinctCount, TargetSamples, and
+// TargetDistinctCount fields on the candidate.
+func (c *relationshipCandidateCollector) collectSampleValues(
+	ctx context.Context,
+	adapter datasource.SchemaDiscoverer,
+	candidate *RelationshipCandidate,
+) error {
+	const sampleLimit = 10
+
+	// Get sample values from source column
+	sourceSamples, err := adapter.GetDistinctValues(
+		ctx,
+		"", candidate.SourceTable, candidate.SourceColumn,
+		sampleLimit,
+	)
+	if err != nil {
+		return fmt.Errorf("get source samples for %s.%s: %w",
+			candidate.SourceTable, candidate.SourceColumn, err)
+	}
+	candidate.SourceSamples = sourceSamples
+
+	// Get sample values from target column
+	targetSamples, err := adapter.GetDistinctValues(
+		ctx,
+		"", candidate.TargetTable, candidate.TargetColumn,
+		sampleLimit,
+	)
+	if err != nil {
+		return fmt.Errorf("get target samples for %s.%s: %w",
+			candidate.TargetTable, candidate.TargetColumn, err)
+	}
+	candidate.TargetSamples = targetSamples
+
+	return nil
+}
+
+// collectDistinctCounts collects the distinct count and null rate for source and target columns.
+// This uses column statistics from the schema discoverer adapter.
+func (c *relationshipCandidateCollector) collectDistinctCounts(
+	ctx context.Context,
+	adapter datasource.SchemaDiscoverer,
+	candidate *RelationshipCandidate,
+) error {
+	// Analyze source column statistics
+	sourceStats, err := adapter.AnalyzeColumnStats(
+		ctx,
+		"", candidate.SourceTable, []string{candidate.SourceColumn},
+	)
+	if err != nil {
+		c.logger.Warn("failed to get source column stats",
+			zap.String("table", candidate.SourceTable),
+			zap.String("column", candidate.SourceColumn),
+			zap.Error(err),
+		)
+	} else if len(sourceStats) > 0 {
+		candidate.SourceDistinctCount = sourceStats[0].DistinctCount
+		// Calculate null rate: (total - non-null) / total
+		if sourceStats[0].RowCount > 0 {
+			nullCount := sourceStats[0].RowCount - sourceStats[0].NonNullCount
+			candidate.SourceNullRate = float64(nullCount) / float64(sourceStats[0].RowCount)
+		}
+	}
+
+	// Analyze target column statistics
+	targetStats, err := adapter.AnalyzeColumnStats(
+		ctx,
+		"", candidate.TargetTable, []string{candidate.TargetColumn},
+	)
+	if err != nil {
+		c.logger.Warn("failed to get target column stats",
+			zap.String("table", candidate.TargetTable),
+			zap.String("column", candidate.TargetColumn),
+			zap.Error(err),
+		)
+	} else if len(targetStats) > 0 {
+		candidate.TargetDistinctCount = targetStats[0].DistinctCount
+		// Calculate null rate: (total - non-null) / total
+		if targetStats[0].RowCount > 0 {
+			nullCount := targetStats[0].RowCount - targetStats[0].NonNullCount
+			candidate.TargetNullRate = float64(nullCount) / float64(targetStats[0].RowCount)
+		}
+	}
+
+	return nil
 }
 
 // CollectCandidates gathers all potential FK relationship candidates using deterministic criteria.

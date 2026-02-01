@@ -76,6 +76,11 @@ func (m *mockAdapterFactoryForCandidateCollector) ListTypes() []datasource.Datas
 	return nil
 }
 
+// mockDatasourceServiceForCandidateCollector is a mock for DatasourceService.
+type mockDatasourceServiceForCandidateCollector struct {
+	DatasourceService
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -84,6 +89,7 @@ func newTestCandidateCollector(repo *mockSchemaRepoForCandidateCollector) *relat
 	return &relationshipCandidateCollector{
 		schemaRepo:     repo,
 		adapterFactory: &mockAdapterFactoryForCandidateCollector{},
+		dsSvc:          &mockDatasourceServiceForCandidateCollector{},
 		logger:         zap.NewNop(),
 	}
 }
@@ -751,7 +757,7 @@ func TestCollectCandidates_GeneratesCandidatePairs(t *testing.T) {
 		},
 	}
 
-	collector := NewRelationshipCandidateCollector(repo, &mockAdapterFactoryForCandidateCollector{}, zap.NewNop())
+	collector := NewRelationshipCandidateCollector(repo, &mockAdapterFactoryForCandidateCollector{}, &mockDatasourceServiceForCandidateCollector{}, zap.NewNop())
 
 	// Track progress callbacks
 	progressCalls := 0
@@ -803,7 +809,7 @@ func TestCollectCandidates_NoTargets(t *testing.T) {
 		},
 	}
 
-	collector := NewRelationshipCandidateCollector(repo, &mockAdapterFactoryForCandidateCollector{}, zap.NewNop())
+	collector := NewRelationshipCandidateCollector(repo, &mockAdapterFactoryForCandidateCollector{}, &mockDatasourceServiceForCandidateCollector{}, zap.NewNop())
 
 	result, err := collector.CollectCandidates(context.Background(), projectID, datasourceID, nil)
 	require.NoError(t, err)
@@ -820,7 +826,7 @@ func TestCollectCandidates_PropagatesError(t *testing.T) {
 		columnsByTableErr: errors.New("database error"),
 	}
 
-	collector := NewRelationshipCandidateCollector(repo, &mockAdapterFactoryForCandidateCollector{}, zap.NewNop())
+	collector := NewRelationshipCandidateCollector(repo, &mockAdapterFactoryForCandidateCollector{}, &mockDatasourceServiceForCandidateCollector{}, zap.NewNop())
 
 	_, err := collector.CollectCandidates(context.Background(), projectID, datasourceID, nil)
 	require.Error(t, err)
@@ -1898,4 +1904,327 @@ func TestGenerateCandidatePairs_PopulatesAllFields(t *testing.T) {
 	assert.Zero(t, c.ReverseOrphans)
 	assert.Zero(t, c.SourceMatched)
 	assert.Zero(t, c.TargetMatched)
+}
+
+// ============================================================================
+// mockSchemaDiscoverer for join statistics tests
+// ============================================================================
+
+type mockSchemaDiscovererForJoinStats struct {
+	datasource.SchemaDiscoverer
+
+	// AnalyzeJoin mock data
+	analyzeJoinResult *datasource.JoinAnalysis
+	analyzeJoinErr    error
+
+	// GetDistinctValues mock data
+	distinctValuesMap map[string][]string // key: "table.column"
+	distinctValuesErr error
+
+	// AnalyzeColumnStats mock data
+	columnStatsMap map[string]datasource.ColumnStats // key: "table.column"
+	columnStatsErr error
+}
+
+func (m *mockSchemaDiscovererForJoinStats) AnalyzeJoin(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+	if m.analyzeJoinErr != nil {
+		return nil, m.analyzeJoinErr
+	}
+	return m.analyzeJoinResult, nil
+}
+
+func (m *mockSchemaDiscovererForJoinStats) GetDistinctValues(ctx context.Context, schemaName, tableName, columnName string, limit int) ([]string, error) {
+	if m.distinctValuesErr != nil {
+		return nil, m.distinctValuesErr
+	}
+	key := tableName + "." + columnName
+	if values, ok := m.distinctValuesMap[key]; ok {
+		return values, nil
+	}
+	return []string{}, nil
+}
+
+func (m *mockSchemaDiscovererForJoinStats) AnalyzeColumnStats(ctx context.Context, schemaName, tableName string, columnNames []string) ([]datasource.ColumnStats, error) {
+	if m.columnStatsErr != nil {
+		return nil, m.columnStatsErr
+	}
+	var results []datasource.ColumnStats
+	for _, colName := range columnNames {
+		key := tableName + "." + colName
+		if stats, ok := m.columnStatsMap[key]; ok {
+			results = append(results, stats)
+		}
+	}
+	return results, nil
+}
+
+func (m *mockSchemaDiscovererForJoinStats) Close() error {
+	return nil
+}
+
+// ============================================================================
+// collectJoinStatistics Tests
+// ============================================================================
+
+func TestCollectJoinStatistics_Success(t *testing.T) {
+	collector := newTestCandidateCollector(nil)
+
+	adapter := &mockSchemaDiscovererForJoinStats{
+		analyzeJoinResult: &datasource.JoinAnalysis{
+			JoinCount:          100,
+			SourceMatched:      50,
+			TargetMatched:      45,
+			OrphanCount:        10,
+			ReverseOrphanCount: 5,
+		},
+	}
+
+	candidate := &RelationshipCandidate{
+		SourceTable:  "orders",
+		SourceColumn: "user_id",
+		TargetTable:  "users",
+		TargetColumn: "id",
+	}
+
+	err := collector.collectJoinStatistics(context.Background(), adapter, candidate)
+	require.NoError(t, err)
+
+	// Verify all fields are populated
+	assert.Equal(t, int64(100), candidate.JoinCount)
+	assert.Equal(t, int64(50), candidate.SourceMatched)
+	assert.Equal(t, int64(45), candidate.TargetMatched)
+	assert.Equal(t, int64(10), candidate.OrphanCount)
+	assert.Equal(t, int64(5), candidate.ReverseOrphans)
+}
+
+func TestCollectJoinStatistics_Error(t *testing.T) {
+	collector := newTestCandidateCollector(nil)
+
+	adapter := &mockSchemaDiscovererForJoinStats{
+		analyzeJoinErr: errors.New("database connection failed"),
+	}
+
+	candidate := &RelationshipCandidate{
+		SourceTable:  "orders",
+		SourceColumn: "user_id",
+		TargetTable:  "users",
+		TargetColumn: "id",
+	}
+
+	err := collector.collectJoinStatistics(context.Background(), adapter, candidate)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "analyze join")
+	assert.Contains(t, err.Error(), "orders.user_id")
+	assert.Contains(t, err.Error(), "users.id")
+
+	// Candidate fields should remain zero
+	assert.Zero(t, candidate.JoinCount)
+	assert.Zero(t, candidate.SourceMatched)
+}
+
+func TestCollectJoinStatistics_ZeroResults(t *testing.T) {
+	collector := newTestCandidateCollector(nil)
+
+	adapter := &mockSchemaDiscovererForJoinStats{
+		analyzeJoinResult: &datasource.JoinAnalysis{
+			JoinCount:          0,
+			SourceMatched:      0,
+			TargetMatched:      0,
+			OrphanCount:        100, // All orphans - no matches
+			ReverseOrphanCount: 50,
+		},
+	}
+
+	candidate := &RelationshipCandidate{
+		SourceTable:  "orders",
+		SourceColumn: "invalid_fk",
+		TargetTable:  "users",
+		TargetColumn: "id",
+	}
+
+	err := collector.collectJoinStatistics(context.Background(), adapter, candidate)
+	require.NoError(t, err)
+
+	// Verify zero matches are correctly reported
+	assert.Equal(t, int64(0), candidate.JoinCount)
+	assert.Equal(t, int64(0), candidate.SourceMatched)
+	assert.Equal(t, int64(100), candidate.OrphanCount)
+}
+
+// ============================================================================
+// collectSampleValues Tests
+// ============================================================================
+
+func TestCollectSampleValues_Success(t *testing.T) {
+	collector := newTestCandidateCollector(nil)
+
+	adapter := &mockSchemaDiscovererForJoinStats{
+		distinctValuesMap: map[string][]string{
+			"orders.user_id": {"uuid-1", "uuid-2", "uuid-3"},
+			"users.id":       {"uuid-1", "uuid-2", "uuid-4", "uuid-5"},
+		},
+	}
+
+	candidate := &RelationshipCandidate{
+		SourceTable:  "orders",
+		SourceColumn: "user_id",
+		TargetTable:  "users",
+		TargetColumn: "id",
+	}
+
+	err := collector.collectSampleValues(context.Background(), adapter, candidate)
+	require.NoError(t, err)
+
+	// Verify samples are populated
+	assert.Equal(t, []string{"uuid-1", "uuid-2", "uuid-3"}, candidate.SourceSamples)
+	assert.Equal(t, []string{"uuid-1", "uuid-2", "uuid-4", "uuid-5"}, candidate.TargetSamples)
+}
+
+func TestCollectSampleValues_SourceError(t *testing.T) {
+	collector := newTestCandidateCollector(nil)
+
+	adapter := &mockSchemaDiscovererForJoinStats{
+		distinctValuesErr: errors.New("query timeout"),
+	}
+
+	candidate := &RelationshipCandidate{
+		SourceTable:  "orders",
+		SourceColumn: "user_id",
+		TargetTable:  "users",
+		TargetColumn: "id",
+	}
+
+	err := collector.collectSampleValues(context.Background(), adapter, candidate)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "get source samples")
+	assert.Contains(t, err.Error(), "orders.user_id")
+}
+
+func TestCollectSampleValues_EmptyResults(t *testing.T) {
+	collector := newTestCandidateCollector(nil)
+
+	adapter := &mockSchemaDiscovererForJoinStats{
+		distinctValuesMap: map[string][]string{
+			"orders.user_id": {},
+			"users.id":       {},
+		},
+	}
+
+	candidate := &RelationshipCandidate{
+		SourceTable:  "orders",
+		SourceColumn: "user_id",
+		TargetTable:  "users",
+		TargetColumn: "id",
+	}
+
+	err := collector.collectSampleValues(context.Background(), adapter, candidate)
+	require.NoError(t, err)
+
+	// Empty samples are OK
+	assert.Empty(t, candidate.SourceSamples)
+	assert.Empty(t, candidate.TargetSamples)
+}
+
+// ============================================================================
+// collectDistinctCounts Tests
+// ============================================================================
+
+func TestCollectDistinctCounts_Success(t *testing.T) {
+	collector := newTestCandidateCollector(nil)
+
+	adapter := &mockSchemaDiscovererForJoinStats{
+		columnStatsMap: map[string]datasource.ColumnStats{
+			"orders.user_id": {
+				ColumnName:    "user_id",
+				RowCount:      1000,
+				NonNullCount:  950,
+				DistinctCount: 100,
+			},
+			"users.id": {
+				ColumnName:    "id",
+				RowCount:      500,
+				NonNullCount:  500, // PKs are never null
+				DistinctCount: 500,
+			},
+		},
+	}
+
+	candidate := &RelationshipCandidate{
+		SourceTable:  "orders",
+		SourceColumn: "user_id",
+		TargetTable:  "users",
+		TargetColumn: "id",
+	}
+
+	err := collector.collectDistinctCounts(context.Background(), adapter, candidate)
+	require.NoError(t, err)
+
+	// Verify source stats
+	assert.Equal(t, int64(100), candidate.SourceDistinctCount)
+	assert.InDelta(t, 0.05, candidate.SourceNullRate, 0.001) // (1000-950)/1000 = 5%
+
+	// Verify target stats
+	assert.Equal(t, int64(500), candidate.TargetDistinctCount)
+	assert.Equal(t, 0.0, candidate.TargetNullRate) // 0% null
+}
+
+func TestCollectDistinctCounts_StatsError_Continues(t *testing.T) {
+	collector := newTestCandidateCollector(nil)
+
+	// Stats error doesn't fail the whole operation - it just logs a warning
+	adapter := &mockSchemaDiscovererForJoinStats{
+		columnStatsErr: errors.New("stats collection failed"),
+	}
+
+	candidate := &RelationshipCandidate{
+		SourceTable:  "orders",
+		SourceColumn: "user_id",
+		TargetTable:  "users",
+		TargetColumn: "id",
+	}
+
+	// Should not return error - stats collection failure is non-fatal
+	err := collector.collectDistinctCounts(context.Background(), adapter, candidate)
+	require.NoError(t, err)
+
+	// Fields should remain zero
+	assert.Zero(t, candidate.SourceDistinctCount)
+	assert.Zero(t, candidate.SourceNullRate)
+	assert.Zero(t, candidate.TargetDistinctCount)
+	assert.Zero(t, candidate.TargetNullRate)
+}
+
+func TestCollectDistinctCounts_ZeroRowCount(t *testing.T) {
+	collector := newTestCandidateCollector(nil)
+
+	adapter := &mockSchemaDiscovererForJoinStats{
+		columnStatsMap: map[string]datasource.ColumnStats{
+			"orders.user_id": {
+				ColumnName:    "user_id",
+				RowCount:      0, // Empty table
+				NonNullCount:  0,
+				DistinctCount: 0,
+			},
+			"users.id": {
+				ColumnName:    "id",
+				RowCount:      0,
+				NonNullCount:  0,
+				DistinctCount: 0,
+			},
+		},
+	}
+
+	candidate := &RelationshipCandidate{
+		SourceTable:  "orders",
+		SourceColumn: "user_id",
+		TargetTable:  "users",
+		TargetColumn: "id",
+	}
+
+	err := collector.collectDistinctCounts(context.Background(), adapter, candidate)
+	require.NoError(t, err)
+
+	// With zero row count, null rate should be 0 (avoid division by zero)
+	assert.Equal(t, int64(0), candidate.SourceDistinctCount)
+	assert.Equal(t, 0.0, candidate.SourceNullRate)
 }

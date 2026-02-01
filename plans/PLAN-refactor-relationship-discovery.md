@@ -231,7 +231,7 @@ func (c *relationshipCandidateCollector) generateCandidatePairs(
 
 ---
 
-#### Task 2.4: Implement Join Statistics Collection [ ]
+#### Task 2.4: Implement Join Statistics Collection [x]
 
 Implement SQL-based join analysis to populate statistics for each candidate pair.
 
