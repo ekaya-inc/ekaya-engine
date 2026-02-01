@@ -123,7 +123,8 @@ func registerGetContextTool(s *server.MCPServer, deps *ContextToolDeps) {
 			"columns":  true,
 		}
 		if !validDepths[depth] {
-			return nil, fmt.Errorf("invalid depth: must be one of 'domain', 'entities', 'tables', 'columns'")
+			return NewErrorResult("invalid_parameters",
+				"invalid depth: must be one of 'domain', 'entities', 'tables', 'columns'"), nil
 		}
 
 		// Parse optional parameters

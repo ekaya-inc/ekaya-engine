@@ -83,7 +83,7 @@ func registerSearchSchemaTool(s *server.MCPServer, deps *SearchToolDeps) {
 		// Trim and validate query
 		query = strings.TrimSpace(query)
 		if query == "" {
-			return nil, fmt.Errorf("query parameter cannot be empty")
+			return NewErrorResult("invalid_parameters", "query parameter cannot be empty"), nil
 		}
 
 		// Get optional limit parameter

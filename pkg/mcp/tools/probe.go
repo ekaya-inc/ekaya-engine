@@ -160,12 +160,13 @@ func registerProbeColumnsTool(s *server.MCPServer, deps *ProbeToolDeps) {
 		// Get columns array from arguments
 		args, ok := req.Params.Arguments.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("invalid request arguments")
+			return NewErrorResult("invalid_parameters", "invalid request arguments"), nil
 		}
 
 		columnsArg, ok := args["columns"].([]any)
 		if !ok || len(columnsArg) == 0 {
-			return nil, fmt.Errorf("columns parameter is required and must be a non-empty array")
+			return NewErrorResult("invalid_parameters",
+				"columns parameter is required and must be a non-empty array"), nil
 		}
 
 		// Parse column requests
@@ -178,17 +179,20 @@ func registerProbeColumnsTool(s *server.MCPServer, deps *ProbeToolDeps) {
 		for _, col := range columnsArg {
 			colMap, ok := col.(map[string]any)
 			if !ok {
-				return nil, fmt.Errorf("each column must be an object with 'table' and 'column' fields")
+				return NewErrorResult("invalid_parameters",
+					"each column must be an object with 'table' and 'column' fields"), nil
 			}
 
 			table, ok := colMap["table"].(string)
 			if !ok || table == "" {
-				return nil, fmt.Errorf("each column must have a non-empty 'table' field")
+				return NewErrorResult("invalid_parameters",
+					"each column must have a non-empty 'table' field"), nil
 			}
 
 			column, ok := colMap["column"].(string)
 			if !ok || column == "" {
-				return nil, fmt.Errorf("each column must have a non-empty 'column' field")
+				return NewErrorResult("invalid_parameters",
+					"each column must have a non-empty 'column' field"), nil
 			}
 
 			columnRequests = append(columnRequests, columnRequest{

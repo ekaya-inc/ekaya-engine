@@ -644,7 +644,8 @@ func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			if paramsArray, ok := args["parameters"].([]any); ok {
 				paramDefs, err = parseParameterDefinitions(paramsArray)
 				if err != nil {
-					return nil, fmt.Errorf("invalid parameters: %w", err)
+					return NewErrorResult("invalid_parameters",
+						fmt.Sprintf("invalid parameters: %s", err.Error())), nil
 				}
 			}
 		}
@@ -677,7 +678,8 @@ func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		// Validate SQL and parameters with dry-run execution
 		validationResult, err := validateAndTestQuery(tenantCtx, deps, projectID, dsID, sqlQuery, paramDefs)
 		if err != nil {
-			return nil, fmt.Errorf("validation failed: %w", err)
+			return NewErrorResult("validation_error",
+				fmt.Sprintf("validation failed: %s", err.Error())), nil
 		}
 
 		// Merge output column descriptions with detected columns

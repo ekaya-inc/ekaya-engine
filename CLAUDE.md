@@ -248,6 +248,30 @@ The `column_feature_extraction` service analyzes columns using data sampling and
 
 If `ColumnFeatures` is not available at a given pipeline stage, document why heuristics are necessary and centralize them.
 
+### 6. MCP Tool Errors Must Return JSON Success Responses
+
+MCP tool validation errors must be returned as **successful MCP responses containing JSON error objects**, not as Go errors that become MCP protocol errors (e.g., `-32603`).
+
+**Why:** Some MCP clients do not pass protocol-level errors to the LLM—they may flash an error on screen or swallow it entirely. This makes Ekaya appear broken when the tool simply received invalid input. The LLM needs to see the error message to correct its approach.
+
+```go
+// WRONG - returns MCP protocol error, may not reach the LLM
+if query == "" {
+    return nil, fmt.Errorf("query parameter cannot be empty")
+}
+
+// CORRECT - returns successful MCP response with JSON error body
+if query == "" {
+    return NewErrorResult("invalid_parameters", "query parameter cannot be empty"), nil
+}
+```
+
+**Error types:**
+- **Actionable errors** (validation, invalid params, not found) → Use `NewErrorResult()` or `NewErrorResultWithDetails()`
+- **System errors** (DB failures, connection errors) → Return Go errors (these are genuine failures)
+
+See `pkg/mcp/tools/errors.go` for the `NewErrorResult()` helper and error code conventions.
+
 ## Error Handling Philosophy: Fail Fast
 
 **This project follows a strict "fail fast" error handling policy.**
