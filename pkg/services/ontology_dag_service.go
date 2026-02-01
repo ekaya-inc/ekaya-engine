@@ -52,6 +52,7 @@ type ontologyDAGService struct {
 	// Adapted service methods for dag package
 	knowledgeSeedingMethods        dag.KnowledgeSeedingMethods
 	columnFeatureExtractionMethods dag.ColumnFeatureExtractionMethods
+	tableFeatureExtractionMethods  dag.TableFeatureExtractionMethods
 	entityDiscoveryMethods         dag.EntityDiscoveryMethods
 	entityEnrichmentMethods        dag.EntityEnrichmentMethods
 	fkDiscoveryMethods             dag.FKDiscoveryMethods
@@ -117,6 +118,12 @@ func (s *ontologyDAGService) SetKnowledgeSeedingMethods(methods dag.KnowledgeSee
 // This is called after service construction to avoid circular dependencies.
 func (s *ontologyDAGService) SetColumnFeatureExtractionMethods(methods dag.ColumnFeatureExtractionMethods) {
 	s.columnFeatureExtractionMethods = methods
+}
+
+// SetTableFeatureExtractionMethods sets the table feature extraction methods interface.
+// This is called after service construction to avoid circular dependencies.
+func (s *ontologyDAGService) SetTableFeatureExtractionMethods(methods dag.TableFeatureExtractionMethods) {
+	s.tableFeatureExtractionMethods = methods
 }
 
 // SetEntityDiscoveryMethods sets the entity discovery methods interface.
@@ -684,6 +691,13 @@ func (s *ontologyDAGService) getNodeExecutor(nodeName models.DAGNodeName, nodeID
 			return nil, fmt.Errorf("FK discovery methods not set")
 		}
 		node := dag.NewFKDiscoveryNode(s.dagRepo, s.fkDiscoveryMethods, s.logger)
+		node.SetCurrentNodeID(nodeID)
+		return node, nil
+
+	case models.DAGNodeTableFeatureExtraction:
+		// Table feature extraction generates table-level descriptions based on column features.
+		// If tableFeatureExtractionMethods is nil, the node operates in no-op mode.
+		node := dag.NewTableFeatureExtractionNode(s.dagRepo, s.tableFeatureExtractionMethods, s.logger)
 		node.SetCurrentNodeID(nodeID)
 		return node, nil
 
