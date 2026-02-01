@@ -719,7 +719,7 @@ func TestBuildValidationPrompt_IncludesAllData(t *testing.T) {
 
 ---
 
-### Task 4: Create `relationship_discovery_service.go` - Orchestration
+### Task 4: Create `relationship_discovery_service.go` - Orchestration [x]
 
 New unified service that replaces both `DeterministicRelationshipService` and `RelationshipDiscoveryService`:
 
