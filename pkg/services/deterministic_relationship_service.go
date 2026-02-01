@@ -1,5 +1,18 @@
 package services
 
+// DEPRECATED: This file is scheduled for removal.
+// The threshold-based heuristics in this service produce ~90% incorrect relationship inferences.
+// Use LLMRelationshipDiscoveryService (relationship_discovery_service.go) instead, which uses
+// LLM validation for semantic accuracy.
+//
+// Migration path:
+// - DeterministicRelationshipService → LLMRelationshipDiscoveryService
+// - DiscoverFKRelationships → handled by LLMRelationshipDiscoveryService.preserveDBDeclaredFKs
+// - DiscoverPKMatchRelationships → handled by RelationshipCandidateCollector + RelationshipValidator
+//
+// This file will be removed after validation in staging environments confirms the new
+// LLM-based approach produces better results.
+
 import (
 	"context"
 	"fmt"

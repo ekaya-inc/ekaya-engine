@@ -1,5 +1,21 @@
 package services
 
+// DEPRECATED: This file is scheduled for removal.
+// The value-overlap discovery approach with magic thresholds produces unreliable results.
+// Use LLMRelationshipDiscoveryService (relationship_discovery_service.go) instead, which uses
+// LLM validation for semantic accuracy.
+//
+// Migration path:
+// - RelationshipDiscoveryService.DiscoverRelationships → LLMRelationshipDiscoveryService.DiscoverRelationships
+// - All threshold-based heuristics (DefaultMatchThreshold, ReviewMinCardinalityRatio, etc.)
+//   are replaced by LLM semantic validation.
+//
+// Note: The CardinalityUniqueThreshold constant has been moved to relationship_utils.go
+// as it's still needed by InferCardinality().
+//
+// This file will be removed after validation in staging environments confirms the new
+// LLM-based approach produces better results.
+
 import (
 	"context"
 	"fmt"
@@ -15,14 +31,15 @@ import (
 )
 
 // Discovery configuration constants
+// DEPRECATED: These constants use magic thresholds that produce unreliable results.
+// The new LLM-based approach in LLMRelationshipDiscoveryService doesn't use these thresholds.
 const (
 	DefaultMatchThreshold   = 0.95 // 95% match (allow 5% for data issues)
 	DefaultSampleLimit      = 1000 // Max values to sample for overlap check
 	MaxColumnsPerStatsQuery = 25   // Batch size for column stats
 
-	// CardinalityUniqueThreshold allows 10% tolerance for uniqueness detection
-	// to account for minor data inconsistencies or sampling variance.
-	CardinalityUniqueThreshold = 1.1
+	// CardinalityUniqueThreshold has been moved to relationship_utils.go
+	// It's still used by InferCardinality() which remains active.
 
 	// Review candidate configuration - more aggressive discovery for orphan tables
 	// ReviewMinCardinalityRatio is the minimum distinct/total ratio for review candidates.

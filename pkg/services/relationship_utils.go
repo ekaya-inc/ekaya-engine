@@ -5,6 +5,12 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
 
+// CardinalityUniqueThreshold allows 10% tolerance for uniqueness detection
+// to account for minor data inconsistencies or sampling variance.
+// This constant is used by InferCardinality to determine if a relationship
+// has a unique side (1:1, N:1, 1:N) or is many-to-many (N:M).
+const CardinalityUniqueThreshold = 1.1
+
 // InferCardinality determines the cardinality type (1:1, 1:N, N:1, N:M) from join analysis.
 // It uses the ratio of join rows to matched rows on each side to determine the relationship type.
 //

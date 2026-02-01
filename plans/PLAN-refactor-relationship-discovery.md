@@ -774,7 +774,7 @@ func (n *RelationshipDiscoveryNode) Execute(ctx context.Context, dag *models.Ont
 
 ---
 
-### Task 6: Deprecate Old Services
+### Task 6: Deprecate Old Services [x]
 
 Mark for removal (but don't delete yet):
 - `pkg/services/deterministic_relationship_service.go`
