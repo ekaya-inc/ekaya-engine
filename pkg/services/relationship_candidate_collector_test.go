@@ -772,3 +772,548 @@ func TestCollectCandidates_PropagatesError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "identify FK sources")
 }
+
+// ============================================================================
+// identifyFKTargets Tests
+// ============================================================================
+
+func TestIdentifyFKTargets_PrimaryKeysOnly(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+
+	// Primary key column - should be included
+	usersPKCol := &models.SchemaColumn{
+		ID:            uuid.New(),
+		SchemaTableID: usersTableID,
+		ColumnName:    "id",
+		DataType:      "uuid",
+		IsPrimaryKey:  true,
+		IsUnique:      false,
+	}
+
+	// Non-PK, non-unique column - should be excluded
+	userNameCol := &models.SchemaColumn{
+		ID:            uuid.New(),
+		SchemaTableID: usersTableID,
+		ColumnName:    "name",
+		DataType:      "text",
+		IsPrimaryKey:  false,
+		IsUnique:      false,
+	}
+
+	// Another PK - should be included
+	ordersPKCol := &models.SchemaColumn{
+		ID:            uuid.New(),
+		SchemaTableID: ordersTableID,
+		ColumnName:    "id",
+		DataType:      "uuid",
+		IsPrimaryKey:  true,
+		IsUnique:      false,
+	}
+
+	repo := &mockSchemaRepoForCandidateCollector{
+		allColumns: []*models.SchemaColumn{usersPKCol, userNameCol, ordersPKCol},
+		tables: []*models.SchemaTable{
+			{ID: usersTableID, TableName: "users"},
+			{ID: ordersTableID, TableName: "orders"},
+		},
+	}
+
+	collector := newTestCandidateCollector(repo)
+
+	targets, err := collector.identifyFKTargets(context.Background(), projectID, datasourceID)
+	require.NoError(t, err)
+
+	// Should have 2 targets (both PKs)
+	assert.Len(t, targets, 2, "expected 2 FK targets (PKs)")
+
+	targetNames := make([]string, len(targets))
+	for i, tgt := range targets {
+		targetNames[i] = tgt.TableName + "." + tgt.Column.ColumnName
+	}
+	assert.Contains(t, targetNames, "users.id")
+	assert.Contains(t, targetNames, "orders.id")
+}
+
+func TestIdentifyFKTargets_UniqueColumns(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	usersTableID := uuid.New()
+
+	// Primary key column
+	usersPKCol := &models.SchemaColumn{
+		ID:            uuid.New(),
+		SchemaTableID: usersTableID,
+		ColumnName:    "id",
+		DataType:      "uuid",
+		IsPrimaryKey:  true,
+		IsUnique:      false,
+	}
+
+	// Unique column (not PK) - should also be included
+	usersEmailCol := &models.SchemaColumn{
+		ID:            uuid.New(),
+		SchemaTableID: usersTableID,
+		ColumnName:    "email",
+		DataType:      "text",
+		IsPrimaryKey:  false,
+		IsUnique:      true, // Unique constraint
+	}
+
+	// Non-unique column - should be excluded
+	userNameCol := &models.SchemaColumn{
+		ID:            uuid.New(),
+		SchemaTableID: usersTableID,
+		ColumnName:    "name",
+		DataType:      "text",
+		IsPrimaryKey:  false,
+		IsUnique:      false,
+	}
+
+	repo := &mockSchemaRepoForCandidateCollector{
+		allColumns: []*models.SchemaColumn{usersPKCol, usersEmailCol, userNameCol},
+		tables: []*models.SchemaTable{
+			{ID: usersTableID, TableName: "users"},
+		},
+	}
+
+	collector := newTestCandidateCollector(repo)
+
+	targets, err := collector.identifyFKTargets(context.Background(), projectID, datasourceID)
+	require.NoError(t, err)
+
+	// Should have 2 targets (PK and unique column)
+	assert.Len(t, targets, 2, "expected 2 FK targets (PK + unique)")
+
+	targetNames := make([]string, len(targets))
+	for i, tgt := range targets {
+		targetNames[i] = tgt.Column.ColumnName
+		// All targets should have IsUnique=true
+		assert.True(t, tgt.IsUnique, "target %s should have IsUnique=true", tgt.Column.ColumnName)
+	}
+	assert.Contains(t, targetNames, "id")
+	assert.Contains(t, targetNames, "email")
+	assert.NotContains(t, targetNames, "name")
+}
+
+func TestIdentifyFKTargets_ExcludesHighCardinalityNonUnique(t *testing.T) {
+	// This test verifies the key change from the old approach:
+	// High-cardinality columns that are NOT PKs or unique should be EXCLUDED
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	usersTableID := uuid.New()
+
+	distinctCount := int64(10000) // High cardinality
+
+	// High-cardinality column but not PK or unique - should be EXCLUDED
+	// (Old approach would have included this because distinctCount >= 20)
+	userNameCol := &models.SchemaColumn{
+		ID:            uuid.New(),
+		SchemaTableID: usersTableID,
+		ColumnName:    "username",
+		DataType:      "text",
+		IsPrimaryKey:  false,
+		IsUnique:      false,
+		DistinctCount: &distinctCount,
+	}
+
+	repo := &mockSchemaRepoForCandidateCollector{
+		allColumns: []*models.SchemaColumn{userNameCol},
+		tables: []*models.SchemaTable{
+			{ID: usersTableID, TableName: "users"},
+		},
+	}
+
+	collector := newTestCandidateCollector(repo)
+
+	targets, err := collector.identifyFKTargets(context.Background(), projectID, datasourceID)
+	require.NoError(t, err)
+
+	// Should have 0 targets - high cardinality alone is NOT enough
+	assert.Len(t, targets, 0, "high-cardinality non-unique column should NOT be a FK target")
+}
+
+func TestIdentifyFKTargets_EmptyDataset(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	repo := &mockSchemaRepoForCandidateCollector{
+		allColumns: []*models.SchemaColumn{},
+		tables:     []*models.SchemaTable{},
+	}
+
+	collector := newTestCandidateCollector(repo)
+
+	targets, err := collector.identifyFKTargets(context.Background(), projectID, datasourceID)
+	require.NoError(t, err)
+	assert.Len(t, targets, 0, "empty dataset should return empty targets")
+}
+
+func TestIdentifyFKTargets_SkipsColumnsWithoutTableName(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	unknownTableID := uuid.New()
+
+	// PK column but table cannot be resolved
+	orphanPKCol := &models.SchemaColumn{
+		ID:            uuid.New(),
+		SchemaTableID: unknownTableID, // Not in tables list
+		ColumnName:    "id",
+		DataType:      "uuid",
+		IsPrimaryKey:  true,
+		IsUnique:      false,
+	}
+
+	repo := &mockSchemaRepoForCandidateCollector{
+		allColumns: []*models.SchemaColumn{orphanPKCol},
+		tables:     []*models.SchemaTable{}, // Empty - no tables to resolve
+	}
+
+	collector := newTestCandidateCollector(repo)
+
+	targets, err := collector.identifyFKTargets(context.Background(), projectID, datasourceID)
+	require.NoError(t, err)
+
+	// Column should be skipped because table name cannot be resolved
+	assert.Len(t, targets, 0, "column without resolvable table name should be skipped")
+}
+
+func TestIdentifyFKTargets_ErrorHandling(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	t.Run("ListTablesByDatasource error", func(t *testing.T) {
+		repo := &mockSchemaRepoForCandidateCollector{
+			tablesErr: errors.New("database error"),
+		}
+
+		collector := newTestCandidateCollector(repo)
+
+		_, err := collector.identifyFKTargets(context.Background(), projectID, datasourceID)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "list tables")
+	})
+
+	t.Run("ListColumnsByDatasource error", func(t *testing.T) {
+		repo := &mockSchemaRepoForCandidateCollector{
+			tables:        []*models.SchemaTable{},
+			allColumnsErr: errors.New("database error"),
+		}
+
+		collector := newTestCandidateCollector(repo)
+
+		_, err := collector.identifyFKTargets(context.Background(), projectID, datasourceID)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "list columns")
+	})
+}
+
+// ============================================================================
+// FKTargetColumn Tests
+// ============================================================================
+
+func TestFKTargetColumn_Fields(t *testing.T) {
+	colID := uuid.New()
+	col := &models.SchemaColumn{
+		ID:           colID,
+		ColumnName:   "id",
+		DataType:     "uuid",
+		IsPrimaryKey: true,
+		IsUnique:     false,
+	}
+
+	fkTarget := &FKTargetColumn{
+		Column:    col,
+		TableName: "users",
+		IsUnique:  true, // PKs are considered unique
+	}
+
+	assert.Equal(t, col, fkTarget.Column)
+	assert.Equal(t, "users", fkTarget.TableName)
+	assert.True(t, fkTarget.IsUnique)
+	assert.Equal(t, "id", fkTarget.Column.ColumnName)
+}
+
+// ============================================================================
+// areTypesCompatible Tests
+// ============================================================================
+
+func TestAreTypesCompatible_ExactMatch(t *testing.T) {
+	// Same types should always be compatible
+	tests := []struct {
+		sourceType string
+		targetType string
+	}{
+		{"uuid", "uuid"},
+		{"text", "text"},
+		{"integer", "integer"},
+		{"bigint", "bigint"},
+		{"varchar(255)", "varchar(255)"},
+		{"boolean", "boolean"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.sourceType+"_to_"+tt.targetType, func(t *testing.T) {
+			assert.True(t, areTypesCompatible(tt.sourceType, tt.targetType),
+				"%s should be compatible with %s", tt.sourceType, tt.targetType)
+		})
+	}
+}
+
+func TestAreTypesCompatible_IntegerVariants(t *testing.T) {
+	// All integer variants should be compatible with each other
+	integerTypes := []string{
+		"int", "int2", "int4", "int8",
+		"integer", "smallint", "bigint",
+		"serial", "smallserial", "bigserial",
+		"tinyint",
+	}
+
+	for _, source := range integerTypes {
+		for _, target := range integerTypes {
+			t.Run(source+"_to_"+target, func(t *testing.T) {
+				assert.True(t, areTypesCompatible(source, target),
+					"%s should be compatible with %s", source, target)
+			})
+		}
+	}
+}
+
+func TestAreTypesCompatible_StringVariants(t *testing.T) {
+	// All string variants should be compatible with each other
+	stringTypes := []string{
+		"text", "varchar", "char", "character", "character varying",
+		"bpchar", "nvarchar", "nchar", "ntext",
+		"varchar(255)", "char(10)", "nvarchar(100)",
+	}
+
+	for _, source := range stringTypes {
+		for _, target := range stringTypes {
+			t.Run(source+"_to_"+target, func(t *testing.T) {
+				assert.True(t, areTypesCompatible(source, target),
+					"%s should be compatible with %s", source, target)
+			})
+		}
+	}
+}
+
+func TestAreTypesCompatible_NumericVariants(t *testing.T) {
+	// All numeric variants should be compatible with each other
+	numericTypes := []string{
+		"numeric", "decimal", "float", "float4", "float8",
+		"real", "double precision", "double", "money",
+		"numeric(10,2)", "decimal(18,4)",
+	}
+
+	for _, source := range numericTypes {
+		for _, target := range numericTypes {
+			t.Run(source+"_to_"+target, func(t *testing.T) {
+				assert.True(t, areTypesCompatible(source, target),
+					"%s should be compatible with %s", source, target)
+			})
+		}
+	}
+}
+
+func TestAreTypesCompatible_UUIDOnly(t *testing.T) {
+	// UUID should only match UUID
+	assert.True(t, areTypesCompatible("uuid", "uuid"))
+	assert.False(t, areTypesCompatible("uuid", "text"), "uuid should not match text")
+	assert.False(t, areTypesCompatible("text", "uuid"), "text should not match uuid")
+	assert.False(t, areTypesCompatible("uuid", "integer"), "uuid should not match integer")
+}
+
+func TestAreTypesCompatible_IncompatiblePairs(t *testing.T) {
+	// These pairs should NOT be compatible
+	tests := []struct {
+		sourceType  string
+		targetType  string
+		description string
+	}{
+		{"text", "integer", "text to integer"},
+		{"integer", "text", "integer to text"},
+		{"boolean", "text", "boolean to text"},
+		{"boolean", "integer", "boolean to integer"},
+		{"boolean", "uuid", "boolean to uuid"},
+		{"timestamp", "text", "timestamp to text"},
+		{"timestamp", "integer", "timestamp to integer"},
+		{"json", "text", "json to text"},
+		{"json", "jsonb", "json to jsonb (same category)"}, // Wait, this should be true
+		{"uuid", "varchar(36)", "uuid to varchar"},
+		{"integer", "float", "integer to float (different categories)"},
+		{"date", "integer", "date to integer"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.description, func(t *testing.T) {
+			// Most should be false, but json/jsonb are same category
+			if tt.sourceType == "json" && tt.targetType == "jsonb" {
+				assert.True(t, areTypesCompatible(tt.sourceType, tt.targetType),
+					"%s should be compatible with %s (same category)", tt.sourceType, tt.targetType)
+			} else {
+				assert.False(t, areTypesCompatible(tt.sourceType, tt.targetType),
+					"%s should NOT be compatible with %s", tt.sourceType, tt.targetType)
+			}
+		})
+	}
+}
+
+func TestAreTypesCompatible_CaseInsensitive(t *testing.T) {
+	// Type comparison should be case-insensitive
+	tests := []struct {
+		sourceType string
+		targetType string
+	}{
+		{"UUID", "uuid"},
+		{"TEXT", "text"},
+		{"Integer", "INTEGER"},
+		{"VARCHAR(255)", "varchar(255)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.sourceType+"_to_"+tt.targetType, func(t *testing.T) {
+			assert.True(t, areTypesCompatible(tt.sourceType, tt.targetType),
+				"%s should be compatible with %s (case-insensitive)", tt.sourceType, tt.targetType)
+		})
+	}
+}
+
+func TestAreTypesCompatible_TimestampTypes(t *testing.T) {
+	// Timestamp types should only match other timestamp types
+	timestampTypes := []string{
+		"timestamp", "timestamptz", "timestamp with time zone",
+		"timestamp without time zone", "datetime", "datetime2",
+		"date", "time", "timetz",
+	}
+
+	for _, source := range timestampTypes {
+		for _, target := range timestampTypes {
+			t.Run(source+"_to_"+target, func(t *testing.T) {
+				assert.True(t, areTypesCompatible(source, target),
+					"%s should be compatible with %s", source, target)
+			})
+		}
+	}
+
+	// Timestamps should NOT match non-timestamps
+	assert.False(t, areTypesCompatible("timestamp", "text"))
+	assert.False(t, areTypesCompatible("timestamp", "integer"))
+	assert.False(t, areTypesCompatible("timestamp", "uuid"))
+}
+
+func TestAreTypesCompatible_BooleanTypes(t *testing.T) {
+	// Boolean types should only match other boolean types
+	boolTypes := []string{"boolean", "bool", "bit"}
+
+	for _, source := range boolTypes {
+		for _, target := range boolTypes {
+			t.Run(source+"_to_"+target, func(t *testing.T) {
+				assert.True(t, areTypesCompatible(source, target),
+					"%s should be compatible with %s", source, target)
+			})
+		}
+	}
+
+	// Booleans should NOT match non-booleans
+	assert.False(t, areTypesCompatible("boolean", "text"))
+	assert.False(t, areTypesCompatible("boolean", "integer"))
+	assert.False(t, areTypesCompatible("boolean", "uuid"))
+}
+
+func TestAreTypesCompatible_UnknownTypes(t *testing.T) {
+	// Unknown types should not match anything (including themselves)
+	// This is conservative - better to not create a bad relationship
+	assert.False(t, areTypesCompatible("unknown_type", "unknown_type"))
+	assert.False(t, areTypesCompatible("unknown_type", "text"))
+	assert.False(t, areTypesCompatible("text", "unknown_type"))
+}
+
+// ============================================================================
+// categorizeDataType Tests
+// ============================================================================
+
+func TestCategorizeDataType_Categories(t *testing.T) {
+	tests := []struct {
+		dataType string
+		expected string
+	}{
+		// UUID
+		{"uuid", "uuid"},
+
+		// Integer types
+		{"int", "integer"},
+		{"int2", "integer"},
+		{"int4", "integer"},
+		{"int8", "integer"},
+		{"integer", "integer"},
+		{"smallint", "integer"},
+		{"bigint", "integer"},
+		{"serial", "integer"},
+		{"smallserial", "integer"},
+		{"bigserial", "integer"},
+		{"tinyint", "integer"},
+
+		// String types
+		{"text", "string"},
+		{"varchar", "string"},
+		{"varchar(255)", "string"},
+		{"char", "string"},
+		{"char(10)", "string"},
+		{"character", "string"},
+		{"character varying", "string"},
+		{"character varying(100)", "string"},
+		{"bpchar", "string"},
+		{"nvarchar", "string"},
+		{"nvarchar(50)", "string"},
+		{"nchar", "string"},
+		{"ntext", "string"},
+
+		// Numeric types
+		{"numeric", "numeric"},
+		{"numeric(10,2)", "numeric"},
+		{"decimal", "numeric"},
+		{"decimal(18,4)", "numeric"},
+		{"float", "numeric"},
+		{"float4", "numeric"},
+		{"float8", "numeric"},
+		{"real", "numeric"},
+		{"double precision", "numeric"},
+		{"double", "numeric"},
+		{"money", "numeric"},
+
+		// Boolean types
+		{"boolean", "boolean"},
+		{"bool", "boolean"},
+		{"bit", "boolean"},
+
+		// Timestamp types
+		{"timestamp", "timestamp"},
+		{"timestamptz", "timestamp"},
+		{"timestamp with time zone", "timestamp"},
+		{"timestamp without time zone", "timestamp"},
+		{"datetime", "timestamp"},
+		{"datetime2", "timestamp"},
+		{"date", "timestamp"},
+		{"time", "timestamp"},
+		{"timetz", "timestamp"},
+		{"time with time zone", "timestamp"},
+
+		// JSON types
+		{"json", "json"},
+		{"jsonb", "json"},
+
+		// Unknown types
+		{"bytea", ""},
+		{"blob", ""},
+		{"custom_type", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.dataType, func(t *testing.T) {
+			assert.Equal(t, tt.expected, categorizeDataType(tt.dataType),
+				"categorizeDataType(%s) should return %q", tt.dataType, tt.expected)
+		})
+	}
+}

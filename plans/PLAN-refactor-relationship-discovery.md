@@ -148,7 +148,7 @@ func NewRelationshipCandidateCollector(
 
 ---
 
-#### Task 2.2: Create FK Target Identification Logic [ ]
+#### Task 2.2: Create FK Target Identification Logic [x]
 
 Implement the logic to identify columns that are valid FK targets (primary keys and unique columns only).
 

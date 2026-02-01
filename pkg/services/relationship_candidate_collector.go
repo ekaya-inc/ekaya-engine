@@ -245,6 +245,178 @@ func (c *relationshipCandidateCollector) isQualifiedFKSource(_ *models.SchemaCol
 	return false
 }
 
+// FKTargetColumn represents a column identified as a valid FK target.
+// FK targets must be either primary keys or unique columns.
+type FKTargetColumn struct {
+	Column    *models.SchemaColumn
+	TableName string
+	IsUnique  bool // true if target is unique (includes PKs)
+}
+
+// identifyFKTargets returns columns that are valid FK targets.
+// Per the plan, FK targets are ONLY:
+//   - Primary key columns (is_primary_key = true)
+//   - Unique columns (is_unique = true)
+//
+// This is a key change from the old approach which allowed any high-cardinality
+// column (distinctCount >= 20) as a target, causing ~90% incorrect inferences.
+func (c *relationshipCandidateCollector) identifyFKTargets(
+	ctx context.Context,
+	projectID, datasourceID uuid.UUID,
+) ([]*FKTargetColumn, error) {
+	// Get tables first to resolve table names
+	tables, err := c.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
+	if err != nil {
+		return nil, fmt.Errorf("list tables: %w", err)
+	}
+	tableIDToName := make(map[uuid.UUID]string)
+	for _, t := range tables {
+		tableIDToName[t.ID] = t.TableName
+	}
+
+	// Get all columns for the datasource
+	allColumns, err := c.schemaRepo.ListColumnsByDatasource(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("list columns: %w", err)
+	}
+
+	var targets []*FKTargetColumn
+
+	for _, col := range allColumns {
+		// FK targets must be PKs or unique columns
+		if !col.IsPrimaryKey && !col.IsUnique {
+			continue
+		}
+
+		tableName, ok := tableIDToName[col.SchemaTableID]
+		if !ok || tableName == "" {
+			// Skip columns where table name cannot be resolved
+			continue
+		}
+
+		targets = append(targets, &FKTargetColumn{
+			Column:    col,
+			TableName: tableName,
+			IsUnique:  col.IsPrimaryKey || col.IsUnique, // Both PKs and unique columns are "unique"
+		})
+	}
+
+	c.logger.Info("identified FK target candidates",
+		zap.Int("count", len(targets)),
+		zap.String("project_id", projectID.String()),
+		zap.String("datasource_id", datasourceID.String()),
+	)
+
+	return targets, nil
+}
+
+// areTypesCompatible checks if two data types are compatible for a FK relationship.
+// Compatible pairs include:
+//   - Same types (uuid→uuid, int→int, text→text)
+//   - Integer variants (int4→int8, smallint→bigint, integer→bigint)
+//   - String variants (varchar→text, char→text, character varying→text)
+//
+// Returns false for clearly incompatible pairs:
+//   - text→int, bool→uuid, timestamp→text, etc.
+//   - Unknown types (conservative approach - better to reject than create bad FK)
+func areTypesCompatible(sourceType, targetType string) bool {
+	// Normalize types to lowercase for comparison
+	source := strings.ToLower(strings.TrimSpace(sourceType))
+	target := strings.ToLower(strings.TrimSpace(targetType))
+
+	// Group types into categories
+	sourceCategory := categorizeDataType(source)
+	targetCategory := categorizeDataType(target)
+
+	// Unknown types are not compatible with anything (including themselves)
+	// This is conservative - better to not create a bad relationship
+	if sourceCategory == "" || targetCategory == "" {
+		return false
+	}
+
+	// Types are compatible if they're in the same category
+	return sourceCategory == targetCategory
+}
+
+// categorizeDataType returns a category string for the given data type.
+// Types in the same category are considered compatible for FK relationships.
+func categorizeDataType(dataType string) string {
+	// UUID types
+	if dataType == "uuid" {
+		return "uuid"
+	}
+
+	// Integer types
+	integerTypes := []string{
+		"int", "int2", "int4", "int8",
+		"integer", "smallint", "bigint",
+		"serial", "smallserial", "bigserial",
+		"tinyint", // MSSQL/MySQL
+	}
+	for _, t := range integerTypes {
+		if dataType == t {
+			return "integer"
+		}
+	}
+
+	// String types
+	stringTypes := []string{
+		"text", "varchar", "char", "character", "character varying",
+		"bpchar", // PostgreSQL blank-padded char
+		"nvarchar", "nchar", "ntext", // MSSQL unicode strings
+		"string", // Some databases
+	}
+	for _, t := range stringTypes {
+		if dataType == t || strings.HasPrefix(dataType, t+"(") {
+			return "string"
+		}
+	}
+	// Handle varchar(n), char(n) patterns
+	if strings.HasPrefix(dataType, "varchar") ||
+		strings.HasPrefix(dataType, "char") ||
+		strings.HasPrefix(dataType, "character") ||
+		strings.HasPrefix(dataType, "nvarchar") ||
+		strings.HasPrefix(dataType, "nchar") {
+		return "string"
+	}
+
+	// Numeric types (decimal, numeric, float, double)
+	numericTypes := []string{
+		"numeric", "decimal", "float", "float4", "float8",
+		"real", "double precision", "double", "money",
+	}
+	for _, t := range numericTypes {
+		if dataType == t || strings.HasPrefix(dataType, t+"(") {
+			return "numeric"
+		}
+	}
+
+	// Boolean types - these should NOT match anything else
+	if dataType == "boolean" || dataType == "bool" || dataType == "bit" {
+		return "boolean"
+	}
+
+	// Timestamp types - these should NOT match anything else
+	timestampTypes := []string{
+		"timestamp", "timestamptz", "timestamp with time zone",
+		"timestamp without time zone", "datetime", "datetime2",
+		"date", "time", "timetz", "time with time zone",
+	}
+	for _, t := range timestampTypes {
+		if dataType == t || strings.HasPrefix(dataType, t) {
+			return "timestamp"
+		}
+	}
+
+	// JSON types - these should NOT match anything else
+	if dataType == "json" || dataType == "jsonb" {
+		return "json"
+	}
+
+	// Unknown type - return empty string (not compatible with anything)
+	return ""
+}
+
 // CollectCandidates gathers all potential FK relationship candidates using deterministic criteria.
 // This method orchestrates the full candidate collection process:
 // 1. Identify FK sources (columns that could be foreign keys)
@@ -272,13 +444,23 @@ func (c *relationshipCandidateCollector) CollectCandidates(
 		progressCallback(1, 5, fmt.Sprintf("Found %d potential FK sources", len(sources)))
 	}
 
-	// TODO: Task 2.2 - Identify FK targets (PKs and unique columns)
+	// Step 2: Identify FK targets (PKs and unique columns only)
+	targets, err := c.identifyFKTargets(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("identify FK targets: %w", err)
+	}
+
+	if progressCallback != nil {
+		progressCallback(2, 5, fmt.Sprintf("Found %d FK targets (PKs/unique)", len(targets)))
+	}
+
 	// TODO: Task 2.3 - Generate candidate pairs with type compatibility
 	// TODO: Task 2.4 - Collect join statistics for each candidate
 	// TODO: Task 2.5 - Wire together and complete this method
 
 	c.logger.Info("candidate collection complete (stub)",
 		zap.Int("sources", len(sources)),
+		zap.Int("targets", len(targets)),
 		zap.String("project_id", projectID.String()),
 	)
 
