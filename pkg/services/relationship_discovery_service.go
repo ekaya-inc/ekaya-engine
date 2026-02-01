@@ -174,7 +174,7 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 
 	candidates, err := s.candidateCollector.CollectCandidates(ctx, projectID, datasourceID, func(current, total int, msg string) {
 		// Map collector progress (0-100%) to 20-50% of overall progress
-		overallProgress := 20 + (current*30/max(total, 1))
+		overallProgress := 20 + (current * 30 / max(total, 1))
 		if progressCallback != nil {
 			progressCallback(overallProgress, 100, msg)
 		}
@@ -217,7 +217,7 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 
 		validatedResults, err := s.validator.ValidateCandidates(ctx, projectID, newCandidates, func(current, total int, msg string) {
 			// Map validator progress (0-100%) to 50-90% of overall progress
-			overallProgress := 50 + (current*40/max(total, 1))
+			overallProgress := 50 + (current * 40 / max(total, 1))
 			if progressCallback != nil {
 				progressCallback(overallProgress, 100, msg)
 			}

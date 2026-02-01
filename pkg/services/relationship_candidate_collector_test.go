@@ -24,8 +24,8 @@ type mockSchemaRepoForCandidateCollector struct {
 	repositories.SchemaRepository
 
 	// GetColumnsWithFeaturesByDatasource mock data
-	columnsByTable        map[string][]*models.SchemaColumn
-	columnsByTableErr     error
+	columnsByTable    map[string][]*models.SchemaColumn
+	columnsByTableErr error
 
 	// ListColumnsByDatasource mock data
 	allColumns    []*models.SchemaColumn

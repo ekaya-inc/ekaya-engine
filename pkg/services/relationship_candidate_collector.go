@@ -365,7 +365,7 @@ func categorizeDataType(dataType string) string {
 	// String types
 	stringTypes := []string{
 		"text", "varchar", "char", "character", "character varying",
-		"bpchar", // PostgreSQL blank-padded char
+		"bpchar",                     // PostgreSQL blank-padded char
 		"nvarchar", "nchar", "ntext", // MSSQL unicode strings
 		"string", // Some databases
 	}

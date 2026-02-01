@@ -930,9 +930,9 @@ func TestRelationshipDiscoveryService_HighOrphanRate_LLMRejects(t *testing.T) {
 
 				// 50% orphan rate - half of source values don't match
 				JoinCount:      100,
-				SourceMatched:  50,  // Only 50 of 100 source values matched
+				SourceMatched:  50, // Only 50 of 100 source values matched
 				TargetMatched:  50,
-				OrphanCount:    50,  // 50% orphan rate (50 of 100 don't match)
+				OrphanCount:    50, // 50% orphan rate (50 of 100 don't match)
 				ReverseOrphans: 50,
 			},
 		},
@@ -1618,7 +1618,7 @@ func TestRelationshipDiscoveryService_ResultStatistics(t *testing.T) {
 				TargetSamples:       []string{"ccc33333-3333-3333-3333-333333333333"},
 				TargetColumnID:      configsIDCol.ID,
 
-				JoinCount:      0,  // No matches
+				JoinCount:      0, // No matches
 				SourceMatched:  0,
 				TargetMatched:  0,
 				OrphanCount:    800, // All are orphans
