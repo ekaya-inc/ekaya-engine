@@ -1186,7 +1186,7 @@ func TestSchemaRepository_UpsertRelationship_Create(t *testing.T) {
 	}
 }
 
-func TestSchemaRepository_UpsertRelationship_ReactivateSoftDeleted(t *testing.T) {
+func TestSchemaRepository_UpsertRelationship_RespectsSoftDelete(t *testing.T) {
 	tc := setupSchemaTest(t)
 	tc.cleanup()
 
@@ -1219,7 +1219,7 @@ func TestSchemaRepository_UpsertRelationship_ReactivateSoftDeleted(t *testing.T)
 
 	originalID := rel.ID
 
-	// Soft-delete
+	// Soft-delete (simulates user removing relationship via UI)
 	err = tc.repo.SoftDeleteRelationship(ctx, tc.projectID, rel.ID)
 	if err != nil {
 		t.Fatalf("SoftDeleteRelationship failed: %v", err)
@@ -1231,37 +1231,44 @@ func TestSchemaRepository_UpsertRelationship_ReactivateSoftDeleted(t *testing.T)
 		t.Error("expected relationship to be not found after soft-delete")
 	}
 
-	// Reactivate with updated confidence
+	// Attempt to upsert again (simulates re-extraction discovering the same relationship)
 	newRel := &models.SchemaRelationship{
 		ProjectID:        tc.projectID,
 		SourceTableID:    table1.ID,
 		SourceColumnID:   col1.ID,
 		TargetTableID:    table2.ID,
 		TargetColumnID:   col2.ID,
-		RelationshipType: models.RelationshipTypeManual,
+		RelationshipType: models.RelationshipTypeInferred,
 		Cardinality:      models.Cardinality1To1,
-		Confidence:       1.0,
+		Confidence:       0.90,
 		IsValidated:      true,
 	}
 
 	err = tc.repo.UpsertRelationship(ctx, newRel)
 	if err != nil {
-		t.Fatalf("UpsertRelationship (reactivate) failed: %v", err)
+		t.Fatalf("UpsertRelationship should succeed (no-op): %v", err)
 	}
 
-	// Verify ID preserved
-	if newRel.ID != originalID {
-		t.Errorf("expected ID to be preserved")
+	// Verify relationship is still NOT visible - soft-delete is respected
+	_, err = tc.repo.GetRelationshipByID(ctx, tc.projectID, originalID)
+	if err == nil {
+		t.Error("expected relationship to remain deleted after upsert attempt")
 	}
 
-	// Verify data updated
-	retrieved, err := tc.repo.GetRelationshipByID(ctx, tc.projectID, newRel.ID)
+	// Verify original relationship is still soft-deleted by checking directly
+	// (the relationship should not have been reactivated)
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		t.Fatal("no tenant scope in context")
+	}
+	var deletedAt *time.Time
+	checkQuery := `SELECT deleted_at FROM engine_schema_relationships WHERE id = $1`
+	err = scope.Conn.QueryRow(ctx, checkQuery, originalID).Scan(&deletedAt)
 	if err != nil {
-		t.Fatalf("GetRelationshipByID failed: %v", err)
+		t.Fatalf("failed to query relationship: %v", err)
 	}
-
-	if retrieved.RelationshipType != models.RelationshipTypeManual {
-		t.Errorf("expected RelationshipType 'manual', got %q", retrieved.RelationshipType)
+	if deletedAt == nil {
+		t.Error("expected deleted_at to be set, but it was NULL (relationship was incorrectly reactivated)")
 	}
 }
 

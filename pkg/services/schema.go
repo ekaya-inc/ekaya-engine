@@ -817,7 +817,7 @@ func (s *schemaService) createEntityRelationshipForManual(
 		zap.String("target_entity", targetEntity.Name))
 }
 
-// RemoveRelationship marks a relationship as removed (is_approved=false).
+// RemoveRelationship soft-deletes a relationship so it stays deleted on re-extraction.
 func (s *schemaService) RemoveRelationship(ctx context.Context, projectID, relationshipID uuid.UUID) error {
 	// Verify relationship exists and belongs to project
 	rel, err := s.schemaRepo.GetRelationshipByID(ctx, projectID, relationshipID)
@@ -830,9 +830,9 @@ func (s *schemaService) RemoveRelationship(ctx context.Context, projectID, relat
 		return apperrors.ErrNotFound
 	}
 
-	// Set is_approved=false to mark as removed
-	if err := s.schemaRepo.UpdateRelationshipApproval(ctx, projectID, relationshipID, false); err != nil {
-		return fmt.Errorf("failed to update relationship: %w", err)
+	// Soft-delete the relationship so it stays deleted on re-extraction
+	if err := s.schemaRepo.SoftDeleteRelationship(ctx, projectID, relationshipID); err != nil {
+		return fmt.Errorf("failed to delete relationship: %w", err)
 	}
 
 	s.logger.Info("Removed relationship",

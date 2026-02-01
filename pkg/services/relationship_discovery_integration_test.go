@@ -498,20 +498,25 @@ func TestSchemaService_ManualRelationship_CRUD_Integration(t *testing.T) {
 		t.Fatalf("expected 1 relationship, got %d", len(response.Relationships))
 	}
 
-	// Remove relationship
+	// Remove relationship (soft-delete)
 	err = tc.service.RemoveRelationship(ctx, tc.projectID, rel.ID)
 	if err != nil {
 		t.Fatalf("RemoveRelationship failed: %v", err)
 	}
 
-	// Verify relationship is marked as not approved (still exists but disapproved)
-	retrieved, err := tc.repo.GetRelationshipByID(ctx, tc.projectID, rel.ID)
-	if err != nil {
-		t.Fatalf("GetRelationshipByID failed: %v", err)
+	// Verify relationship is soft-deleted and no longer visible
+	_, err = tc.repo.GetRelationshipByID(ctx, tc.projectID, rel.ID)
+	if err == nil {
+		t.Error("expected relationship to be not found after soft-delete")
 	}
 
-	if retrieved.IsApproved == nil || *retrieved.IsApproved {
-		t.Error("expected IsApproved to be false after removal")
+	// Verify the relationship still exists in the database but is soft-deleted
+	response, err = tc.service.GetRelationshipsResponse(ctx, tc.projectID, tc.dsID)
+	if err != nil {
+		t.Fatalf("GetRelationshipsResponse failed: %v", err)
+	}
+	if len(response.Relationships) != 0 {
+		t.Errorf("expected 0 visible relationships after removal, got %d", len(response.Relationships))
 	}
 }
 

@@ -25,9 +25,10 @@ interface RemoveRelationshipDialogProps {
 
 /**
  * Confirmation dialog for removing a relationship.
- * Removing a relationship marks it as is_approved=false, hiding it from the UI
- * and excluding it from ontology generation. The relationship remains in the
- * database to prevent re-discovery.
+ * Removing a relationship soft-deletes it, hiding it from the UI and excluding
+ * it from ontology generation. The soft-deleted record prevents re-discovery
+ * on subsequent extractions. To reset and allow rediscovery, remove the source
+ * column from the schema, save, then re-add it (the new column gets a new ID).
  */
 export const RemoveRelationshipDialog = ({
   open,
@@ -97,7 +98,7 @@ export const RemoveRelationshipDialog = ({
 
           <p className="mt-4 text-sm text-text-secondary">
             This relationship will be hidden from the UI and excluded from ontology generation.
-            To restore it, you must delete and recreate the project.
+            To restore it, remove the source column from the schema, save, then re-add it.
           </p>
 
           {error && (

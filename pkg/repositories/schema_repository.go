@@ -1050,46 +1050,27 @@ func (r *schemaRepository) UpsertRelationship(ctx context.Context, rel *models.S
 		}
 	}
 
-	// First, try to reactivate a soft-deleted record
-	reactivateQuery := `
-		UPDATE engine_schema_relationships
-		SET deleted_at = NULL,
-		    relationship_type = $3,
-		    cardinality = $4,
-		    confidence = $5,
-		    inference_method = $6,
-		    is_validated = $7,
-		    validation_results = $8,
-		    is_approved = $9,
-		    rejection_reason = $10,
-		    updated_at = $11
-		WHERE source_column_id = $1
-		  AND target_column_id = $2
-		  AND deleted_at IS NOT NULL
-		RETURNING id, project_id, source_table_id, target_table_id, created_at`
-
-	var existingID, existingProjectID, existingSourceTableID, existingTargetTableID uuid.UUID
-	var existingCreatedAt time.Time
-	err := scope.Conn.QueryRow(ctx, reactivateQuery,
-		rel.SourceColumnID, rel.TargetColumnID,
-		rel.RelationshipType, rel.Cardinality, rel.Confidence, rel.InferenceMethod,
-		rel.IsValidated, validationResultsJSON, rel.IsApproved, rel.RejectionReason, now,
-	).Scan(&existingID, &existingProjectID, &existingSourceTableID, &existingTargetTableID, &existingCreatedAt)
-
-	if err == nil {
-		// Reactivated soft-deleted record
-		rel.ID = existingID
-		rel.ProjectID = existingProjectID
-		rel.SourceTableID = existingSourceTableID
-		rel.TargetTableID = existingTargetTableID
-		rel.CreatedAt = existingCreatedAt
+	// Check if a soft-deleted record exists with the same column IDs.
+	// If so, respect the user's deletion and skip the insert.
+	// The reset mechanism is: if a column is deleted and re-added, it gets a new UUID,
+	// so the soft-deleted record won't match and the relationship can be rediscovered.
+	var softDeletedExists bool
+	checkQuery := `
+		SELECT EXISTS(
+			SELECT 1 FROM engine_schema_relationships
+			WHERE source_column_id = $1
+			  AND target_column_id = $2
+			  AND deleted_at IS NOT NULL
+		)`
+	if err := scope.Conn.QueryRow(ctx, checkQuery, rel.SourceColumnID, rel.TargetColumnID).Scan(&softDeletedExists); err != nil {
+		return fmt.Errorf("failed to check for soft-deleted relationship: %w", err)
+	}
+	if softDeletedExists {
+		// User explicitly deleted this relationship - don't recreate it
 		return nil
 	}
-	if err != pgx.ErrNoRows {
-		return fmt.Errorf("failed to reactivate relationship: %w", err)
-	}
 
-	// No soft-deleted record, do standard upsert on active records
+	// No soft-deleted record exists, do standard upsert on active records
 	upsertQuery := `
 		INSERT INTO engine_schema_relationships (
 			id, project_id, source_table_id, source_column_id,
@@ -1111,7 +1092,7 @@ func (r *schemaRepository) UpsertRelationship(ctx context.Context, rel *models.S
 			updated_at = EXCLUDED.updated_at
 		RETURNING id, created_at`
 
-	err = scope.Conn.QueryRow(ctx, upsertQuery,
+	err := scope.Conn.QueryRow(ctx, upsertQuery,
 		rel.ID, rel.ProjectID, rel.SourceTableID, rel.SourceColumnID,
 		rel.TargetTableID, rel.TargetColumnID, rel.RelationshipType,
 		rel.Cardinality, rel.Confidence, rel.InferenceMethod, rel.IsValidated,
@@ -1423,51 +1404,27 @@ func (r *schemaRepository) UpsertRelationshipWithMetrics(ctx context.Context, re
 		rel.MatchedCount = &metrics.MatchedCount
 	}
 
-	// First, try to reactivate a soft-deleted record
-	reactivateQuery := `
-		UPDATE engine_schema_relationships
-		SET deleted_at = NULL,
-		    relationship_type = $3,
-		    cardinality = $4,
-		    confidence = $5,
-		    inference_method = $6,
-		    is_validated = $7,
-		    validation_results = $8,
-		    is_approved = $9,
-		    match_rate = $10,
-		    source_distinct = $11,
-		    target_distinct = $12,
-		    matched_count = $13,
-		    rejection_reason = $14,
-		    updated_at = $15
-		WHERE source_column_id = $1
-		  AND target_column_id = $2
-		  AND deleted_at IS NOT NULL
-		RETURNING id, project_id, source_table_id, target_table_id, created_at`
-
-	var existingID, existingProjectID, existingSourceTableID, existingTargetTableID uuid.UUID
-	var existingCreatedAt time.Time
-	err := scope.Conn.QueryRow(ctx, reactivateQuery,
-		rel.SourceColumnID, rel.TargetColumnID,
-		rel.RelationshipType, rel.Cardinality, rel.Confidence, rel.InferenceMethod,
-		rel.IsValidated, validationResultsJSON, rel.IsApproved,
-		rel.MatchRate, rel.SourceDistinct, rel.TargetDistinct, rel.MatchedCount,
-		rel.RejectionReason, now,
-	).Scan(&existingID, &existingProjectID, &existingSourceTableID, &existingTargetTableID, &existingCreatedAt)
-
-	if err == nil {
-		rel.ID = existingID
-		rel.ProjectID = existingProjectID
-		rel.SourceTableID = existingSourceTableID
-		rel.TargetTableID = existingTargetTableID
-		rel.CreatedAt = existingCreatedAt
+	// Check if a soft-deleted record exists with the same column IDs.
+	// If so, respect the user's deletion and skip the insert.
+	// The reset mechanism is: if a column is deleted and re-added, it gets a new UUID,
+	// so the soft-deleted record won't match and the relationship can be rediscovered.
+	var softDeletedExists bool
+	checkQuery := `
+		SELECT EXISTS(
+			SELECT 1 FROM engine_schema_relationships
+			WHERE source_column_id = $1
+			  AND target_column_id = $2
+			  AND deleted_at IS NOT NULL
+		)`
+	if err := scope.Conn.QueryRow(ctx, checkQuery, rel.SourceColumnID, rel.TargetColumnID).Scan(&softDeletedExists); err != nil {
+		return fmt.Errorf("failed to check for soft-deleted relationship: %w", err)
+	}
+	if softDeletedExists {
+		// User explicitly deleted this relationship - don't recreate it
 		return nil
 	}
-	if err != pgx.ErrNoRows {
-		return fmt.Errorf("failed to reactivate relationship: %w", err)
-	}
 
-	// No soft-deleted record, do standard upsert on active records
+	// No soft-deleted record exists, do standard upsert on active records
 	upsertQuery := `
 		INSERT INTO engine_schema_relationships (
 			id, project_id, source_table_id, source_column_id,
@@ -1495,7 +1452,7 @@ func (r *schemaRepository) UpsertRelationshipWithMetrics(ctx context.Context, re
 			updated_at = EXCLUDED.updated_at
 		RETURNING id, created_at`
 
-	err = scope.Conn.QueryRow(ctx, upsertQuery,
+	err := scope.Conn.QueryRow(ctx, upsertQuery,
 		rel.ID, rel.ProjectID, rel.SourceTableID, rel.SourceColumnID,
 		rel.TargetTableID, rel.TargetColumnID, rel.RelationshipType,
 		rel.Cardinality, rel.Confidence, rel.InferenceMethod, rel.IsValidated,
