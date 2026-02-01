@@ -1376,6 +1376,8 @@ type mockTestSchemaRepo struct {
 	columns               []*models.SchemaColumn
 	relationships         []*models.SchemaRelationship
 	upsertedRelationships []*models.SchemaRelationship // Tracks relationships upserted via UpsertRelationship
+	upsertedMetrics       []*models.DiscoveryMetrics   // Tracks metrics passed to UpsertRelationshipWithMetrics
+	upsertError           error                        // If set, UpsertRelationship/UpsertRelationshipWithMetrics will return this error
 }
 
 func (m *mockTestSchemaRepo) GetTables(ctx context.Context, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
@@ -1610,6 +1612,9 @@ func (m *mockTestSchemaRepo) GetRelationshipByColumns(ctx context.Context, sourc
 }
 
 func (m *mockTestSchemaRepo) UpsertRelationship(ctx context.Context, rel *models.SchemaRelationship) error {
+	if m.upsertError != nil {
+		return m.upsertError
+	}
 	// Track upserted relationships
 	m.upsertedRelationships = append(m.upsertedRelationships, rel)
 	return nil
@@ -1632,8 +1637,13 @@ func (m *mockTestSchemaRepo) GetRelationshipDetails(ctx context.Context, project
 }
 
 func (m *mockTestSchemaRepo) UpsertRelationshipWithMetrics(ctx context.Context, rel *models.SchemaRelationship, metrics *models.DiscoveryMetrics) error {
+	if m.upsertError != nil {
+		return m.upsertError
+	}
 	// Track upserted relationships (same as UpsertRelationship for test verification)
 	m.upsertedRelationships = append(m.upsertedRelationships, rel)
+	// Track metrics
+	m.upsertedMetrics = append(m.upsertedMetrics, metrics)
 	return nil
 }
 
@@ -5972,5 +5982,571 @@ func TestPKMatch_AcceptsLowReverseOrphans(t *testing.T) {
 	// Verify: Relationship WAS created because reverse orphan rate (20%) is below 50% threshold
 	if len(mocks.schemaRepo.upsertedRelationships) == 0 {
 		t.Error("expected relationship to be CREATED (reverse orphan rate 20% < 50% threshold), but none were created")
+	}
+}
+
+// TestFKDiscovery_NoEntityDependency verifies that FKDiscovery does NOT return early
+// when no entities exist. The service should still discover FK relationships from
+// ColumnFeatures and schema FK constraints, writing to SchemaRelationship.
+func TestFKDiscovery_NoEntityDependency(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+
+	// Create mocks with NO entities
+	mocks := setupMocks(projectID, ontologyID, datasourceID, uuid.Nil)
+	mocks.entityRepo.entities = []*models.OntologyEntity{} // Empty - no entities
+
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+	userIDColumnID := uuid.New()
+	buyerIDColumnID := uuid.New()
+
+	// Setup tables with columns - buyer_id has ColumnFeatures with FK resolved
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            userIDColumnID,
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+				},
+			},
+		},
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            buyerIDColumnID,
+					SchemaTableID: ordersTableID,
+					ColumnName:    "buyer_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose":       "identifier",
+							"semantic_type": "foreign_key",
+							"role":          "foreign_key",
+							"identifier_features": map[string]any{
+								"identifier_type":  "foreign_key",
+								"fk_target_table":  "users",
+								"fk_target_column": "id",
+								"fk_confidence":    0.9,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{}
+
+	// Setup join analysis to return valid join (no orphans)
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		return &datasource.JoinAnalysis{
+			JoinCount:     100,
+			SourceMatched: 100,
+			TargetMatched: 50,
+			OrphanCount:   0,
+		}, nil
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: FKDiscovery succeeded even without entities
+	if result.FKRelationships == 0 {
+		t.Error("expected FK relationships to be discovered even without entities")
+	}
+
+	// Verify: SchemaRelationship was created
+	if len(mocks.schemaRepo.upsertedRelationships) == 0 {
+		t.Error("expected SchemaRelationship to be created even without entities")
+	}
+
+	// Verify: The relationship was created from ColumnFeatures
+	rel := mocks.schemaRepo.upsertedRelationships[0]
+	if rel.InferenceMethod == nil || *rel.InferenceMethod != models.InferenceMethodColumnFeatures {
+		t.Error("expected InferenceMethod=column_features")
+	}
+}
+
+// TestFKDiscovery_UpsertBehavior verifies that FKDiscovery uses upsert semantics
+// when creating relationships, allowing updates to existing relationships.
+func TestFKDiscovery_UpsertBehavior(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+	userIDColumnID := uuid.New()
+	buyerIDColumnID := uuid.New()
+
+	// Setup tables with columns
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            userIDColumnID,
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+				},
+			},
+		},
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            buyerIDColumnID,
+					SchemaTableID: ordersTableID,
+					ColumnName:    "buyer_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose":       "identifier",
+							"role":          "foreign_key",
+							"identifier_features": map[string]any{
+								"fk_target_table":  "users",
+								"fk_target_column": "id",
+								"fk_confidence":    0.85,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{}
+
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		return &datasource.JoinAnalysis{
+			JoinCount:     100,
+			SourceMatched: 100,
+			TargetMatched: 50,
+			OrphanCount:   0,
+		}, nil
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	// Run discovery twice
+	_, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("first call unexpected error: %v", err)
+	}
+
+	firstCallCount := len(mocks.schemaRepo.upsertedRelationships)
+	if firstCallCount == 0 {
+		t.Fatal("expected at least one relationship after first call")
+	}
+
+	// Run again - should use upsert (UpsertRelationship is called, not Create)
+	_, err = service.DiscoverFKRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("second call unexpected error: %v", err)
+	}
+
+	// The mock tracks all upsert calls - in production, duplicate upserts would
+	// update the existing row, but here we just verify upsert is being called
+	secondCallCount := len(mocks.schemaRepo.upsertedRelationships)
+	if secondCallCount <= firstCallCount {
+		t.Error("expected UpsertRelationship to be called on second run (upsert semantics)")
+	}
+
+	// Verify all calls used UpsertRelationship (not Create which goes to relationshipRepo)
+	if len(mocks.relationshipRepo.created) > 0 {
+		t.Error("expected FKDiscovery to use schemaRepo.UpsertRelationship, not relationshipRepo.Create")
+	}
+}
+
+// TestFKDiscovery_ErrorPropagation verifies that FKDiscovery propagates repository
+// errors immediately (fail-fast pattern per project guidelines).
+func TestFKDiscovery_ErrorPropagation(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+	userIDColumnID := uuid.New()
+	buyerIDColumnID := uuid.New()
+
+	// Setup tables with columns
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            userIDColumnID,
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+				},
+			},
+		},
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            buyerIDColumnID,
+					SchemaTableID: ordersTableID,
+					ColumnName:    "buyer_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose":       "identifier",
+							"role":          "foreign_key",
+							"identifier_features": map[string]any{
+								"fk_target_table":  "users",
+								"fk_target_column": "id",
+								"fk_confidence":    0.9,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{}
+
+	// Configure upsert to return an error
+	expectedError := fmt.Errorf("database connection lost")
+	mocks.schemaRepo.upsertError = expectedError
+
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	_, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID, nil)
+
+	// Verify: Error was propagated
+	if err == nil {
+		t.Fatal("expected error to be propagated, got nil")
+	}
+
+	// Verify: The original error is in the chain
+	if !strings.Contains(err.Error(), "database connection lost") {
+		t.Errorf("expected error to contain original message, got: %v", err)
+	}
+}
+
+// TestPKMatchDiscovery_NoEntitiesExist verifies that PKMatchDiscovery does NOT return
+// empty when no entities exist. After the refactor (plan Step 3.1), the service builds
+// candidates from schema metadata instead of entities.
+func TestPKMatchDiscovery_NoEntitiesExist(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+
+	distinctCount := int64(100)
+	rowCount := int64(1000)
+	isJoinableTrue := true
+
+	// Create mocks with NO entities
+	mocks := setupMocks(projectID, ontologyID, datasourceID, uuid.Nil)
+	mocks.entityRepo.entities = []*models.OntologyEntity{} // Empty - no entities
+
+	// Configure AnalyzeJoin to return valid join
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		return &datasource.JoinAnalysis{
+			JoinCount:          100,
+			SourceMatched:      100,
+			TargetMatched:      50,
+			OrphanCount:        0,
+			ReverseOrphanCount: 0,
+		}, nil
+	}
+
+	// Schema with FK candidate column
+	sourceTableID := uuid.New()
+	targetTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         sourceTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            uuid.New(),
+					SchemaTableID: sourceTableID,
+					ColumnName:    "id",
+					DataType:      "int8",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+				{
+					ID:            uuid.New(),
+					SchemaTableID: sourceTableID,
+					ColumnName:    "user_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+						},
+					},
+				},
+			},
+		},
+		{
+			ID:         targetTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            uuid.New(),
+					SchemaTableID: targetTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: PKMatchDiscovery succeeded even without entities
+	// The old behavior (lines 711-717 in the plan) would return empty here
+	if result.InferredRelationships == 0 {
+		t.Error("expected PK-match relationships to be discovered even without entities")
+	}
+
+	// Verify: SchemaRelationship was created
+	if len(mocks.schemaRepo.upsertedRelationships) == 0 {
+		t.Error("expected SchemaRelationship to be created even without entities")
+	}
+
+	// Verify: inference_method=pk_match
+	rel := mocks.schemaRepo.upsertedRelationships[0]
+	if rel.InferenceMethod == nil || *rel.InferenceMethod != models.InferenceMethodPKMatch {
+		var method string
+		if rel.InferenceMethod != nil {
+			method = *rel.InferenceMethod
+		}
+		t.Errorf("expected InferenceMethod=%q, got %q", models.InferenceMethodPKMatch, method)
+	}
+}
+
+// TestPKMatchDiscovery_ValidationMetricsStored verifies that PKMatchDiscovery stores
+// validation metrics (match_rate, source_distinct, target_distinct, matched_count)
+// via UpsertRelationshipWithMetrics.
+func TestPKMatchDiscovery_ValidationMetricsStored(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+
+	distinctCount := int64(100)
+	rowCount := int64(1000)
+	isJoinableTrue := true
+
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Configure AnalyzeJoin to return specific metrics
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		return &datasource.JoinAnalysis{
+			JoinCount:          75, // 75 matching rows
+			SourceMatched:      50, // 50 distinct source values matched
+			TargetMatched:      40, // 40 distinct target values matched
+			OrphanCount:        0,  // 0 orphans (required for relationship creation)
+			ReverseOrphanCount: 10, // 10 reverse orphans (20% < 50% threshold)
+		}, nil
+	}
+
+	// Schema with FK candidate column
+	sourceTableID := uuid.New()
+	targetTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         sourceTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            uuid.New(),
+					SchemaTableID: sourceTableID,
+					ColumnName:    "id",
+					DataType:      "int8",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+				{
+					ID:            uuid.New(),
+					SchemaTableID: sourceTableID,
+					ColumnName:    "user_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+						},
+					},
+				},
+			},
+		},
+		{
+			ID:         targetTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            uuid.New(),
+					SchemaTableID: targetTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	_, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: Metrics were stored
+	if len(mocks.schemaRepo.upsertedMetrics) == 0 {
+		t.Fatal("expected metrics to be stored via UpsertRelationshipWithMetrics")
+	}
+
+	// Find the metrics for the relationship
+	var metrics *models.DiscoveryMetrics
+	for _, m := range mocks.schemaRepo.upsertedMetrics {
+		if m != nil {
+			metrics = m
+			break
+		}
+	}
+
+	if metrics == nil {
+		t.Fatal("expected non-nil metrics")
+	}
+
+	// Verify metrics values
+	// MatchRate = SourceMatched / (SourceMatched + OrphanCount) = 50 / (50 + 0) = 1.0
+	if metrics.MatchRate != 1.0 {
+		t.Errorf("expected MatchRate=1.0, got %f", metrics.MatchRate)
+	}
+
+	// SourceDistinct = SourceMatched + OrphanCount = 50 + 0 = 50
+	if metrics.SourceDistinct != 50 {
+		t.Errorf("expected SourceDistinct=50, got %d", metrics.SourceDistinct)
+	}
+
+	// TargetDistinct = TargetMatched = 40
+	if metrics.TargetDistinct != 40 {
+		t.Errorf("expected TargetDistinct=40, got %d", metrics.TargetDistinct)
+	}
+
+	// MatchedCount = SourceMatched = 50
+	if metrics.MatchedCount != 50 {
+		t.Errorf("expected MatchedCount=50, got %d", metrics.MatchedCount)
 	}
 }

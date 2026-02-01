@@ -196,109 +196,186 @@ GetRelationshipsByMethod(ctx context.Context, projectID uuid.UUID, method string
 
 ## Step 5: Testing
 
-### 5.1 Unit tests
+### 5.1 Unit tests for TableFeatureExtraction service
 
-#### 5.1.1 Unit tests for TableFeatureExtraction service
-
-Write unit tests for the TableFeatureExtraction service in `pkg/services/table_feature_extraction.go`. The service generates table-level descriptions based on column features already extracted.
+Write unit tests for the TableFeatureExtraction service that generates table-level descriptions based on column features.
 
 **File to create:** `pkg/services/table_feature_extraction_test.go`
 
-**Test cases needed:**
-1. [ ] **Happy path**: Given a table with columns that have ColumnFeatures (PKs, FKs, enums, semantic types), verify the service calls the LLM with the correct prompt and stores results in `engine_table_metadata`
-2. [ ] **Empty columns**: Table with no columns should handle gracefully
-3. [ ] **LLM error handling**: Verify errors from LLM client are propagated correctly (fail-fast pattern)
-4. [ ] **Progress callback**: Verify the progress callback is invoked after each table completes
-5. [ ] **Parallel execution**: Verify multiple tables are processed concurrently via worker pool
-6. [ ] **Output validation**: Verify the service correctly populates `description`, `usage_notes`, and `is_ephemeral` fields
+**Service under test:** `pkg/services/table_feature_extraction.go` - generates table-level metadata (description, usage_notes, is_ephemeral) by synthesizing column features via LLM calls.
+
+**Test cases to implement:**
+
+1. [ ] **Happy path**: Given a table with columns that have ColumnFeatures (PKs, FKs, enums, semantic types), verify:
+   - LLM is called with correct prompt containing column metadata
+   - Results are stored in `engine_table_metadata` via repository
+   - Returned TableMetadata contains correct description, usage_notes, is_ephemeral
+
+2. [ ] **Empty columns**: Table with no columns should handle gracefully (not error, return minimal metadata)
+
+3. [ ] **LLM error handling**: When LLM client returns error, verify error is propagated immediately (fail-fast pattern per project guidelines)
+
+4. [ ] **Progress callback invocation**: Verify progress callback is invoked after each table completes with correct progress fraction
+
+5. [ ] **Parallel execution via worker pool**: Verify multiple tables are processed concurrently (mock multiple tables, verify concurrent calls)
+
+6. [ ] **Output validation**: Verify the service correctly parses LLM response and populates:
+   - `description`: What this table represents
+   - `usage_notes`: When to use/not use this table
+   - `is_ephemeral`: Whether it's transient/temp data
 
 **Dependencies to mock:**
-- `TableMetadataRepository` interface (for storing results)
-- `SchemaRepository` interface (for fetching columns with features)
-- LLM client interface
+- `TableMetadataRepository` interface - for storing results
+- `SchemaRepository` interface - for fetching columns with features
+- LLM client interface (likely `pkg/llm` package)
 - Progress callback function
 
-**Reference implementation:** See `pkg/services/column_feature_extraction_test.go` for similar service test patterns in this codebase.
+**Reference for test patterns:** See `pkg/services/column_feature_extraction_test.go` for similar service test patterns in this codebase.
 
 ---
 
-#### 5.1.2 Unit tests for FKDiscovery writing to SchemaRelationship
+### 5.2 Unit tests for FKDiscovery and PKMatchDiscovery SchemaRelationship writing ✓
 
-Write unit tests verifying that FKDiscovery (in `pkg/services/deterministic_relationship_service.go`) correctly writes to `engine_schema_relationships` instead of entity relationships.
+Write unit tests verifying that both FKDiscovery and PKMatchDiscovery correctly write to `engine_schema_relationships` without entity dependencies.
 
-**File to create/update:** `pkg/services/deterministic_relationship_service_test.go`
+**File to update:** `pkg/services/deterministic_relationship_service_test.go`
 
-**Test cases needed:**
-1. [ ] **FK from ColumnFeatures**: When a column has `Role=foreign_key` in its ColumnFeatures, verify a SchemaRelationship is created with `inference_method='column_features'`
-2. [ ] **No entity dependency**: Verify the service does NOT require entities to exist (should not return early when no entities found)
-3. [ ] **Relationship fields**: Verify created SchemaRelationship has correct fields: `source_table`, `source_column`, `target_table`, `target_column`, `inference_method`, `confidence`
-4. [ ] **Upsert behavior**: If relationship already exists, verify it's updated not duplicated
-5. [ ] **Error propagation**: Verify repository errors are propagated (fail-fast)
+**Service under test:** `pkg/services/deterministic_relationship_service.go` - the refactored service that discovers relationships and writes to SchemaRelationship instead of EntityRelationship.
 
-**Key change context:** The refactor removed entity lookup/requirement from FKDiscovery. It now calls `schemaRepo.CreateInferredRelationship()` or `UpsertRelationship()` instead of `relationshipRepo.Create()`.
+**FKDiscovery test cases:**
+
+1. [x] **FK from ColumnFeatures**: When a column has `Role=foreign_key` in its ColumnFeatures, verify:
+   - SchemaRelationship is created with `inference_method='column_features'`
+   - Correct fields: `source_table`, `source_column`, `target_table`, `target_column`, `confidence`
+
+2. [x] **No entity dependency**: Verify the service does NOT require entities to exist - should NOT return early when no entities found
+
+3. [x] **Upsert behavior**: If relationship already exists, verify it's updated not duplicated
+
+4. [x] **Error propagation**: Verify repository errors are propagated immediately (fail-fast)
+
+**PKMatchDiscovery test cases:**
+
+1. [x] **No entities exist**: When `entityRepo.GetByOntology()` returns empty, PKMatchDiscovery should still proceed (not return empty result as it did before the refactor at lines 711-717)
+
+2. [x] **Build candidates from schema**: Verify candidate columns are built from PKs, unique columns, and high-cardinality columns from schema metadata (not from entities)
+
+3. [x] **Build references from ColumnFeatures**: Verify reference columns are built from ColumnFeatures with `Role=foreign_key` or `Purpose=identifier`
+
+4. [x] **Write to SchemaRelationship**: Verify discovered matches are written with `inference_method='pk_match'`
+
+5. [x] **Validation metrics stored**: Verify `validation_results` field contains match_rate, source_distinct, target_distinct, orphan_count
 
 **Dependencies to mock:**
-- `SchemaRepository` interface (new methods: `CreateInferredRelationship`, `UpsertRelationship`)
+- `SchemaRepository` interface (methods: `CreateInferredRelationship`, `UpsertRelationship`, `GetRelationshipsByMethod`)
 - `ColumnFeatureRepository` (to return columns with FK role)
+- `EntityRepository` (to verify it's called but empty result doesn't stop processing)
+- `DatasourceAdapter` (for AnalyzeJoin validation in PKMatchDiscovery)
 
 ---
 
-#### 5.1.3 Unit tests for PKMatchDiscovery without entity dependency
+### 5.3 Unit tests for bidirectional join validation
 
-Write unit tests verifying that PKMatchDiscovery (in `pkg/services/deterministic_relationship_service.go`) works without requiring entities to exist.
+Write unit tests for the bidirectional join validation fix in the PostgreSQL adapter's AnalyzeJoin method.
 
-**File to create/update:** `pkg/services/deterministic_relationship_service_test.go`
+**File to update:** `pkg/adapters/datasource/postgres/schema_test.go`
 
-**Test cases needed:**
-1. [ ] **No entities exist**: When `entityRepo.GetByOntology()` returns empty, PKMatchDiscovery should still proceed (not return empty result)
-2. [ ] **Build candidates from schema**: Verify candidate columns are built from PKs, unique columns, and high-cardinality columns from schema (not from entities)
-3. [ ] **Build references from ColumnFeatures**: Verify reference columns are built from ColumnFeatures with `Role=foreign_key` or `Purpose=identifier`
-4. [ ] **Write to SchemaRelationship**: Verify discovered matches are written to `engine_schema_relationships` with `inference_method='pk_match'`
-5. [ ] **Validation metrics stored**: Verify `validation_results` field contains match_rate, source_distinct, target_distinct, orphan_count
+**Code under test:** `pkg/adapters/datasource/postgres/schema.go` - the `AnalyzeJoin` method that validates FK candidates.
 
-**Key change context:** Lines 711-717 previously returned early if no entities existed. The refactor removed this dependency, building candidates directly from schema metadata.
+**Bug context:** The previous implementation only checked orphans in source→target direction. This caused false positives like:
+- `identity_provider` (3 distinct values: {1,2,3}) appearing to reference `jobs.id` (83 distinct values)
+- All 3 source values exist in target → 0 orphans → incorrectly PASSED
+- But 80 target values (4-83) don't exist in source → NEVER CHECKED
 
-**Dependencies to mock:**
-- `SchemaRepository` (for candidate columns and relationship storage)
-- `ColumnFeatureRepository` (for reference columns)
-- `DatasourceAdapter` (for AnalyzeJoin validation)
+**Test cases to implement:**
+
+1. [ ] **Reject asymmetric cardinality**:
+   - Setup: Source column has 3 distinct values {1,2,3}, target has 83 values {1..83}
+   - Source→target: 0 orphans (all 3 exist in 83)
+   - Target→source: 80 orphans (values 4-83 don't exist in source)
+   - Expected: REJECT this relationship
+
+2. [ ] **Accept valid FK**:
+   - Setup: Source column references target PK with high match rate in both directions
+   - Expected: ACCEPT
+
+3. [ ] **Accept partial FK based on thresholds**:
+   - Setup: Source has some orphans but reverse check passes (target values mostly exist in source)
+   - Expected: ACCEPT based on configurable thresholds
+
+4. [ ] **Reverse orphan threshold enforcement**:
+   - Verify: If `reverse_orphan_count / target_distinct > 0.5`, should reject
+   - Test boundary conditions around the threshold
+
+5. [ ] **Verify SQL includes reverse_orphans CTE**:
+   - The fix added a CTE like:
+   ```sql
+   reverse_orphans AS (
+       SELECT COUNT(DISTINCT t.target_col) as reverse_orphan_count
+       FROM target_table t
+       LEFT JOIN source_table s ON t.target_col = s.source_col
+       WHERE s.source_col IS NULL
+   )
+   ```
+   - Verify this CTE is present and results are used in rejection logic
+
+**Test setup requirements:**
+- These tests need a test database connection
+- Use `testhelpers.GetTestDB(t)` from `pkg/testhelpers/containers.go` to get containerized PostgreSQL
+- Create test tables with controlled data to verify validation logic
+- Example setup SQL:
+  ```sql
+  CREATE TABLE test_target (id INT PRIMARY KEY);
+  INSERT INTO test_target SELECT generate_series(1, 83);
+
+  CREATE TABLE test_source (identity_provider INT);
+  INSERT INTO test_source VALUES (1), (2), (3), (1), (2);
+  ```
 
 ---
 
-#### 5.1.4 Unit tests for bidirectional join validation logic
+### 5.4 Integration tests for full DAG relationship discovery
 
-Write unit tests for the bidirectional join validation fix in `pkg/adapters/datasource/postgres/schema.go` (AnalyzeJoin method).
+Write integration tests that run the DAG through PKMatchDiscovery and verify correct relationship discovery without false positives.
 
-**File to create/update:** `pkg/adapters/datasource/postgres/schema_test.go`
+**File to create:** `pkg/services/dag/relationship_discovery_integration_test.go` (or add to existing integration test file)
 
-**Bug context:** The previous implementation only checked orphans in source→target direction. This caused false positives like `identity_provider` (3 distinct values: {1,2,3}) appearing to reference `jobs.id` (83 distinct values) because all 3 source values existed in the target.
+**Test scope:** Full DAG execution from KnowledgeSeeding through PKMatchDiscovery to verify the refactored pipeline works end-to-end.
 
-**Test cases needed:**
-1. [ ] **Reject asymmetric cardinality**: Source has 3 distinct values, target has 83. Source→target has 0 orphans, but target→source has 80 orphans. Should REJECT this relationship.
-2. [ ] **Accept valid FK**: Source column references target PK with high match rate in both directions. Should ACCEPT.
-3. [ ] **Accept partial FK**: Source has some orphans but reverse check passes (target values mostly exist in source). Should ACCEPT based on thresholds.
-4. [ ] **Reverse orphan threshold**: If `reverse_orphan_count / target_distinct > 0.5`, should reject
-5. [ ] **Both directions checked**: Verify the SQL includes the `reverse_orphans` CTE that counts target values not found in source
+**Test cases:**
 
-**Expected SQL pattern in fix:**
-```sql
-reverse_orphans AS (
-    SELECT COUNT(DISTINCT t.target_col) as reverse_orphan_count
-    FROM target_table t
-    LEFT JOIN source_table s ON t.target_col = s.source_col
-    WHERE s.source_col IS NULL
-)
-```
+1. [ ] **Full DAG run through PKMatchDiscovery**:
+   - Setup: Create a test project with schema containing:
+     - A clear FK relationship (e.g., `orders.customer_id` → `customers.id`)
+     - A false positive candidate (e.g., `settings.identity_provider` with values {1,2,3} and a `jobs` table with id 1-100)
+   - Execute: Run DAG nodes in order: KnowledgeSeeding → ColumnFeatureExtraction → FKDiscovery → TableFeatureExtraction → PKMatchDiscovery
+   - Verify: DAG completes successfully
 
-**Dependencies:** These tests need a test database connection. Use `testhelpers.GetTestDB(t)` from `pkg/testhelpers/containers.go` to get a containerized PostgreSQL connection. Create test tables with controlled data to verify the validation logic.
+2. [ ] **Verify no false positives like identity_provider → jobs.id**:
+   - Query `engine_schema_relationships` after DAG completion
+   - Assert: No relationship exists between `identity_provider` column and `jobs.id`
+   - This validates the bidirectional join fix is working
 
-### 5.2 Integration tests
+3. [ ] **Verify legitimate relationships discovered**:
+   - Assert: The `orders.customer_id` → `customers.id` relationship IS discovered
+   - Verify: `inference_method` is correctly set ('fk', 'column_features', or 'pk_match' depending on discovery path)
+   - Verify: `validation_results` contains expected metrics
 
-- Full DAG run through PKMatchDiscovery
-- Verify no false positives like `identity_provider` → `jobs.id`
-- Verify legitimate relationships are discovered
+4. [ ] **Verify SchemaRelationship not EntityRelationship**:
+   - Assert: Relationships are in `engine_schema_relationships` table
+   - Assert: `engine_entity_relationships` is NOT populated by these discovery steps
 
-### 5.3 Manual testing
+**Test setup:**
+- Use `testhelpers.GetEngineDB(t)` for engine database with migrations
+- Use `testhelpers.GetTestDB(t)` for test datasource with controlled schema
+- Create isolated test project with unique `project_id`
+- Cleanup after test completes
+
+**Reference:** Check existing integration tests in `pkg/services/dag/` for patterns on running DAG nodes in tests.
+
+---
+
+### 5.5 Manual testing
 
 - Run DAG on test project
 - Review relationships in UI
