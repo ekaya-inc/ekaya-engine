@@ -349,56 +349,373 @@ func (c *relationshipCandidateCollector) CollectCandidates(
 
 ### Task 3: Create `relationship_validator.go` - LLM Validation
 
-Phase 2: Validate each candidate with a small, focused LLM call:
+Phase 2: Validate each candidate with a small, focused LLM call. This task is broken into subtasks below.
 
+**Files:** `pkg/services/relationship_validator.go`
+
+---
+
+#### Task 3.1: Create RelationshipValidator Interface and Data Structures [x]
+
+Create the RelationshipValidator interface and ValidatedRelationship result type in a new file.
+
+**File:** `pkg/services/relationship_validator.go`
+
+**Context:** This is Phase 2 of the relationship discovery pipeline. Task 2 created `RelationshipCandidate` (input) and `RelationshipValidationResult` (LLM response). This task creates the validator interface that processes candidates.
+
+**Implementation:**
+
+1. Create the file with package declaration and imports:
 ```go
+package services
+
+import (
+    "context"
+
+    "github.com/ekaya-inc/ekaya-engine/pkg/services/dag"
+    "github.com/google/uuid"
+)
+```
+
+2. Define `ValidatedRelationship` struct that combines candidate with validation result:
+```go
+// ValidatedRelationship combines a candidate with its LLM validation result.
+// Only candidates where IsValidFK=true become relationships.
+type ValidatedRelationship struct {
+    Candidate  *RelationshipCandidate
+    Result     *RelationshipValidationResult
+    Validated  bool  // true if LLM was called, false if skipped (e.g., DB-declared FK)
+}
+```
+
+3. Define the `RelationshipValidator` interface:
+```go
+// RelationshipValidator validates relationship candidates using LLM.
+// Each candidate is evaluated independently for parallelization.
 type RelationshipValidator interface {
     // ValidateCandidate asks LLM if this is a valid FK relationship.
     // One candidate per call for parallelization and progress reporting.
     ValidateCandidate(ctx context.Context, projectID uuid.UUID, candidate *RelationshipCandidate) (*RelationshipValidationResult, error)
 
     // ValidateCandidates validates multiple candidates in parallel using worker pool.
+    // Returns all results including rejected candidates (for debugging/audit).
+    // progressCallback reports progress as candidates complete.
     ValidateCandidates(ctx context.Context, projectID uuid.UUID, candidates []*RelationshipCandidate, progressCallback dag.ProgressCallback) ([]*ValidatedRelationship, error)
 }
 ```
 
-LLM prompt structure:
-```
-## Relationship Candidate
+4. Add the struct definition (implementation will be in 3.2):
+```go
+type relationshipValidator struct {
+    llmService LLMService
+    logger     *slog.Logger
+}
 
-Source: {table}.{column} ({data_type}, {purpose}, {role})
-  - Distinct values: {n}, Null rate: {n}%
-  - Samples: {val1}, {val2}, {val3}...
-
-Target: {table}.{column} ({data_type}, {purpose}, {role})
-  - Distinct values: {n}, Null rate: {n}%
-  - Samples: {val1}, {val2}, {val3}...
-
-## Join Analysis Results
-- {source_matched} of {source_distinct} source values exist in target
-- {orphan_count} source values have no match (orphan rate: {n}%)
-- {reverse_orphans} target values not referenced by source
-
-## Question
-Is {source_table}.{source_column} a foreign key referencing {target_table}.{target_column}?
-
-Consider:
-- Do the sample values suggest these columns represent the same entity?
-- Is the join direction correct (FK → PK)?
-- Does the orphan rate suggest data integrity issues or a false positive?
-- What semantic role does this FK represent (if any)?
-
-## Response Format (JSON)
-{
-  "is_valid_fk": true/false,
-  "confidence": 0.0-1.0,
-  "cardinality": "N:1" | "1:1" | "1:N" | "N:M",
-  "reasoning": "Brief explanation",
-  "source_role": "owner" | "creator" | null
+func NewRelationshipValidator(llmService LLMService, logger *slog.Logger) RelationshipValidator {
+    return &relationshipValidator{
+        llmService: llmService,
+        logger:     logger,
+    }
 }
 ```
 
-**Files:** `pkg/services/relationship_validator.go`
+**Note:** The actual method implementations will be added in subtasks 3.2 and 3.3.
+
+---
+
+#### Task 3.2: Implement ValidateCandidate with LLM Prompt [ ]
+
+Implement the single-candidate validation method with a carefully designed LLM prompt.
+
+**File:** `pkg/services/relationship_validator.go` (continue from 3.1)
+
+**Context:** This method makes one LLM call per candidate. The prompt must present all relevant data and get a structured JSON response. Follow patterns from `column_enrichment.go` and `column_feature_extraction.go` for LLM interaction.
+
+**Implementation:**
+
+1. Create the prompt builder function:
+```go
+func (v *relationshipValidator) buildValidationPrompt(candidate *RelationshipCandidate) string {
+    // Build prompt following this structure:
+    /*
+    ## Relationship Candidate
+
+    Source: {table}.{column} ({data_type}, {purpose}, {role})
+      - Distinct values: {n}, Null rate: {n}%
+      - Samples: {val1}, {val2}, {val3}...
+
+    Target: {table}.{column} ({data_type}, {purpose}, {role})
+      - Distinct values: {n}, Null rate: {n}%
+      - Samples: {val1}, {val2}, {val3}...
+
+    ## Join Analysis Results
+    - {source_matched} of {source_distinct} source values exist in target
+    - {orphan_count} source values have no match (orphan rate: {n}%)
+    - {reverse_orphans} target values not referenced by source
+
+    ## Question
+    Is {source_table}.{source_column} a foreign key referencing {target_table}.{target_column}?
+
+    Consider:
+    - Do the sample values suggest these columns represent the same entity?
+    - Is the join direction correct (FK → PK)?
+    - Does the orphan rate suggest data integrity issues or a false positive?
+    - What semantic role does this FK represent (if any)?
+
+    ## Response Format (JSON)
+    {
+      "is_valid_fk": true/false,
+      "confidence": 0.0-1.0,
+      "cardinality": "N:1" | "1:1" | "1:N" | "N:M",
+      "reasoning": "Brief explanation",
+      "source_role": "owner" | "creator" | null
+    }
+    */
+}
+```
+
+2. Implement `ValidateCandidate`:
+```go
+func (v *relationshipValidator) ValidateCandidate(ctx context.Context, projectID uuid.UUID, candidate *RelationshipCandidate) (*RelationshipValidationResult, error) {
+    prompt := v.buildValidationPrompt(candidate)
+
+    // Use LLMService to make the call (follow existing patterns)
+    // Parse JSON response into RelationshipValidationResult
+    // Handle parsing errors gracefully
+
+    // Log the decision for debugging
+    v.logger.Debug("validated relationship candidate",
+        "source", candidate.SourceTable+"."+candidate.SourceColumn,
+        "target", candidate.TargetTable+"."+candidate.TargetColumn,
+        "is_valid", result.IsValidFK,
+        "confidence", result.Confidence,
+    )
+
+    return result, nil
+}
+```
+
+3. Look at existing LLM service usage in `column_feature_extraction.go` or `column_enrichment.go` to match the calling pattern (system prompt, user prompt, JSON parsing).
+
+**Key design decision from plan:** If LLM confidence is low, treat as rejection. Do not create relationship, do not ask user.
+
+---
+
+#### Task 3.3: Implement ValidateCandidates with Worker Pool and Progress Reporting [ ]
+
+Implement parallel validation with a worker pool pattern and progress callbacks.
+
+**File:** `pkg/services/relationship_validator.go` (continue from 3.2)
+
+**Context:** For large schemas, there may be 50-200+ candidates. Running them sequentially would take too long. Use a worker pool with progress reporting so the UI can show "Validating relationships: 45/127".
+
+**Implementation:**
+
+1. Add worker pool configuration:
+```go
+const (
+    defaultValidationWorkers = 5  // Parallel LLM calls
+)
+```
+
+2. Implement `ValidateCandidates`:
+```go
+func (v *relationshipValidator) ValidateCandidates(
+    ctx context.Context,
+    projectID uuid.UUID,
+    candidates []*RelationshipCandidate,
+    progressCallback dag.ProgressCallback,
+) ([]*ValidatedRelationship, error) {
+    if len(candidates) == 0 {
+        return nil, nil
+    }
+
+    total := len(candidates)
+    progressCallback(0, total, "Starting relationship validation")
+
+    // Create result channel and work channel
+    type workItem struct {
+        index     int
+        candidate *RelationshipCandidate
+    }
+
+    workCh := make(chan workItem, total)
+    resultCh := make(chan struct {
+        index  int
+        result *ValidatedRelationship
+        err    error
+    }, total)
+
+    // Start workers
+    var wg sync.WaitGroup
+    for i := 0; i < defaultValidationWorkers; i++ {
+        wg.Add(1)
+        go func() {
+            defer wg.Done()
+            for work := range workCh {
+                result, err := v.ValidateCandidate(ctx, projectID, work.candidate)
+                resultCh <- struct {
+                    index  int
+                    result *ValidatedRelationship
+                    err    error
+                }{
+                    index: work.index,
+                    result: &ValidatedRelationship{
+                        Candidate: work.candidate,
+                        Result:    result,
+                        Validated: true,
+                    },
+                    err: err,
+                }
+            }
+        }()
+    }
+
+    // Send work
+    go func() {
+        for i, c := range candidates {
+            workCh <- workItem{index: i, candidate: c}
+        }
+        close(workCh)
+    }()
+
+    // Collect results with progress
+    go func() {
+        wg.Wait()
+        close(resultCh)
+    }()
+
+    results := make([]*ValidatedRelationship, total)
+    completed := 0
+    var firstErr error
+
+    for r := range resultCh {
+        if r.err != nil && firstErr == nil {
+            firstErr = r.err
+            // Continue collecting results, don't fail fast on single LLM error
+            v.logger.Warn("relationship validation failed",
+                "candidate", candidates[r.index].SourceTable+"."+candidates[r.index].SourceColumn,
+                "error", r.err,
+            )
+        }
+        results[r.index] = r.result
+        completed++
+
+        // Report progress
+        if completed%5 == 0 || completed == total {
+            progressCallback(completed, total, fmt.Sprintf("Validated %d/%d candidates", completed, total))
+        }
+    }
+
+    // Filter out nil results (from errors) and return
+    var validResults []*ValidatedRelationship
+    for _, r := range results {
+        if r != nil {
+            validResults = append(validResults, r)
+        }
+    }
+
+    return validResults, firstErr
+}
+```
+
+3. Consider context cancellation - if ctx is cancelled, workers should stop:
+```go
+select {
+case work := <-workCh:
+    // process
+case <-ctx.Done():
+    return
+}
+```
+
+**Error handling per CLAUDE.md:** Don't fail the entire batch if one LLM call fails. Log the error, skip that candidate, continue with others. Only return error if ALL candidates failed or context was cancelled.
+
+---
+
+#### Task 3.4: Add Unit Tests for RelationshipValidator [ ]
+
+Create comprehensive unit tests with mocked LLM service.
+
+**File:** `pkg/services/relationship_validator_test.go`
+
+**Context:** Tests should verify the validator interface works correctly without making real LLM calls. Mock the LLMService to return predictable responses.
+
+**Implementation:**
+
+1. Create mock LLM service:
+```go
+type mockLLMService struct {
+    responses map[string]*RelationshipValidationResult  // keyed by "source.col->target.col"
+    callCount int
+}
+
+func (m *mockLLMService) // implement LLMService interface methods
+```
+
+2. Test cases to implement:
+
+```go
+func TestValidateCandidate_ValidFK(t *testing.T) {
+    // Setup: candidate where user_id -> users.id
+    // Mock LLM returns is_valid_fk=true, confidence=0.95, cardinality="N:1"
+    // Assert: result matches expected
+}
+
+func TestValidateCandidate_InvalidFK(t *testing.T) {
+    // Setup: candidate where id -> messages.nonce (bad inference)
+    // Mock LLM returns is_valid_fk=false, reasoning="nonce is not an identifier"
+    // Assert: result correctly rejected
+}
+
+func TestValidateCandidate_LowConfidence(t *testing.T) {
+    // Setup: ambiguous candidate
+    // Mock LLM returns is_valid_fk=true but confidence=0.4
+    // Assert: result has low confidence (caller will reject)
+}
+
+func TestValidateCandidates_Parallel(t *testing.T) {
+    // Setup: 10 candidates
+    // Mock LLM with slight delay to verify parallel execution
+    // Assert: all results returned, progress callback called
+}
+
+func TestValidateCandidates_PartialFailure(t *testing.T) {
+    // Setup: 5 candidates, mock LLM fails on candidate 3
+    // Assert: other 4 candidates still validated
+    // Assert: error returned but results available
+}
+
+func TestValidateCandidates_ContextCancellation(t *testing.T) {
+    // Setup: many candidates, cancel context after a few
+    // Assert: workers stop, partial results returned
+}
+
+func TestBuildValidationPrompt(t *testing.T) {
+    // Setup: candidate with all fields populated
+    // Assert: prompt contains all expected sections
+    // Assert: sample values are included
+    // Assert: join statistics are formatted correctly
+}
+```
+
+3. Test the prompt building separately to ensure all candidate data is included:
+```go
+func TestBuildValidationPrompt_IncludesAllData(t *testing.T) {
+    candidate := &RelationshipCandidate{
+        SourceTable: "orders",
+        SourceColumn: "user_id",
+        // ... fill all fields
+    }
+
+    prompt := validator.buildValidationPrompt(candidate)
+
+    assert.Contains(t, prompt, "orders.user_id")
+    assert.Contains(t, prompt, "Distinct values:")
+    assert.Contains(t, prompt, "Join Analysis Results")
+    // etc.
+}
+```
 
 ---
 
