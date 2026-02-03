@@ -386,9 +386,11 @@ const EnrichmentPage = () => {
   };
 
   // Get list of tables to render - prefer entitySummaries, fall back to column_details tables
-  const tablesToRender = entitySummaries.length > 0
+  // Sort alphabetically by table name for consistency with other ontology screens
+  const tablesToRender = (entitySummaries.length > 0
     ? entitySummaries.map(e => ({ tableName: e.table_name, entity: e }))
-    : columnDetails.map(cd => ({ tableName: cd.table_name, entity: undefined }));
+    : columnDetails.map(cd => ({ tableName: cd.table_name, entity: undefined }))
+  ).sort((a, b) => a.tableName.localeCompare(b.tableName));
 
   return (
     <div className="mx-auto max-w-6xl">
