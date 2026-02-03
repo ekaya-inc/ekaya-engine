@@ -48,6 +48,10 @@ type columnFeatureExtractionService struct {
 	getTenantCtx      TenantContextFunc
 	logger            *zap.Logger
 
+	// Dependencies for question creation when classifiers are uncertain
+	questionService OntologyQuestionService
+	ontologyRepo    repositories.OntologyRepository
+
 	// Cached classifiers (created lazily)
 	classifiersMu sync.RWMutex
 	classifiers   map[models.ClassificationPath]ColumnClassifier
@@ -93,6 +97,8 @@ func NewColumnFeatureExtractionServiceFull(
 	llmFactory llm.LLMClientFactory,
 	workerPool *llm.WorkerPool,
 	getTenantCtx TenantContextFunc,
+	questionService OntologyQuestionService,
+	ontologyRepo repositories.OntologyRepository,
 	logger *zap.Logger,
 ) ColumnFeatureExtractionService {
 	return &columnFeatureExtractionService{
@@ -102,6 +108,8 @@ func NewColumnFeatureExtractionServiceFull(
 		llmFactory:        llmFactory,
 		workerPool:        workerPool,
 		getTenantCtx:      getTenantCtx,
+		questionService:   questionService,
+		ontologyRepo:      ontologyRepo,
 		logger:            logger.Named("column-feature-extraction"),
 		classifiers:       make(map[models.ClassificationPath]ColumnClassifier),
 	}
@@ -670,6 +678,9 @@ func (s *columnFeatureExtractionService) runPhase2ColumnClassification(
 		result.Phase5CrossColumnQueue = append(result.Phase5CrossColumnQueue, table)
 	}
 
+	// Collect questions from uncertain classifications and store them
+	s.createQuestionsFromUncertainClassifications(ctx, projectID, result.Features, profiles)
+
 	s.logger.Info("Column classification complete",
 		zap.Int("total_columns", len(profiles)),
 		zap.Int("classified", len(result.Features)),
@@ -686,6 +697,82 @@ func (s *columnFeatureExtractionService) runPhase2ColumnClassification(
 	}
 
 	return result, nil
+}
+
+// createQuestionsFromUncertainClassifications collects questions from columns where the
+// classifier was uncertain and stores them in the ontology questions table.
+func (s *columnFeatureExtractionService) createQuestionsFromUncertainClassifications(
+	ctx context.Context,
+	projectID uuid.UUID,
+	features []*models.ColumnFeatures,
+	profiles []*models.ColumnDataProfile,
+) {
+	// Build a map of profiles by column ID for quick lookup
+	profileByColumnID := make(map[uuid.UUID]*models.ColumnDataProfile)
+	for _, p := range profiles {
+		profileByColumnID[p.ColumnID] = p
+	}
+
+	// Collect questions from uncertain classifications
+	var questionInputs []OntologyQuestionInput
+	for _, f := range features {
+		if f.NeedsClarification && f.ClarificationQuestion != "" {
+			// Get profile for column context (table name, column name, data type, null rate)
+			profile := profileByColumnID[f.ColumnID]
+			if profile == nil {
+				// Skip if we can't find the profile - we need it for context
+				continue
+			}
+
+			questionInputs = append(questionInputs, OntologyQuestionInput{
+				Question: f.ClarificationQuestion,
+				Category: models.QuestionCategoryTerminology,
+				Priority: 3, // Medium priority
+				Context: fmt.Sprintf("Column: %s.%s, Type: %s, Null Rate: %.1f%%",
+					profile.TableName, profile.ColumnName, profile.DataType, profile.NullRate*100),
+			})
+		}
+	}
+
+	if len(questionInputs) == 0 {
+		return
+	}
+
+	// Get active ontology for question storage
+	if s.ontologyRepo == nil || s.questionService == nil {
+		s.logger.Debug("Question service or ontology repo not available, skipping question creation",
+			zap.Int("questions_skipped", len(questionInputs)))
+		return
+	}
+
+	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
+	if err != nil {
+		s.logger.Error("failed to get active ontology for classification question storage",
+			zap.Error(err))
+		// Non-fatal: continue even if we can't store questions
+		return
+	}
+
+	if ontology == nil {
+		s.logger.Debug("No active ontology found, skipping classification question storage",
+			zap.Int("questions_skipped", len(questionInputs)))
+		return
+	}
+
+	questionModels := ConvertQuestionInputs(questionInputs, projectID, ontology.ID, nil)
+	if len(questionModels) == 0 {
+		return
+	}
+
+	if err := s.questionService.CreateQuestions(ctx, questionModels); err != nil {
+		s.logger.Error("failed to store classification questions",
+			zap.Int("count", len(questionModels)),
+			zap.Error(err))
+		// Non-fatal: continue even if question storage fails
+	} else {
+		s.logger.Info("Stored classification questions from uncertain columns",
+			zap.Int("question_count", len(questionModels)))
+	}
 }
 
 // classifySingleColumn sends ONE focused LLM request for ONE column.

@@ -3385,3 +3385,310 @@ func (m *mockSchemaRepoForStoreFeatures) UpdateColumnFeatures(ctx context.Contex
 	m.storedFeatures[columnID] = features
 	return nil
 }
+
+// ============================================================================
+// Tests for createQuestionsFromUncertainClassifications
+// ============================================================================
+
+// mockOntologyRepoForFeatureExtraction is a minimal mock for testing question creation
+type mockOntologyRepoForFeatureExtraction struct {
+	ontology *models.TieredOntology
+	getErr   error
+}
+
+func (m *mockOntologyRepoForFeatureExtraction) GetActive(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error) {
+	if m.getErr != nil {
+		return nil, m.getErr
+	}
+	return m.ontology, nil
+}
+
+func (m *mockOntologyRepoForFeatureExtraction) Create(ctx context.Context, ontology *models.TieredOntology) error {
+	return nil
+}
+func (m *mockOntologyRepoForFeatureExtraction) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
+	return nil
+}
+func (m *mockOntologyRepoForFeatureExtraction) UpdateEntitySummary(ctx context.Context, projectID uuid.UUID, tableName string, summary *models.EntitySummary) error {
+	return nil
+}
+func (m *mockOntologyRepoForFeatureExtraction) UpdateEntitySummaries(ctx context.Context, projectID uuid.UUID, summaries map[string]*models.EntitySummary) error {
+	return nil
+}
+func (m *mockOntologyRepoForFeatureExtraction) UpdateColumnDetails(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error {
+	return nil
+}
+func (m *mockOntologyRepoForFeatureExtraction) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+func (m *mockOntologyRepoForFeatureExtraction) GetNextVersion(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return 1, nil
+}
+
+// mockQuestionServiceForFeatureExtraction is a minimal mock for testing question creation
+type mockQuestionServiceForFeatureExtraction struct {
+	createdQuestions []*models.OntologyQuestion
+	createErr        error
+}
+
+func (m *mockQuestionServiceForFeatureExtraction) GetNextQuestion(ctx context.Context, projectID uuid.UUID, includeSkipped bool) (*models.OntologyQuestion, error) {
+	return nil, nil
+}
+func (m *mockQuestionServiceForFeatureExtraction) GetPendingQuestions(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyQuestion, error) {
+	return nil, nil
+}
+func (m *mockQuestionServiceForFeatureExtraction) GetPendingCount(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return 0, nil
+}
+func (m *mockQuestionServiceForFeatureExtraction) GetPendingCounts(ctx context.Context, projectID uuid.UUID) (*repositories.QuestionCounts, error) {
+	return nil, nil
+}
+func (m *mockQuestionServiceForFeatureExtraction) AnswerQuestion(ctx context.Context, questionID uuid.UUID, answer string, userID string) (*models.AnswerResult, error) {
+	return nil, nil
+}
+func (m *mockQuestionServiceForFeatureExtraction) SkipQuestion(ctx context.Context, questionID uuid.UUID) error {
+	return nil
+}
+func (m *mockQuestionServiceForFeatureExtraction) DeleteQuestion(ctx context.Context, questionID uuid.UUID) error {
+	return nil
+}
+func (m *mockQuestionServiceForFeatureExtraction) CreateQuestions(ctx context.Context, questions []*models.OntologyQuestion) error {
+	if m.createErr != nil {
+		return m.createErr
+	}
+	m.createdQuestions = append(m.createdQuestions, questions...)
+	return nil
+}
+
+func TestCreateQuestionsFromUncertainClassifications_CreatesQuestions(t *testing.T) {
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	columnID := uuid.New()
+
+	ontologyRepo := &mockOntologyRepoForFeatureExtraction{
+		ontology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
+
+	questionService := &mockQuestionServiceForFeatureExtraction{}
+
+	svc := &columnFeatureExtractionService{
+		ontologyRepo:    ontologyRepo,
+		questionService: questionService,
+		logger:          zap.NewNop(),
+	}
+
+	features := []*models.ColumnFeatures{
+		{
+			ColumnID:              columnID,
+			NeedsClarification:    true,
+			ClarificationQuestion: "Is this column tracking record updates or something else?",
+		},
+	}
+
+	profiles := []*models.ColumnDataProfile{
+		{
+			ColumnID:   columnID,
+			TableName:  "users",
+			ColumnName: "updated_at",
+			DataType:   "timestamp with time zone",
+			NullRate:   0.05,
+		},
+	}
+
+	svc.createQuestionsFromUncertainClassifications(context.Background(), projectID, features, profiles)
+
+	if len(questionService.createdQuestions) != 1 {
+		t.Fatalf("Expected 1 question to be created, got %d", len(questionService.createdQuestions))
+	}
+
+	q := questionService.createdQuestions[0]
+	if q.Text != "Is this column tracking record updates or something else?" {
+		t.Errorf("Question text = %q, want %q", q.Text, "Is this column tracking record updates or something else?")
+	}
+	if q.Category != models.QuestionCategoryTerminology {
+		t.Errorf("Question category = %q, want %q", q.Category, models.QuestionCategoryTerminology)
+	}
+	if q.Priority != 3 {
+		t.Errorf("Question priority = %d, want 3", q.Priority)
+	}
+	if !strings.Contains(q.Reasoning, "users.updated_at") {
+		t.Errorf("Question context should contain table.column, got: %q", q.Reasoning)
+	}
+	if !strings.Contains(q.Reasoning, "timestamp with time zone") {
+		t.Errorf("Question context should contain data type, got: %q", q.Reasoning)
+	}
+	if !strings.Contains(q.Reasoning, "5.0%") {
+		t.Errorf("Question context should contain null rate, got: %q", q.Reasoning)
+	}
+}
+
+func TestCreateQuestionsFromUncertainClassifications_SkipsColumnsWithoutClarification(t *testing.T) {
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	col1ID := uuid.New()
+	col2ID := uuid.New()
+
+	ontologyRepo := &mockOntologyRepoForFeatureExtraction{
+		ontology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
+
+	questionService := &mockQuestionServiceForFeatureExtraction{}
+
+	svc := &columnFeatureExtractionService{
+		ontologyRepo:    ontologyRepo,
+		questionService: questionService,
+		logger:          zap.NewNop(),
+	}
+
+	features := []*models.ColumnFeatures{
+		{
+			ColumnID:           col1ID,
+			NeedsClarification: false, // Not flagged for clarification
+		},
+		{
+			ColumnID:              col2ID,
+			NeedsClarification:    true,
+			ClarificationQuestion: "", // Empty question
+		},
+	}
+
+	profiles := []*models.ColumnDataProfile{
+		{
+			ColumnID:   col1ID,
+			TableName:  "users",
+			ColumnName: "id",
+		},
+		{
+			ColumnID:   col2ID,
+			TableName:  "users",
+			ColumnName: "created_at",
+		},
+	}
+
+	svc.createQuestionsFromUncertainClassifications(context.Background(), projectID, features, profiles)
+
+	if len(questionService.createdQuestions) != 0 {
+		t.Errorf("Expected 0 questions (all should be skipped), got %d", len(questionService.createdQuestions))
+	}
+}
+
+func TestCreateQuestionsFromUncertainClassifications_ContinuesOnOntologyNotFound(t *testing.T) {
+	projectID := uuid.New()
+	columnID := uuid.New()
+
+	ontologyRepo := &mockOntologyRepoForFeatureExtraction{
+		ontology: nil, // No active ontology
+	}
+
+	questionService := &mockQuestionServiceForFeatureExtraction{}
+
+	svc := &columnFeatureExtractionService{
+		ontologyRepo:    ontologyRepo,
+		questionService: questionService,
+		logger:          zap.NewNop(),
+	}
+
+	features := []*models.ColumnFeatures{
+		{
+			ColumnID:              columnID,
+			NeedsClarification:    true,
+			ClarificationQuestion: "What does this status mean?",
+		},
+	}
+
+	profiles := []*models.ColumnDataProfile{
+		{
+			ColumnID:   columnID,
+			TableName:  "users",
+			ColumnName: "status",
+		},
+	}
+
+	// Should not panic
+	svc.createQuestionsFromUncertainClassifications(context.Background(), projectID, features, profiles)
+
+	if len(questionService.createdQuestions) != 0 {
+		t.Errorf("Expected 0 questions when no ontology, got %d", len(questionService.createdQuestions))
+	}
+}
+
+func TestCreateQuestionsFromUncertainClassifications_ContinuesOnQuestionServiceError(t *testing.T) {
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	columnID := uuid.New()
+
+	ontologyRepo := &mockOntologyRepoForFeatureExtraction{
+		ontology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
+
+	questionService := &mockQuestionServiceForFeatureExtraction{
+		createErr: fmt.Errorf("simulated database error"),
+	}
+
+	svc := &columnFeatureExtractionService{
+		ontologyRepo:    ontologyRepo,
+		questionService: questionService,
+		logger:          zap.NewNop(),
+	}
+
+	features := []*models.ColumnFeatures{
+		{
+			ColumnID:              columnID,
+			NeedsClarification:    true,
+			ClarificationQuestion: "What does this status mean?",
+		},
+	}
+
+	profiles := []*models.ColumnDataProfile{
+		{
+			ColumnID:   columnID,
+			TableName:  "users",
+			ColumnName: "status",
+		},
+	}
+
+	// Should not panic - error is logged but not returned
+	svc.createQuestionsFromUncertainClassifications(context.Background(), projectID, features, profiles)
+}
+
+func TestCreateQuestionsFromUncertainClassifications_NilDependencies(t *testing.T) {
+	projectID := uuid.New()
+	columnID := uuid.New()
+
+	svc := &columnFeatureExtractionService{
+		ontologyRepo:    nil, // nil dependencies
+		questionService: nil,
+		logger:          zap.NewNop(),
+	}
+
+	features := []*models.ColumnFeatures{
+		{
+			ColumnID:              columnID,
+			NeedsClarification:    true,
+			ClarificationQuestion: "What does this status mean?",
+		},
+	}
+
+	profiles := []*models.ColumnDataProfile{
+		{
+			ColumnID:   columnID,
+			TableName:  "users",
+			ColumnName: "status",
+		},
+	}
+
+	// Should not panic
+	svc.createQuestionsFromUncertainClassifications(context.Background(), projectID, features, profiles)
+}
