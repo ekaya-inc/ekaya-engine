@@ -326,8 +326,11 @@ func (s *columnFeatureExtractionService) buildColumnProfile(
 	}
 
 	// Set null count and compute null rate
+	// Adapters populate NonNullCount via COUNT(col); calculate NullCount from it
 	if col.NullCount != nil {
 		profile.NullCount = *col.NullCount
+	} else if col.NonNullCount != nil && rowCount > 0 {
+		profile.NullCount = rowCount - *col.NonNullCount
 	}
 	if rowCount > 0 {
 		profile.NullRate = float64(profile.NullCount) / float64(rowCount)

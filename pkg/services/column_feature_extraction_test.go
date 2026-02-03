@@ -654,6 +654,119 @@ func TestBuildColumnProfile(t *testing.T) {
 	}
 }
 
+func TestBuildColumnProfile_NullRateFromNonNullCount(t *testing.T) {
+	// This test verifies the fix for the NullCount bug.
+	// In production, adapters populate NonNullCount but not NullCount.
+	// The code must calculate NullCount = RowCount - NonNullCount.
+	svc := &columnFeatureExtractionService{
+		logger: zap.NewNop(),
+	}
+
+	tableID := uuid.New()
+	rowCount := int64(100)
+	nonNullCount := int64(5) // 95 nulls = 95% null rate
+
+	tableNameByID := map[uuid.UUID]string{tableID: "users"}
+	tableRowCountByID := map[uuid.UUID]int64{tableID: rowCount}
+
+	col := &models.SchemaColumn{
+		ID:            uuid.New(),
+		SchemaTableID: tableID,
+		ColumnName:    "deleted_at",
+		DataType:      "timestamp with time zone",
+		IsNullable:    true,
+		NonNullCount:  &nonNullCount,
+		NullCount:     nil, // Simulates production: never populated
+	}
+
+	profile := svc.buildColumnProfile(col, tableNameByID, tableRowCountByID)
+
+	// Verify NullCount was calculated
+	expectedNullCount := int64(95)
+	if profile.NullCount != expectedNullCount {
+		t.Errorf("NullCount = %d, want %d", profile.NullCount, expectedNullCount)
+	}
+
+	// Verify NullRate was calculated correctly
+	expectedNullRate := 0.95
+	if profile.NullRate != expectedNullRate {
+		t.Errorf("NullRate = %f, want %f", profile.NullRate, expectedNullRate)
+	}
+}
+
+func TestBuildColumnProfile_NullCountPreferred(t *testing.T) {
+	// If NullCount IS populated (future-proofing), prefer it over calculation
+	svc := &columnFeatureExtractionService{
+		logger: zap.NewNop(),
+	}
+
+	tableID := uuid.New()
+	rowCount := int64(100)
+	nullCount := int64(80)
+	nonNullCount := int64(20)
+
+	tableNameByID := map[uuid.UUID]string{tableID: "users"}
+	tableRowCountByID := map[uuid.UUID]int64{tableID: rowCount}
+
+	col := &models.SchemaColumn{
+		ID:            uuid.New(),
+		SchemaTableID: tableID,
+		ColumnName:    "optional_field",
+		DataType:      "text",
+		IsNullable:    true,
+		NullCount:     &nullCount,    // Explicitly set
+		NonNullCount:  &nonNullCount, // Also present, but should be ignored
+	}
+
+	profile := svc.buildColumnProfile(col, tableNameByID, tableRowCountByID)
+
+	// Should use NullCount directly, not calculate from NonNullCount
+	if profile.NullCount != nullCount {
+		t.Errorf("NullCount = %d, want %d (should use NullCount directly)", profile.NullCount, nullCount)
+	}
+
+	// Verify NullRate uses the explicit NullCount
+	expectedNullRate := 0.80
+	if profile.NullRate != expectedNullRate {
+		t.Errorf("NullRate = %f, want %f", profile.NullRate, expectedNullRate)
+	}
+}
+
+func TestBuildColumnProfile_ZeroRowCount(t *testing.T) {
+	// Edge case: rowCount is 0 - should not divide by zero
+	svc := &columnFeatureExtractionService{
+		logger: zap.NewNop(),
+	}
+
+	tableID := uuid.New()
+	rowCount := int64(0)
+	nonNullCount := int64(0)
+
+	tableNameByID := map[uuid.UUID]string{tableID: "empty_table"}
+	tableRowCountByID := map[uuid.UUID]int64{tableID: rowCount}
+
+	col := &models.SchemaColumn{
+		ID:            uuid.New(),
+		SchemaTableID: tableID,
+		ColumnName:    "some_column",
+		DataType:      "text",
+		NonNullCount:  &nonNullCount,
+		NullCount:     nil,
+	}
+
+	profile := svc.buildColumnProfile(col, tableNameByID, tableRowCountByID)
+
+	// NullCount should NOT be calculated when rowCount is 0 (the condition checks rowCount > 0)
+	if profile.NullCount != 0 {
+		t.Errorf("NullCount = %d, want 0 (should not calculate with rowCount=0)", profile.NullCount)
+	}
+
+	// NullRate should be 0 (no division attempted)
+	if profile.NullRate != 0 {
+		t.Errorf("NullRate = %f, want 0", profile.NullRate)
+	}
+}
+
 // ============================================================================
 // Type Detection Helper Tests
 // ============================================================================
