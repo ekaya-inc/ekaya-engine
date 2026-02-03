@@ -77,15 +77,8 @@ func (n *RelationshipDiscoveryNode) Execute(ctx context.Context, dag *models.Ont
 		return fmt.Errorf("LLM relationship discovery failed: %w", err)
 	}
 
-	// Report completion with summary
-	msg := fmt.Sprintf("Discovery complete: %d DB FKs, %d ColumnFeatures FKs, %d LLM-validated (%d rejected)",
-		result.PreservedDBFKs,
-		result.PreservedColumnFKs,
-		result.RelationshipsCreated,
-		result.RelationshipsRejected)
-	if err := n.ReportProgress(ctx, 100, 100, msg); err != nil {
-		n.Logger().Warn("Failed to report progress", zap.Error(err))
-	}
+	// Note: The service already reports "Discovery complete" - don't override it here
+	// as additional messages can accidentally match phase patterns in the UI.
 
 	n.Logger().Info("LLM relationship discovery complete",
 		zap.String("project_id", dag.ProjectID.String()),
