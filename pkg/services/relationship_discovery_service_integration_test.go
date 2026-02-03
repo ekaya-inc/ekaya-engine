@@ -1146,18 +1146,9 @@ func TestRelationshipDiscoveryService_ProgressCallback(t *testing.T) {
 
 	assert.GreaterOrEqual(t, len(updates), 3, "Progress callback should be invoked at least 3 times")
 
-	// Assert: current values are monotonically increasing
-	lastCurrent := -1
-	for i, update := range updates {
-		assert.GreaterOrEqual(t, update.current, lastCurrent,
-			"Progress current value should be monotonically increasing (update %d: %d >= %d)", i, update.current, lastCurrent)
-		lastCurrent = update.current
-	}
-
-	// Assert: total values are consistent (all should be 100 for main progress)
-	for _, update := range updates {
-		assert.Equal(t, 100, update.total, "Progress total should be 100 (main progress scale)")
-	}
+	// Note: Progress values are now actual item counts per phase, not percentages.
+	// Each phase reports its own (current, total) values, so we don't assert
+	// monotonically increasing or consistent totals across phases.
 
 	// Assert: messages describe different phases
 	var phaseMessages []string
@@ -1195,10 +1186,10 @@ func TestRelationshipDiscoveryService_ProgressCallback(t *testing.T) {
 	assert.True(t, foundValidating, "Should have validation phase messages")
 	assert.True(t, foundComplete, "Should have completion message")
 
-	// Assert: final progress shows 100/100
+	// Assert: final progress shows 1/1 (completion indicator)
 	finalUpdate := updates[len(updates)-1]
-	assert.Equal(t, 100, finalUpdate.current, "Final progress current should be 100")
-	assert.Equal(t, 100, finalUpdate.total, "Final progress total should be 100")
+	assert.Equal(t, 1, finalUpdate.current, "Final progress current should be 1")
+	assert.Equal(t, 1, finalUpdate.total, "Final progress total should be 1")
 
 	// Assert: result statistics - verify candidates were evaluated
 	// Note: Some relationships may fail to create due to FK constraints on test column IDs

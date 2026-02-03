@@ -116,7 +116,7 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 	// Phase 1: Count existing DB-declared FK relationships (these are already stored in schema_relationships)
 	// DB-declared FKs are created by schema discovery (inference_method = 'fk'), not this service.
 	if progressCallback != nil {
-		progressCallback(0, 100, "Counting existing DB-declared FK relationships")
+		progressCallback(0, 1, "Preserving DB FKs")
 	}
 
 	existingDBFKs, err := s.schemaRepo.GetRelationshipsByMethod(ctx, projectID, datasourceID, models.InferenceMethodForeignKey)
@@ -131,7 +131,7 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 
 	// Phase 2: Process ColumnFeatures FK relationships with high confidence
 	if progressCallback != nil {
-		progressCallback(10, 100, "Processing ColumnFeatures FK relationships")
+		progressCallback(0, 1, "Processing ColumnFeatures FKs")
 	}
 
 	preservedColumnFKs, err := s.preserveColumnFeaturesFKs(ctx, projectID, columns, tableByID, tableByName, columnByID, discoverer)
@@ -146,14 +146,13 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 
 	// Phase 3: Collect inference candidates for remaining potential relationships
 	if progressCallback != nil {
-		progressCallback(20, 100, "Collecting relationship candidates")
+		progressCallback(0, 1, "Collecting relationship candidates")
 	}
 
 	candidates, err := s.candidateCollector.CollectCandidates(ctx, projectID, datasourceID, func(current, total int, msg string) {
-		// Map collector progress (0-100%) to 20-50% of overall progress
-		overallProgress := 20 + (current * 30 / max(total, 1))
 		if progressCallback != nil {
-			progressCallback(overallProgress, 100, msg)
+			// Prefix messages from collector to maintain phase context
+			progressCallback(current, total, "Collecting candidates: "+msg)
 		}
 	})
 	if err != nil {
@@ -186,17 +185,15 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 
 	result.CandidatesEvaluated = len(newCandidates)
 
-	// Phase 5: Validate candidates with LLM (if any remain)
+	// Phase 4: Validate candidates with LLM (if any remain)
 	if len(newCandidates) > 0 {
 		if progressCallback != nil {
-			progressCallback(50, 100, "Validating relationship candidates with LLM")
+			progressCallback(0, len(newCandidates), "Validating relationships")
 		}
 
 		validatedResults, err := s.validator.ValidateCandidates(ctx, projectID, newCandidates, func(current, total int, msg string) {
-			// Map validator progress (0-100%) to 50-90% of overall progress
-			overallProgress := 50 + (current * 40 / max(total, 1))
 			if progressCallback != nil {
-				progressCallback(overallProgress, 100, msg)
+				progressCallback(current, total, msg)
 			}
 		})
 		if err != nil {
@@ -206,9 +203,9 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 				zap.String("project_id", projectID.String()))
 		}
 
-		// Phase 6: Store validated relationships in schema_relationships
+		// Phase 5: Store validated relationships in schema_relationships
 		if progressCallback != nil {
-			progressCallback(90, 100, "Storing validated relationships")
+			progressCallback(0, 1, "Storing results")
 		}
 
 		for _, vr := range validatedResults {
@@ -233,7 +230,7 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 	}
 
 	if progressCallback != nil {
-		progressCallback(100, 100, "Relationship discovery complete")
+		progressCallback(1, 1, "Discovery complete")
 	}
 
 	result.DurationMs = time.Since(startTime).Milliseconds()

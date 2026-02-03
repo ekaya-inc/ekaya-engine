@@ -298,7 +298,7 @@ func (v *relationshipValidator) ValidateCandidates(ctx context.Context, projectI
 	results := llm.Process(ctx, v.workerPool, workItems, func(completed, total int) {
 		// Report progress every 5 completions or at the end
 		if progressCallback != nil && (completed-lastProgressReport >= 5 || completed == total) {
-			progressCallback(completed, total, fmt.Sprintf("Validating relationships (%d/%d)...", completed, total))
+			progressCallback(completed, total, "Validating relationships...")
 			lastProgressReport = completed
 		}
 	})
