@@ -675,19 +675,38 @@ func (c *relationshipCandidateCollector) CollectCandidates(
 		progressCallback(3, 5, fmt.Sprintf("Generated %d candidate pairs", len(candidates)))
 	}
 
-	// Step 5: Collect join statistics and sample values for each candidate
-	// Per fail-fast policy: log and continue on individual candidate failures
+	// Step 5: Collect join statistics for each candidate and filter aggressively
+	// A valid FK relationship requires:
+	// - At least one source value matches a target value (SourceMatched > 0)
+	// - Zero orphans (all source values must exist in target for referential integrity)
+	var validCandidates []*RelationshipCandidate
+	var rejectedNoMatch, rejectedOrphans, rejectedError int
+
 	for i, candidate := range candidates {
 		// Collect join statistics (join count, orphans, etc.)
 		if err := c.collectJoinStatistics(ctx, adapter, candidate); err != nil {
-			c.logger.Warn("failed to collect join stats, continuing",
+			c.logger.Debug("failed to collect join stats, rejecting candidate",
 				zap.String("source", candidate.SourceTable+"."+candidate.SourceColumn),
 				zap.String("target", candidate.TargetTable+"."+candidate.TargetColumn),
 				zap.Error(err),
 			)
-			// Continue - missing join stats is not fatal, LLM can still evaluate
+			rejectedError++
+			continue
 		}
 
+		// Filter: Reject if no source values match target (not a relationship)
+		if candidate.SourceMatched == 0 {
+			rejectedNoMatch++
+			continue
+		}
+
+		// Filter: Reject if any orphans exist (violates referential integrity)
+		if candidate.OrphanCount > 0 {
+			rejectedOrphans++
+			continue
+		}
+
+		// This candidate passed join analysis - collect additional data for LLM
 		// Collect sample values for source and target columns
 		if err := c.collectSampleValues(ctx, adapter, candidate); err != nil {
 			c.logger.Warn("failed to collect sample values, continuing",
@@ -708,22 +727,28 @@ func (c *relationshipCandidateCollector) CollectCandidates(
 			// Continue - missing stats is not fatal
 		}
 
-		// Report progress for large candidate sets (every 10 candidates)
-		if len(candidates) > 10 && i%10 == 0 && progressCallback != nil {
+		validCandidates = append(validCandidates, candidate)
+
+		// Report progress for large candidate sets (every 100 candidates)
+		if len(candidates) > 100 && i%100 == 0 && progressCallback != nil {
 			progressCallback(4, 5, fmt.Sprintf("Analyzing candidates: %d/%d", i, len(candidates)))
 		}
 	}
 
 	if progressCallback != nil {
-		progressCallback(5, 5, "Candidate collection complete")
+		progressCallback(5, 5, fmt.Sprintf("Found %d valid candidates", len(validCandidates)))
 	}
 
 	c.logger.Info("candidate collection complete",
 		zap.Int("sources", len(sources)),
 		zap.Int("targets", len(targets)),
-		zap.Int("candidates", len(candidates)),
+		zap.Int("initial_candidates", len(candidates)),
+		zap.Int("valid_candidates", len(validCandidates)),
+		zap.Int("rejected_no_match", rejectedNoMatch),
+		zap.Int("rejected_orphans", rejectedOrphans),
+		zap.Int("rejected_error", rejectedError),
 		zap.String("project_id", projectID.String()),
 	)
 
-	return candidates, nil
+	return validCandidates, nil
 }

@@ -1965,8 +1965,15 @@ func (m *mockSchemaDiscovererForJoinStats) AnalyzeJoin(ctx context.Context, sour
 	if m.analyzeJoinResult != nil {
 		return m.analyzeJoinResult, nil
 	}
-	// Return a default empty result when not configured
-	return &datasource.JoinAnalysis{}, nil
+	// Return a default valid result that passes aggressive filtering:
+	// - SourceMatched > 0 (required to not be rejected as "no match")
+	// - OrphanCount == 0 (required to not be rejected as "has orphans")
+	return &datasource.JoinAnalysis{
+		JoinCount:     100,
+		SourceMatched: 100,
+		TargetMatched: 100,
+		OrphanCount:   0,
+	}, nil
 }
 
 func (m *mockSchemaDiscovererForJoinStats) GetDistinctValues(ctx context.Context, schemaName, tableName, columnName string, limit int) ([]string, error) {
@@ -2353,12 +2360,13 @@ func TestCollectCandidates_CollectsJoinStatistics(t *testing.T) {
 	}
 
 	// Create a mock adapter with join statistics
+	// Note: OrphanCount must be 0 to pass the aggressive filtering
 	mockAdapter := &mockSchemaDiscovererForJoinStats{
 		analyzeJoinResult: &datasource.JoinAnalysis{
 			JoinCount:          500,
 			SourceMatched:      100,
 			TargetMatched:      90,
-			OrphanCount:        5,
+			OrphanCount:        0, // Must be 0 - candidates with orphans are rejected
 			ReverseOrphanCount: 10,
 		},
 		distinctValuesMap: map[string][]string{
@@ -2397,7 +2405,7 @@ func TestCollectCandidates_CollectsJoinStatistics(t *testing.T) {
 	assert.Equal(t, int64(500), candidate.JoinCount)
 	assert.Equal(t, int64(100), candidate.SourceMatched)
 	assert.Equal(t, int64(90), candidate.TargetMatched)
-	assert.Equal(t, int64(5), candidate.OrphanCount)
+	assert.Equal(t, int64(0), candidate.OrphanCount)
 	assert.Equal(t, int64(10), candidate.ReverseOrphans)
 
 	// Verify sample values were collected
@@ -2413,7 +2421,9 @@ func TestCollectCandidates_CollectsJoinStatistics(t *testing.T) {
 
 func TestCollectCandidates_ContinuesOnNonFatalErrors(t *testing.T) {
 	// Tests that the collector continues processing candidates when
-	// individual statistics collection fails (non-fatal errors)
+	// sample value and distinct count collection fails (these are non-fatal).
+	// Note: Join analysis failure IS fatal (candidate rejected), so we must
+	// provide valid join stats for the candidate to pass filtering.
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 	ordersTableID := uuid.New()
@@ -2454,9 +2464,15 @@ func TestCollectCandidates_ContinuesOnNonFatalErrors(t *testing.T) {
 		},
 	}
 
-	// Create a mock adapter that returns errors for all stats collection
+	// Create a mock adapter that succeeds for join analysis but fails for
+	// sample values and distinct counts (which are non-fatal errors)
 	mockAdapter := &mockSchemaDiscovererForJoinStats{
-		analyzeJoinErr:    errors.New("join analysis failed"),
+		analyzeJoinResult: &datasource.JoinAnalysis{
+			JoinCount:     100,
+			SourceMatched: 100, // Must be > 0 to pass filtering
+			TargetMatched: 100,
+			OrphanCount:   0, // Must be 0 to pass filtering
+		},
 		distinctValuesErr: errors.New("distinct values failed"),
 		columnStatsErr:    errors.New("column stats failed"),
 	}
@@ -2467,7 +2483,7 @@ func TestCollectCandidates_ContinuesOnNonFatalErrors(t *testing.T) {
 
 	collector := NewRelationshipCandidateCollector(repo, adapterFactory, &mockDatasourceServiceForCandidateCollector{}, zap.NewNop())
 
-	// Should still succeed - errors are logged but not fatal
+	// Should still succeed - sample/stats errors are logged but not fatal
 	result, err := collector.CollectCandidates(context.Background(), projectID, datasourceID, nil)
 	require.NoError(t, err)
 	require.Len(t, result, 1, "should return candidate even if stats collection fails")
@@ -2480,9 +2496,11 @@ func TestCollectCandidates_ContinuesOnNonFatalErrors(t *testing.T) {
 	assert.Equal(t, "users", candidate.TargetTable)
 	assert.Equal(t, "id", candidate.TargetColumn)
 
-	// Statistics fields should be zero (collection failed)
-	assert.Zero(t, candidate.JoinCount)
-	assert.Zero(t, candidate.SourceMatched)
+	// Join statistics should be present (analysis succeeded)
+	assert.Equal(t, int64(100), candidate.JoinCount)
+	assert.Equal(t, int64(100), candidate.SourceMatched)
+
+	// Sample values and distinct counts should be empty/zero (collection failed)
 	assert.Zero(t, candidate.SourceDistinctCount)
 	assert.Empty(t, candidate.SourceSamples)
 }
