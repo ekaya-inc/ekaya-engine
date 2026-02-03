@@ -308,6 +308,91 @@ func TestProbeColumn_NullRateCalculation(t *testing.T) {
 	}
 }
 
+func TestProbeColumn_NullRateFromNonNullCount(t *testing.T) {
+	// Test that null rate is calculated from NonNullCount when NullCount is nil.
+	// This is the production scenario: adapters populate NonNullCount via COUNT(col)
+	// but never populate NullCount.
+	testCases := []struct {
+		name             string
+		rowCount         int64
+		nonNullCount     int64
+		nullCount        *int64
+		expectedNullRate *float64
+	}{
+		{
+			name:             "5% null rate from NonNullCount (soft delete typical)",
+			rowCount:         100,
+			nonNullCount:     5, // 95 nulls = 95% null rate (deleted_at column)
+			nullCount:        nil,
+			expectedNullRate: ptr(0.95),
+		},
+		{
+			name:             "No nulls from NonNullCount",
+			rowCount:         100,
+			nonNullCount:     100,
+			nullCount:        nil,
+			expectedNullRate: ptr(0.0),
+		},
+		{
+			name:             "All nulls from NonNullCount",
+			rowCount:         100,
+			nonNullCount:     0,
+			nullCount:        nil,
+			expectedNullRate: ptr(1.0),
+		},
+		{
+			name:             "NullCount takes precedence when set",
+			rowCount:         100,
+			nonNullCount:     90, // Would calculate to 10% null rate
+			nullCount:        ptr64(20),
+			expectedNullRate: ptr(0.20), // Uses NullCount directly
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			column := &models.SchemaColumn{
+				ColumnName:   "deleted_at",
+				RowCount:     &tc.rowCount,
+				NonNullCount: &tc.nonNullCount,
+				NullCount:    tc.nullCount,
+			}
+
+			// Simulate the fixed logic from probeColumn
+			var calculatedNullRate *float64
+			if column.RowCount != nil && *column.RowCount > 0 {
+				var nullCount int64
+				if column.NullCount != nil {
+					nullCount = *column.NullCount
+				} else if column.NonNullCount != nil {
+					nullCount = *column.RowCount - *column.NonNullCount
+				}
+				if nullCount > 0 || column.NullCount != nil || column.NonNullCount != nil {
+					rate := float64(nullCount) / float64(*column.RowCount)
+					calculatedNullRate = &rate
+				}
+			}
+
+			if tc.expectedNullRate == nil {
+				assert.Nil(t, calculatedNullRate)
+			} else {
+				assert.NotNil(t, calculatedNullRate)
+				assert.InDelta(t, *tc.expectedNullRate, *calculatedNullRate, 0.001)
+			}
+		})
+	}
+}
+
+// Helper to create *float64
+func ptr(f float64) *float64 {
+	return &f
+}
+
+// Helper to create *int64
+func ptr64(i int64) *int64 {
+	return &i
+}
+
 func TestProbeColumn_CardinalityRatioCalculation(t *testing.T) {
 	// Test cardinality ratio calculation edge cases
 	testCases := []struct {

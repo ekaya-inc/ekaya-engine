@@ -280,9 +280,19 @@ func probeColumn(ctx context.Context, deps *ProbeToolDeps, projectID uuid.UUID, 
 			stats.NonNullCount = *column.NonNullCount
 		}
 
-		if column.NullCount != nil && column.RowCount != nil && *column.RowCount > 0 {
-			nullRate := float64(*column.NullCount) / float64(*column.RowCount)
-			stats.NullRate = &nullRate
+		// Calculate null rate from NullCount or derive from NonNullCount
+		// Adapters populate NonNullCount via COUNT(col) but not NullCount
+		if column.RowCount != nil && *column.RowCount > 0 {
+			var nullCount int64
+			if column.NullCount != nil {
+				nullCount = *column.NullCount
+			} else if column.NonNullCount != nil {
+				nullCount = *column.RowCount - *column.NonNullCount
+			}
+			if nullCount > 0 || column.NullCount != nil || column.NonNullCount != nil {
+				nullRate := float64(nullCount) / float64(*column.RowCount)
+				stats.NullRate = &nullRate
+			}
 		}
 
 		if column.DistinctCount != nil && column.RowCount != nil && *column.RowCount > 0 {
