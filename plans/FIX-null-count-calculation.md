@@ -323,7 +323,7 @@ Once this fix is applied, the following symptoms will be resolved:
 
 ```
 [x] Apply fix to pkg/services/column_feature_extraction.go:328-334
-[ ] Apply fix to pkg/mcp/tools/context.go:764-768
+[x] Apply fix to pkg/mcp/tools/context.go:764-768
 [ ] Apply fix to pkg/mcp/tools/probe.go:283-286
 [ ] Add unit tests for NullRate calculation
 [ ] Run make check - all tests pass

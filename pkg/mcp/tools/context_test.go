@@ -579,7 +579,18 @@ func TestAddStatisticsToColumnDetail(t *testing.T) {
 			expectNotPresent: []string{},
 		},
 		{
-			name: "missing null count",
+			name: "missing null count but has non_null_count - calculates null_rate",
+			schemaCol: &models.SchemaColumn{
+				DistinctCount:    ptrInt64(100),
+				RowCount:         ptrInt64(1000),
+				NonNullCount:     ptrInt64(950), // 950 non-null = 50 nulls = 5% null rate
+			},
+			datasourceCol:    &models.DatasourceColumn{},
+			expectFields:     []string{"distinct_count", "row_count", "cardinality_ratio", "null_rate"},
+			expectNotPresent: []string{},
+		},
+		{
+			name: "missing both null_count and non_null_count",
 			schemaCol: &models.SchemaColumn{
 				DistinctCount: ptrInt64(100),
 				RowCount:      ptrInt64(1000),
@@ -634,9 +645,15 @@ func TestAddStatisticsToColumnDetail(t *testing.T) {
 			}
 
 			// Verify calculated values are correct
-			if tt.schemaCol.RowCount != nil && tt.schemaCol.NullCount != nil {
+			if tt.schemaCol.RowCount != nil {
 				if nullRate, ok := colDetail["null_rate"].(float64); ok {
-					expectedRate := float64(*tt.schemaCol.NullCount) / float64(*tt.schemaCol.RowCount)
+					var expectedRate float64
+					if tt.schemaCol.NullCount != nil {
+						expectedRate = float64(*tt.schemaCol.NullCount) / float64(*tt.schemaCol.RowCount)
+					} else if tt.schemaCol.NonNullCount != nil {
+						nullCount := *tt.schemaCol.RowCount - *tt.schemaCol.NonNullCount
+						expectedRate = float64(nullCount) / float64(*tt.schemaCol.RowCount)
+					}
 					assert.InDelta(t, expectedRate, nullRate, 0.0001, "null_rate calculation should be accurate")
 				}
 			}

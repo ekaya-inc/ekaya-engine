@@ -762,8 +762,13 @@ func addStatisticsToColumnDetail(colDetail map[string]any, schemaCol *models.Sch
 		colDetail["row_count"] = *schemaCol.RowCount
 
 		// Calculate null_rate if we have the data
+		// NullCount is rarely populated; calculate from NonNullCount when available
 		if schemaCol.NullCount != nil {
 			nullRate := float64(*schemaCol.NullCount) / float64(*schemaCol.RowCount)
+			colDetail["null_rate"] = nullRate
+		} else if schemaCol.NonNullCount != nil {
+			nullCount := *schemaCol.RowCount - *schemaCol.NonNullCount
+			nullRate := float64(nullCount) / float64(*schemaCol.RowCount)
 			colDetail["null_rate"] = nullRate
 		}
 
