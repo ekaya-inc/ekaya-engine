@@ -14,6 +14,18 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 )
 
+// qualifiedTableName returns a properly quoted table reference.
+// If schemaName is empty, returns just the quoted table name.
+// Otherwise returns "schema"."table".
+func qualifiedTableName(schemaName, tableName string) string {
+	quotedTable := pgx.Identifier{tableName}.Sanitize()
+	if schemaName == "" {
+		return quotedTable
+	}
+	quotedSchema := pgx.Identifier{schemaName}.Sanitize()
+	return quotedSchema + "." + quotedTable
+}
+
 // SchemaDiscoverer provides PostgreSQL schema discovery.
 type SchemaDiscoverer struct {
 	pool         *pgxpool.Pool
@@ -245,9 +257,8 @@ func (d *SchemaDiscoverer) AnalyzeColumnStats(ctx context.Context, schemaName, t
 		return nil, nil
 	}
 
-	// Quote identifiers to prevent SQL injection
-	quotedSchema := pgx.Identifier{schemaName}.Sanitize()
-	quotedTable := pgx.Identifier{tableName}.Sanitize()
+	// Build qualified table name (handles empty schema)
+	tableRef := qualifiedTableName(schemaName, tableName)
 
 	var stats []datasource.ColumnStats
 	var retriedColumns []string
@@ -260,7 +271,7 @@ func (d *SchemaDiscoverer) AnalyzeColumnStats(ctx context.Context, schemaName, t
 		query := fmt.Sprintf(`
 			WITH col_type AS (
 				SELECT pg_typeof(%s)::text AS dtype
-				FROM %s.%s
+				FROM %s
 				WHERE %s IS NOT NULL
 				LIMIT 1
 			)
@@ -278,9 +289,9 @@ func (d *SchemaDiscoverer) AnalyzeColumnStats(ctx context.Context, schemaName, t
 					THEN MAX(LENGTH(%s::text))
 					ELSE NULL
 				END as max_length
-			FROM %s.%s
-		`, quotedCol, quotedSchema, quotedTable, quotedCol,
-			quotedCol, quotedCol, quotedCol, quotedCol, quotedSchema, quotedTable)
+			FROM %s
+		`, quotedCol, tableRef, quotedCol,
+			quotedCol, quotedCol, quotedCol, quotedCol, tableRef)
 
 		var s datasource.ColumnStats
 		s.ColumnName = colName
@@ -296,8 +307,8 @@ func (d *SchemaDiscoverer) AnalyzeColumnStats(ctx context.Context, schemaName, t
 					COUNT(*) as row_count,
 					COUNT(%s) as non_null_count,
 					COUNT(DISTINCT %s) as distinct_count
-				FROM %s.%s
-			`, quotedCol, quotedCol, quotedSchema, quotedTable)
+				FROM %s
+			`, quotedCol, quotedCol, tableRef)
 
 			retryRow := d.pool.QueryRow(ctx, simplifiedQuery)
 			if retryErr := retryRow.Scan(&s.RowCount, &s.NonNullCount, &s.DistinctCount); retryErr != nil {
@@ -350,24 +361,22 @@ func (d *SchemaDiscoverer) CheckValueOverlap(ctx context.Context,
 	targetSchema, targetTable, targetColumn string,
 	sampleLimit int) (*datasource.ValueOverlapResult, error) {
 
-	// Quote identifiers to prevent SQL injection
-	srcSchema := pgx.Identifier{sourceSchema}.Sanitize()
-	srcTable := pgx.Identifier{sourceTable}.Sanitize()
+	// Build qualified table names (handles empty schema)
+	srcTableRef := qualifiedTableName(sourceSchema, sourceTable)
+	tgtTableRef := qualifiedTableName(targetSchema, targetTable)
 	srcCol := pgx.Identifier{sourceColumn}.Sanitize()
-	tgtSchema := pgx.Identifier{targetSchema}.Sanitize()
-	tgtTable := pgx.Identifier{targetTable}.Sanitize()
 	tgtCol := pgx.Identifier{targetColumn}.Sanitize()
 
 	query := fmt.Sprintf(`
 		WITH source_vals AS (
 			SELECT DISTINCT %s::text as val
-			FROM %s.%s
+			FROM %s
 			WHERE %s IS NOT NULL
 			LIMIT $1
 		),
 		target_vals AS (
 			SELECT DISTINCT %s::text as val
-			FROM %s.%s
+			FROM %s
 			WHERE %s IS NOT NULL
 			LIMIT $1
 		)
@@ -375,7 +384,7 @@ func (d *SchemaDiscoverer) CheckValueOverlap(ctx context.Context,
 			(SELECT COUNT(*) FROM source_vals) as source_distinct,
 			(SELECT COUNT(*) FROM target_vals) as target_distinct,
 			(SELECT COUNT(*) FROM source_vals s JOIN target_vals t ON s.val = t.val) as matched_count
-	`, srcCol, srcSchema, srcTable, srcCol, tgtCol, tgtSchema, tgtTable, tgtCol)
+	`, srcCol, srcTableRef, srcCol, tgtCol, tgtTableRef, tgtCol)
 
 	var result datasource.ValueOverlapResult
 	row := d.pool.QueryRow(ctx, query, sampleLimit)
@@ -399,11 +408,9 @@ func (d *SchemaDiscoverer) AnalyzeJoin(ctx context.Context,
 	targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
 
 	// Quote identifiers to prevent SQL injection
-	srcSchema := pgx.Identifier{sourceSchema}.Sanitize()
-	srcTable := pgx.Identifier{sourceTable}.Sanitize()
+	srcTableRef := qualifiedTableName(sourceSchema, sourceTable)
+	tgtTableRef := qualifiedTableName(targetSchema, targetTable)
 	srcCol := pgx.Identifier{sourceColumn}.Sanitize()
-	tgtSchema := pgx.Identifier{targetSchema}.Sanitize()
-	tgtTable := pgx.Identifier{targetTable}.Sanitize()
 	tgtCol := pgx.Identifier{targetColumn}.Sanitize()
 
 	// Cast columns to text to handle cross-type comparisons (e.g., text vs bigint)
@@ -421,19 +428,19 @@ func (d *SchemaDiscoverer) AnalyzeJoin(ctx context.Context,
 				COUNT(*) as join_count,
 				COUNT(DISTINCT s.%s) as source_matched,
 				COUNT(DISTINCT t.%s) as target_matched
-			FROM %s.%s s
-			JOIN %s.%s t ON s.%s::text = t.%s::text
+			FROM %s s
+			JOIN %s t ON s.%s::text = t.%s::text
 		),
 		orphan_stats AS (
 			SELECT COUNT(DISTINCT s.%s) as orphan_count
-			FROM %s.%s s
-			LEFT JOIN %s.%s t ON s.%s::text = t.%s::text
+			FROM %s s
+			LEFT JOIN %s t ON s.%s::text = t.%s::text
 			WHERE t.%s IS NULL AND s.%s IS NOT NULL
 		),
 		reverse_orphan_stats AS (
 			SELECT COUNT(DISTINCT t.%s) as reverse_orphan_count
-			FROM %s.%s t
-			LEFT JOIN %s.%s s ON t.%s::text = s.%s::text
+			FROM %s t
+			LEFT JOIN %s s ON t.%s::text = s.%s::text
 			WHERE s.%s IS NULL AND t.%s IS NOT NULL
 		),
 		max_source AS (
@@ -444,20 +451,20 @@ func (d *SchemaDiscoverer) AnalyzeJoin(ctx context.Context,
 					ELSE NULL
 				END
 			) as max_source_value
-			FROM %s.%s s
+			FROM %s s
 			WHERE s.%s IS NOT NULL
 		)
 		SELECT join_count, source_matched, target_matched, orphan_count, reverse_orphan_count, max_source_value
 		FROM join_stats, orphan_stats, reverse_orphan_stats, max_source
 	`,
 		// join_stats
-		srcCol, tgtCol, srcSchema, srcTable, tgtSchema, tgtTable, srcCol, tgtCol,
+		srcCol, tgtCol, srcTableRef, tgtTableRef, srcCol, tgtCol,
 		// orphan_stats
-		srcCol, srcSchema, srcTable, tgtSchema, tgtTable, srcCol, tgtCol, tgtCol, srcCol,
+		srcCol, srcTableRef, tgtTableRef, srcCol, tgtCol, tgtCol, srcCol,
 		// reverse_orphan_stats
-		tgtCol, tgtSchema, tgtTable, srcSchema, srcTable, tgtCol, srcCol, srcCol, tgtCol,
+		tgtCol, tgtTableRef, srcTableRef, tgtCol, srcCol, srcCol, tgtCol,
 		// max_source
-		srcCol, srcCol, srcSchema, srcTable, srcCol)
+		srcCol, srcCol, srcTableRef, srcCol)
 
 	var result datasource.JoinAnalysis
 	row := d.pool.QueryRow(ctx, query)
@@ -471,17 +478,16 @@ func (d *SchemaDiscoverer) AnalyzeJoin(ctx context.Context,
 // GetDistinctValues returns up to limit distinct non-null values from a column.
 func (d *SchemaDiscoverer) GetDistinctValues(ctx context.Context, schemaName, tableName, columnName string, limit int) ([]string, error) {
 	// Quote identifiers to prevent SQL injection
-	quotedSchema := pgx.Identifier{schemaName}.Sanitize()
-	quotedTable := pgx.Identifier{tableName}.Sanitize()
+	tableRef := qualifiedTableName(schemaName, tableName)
 	quotedCol := pgx.Identifier{columnName}.Sanitize()
 
 	query := fmt.Sprintf(`
 		SELECT DISTINCT %s::text
-		FROM %s.%s
+		FROM %s
 		WHERE %s IS NOT NULL
 		ORDER BY 1
 		LIMIT $1
-	`, quotedCol, quotedSchema, quotedTable, quotedCol)
+	`, quotedCol, tableRef, quotedCol)
 
 	rows, err := d.pool.Query(ctx, query, limit)
 	if err != nil {
@@ -509,9 +515,8 @@ func (d *SchemaDiscoverer) GetDistinctValues(ctx context.Context, schemaName, ta
 // Returns count and percentage for each distinct value, sorted by count descending.
 // If completionTimestampCol is provided, also computes completion rate per value.
 func (d *SchemaDiscoverer) GetEnumValueDistribution(ctx context.Context, schemaName, tableName, columnName string, completionTimestampCol string, limit int) (*datasource.EnumDistributionResult, error) {
-	// Quote identifiers to prevent SQL injection
-	quotedSchema := pgx.Identifier{schemaName}.Sanitize()
-	quotedTable := pgx.Identifier{tableName}.Sanitize()
+	// Build qualified table name (handles empty schema)
+	tableRef := qualifiedTableName(schemaName, tableName)
 	quotedCol := pgx.Identifier{columnName}.Sanitize()
 
 	// Get total row count and null count first
@@ -519,8 +524,8 @@ func (d *SchemaDiscoverer) GetEnumValueDistribution(ctx context.Context, schemaN
 		SELECT COUNT(*) as total_rows,
 		       COUNT(*) FILTER (WHERE %s IS NULL) as null_count,
 		       COUNT(DISTINCT %s) as distinct_count
-		FROM %s.%s
-	`, quotedCol, quotedCol, quotedSchema, quotedTable)
+		FROM %s
+	`, quotedCol, quotedCol, tableRef)
 
 	var totalRows, nullCount, distinctCount int64
 	if err := d.pool.QueryRow(ctx, totalQuery).Scan(&totalRows, &nullCount, &distinctCount); err != nil {
@@ -547,12 +552,12 @@ func (d *SchemaDiscoverer) GetEnumValueDistribution(ctx context.Context, schemaN
 			       ROUND(100.0 * COUNT(*) / NULLIF($1::numeric, 0), 2) as percentage,
 			       COUNT(*) FILTER (WHERE %s IS NOT NULL) as has_completion_at,
 			       ROUND(100.0 * COUNT(*) FILTER (WHERE %s IS NOT NULL) / NULLIF(COUNT(*), 0), 2) as completion_rate
-			FROM %s.%s
+			FROM %s
 			WHERE %s IS NOT NULL
 			GROUP BY %s
 			ORDER BY count DESC
 			LIMIT $2
-		`, quotedCol, quotedCompletionCol, quotedCompletionCol, quotedSchema, quotedTable, quotedCol, quotedCol)
+		`, quotedCol, quotedCompletionCol, quotedCompletionCol, tableRef, quotedCol, quotedCol)
 	} else {
 		query = fmt.Sprintf(`
 			SELECT %s::text as value,
@@ -560,12 +565,12 @@ func (d *SchemaDiscoverer) GetEnumValueDistribution(ctx context.Context, schemaN
 			       ROUND(100.0 * COUNT(*) / NULLIF($1::numeric, 0), 2) as percentage,
 			       0 as has_completion_at,
 			       0.0 as completion_rate
-			FROM %s.%s
+			FROM %s
 			WHERE %s IS NOT NULL
 			GROUP BY %s
 			ORDER BY count DESC
 			LIMIT $2
-		`, quotedCol, quotedSchema, quotedTable, quotedCol, quotedCol)
+		`, quotedCol, tableRef, quotedCol, quotedCol)
 	}
 
 	rows, err := d.pool.Query(ctx, query, totalRows, limit)
