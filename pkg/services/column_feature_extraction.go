@@ -938,8 +938,9 @@ func (c *timestampClassifier) parseResponse(profile *models.ColumnDataProfile, c
 		LLMModelUsed: model,
 	}
 
-	// Soft delete timestamps may need cross-column validation
-	if response.IsSoftDelete {
+	// Nullable timestamps with mixed null/non-null values may need cross-column validation
+	// to understand the semantic meaning of nullability
+	if profile.IsNullable && profile.NullRate > 0 && profile.NullRate < 1.0 {
 		features.NeedsCrossColumnCheck = true
 	}
 

@@ -312,12 +312,11 @@ func Test_TimestampClassifier_UncertaintyGeneratesQuestion(t *testing.T) {
 ```
 [x] Prerequisite: FIX-null-count-calculation.md is complete
 [x] Update timestamp classification prompt (lines 854-872)
-[ ] Update NeedsCrossColumnCheck flagging logic (line 937-939)
+[x] Update NeedsCrossColumnCheck flagging logic (line 937-939)
 [ ] Add NeedsClarification fields to response schema
 [ ] Add NeedsClarification fields to ColumnFeatures model
 [ ] Update parseResponse to handle clarification
 [ ] Add question creation in ClassifyColumnsInBatch
 [ ] Add unit tests for each change
 [ ] Run make check - all tests pass
-[ ] Manual verification: run extraction on test project with various timestamp patterns
 ```

@@ -1573,6 +1573,99 @@ func TestTimestampClassifier_BuildPrompt_NanosecondPrecision(t *testing.T) {
 	}
 }
 
+func TestTimestampClassifier_NeedsCrossColumnCheck_NullableTimestamps(t *testing.T) {
+	// Test that nullable timestamps with mixed null/non-null values are flagged
+	// for cross-column validation, regardless of whether they're soft deletes
+	tests := []struct {
+		name       string
+		nullRate   float64
+		isNullable bool
+		wantFlag   bool
+	}{
+		{"soft_delete_rare_2pct", 0.98, true, true},       // 2% deleted - flagged
+		{"soft_delete_common_50pct", 0.50, true, true},    // 50% deleted - flagged
+		{"completed_at_70pct", 0.30, true, true},          // 70% completed - flagged
+		{"created_at_required", 0.0, false, false},        // NOT NULL - not flagged
+		{"created_at_nullable_no_nulls", 0.0, true, false}, // nullable but no nulls - not flagged
+		{"all_null_no_data", 1.0, true, false},            // 100% null (no data yet) - not flagged
+		{"mostly_null_99pct", 0.99, true, true},           // 1% non-null - flagged
+		{"mostly_non_null_1pct", 0.01, true, true},        // 99% non-null - flagged
+	}
+
+	classifier := &timestampClassifier{logger: zap.NewNop()}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			profile := &models.ColumnDataProfile{
+				ColumnID:   uuid.New(),
+				ColumnName: "test_timestamp",
+				TableName:  "test_table",
+				DataType:   "timestamp with time zone",
+				IsNullable: tt.isNullable,
+				NullRate:   tt.nullRate,
+				RowCount:   10000,
+			}
+
+			// Mock LLM response - use a generic response since we're testing
+			// the flagging logic, not the LLM classification
+			mockResponse := `{
+				"purpose": "event_time",
+				"confidence": 0.85,
+				"is_soft_delete": false,
+				"is_audit_field": false,
+				"description": "Records when an event occurred."
+			}`
+
+			features, err := classifier.parseResponse(profile, mockResponse, "test-model")
+			if err != nil {
+				t.Fatalf("parseResponse error: %v", err)
+			}
+
+			if features.NeedsCrossColumnCheck != tt.wantFlag {
+				t.Errorf("NeedsCrossColumnCheck = %v, want %v (nullRate=%.2f, isNullable=%v)",
+					features.NeedsCrossColumnCheck, tt.wantFlag, tt.nullRate, tt.isNullable)
+			}
+		})
+	}
+}
+
+func TestTimestampClassifier_NeedsCrossColumnCheck_SoftDeleteNotSpecial(t *testing.T) {
+	// Verify that IsSoftDelete no longer has special handling -
+	// the flag depends on nullability and null rate, not the classification
+	classifier := &timestampClassifier{logger: zap.NewNop()}
+
+	// Case: Non-nullable column classified as soft_delete (edge case)
+	// Should NOT be flagged because it's not nullable
+	profile := &models.ColumnDataProfile{
+		ColumnID:   uuid.New(),
+		ColumnName: "deleted_at",
+		TableName:  "users",
+		DataType:   "timestamp with time zone",
+		IsNullable: false, // Not nullable
+		NullRate:   0.0,
+		RowCount:   10000,
+	}
+
+	// LLM incorrectly classifies as soft_delete (shouldn't happen, but test the logic)
+	mockResponse := `{
+		"purpose": "soft_delete",
+		"confidence": 0.75,
+		"is_soft_delete": true,
+		"is_audit_field": false,
+		"description": "Records deletion time."
+	}`
+
+	features, err := classifier.parseResponse(profile, mockResponse, "test-model")
+	if err != nil {
+		t.Fatalf("parseResponse error: %v", err)
+	}
+
+	// Even though IsSoftDelete=true, non-nullable means no cross-column check needed
+	if features.NeedsCrossColumnCheck {
+		t.Error("NeedsCrossColumnCheck should be false for non-nullable columns, even if classified as soft_delete")
+	}
+}
+
 // containsStr is a local helper since strings.Contains is the right function to use
 // This is just to avoid name collision with datasource_test.go's contains function
 func containsStr(s, substr string) bool {
