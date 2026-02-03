@@ -31,6 +31,7 @@ type relationshipValidator struct {
 	workerPool       *llm.WorkerPool
 	circuitBreaker   *llm.CircuitBreaker
 	conversationRepo repositories.ConversationRepository
+	getTenantCtx     TenantContextFunc
 	logger           *zap.Logger
 }
 
@@ -40,6 +41,7 @@ func NewRelationshipValidator(
 	workerPool *llm.WorkerPool,
 	circuitBreaker *llm.CircuitBreaker,
 	conversationRepo repositories.ConversationRepository,
+	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) RelationshipValidator {
 	return &relationshipValidator{
@@ -47,6 +49,7 @@ func NewRelationshipValidator(
 		workerPool:       workerPool,
 		circuitBreaker:   circuitBreaker,
 		conversationRepo: conversationRepo,
+		getTenantCtx:     getTenantCtx,
 		logger:           logger.Named("relationship-validator"),
 	}
 }
@@ -63,12 +66,24 @@ func (v *relationshipValidator) ValidateCandidate(ctx context.Context, projectID
 	prompt := v.buildValidationPrompt(candidate)
 	systemMsg := v.systemMessage()
 
-	llmClient, err := v.llmFactory.CreateForProject(ctx, projectID)
+	// Acquire fresh tenant context to avoid concurrent map writes in pgx
+	workCtx := ctx
+	if v.getTenantCtx != nil {
+		var cleanup func()
+		var err error
+		workCtx, cleanup, err = v.getTenantCtx(ctx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("acquire tenant context: %w", err)
+		}
+		defer cleanup()
+	}
+
+	llmClient, err := v.llmFactory.CreateForProject(workCtx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("create LLM client: %w", err)
 	}
 
-	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.2, false)
+	result, err := llmClient.GenerateResponse(workCtx, prompt, systemMsg, 0.2, false)
 	if err != nil {
 		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}

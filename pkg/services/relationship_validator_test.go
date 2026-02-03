@@ -80,6 +80,7 @@ func TestNewRelationshipValidator(t *testing.T) {
 		workerPool,
 		circuitBreaker,
 		conversationRepo,
+		nil, // getTenantCtx - not needed for unit tests
 		logger,
 	)
 
@@ -99,6 +100,7 @@ func TestNewRelationshipValidator_WithNilDependencies(t *testing.T) {
 		nil, // workerPool
 		nil, // circuitBreaker
 		nil, // conversationRepo
+		nil, // getTenantCtx
 		logger,
 	)
 
@@ -284,6 +286,7 @@ func TestValidateCandidate_ValidFK(t *testing.T) {
 		nil,
 		nil,
 		&mockRelValConversationRepo{},
+		nil, // getTenantCtx
 		zap.NewNop(),
 	)
 
@@ -333,6 +336,7 @@ func TestValidateCandidate_InvalidFK(t *testing.T) {
 		nil,
 		nil,
 		&mockRelValConversationRepo{},
+		nil, // getTenantCtx
 		zap.NewNop(),
 	)
 
@@ -378,6 +382,7 @@ func TestValidateCandidate_LowConfidence_RejectsValidation(t *testing.T) {
 		nil,
 		nil,
 		&mockRelValConversationRepo{},
+		nil, // getTenantCtx
 		zap.NewNop(),
 	)
 
@@ -423,6 +428,7 @@ func TestValidateCandidate_ConfidenceAtThreshold(t *testing.T) {
 		nil,
 		nil,
 		&mockRelValConversationRepo{},
+		nil, // getTenantCtx
 		zap.NewNop(),
 	)
 
@@ -456,6 +462,7 @@ func TestValidateCandidate_LLMError(t *testing.T) {
 		nil,
 		nil,
 		&mockRelValConversationRepo{},
+		nil, // getTenantCtx
 		zap.NewNop(),
 	)
 
@@ -484,6 +491,7 @@ func TestValidateCandidate_InvalidJSONResponse(t *testing.T) {
 		nil,
 		nil,
 		&mockRelValConversationRepo{},
+		nil, // getTenantCtx
 		zap.NewNop(),
 	)
 
@@ -570,6 +578,7 @@ func TestValidateCandidate_CardinalityNormalization(t *testing.T) {
 				nil,
 				nil,
 				&mockRelValConversationRepo{},
+				nil, // getTenantCtx
 				zap.NewNop(),
 			)
 
@@ -813,6 +822,7 @@ func TestValidateCandidates_EmptySlice(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil, // getTenantCtx
 		zap.NewNop(),
 	)
 
@@ -843,6 +853,7 @@ func TestValidateCandidates_SingleCandidate(t *testing.T) {
 		workerPool,
 		nil,
 		nil,
+		nil, // getTenantCtx
 		logger,
 	)
 
@@ -897,6 +908,7 @@ func TestValidateCandidates_MultipleCandidates(t *testing.T) {
 		workerPool,
 		nil,
 		nil,
+		nil, // getTenantCtx
 		logger,
 	)
 
@@ -944,6 +956,7 @@ func TestValidateCandidates_PartialFailure(t *testing.T) {
 		workerPool,
 		nil,
 		nil,
+		nil, // getTenantCtx
 		logger,
 	)
 
@@ -977,6 +990,7 @@ func TestValidateCandidates_AllFailures(t *testing.T) {
 		workerPool,
 		nil,
 		nil,
+		nil, // getTenantCtx
 		logger,
 	)
 
@@ -1011,6 +1025,7 @@ func TestValidateCandidates_ContextCancellation(t *testing.T) {
 		workerPool,
 		nil,
 		nil,
+		nil, // getTenantCtx
 		logger,
 	)
 
@@ -1053,6 +1068,7 @@ func TestValidateCandidates_ProgressCallback(t *testing.T) {
 		workerPool,
 		nil,
 		nil,
+		nil, // getTenantCtx
 		logger,
 	)
 
@@ -1125,6 +1141,7 @@ func TestValidateCandidates_NilProgressCallback(t *testing.T) {
 		workerPool,
 		nil,
 		nil,
+		nil, // getTenantCtx
 		logger,
 	)
 
@@ -1158,6 +1175,7 @@ func TestValidateCandidates_ResultsMatchCandidates(t *testing.T) {
 		workerPool,
 		nil,
 		nil,
+		nil, // getTenantCtx
 		logger,
 	)
 
