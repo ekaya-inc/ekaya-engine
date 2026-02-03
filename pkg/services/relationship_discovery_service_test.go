@@ -28,9 +28,6 @@ func TestNewLLMRelationshipDiscoveryService(t *testing.T) {
 		nil, // validator - tested in relationship_validator_test.go
 		nil, // datasourceService
 		nil, // adapterFactory
-		nil, // ontologyRepo
-		nil, // entityRepo
-		nil, // relationshipRepo
 		nil, // schemaRepo
 		logger,
 	)
@@ -57,52 +54,53 @@ func TestLLMRelationshipDiscoveryResult(t *testing.T) {
 	assert.Equal(t, int64(1500), result.DurationMs)
 }
 
-// TestBuildEntityByTableMap verifies entity-to-table mapping
-func TestBuildEntityByTableMap(t *testing.T) {
+// TestBuildExistingSchemaRelationshipSet verifies deduplication set creation for schema relationships
+func TestBuildExistingSchemaRelationshipSet(t *testing.T) {
 	logger := zap.NewNop()
 
 	svc := NewLLMRelationshipDiscoveryService(
-		nil, nil, nil, nil, nil, nil, nil, nil, logger,
+		nil, nil, nil, nil, nil, logger,
 	).(*llmRelationshipDiscoveryService)
 
-	entities := []*models.OntologyEntity{
-		{ID: uuid.New(), Name: "User", PrimaryTable: "users"},
-		{ID: uuid.New(), Name: "Order", PrimaryTable: "orders"},
-		{ID: uuid.New(), Name: "Orphan", PrimaryTable: ""}, // No primary table
+	// Create test tables and columns
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+	productsTableID := uuid.New()
+
+	userIDColID := uuid.New()
+	orderUserIDColID := uuid.New()
+	productIDColID := uuid.New()
+	orderProductIDColID := uuid.New()
+
+	tableByID := map[uuid.UUID]*models.SchemaTable{
+		usersTableID:    {ID: usersTableID, TableName: "users"},
+		ordersTableID:   {ID: ordersTableID, TableName: "orders"},
+		productsTableID: {ID: productsTableID, TableName: "products"},
 	}
 
-	entityMap := svc.buildEntityByTableMap(entities)
+	columnByID := map[uuid.UUID]*models.SchemaColumn{
+		userIDColID:         {ID: userIDColID, ColumnName: "id"},
+		orderUserIDColID:    {ID: orderUserIDColID, ColumnName: "user_id"},
+		productIDColID:      {ID: productIDColID, ColumnName: "id"},
+		orderProductIDColID: {ID: orderProductIDColID, ColumnName: "product_id"},
+	}
 
-	require.Len(t, entityMap, 2, "should only include entities with primary tables")
-	assert.NotNil(t, entityMap["users"])
-	assert.NotNil(t, entityMap["orders"])
-	assert.Nil(t, entityMap[""], "should not include empty table name")
-}
-
-// TestBuildExistingRelationshipSet verifies deduplication set creation
-func TestBuildExistingRelationshipSet(t *testing.T) {
-	logger := zap.NewNop()
-
-	svc := NewLLMRelationshipDiscoveryService(
-		nil, nil, nil, nil, nil, nil, nil, nil, logger,
-	).(*llmRelationshipDiscoveryService)
-
-	relationships := []*models.EntityRelationship{
+	relationships := []*models.SchemaRelationship{
 		{
-			SourceColumnTable: "orders",
-			SourceColumnName:  "user_id",
-			TargetColumnTable: "users",
-			TargetColumnName:  "id",
+			SourceTableID:  ordersTableID,
+			SourceColumnID: orderUserIDColID,
+			TargetTableID:  usersTableID,
+			TargetColumnID: userIDColID,
 		},
 		{
-			SourceColumnTable: "orders",
-			SourceColumnName:  "product_id",
-			TargetColumnTable: "products",
-			TargetColumnName:  "id",
+			SourceTableID:  ordersTableID,
+			SourceColumnID: orderProductIDColID,
+			TargetTableID:  productsTableID,
+			TargetColumnID: productIDColID,
 		},
 	}
 
-	relSet := svc.buildExistingRelationshipSet(relationships)
+	relSet := svc.buildExistingSchemaRelationshipSet(relationships, tableByID, columnByID)
 
 	require.Len(t, relSet, 2)
 	assert.True(t, relSet["orders.user_id->users.id"])
@@ -110,95 +108,34 @@ func TestBuildExistingRelationshipSet(t *testing.T) {
 	assert.False(t, relSet["orders.status_id->statuses.id"], "non-existent relationship should not be in set")
 }
 
-// TestBuildEntityByTableMap_EmptyInput tests handling of empty entity list
-func TestBuildEntityByTableMap_EmptyInput(t *testing.T) {
+// TestBuildExistingSchemaRelationshipSet_EmptyInput tests handling of empty relationship list
+func TestBuildExistingSchemaRelationshipSet_EmptyInput(t *testing.T) {
 	logger := zap.NewNop()
 
 	svc := NewLLMRelationshipDiscoveryService(
-		nil, nil, nil, nil, nil, nil, nil, nil, logger,
+		nil, nil, nil, nil, nil, logger,
 	).(*llmRelationshipDiscoveryService)
 
-	entityMap := svc.buildEntityByTableMap([]*models.OntologyEntity{})
-
-	require.Empty(t, entityMap, "empty input should produce empty map")
-}
-
-// TestBuildEntityByTableMap_NilInput tests handling of nil entity list
-func TestBuildEntityByTableMap_NilInput(t *testing.T) {
-	logger := zap.NewNop()
-
-	svc := NewLLMRelationshipDiscoveryService(
-		nil, nil, nil, nil, nil, nil, nil, nil, logger,
-	).(*llmRelationshipDiscoveryService)
-
-	entityMap := svc.buildEntityByTableMap(nil)
-
-	require.Empty(t, entityMap, "nil input should produce empty map")
-}
-
-// TestBuildExistingRelationshipSet_EmptyInput tests handling of empty relationship list
-func TestBuildExistingRelationshipSet_EmptyInput(t *testing.T) {
-	logger := zap.NewNop()
-
-	svc := NewLLMRelationshipDiscoveryService(
-		nil, nil, nil, nil, nil, nil, nil, nil, logger,
-	).(*llmRelationshipDiscoveryService)
-
-	relSet := svc.buildExistingRelationshipSet([]*models.EntityRelationship{})
+	relSet := svc.buildExistingSchemaRelationshipSet(
+		[]*models.SchemaRelationship{},
+		map[uuid.UUID]*models.SchemaTable{},
+		map[uuid.UUID]*models.SchemaColumn{},
+	)
 
 	require.Empty(t, relSet, "empty input should produce empty set")
 }
 
-// TestBuildExistingRelationshipSet_NilInput tests handling of nil relationship list
-func TestBuildExistingRelationshipSet_NilInput(t *testing.T) {
+// TestBuildExistingSchemaRelationshipSet_NilInput tests handling of nil relationship list
+func TestBuildExistingSchemaRelationshipSet_NilInput(t *testing.T) {
 	logger := zap.NewNop()
 
 	svc := NewLLMRelationshipDiscoveryService(
-		nil, nil, nil, nil, nil, nil, nil, nil, logger,
+		nil, nil, nil, nil, nil, logger,
 	).(*llmRelationshipDiscoveryService)
 
-	relSet := svc.buildExistingRelationshipSet(nil)
+	relSet := svc.buildExistingSchemaRelationshipSet(nil, nil, nil)
 
 	require.Empty(t, relSet, "nil input should produce empty set")
-}
-
-// TestBuildEntityByTableMap_DuplicateTables tests that later entities override earlier ones
-func TestBuildEntityByTableMap_DuplicateTables(t *testing.T) {
-	logger := zap.NewNop()
-
-	svc := NewLLMRelationshipDiscoveryService(
-		nil, nil, nil, nil, nil, nil, nil, nil, logger,
-	).(*llmRelationshipDiscoveryService)
-
-	firstEntity := &models.OntologyEntity{ID: uuid.New(), Name: "First", PrimaryTable: "shared_table"}
-	secondEntity := &models.OntologyEntity{ID: uuid.New(), Name: "Second", PrimaryTable: "shared_table"}
-
-	entityMap := svc.buildEntityByTableMap([]*models.OntologyEntity{firstEntity, secondEntity})
-
-	require.Len(t, entityMap, 1, "duplicate tables should result in single entry")
-	assert.Equal(t, secondEntity.ID, entityMap["shared_table"].ID, "later entity should override earlier one")
-}
-
-// TestBuildExistingRelationshipSet_KeyFormat tests the relationship key format
-func TestBuildExistingRelationshipSet_KeyFormat(t *testing.T) {
-	logger := zap.NewNop()
-
-	svc := NewLLMRelationshipDiscoveryService(
-		nil, nil, nil, nil, nil, nil, nil, nil, logger,
-	).(*llmRelationshipDiscoveryService)
-
-	rel := &models.EntityRelationship{
-		SourceColumnTable: "source_table",
-		SourceColumnName:  "source_col",
-		TargetColumnTable: "target_table",
-		TargetColumnName:  "target_col",
-	}
-
-	relSet := svc.buildExistingRelationshipSet([]*models.EntityRelationship{rel})
-
-	// Key format should be "source_table.source_col->target_table.target_col"
-	expectedKey := "source_table.source_col->target_table.target_col"
-	assert.True(t, relSet[expectedKey], "key format should match expected pattern")
 }
 
 // ============================================================================
@@ -433,7 +370,7 @@ func TestRelationshipDiscoveryService_ColumnFeaturesFKPreserved(t *testing.T) {
 	}
 
 	// Mock repos and services
-	mockOntologyRepo := &mockOntologyRepoForRelDiscovery{
+	_ = &mockOntologyRepoForRelDiscovery{
 		activeOntology: &models.TieredOntology{
 			ID:        ontologyID,
 			ProjectID: projectID,
@@ -441,14 +378,14 @@ func TestRelationshipDiscoveryService_ColumnFeaturesFKPreserved(t *testing.T) {
 		},
 	}
 
-	mockEntityRepo := &mockEntityRepoForRelDiscovery{
+	_ = &mockEntityRepoForRelDiscovery{
 		entities: []*models.OntologyEntity{
 			{ID: sourceEntityID, Name: "Order", PrimaryTable: "orders"},
 			{ID: targetEntityID, Name: "User", PrimaryTable: "users"},
 		},
 	}
 
-	mockRelationshipRepo := &mockRelationshipRepoForRelDiscovery{
+	_ = &mockRelationshipRepoForRelDiscovery{
 		relationships: []*models.EntityRelationship{},
 		createdRels:   []*models.EntityRelationship{},
 	}
@@ -501,9 +438,6 @@ func TestRelationshipDiscoveryService_ColumnFeaturesFKPreserved(t *testing.T) {
 		mockValidator,
 		mockDatasourceSvc,
 		mockAdapterFactory,
-		mockOntologyRepo,
-		mockEntityRepo,
-		mockRelationshipRepo,
 		mockSchemaRepo,
 		logger,
 	)
@@ -554,7 +488,7 @@ func TestRelationshipDiscoveryService_UUIDTextToUUIDPK_LLMValidates(t *testing.T
 	}
 
 	// Mock repos and services
-	mockOntologyRepo := &mockOntologyRepoForRelDiscovery{
+	_ = &mockOntologyRepoForRelDiscovery{
 		activeOntology: &models.TieredOntology{
 			ID:        ontologyID,
 			ProjectID: projectID,
@@ -562,14 +496,14 @@ func TestRelationshipDiscoveryService_UUIDTextToUUIDPK_LLMValidates(t *testing.T
 		},
 	}
 
-	mockEntityRepo := &mockEntityRepoForRelDiscovery{
+	_ = &mockEntityRepoForRelDiscovery{
 		entities: []*models.OntologyEntity{
 			{ID: sourceEntityID, Name: "Order", PrimaryTable: "orders"},
 			{ID: targetEntityID, Name: "User", PrimaryTable: "users"},
 		},
 	}
 
-	mockRelationshipRepo := &mockRelationshipRepoForRelDiscovery{
+	_ = &mockRelationshipRepoForRelDiscovery{
 		relationships: []*models.EntityRelationship{},
 		createdRels:   []*models.EntityRelationship{},
 	}
@@ -651,9 +585,6 @@ func TestRelationshipDiscoveryService_UUIDTextToUUIDPK_LLMValidates(t *testing.T
 		mockValidator,
 		mockDatasourceSvc,
 		mockAdapterFactory,
-		mockOntologyRepo,
-		mockEntityRepo,
-		mockRelationshipRepo,
 		mockSchemaRepo,
 		logger,
 	)
@@ -679,9 +610,9 @@ func TestRelationshipDiscoveryService_UUIDTextToUUIDPK_LLMValidates(t *testing.T
 	assert.Equal(t, 0, result.RelationshipsRejected, "should reject 0 relationships")
 
 	// Verify the relationship was stored with correct cardinality
-	assert.Len(t, mockRelationshipRepo.createdRels, 1, "should create 1 relationship in repo")
-	if len(mockRelationshipRepo.createdRels) > 0 {
-		createdRel := mockRelationshipRepo.createdRels[0]
+	assert.Len(t, mockSchemaRepo.createdRels, 1, "should create 1 relationship in repo")
+	if len(mockSchemaRepo.createdRels) > 0 {
+		createdRel := mockSchemaRepo.createdRels[0]
 		assert.Equal(t, "N:1", createdRel.Cardinality, "relationship should have N:1 cardinality from LLM")
 	}
 }
@@ -713,7 +644,7 @@ func TestRelationshipDiscoveryService_IDToTimestamp_LLMRejects(t *testing.T) {
 	}
 
 	// Mock repos and services
-	mockOntologyRepo := &mockOntologyRepoForRelDiscovery{
+	_ = &mockOntologyRepoForRelDiscovery{
 		activeOntology: &models.TieredOntology{
 			ID:        ontologyID,
 			ProjectID: projectID,
@@ -721,14 +652,14 @@ func TestRelationshipDiscoveryService_IDToTimestamp_LLMRejects(t *testing.T) {
 		},
 	}
 
-	mockEntityRepo := &mockEntityRepoForRelDiscovery{
+	_ = &mockEntityRepoForRelDiscovery{
 		entities: []*models.OntologyEntity{
 			{ID: sourceEntityID, Name: "Event", PrimaryTable: "events"},
 			{ID: targetEntityID, Name: "Log", PrimaryTable: "logs"},
 		},
 	}
 
-	mockRelationshipRepo := &mockRelationshipRepoForRelDiscovery{
+	_ = &mockRelationshipRepoForRelDiscovery{
 		relationships: []*models.EntityRelationship{},
 		createdRels:   []*models.EntityRelationship{},
 	}
@@ -810,9 +741,6 @@ func TestRelationshipDiscoveryService_IDToTimestamp_LLMRejects(t *testing.T) {
 		mockValidator,
 		mockDatasourceSvc,
 		mockAdapterFactory,
-		mockOntologyRepo,
-		mockEntityRepo,
-		mockRelationshipRepo,
 		mockSchemaRepo,
 		logger,
 	)
@@ -838,7 +766,7 @@ func TestRelationshipDiscoveryService_IDToTimestamp_LLMRejects(t *testing.T) {
 	assert.Equal(t, 1, result.RelationshipsRejected, "should reject 1 relationship")
 
 	// Verify no relationship was stored
-	assert.Len(t, mockRelationshipRepo.createdRels, 0, "should not create any relationships in repo")
+	assert.Len(t, mockSchemaRepo.createdRels, 0, "should not create any relationships in repo")
 }
 
 // TestRelationshipDiscoveryService_VerifyLLMCallsSlice tests that we can correctly
@@ -881,7 +809,7 @@ func TestRelationshipDiscoveryService_VerifyLLMCallsSlice(t *testing.T) {
 	}
 
 	// Mock repos and services
-	mockOntologyRepo := &mockOntologyRepoForRelDiscovery{
+	_ = &mockOntologyRepoForRelDiscovery{
 		activeOntology: &models.TieredOntology{
 			ID:        ontologyID,
 			ProjectID: projectID,
@@ -889,7 +817,7 @@ func TestRelationshipDiscoveryService_VerifyLLMCallsSlice(t *testing.T) {
 		},
 	}
 
-	mockEntityRepo := &mockEntityRepoForRelDiscovery{
+	_ = &mockEntityRepoForRelDiscovery{
 		entities: []*models.OntologyEntity{
 			{ID: sourceEntityID, Name: "Order", PrimaryTable: "orders"},
 			{ID: targetEntityID, Name: "User", PrimaryTable: "users"},
@@ -897,7 +825,7 @@ func TestRelationshipDiscoveryService_VerifyLLMCallsSlice(t *testing.T) {
 		},
 	}
 
-	mockRelationshipRepo := &mockRelationshipRepoForRelDiscovery{
+	_ = &mockRelationshipRepoForRelDiscovery{
 		relationships: []*models.EntityRelationship{},
 		createdRels:   []*models.EntityRelationship{},
 	}
@@ -980,9 +908,6 @@ func TestRelationshipDiscoveryService_VerifyLLMCallsSlice(t *testing.T) {
 		mockValidator,
 		mockDatasourceSvc,
 		mockAdapterFactory,
-		mockOntologyRepo,
-		mockEntityRepo,
-		mockRelationshipRepo,
 		mockSchemaRepo,
 		logger,
 	)
@@ -1059,6 +984,7 @@ type mockSchemaRepoForRelDiscovery struct {
 	tables        []*models.SchemaTable
 	columns       []*models.SchemaColumn
 	relationships []*models.SchemaRelationship
+	createdRels   []*models.SchemaRelationship // Track relationships created via UpsertRelationshipWithMetrics
 }
 
 func (m *mockSchemaRepoForRelDiscovery) ListTablesByDatasource(_ context.Context, _, _ uuid.UUID, _ bool) ([]*models.SchemaTable, error) {
@@ -1071,6 +997,22 @@ func (m *mockSchemaRepoForRelDiscovery) ListColumnsByDatasource(_ context.Contex
 
 func (m *mockSchemaRepoForRelDiscovery) ListRelationshipsByDatasource(_ context.Context, _, _ uuid.UUID) ([]*models.SchemaRelationship, error) {
 	return m.relationships, nil
+}
+
+func (m *mockSchemaRepoForRelDiscovery) GetRelationshipsByMethod(_ context.Context, _, _ uuid.UUID, _ string) ([]*models.SchemaRelationship, error) {
+	// Return DB FKs from relationships slice (filter by method='fk')
+	var result []*models.SchemaRelationship
+	for _, rel := range m.relationships {
+		if rel.InferenceMethod != nil && *rel.InferenceMethod == models.InferenceMethodForeignKey {
+			result = append(result, rel)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockSchemaRepoForRelDiscovery) UpsertRelationshipWithMetrics(_ context.Context, rel *models.SchemaRelationship, _ *models.DiscoveryMetrics) error {
+	m.createdRels = append(m.createdRels, rel)
+	return nil
 }
 
 type mockDatasourceServiceForRelDiscovery struct {

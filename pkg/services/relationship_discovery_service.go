@@ -43,9 +43,6 @@ type llmRelationshipDiscoveryService struct {
 	validator          RelationshipValidator
 	datasourceService  DatasourceService
 	adapterFactory     datasource.DatasourceAdapterFactory
-	ontologyRepo       repositories.OntologyRepository
-	entityRepo         repositories.OntologyEntityRepository
-	relationshipRepo   repositories.EntityRelationshipRepository
 	schemaRepo         repositories.SchemaRepository
 	logger             *zap.Logger
 }
@@ -56,9 +53,6 @@ func NewLLMRelationshipDiscoveryService(
 	validator RelationshipValidator,
 	datasourceService DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
-	ontologyRepo repositories.OntologyRepository,
-	entityRepo repositories.OntologyEntityRepository,
-	relationshipRepo repositories.EntityRelationshipRepository,
 	schemaRepo repositories.SchemaRepository,
 	logger *zap.Logger,
 ) LLMRelationshipDiscoveryService {
@@ -67,9 +61,6 @@ func NewLLMRelationshipDiscoveryService(
 		validator:          validator,
 		datasourceService:  datasourceService,
 		adapterFactory:     adapterFactory,
-		ontologyRepo:       ontologyRepo,
-		entityRepo:         entityRepo,
-		relationshipRepo:   relationshipRepo,
 		schemaRepo:         schemaRepo,
 		logger:             logger.Named("llm-relationship-discovery"),
 	}
@@ -78,6 +69,7 @@ func NewLLMRelationshipDiscoveryService(
 var _ LLMRelationshipDiscoveryService = (*llmRelationshipDiscoveryService)(nil)
 
 // DiscoverRelationships runs the full LLM-validated relationship discovery pipeline.
+// Relationships are stored in engine_schema_relationships (not engine_entity_relationships).
 func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 	ctx context.Context,
 	projectID, datasourceID uuid.UUID,
@@ -86,22 +78,6 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 	startTime := time.Now()
 
 	result := &LLMRelationshipDiscoveryResult{}
-
-	// Get active ontology for the project
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("get active ontology: %w", err)
-	}
-	if ontology == nil {
-		return nil, fmt.Errorf("no active ontology found for project %s", projectID)
-	}
-
-	// Load entities for entity resolution
-	entities, err := s.entityRepo.GetByOntology(ctx, ontology.ID)
-	if err != nil {
-		return nil, fmt.Errorf("get entities: %w", err)
-	}
-	entityByTable := s.buildEntityByTableMap(entities)
 
 	// Load tables and columns for resolving table/column metadata
 	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
@@ -137,27 +113,28 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 	}
 	defer discoverer.Close()
 
-	// Phase 1: Preserve DB-declared FK relationships (these are always valid)
+	// Phase 1: Count existing DB-declared FK relationships (these are already stored in schema_relationships)
+	// DB-declared FKs are created by schema discovery (inference_method = 'fk'), not this service.
 	if progressCallback != nil {
-		progressCallback(0, 100, "Processing DB-declared FK relationships")
+		progressCallback(0, 100, "Counting existing DB-declared FK relationships")
 	}
 
-	preservedDBFKs, err := s.preserveDBDeclaredFKs(ctx, ontology.ID, projectID, datasourceID, tableByID, columnByID, entityByTable, discoverer)
+	existingDBFKs, err := s.schemaRepo.GetRelationshipsByMethod(ctx, projectID, datasourceID, models.InferenceMethodForeignKey)
 	if err != nil {
-		return nil, fmt.Errorf("preserve DB-declared FKs: %w", err)
+		return nil, fmt.Errorf("get existing DB FKs: %w", err)
 	}
-	result.PreservedDBFKs = preservedDBFKs
+	result.PreservedDBFKs = len(existingDBFKs)
 
-	s.logger.Info("Preserved DB-declared FK relationships",
-		zap.Int("count", preservedDBFKs),
+	s.logger.Info("Found existing DB-declared FK relationships",
+		zap.Int("count", result.PreservedDBFKs),
 		zap.String("project_id", projectID.String()))
 
-	// Phase 2: Preserve ColumnFeatures FK relationships with high confidence
+	// Phase 2: Process ColumnFeatures FK relationships with high confidence
 	if progressCallback != nil {
 		progressCallback(10, 100, "Processing ColumnFeatures FK relationships")
 	}
 
-	preservedColumnFKs, err := s.preserveColumnFeaturesFKs(ctx, ontology.ID, projectID, columns, tableByID, tableByName, columnByID, entityByTable, discoverer)
+	preservedColumnFKs, err := s.preserveColumnFeaturesFKs(ctx, projectID, columns, tableByID, tableByName, columnByID, discoverer)
 	if err != nil {
 		return nil, fmt.Errorf("preserve ColumnFeatures FKs: %w", err)
 	}
@@ -187,12 +164,12 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 		zap.Int("count", len(candidates)),
 		zap.String("project_id", projectID.String()))
 
-	// Phase 4: Filter out candidates that already have relationships (from Phase 1 & 2)
-	existingRels, err := s.relationshipRepo.GetByOntology(ctx, ontology.ID)
+	// Phase 4: Filter out candidates that already have schema relationships
+	existingRels, err := s.schemaRepo.ListRelationshipsByDatasource(ctx, projectID, datasourceID)
 	if err != nil {
 		return nil, fmt.Errorf("get existing relationships: %w", err)
 	}
-	existingRelSet := s.buildExistingRelationshipSet(existingRels)
+	existingRelSet := s.buildExistingSchemaRelationshipSet(existingRels, tableByID, columnByID)
 
 	var newCandidates []*RelationshipCandidate
 	for _, c := range candidates {
@@ -229,7 +206,7 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 				zap.String("project_id", projectID.String()))
 		}
 
-		// Phase 6: Store validated relationships
+		// Phase 6: Store validated relationships in schema_relationships
 		if progressCallback != nil {
 			progressCallback(90, 100, "Storing validated relationships")
 		}
@@ -240,8 +217,8 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 			}
 
 			if vr.Result.IsValidFK {
-				// Create the relationship
-				if err := s.createRelationshipFromValidation(ctx, ontology.ID, vr, entityByTable, columnByID, tableByName); err != nil {
+				// Create the schema relationship
+				if err := s.createSchemaRelationshipFromValidation(ctx, projectID, vr, tableByName); err != nil {
 					s.logger.Warn("Failed to create relationship",
 						zap.String("source", fmt.Sprintf("%s.%s", vr.Candidate.SourceTable, vr.Candidate.SourceColumn)),
 						zap.String("target", fmt.Sprintf("%s.%s", vr.Candidate.TargetTable, vr.Candidate.TargetColumn)),
@@ -273,124 +250,40 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 	return result, nil
 }
 
-// buildEntityByTableMap creates a map from table name to entity for quick lookup.
-func (s *llmRelationshipDiscoveryService) buildEntityByTableMap(entities []*models.OntologyEntity) map[string]*models.OntologyEntity {
-	entityByTable := make(map[string]*models.OntologyEntity)
-	for _, e := range entities {
-		if e.PrimaryTable != "" {
-			entityByTable[e.PrimaryTable] = e
-		}
-	}
-	return entityByTable
-}
-
-// buildExistingRelationshipSet creates a set of existing relationship keys for deduplication.
-func (s *llmRelationshipDiscoveryService) buildExistingRelationshipSet(rels []*models.EntityRelationship) map[string]bool {
+// buildExistingSchemaRelationshipSet creates a set of existing relationship keys for deduplication.
+// Uses table/column names resolved from the provided lookups for consistent key formatting.
+func (s *llmRelationshipDiscoveryService) buildExistingSchemaRelationshipSet(
+	rels []*models.SchemaRelationship,
+	tableByID map[uuid.UUID]*models.SchemaTable,
+	columnByID map[uuid.UUID]*models.SchemaColumn,
+) map[string]bool {
 	set := make(map[string]bool)
 	for _, r := range rels {
-		key := fmt.Sprintf("%s.%s->%s.%s", r.SourceColumnTable, r.SourceColumnName, r.TargetColumnTable, r.TargetColumnName)
+		sourceTable := tableByID[r.SourceTableID]
+		sourceCol := columnByID[r.SourceColumnID]
+		targetTable := tableByID[r.TargetTableID]
+		targetCol := columnByID[r.TargetColumnID]
+
+		if sourceTable == nil || sourceCol == nil || targetTable == nil || targetCol == nil {
+			continue
+		}
+
+		key := fmt.Sprintf("%s.%s->%s.%s", sourceTable.TableName, sourceCol.ColumnName, targetTable.TableName, targetCol.ColumnName)
 		set[key] = true
 	}
 	return set
 }
 
-// preserveDBDeclaredFKs creates EntityRelationship records for database-declared FK constraints.
-// These are always valid (they come from the database schema) and skip LLM validation.
-func (s *llmRelationshipDiscoveryService) preserveDBDeclaredFKs(
-	ctx context.Context,
-	ontologyID, projectID, datasourceID uuid.UUID,
-	tableByID map[uuid.UUID]*models.SchemaTable,
-	columnByID map[uuid.UUID]*models.SchemaColumn,
-	entityByTable map[string]*models.OntologyEntity,
-	discoverer datasource.SchemaDiscoverer,
-) (int, error) {
-	// Get schema relationships with inference_method = 'foreign_key'
-	schemaRels, err := s.schemaRepo.ListRelationshipsByDatasource(ctx, projectID, datasourceID)
-	if err != nil {
-		return 0, fmt.Errorf("list schema relationships: %w", err)
-	}
-
-	var createdCount int
-	for _, schemaRel := range schemaRels {
-		// Only process FK relationships (skip inferred ones)
-		if schemaRel.InferenceMethod == nil || *schemaRel.InferenceMethod != models.InferenceMethodForeignKey {
-			continue
-		}
-
-		sourceCol := columnByID[schemaRel.SourceColumnID]
-		sourceTable := tableByID[schemaRel.SourceTableID]
-		targetCol := columnByID[schemaRel.TargetColumnID]
-		targetTable := tableByID[schemaRel.TargetTableID]
-
-		if sourceCol == nil || sourceTable == nil || targetCol == nil || targetTable == nil {
-			continue
-		}
-
-		// Resolve entities
-		sourceEntity := entityByTable[sourceTable.TableName]
-		targetEntity := entityByTable[targetTable.TableName]
-
-		if sourceEntity == nil || targetEntity == nil {
-			s.logger.Debug("Skipping FK - missing entity for table",
-				zap.String("source_table", sourceTable.TableName),
-				zap.String("target_table", targetTable.TableName),
-				zap.Bool("source_entity_found", sourceEntity != nil),
-				zap.Bool("target_entity_found", targetEntity != nil))
-			continue
-		}
-
-		// Compute cardinality from actual data
-		cardinality := models.CardinalityNTo1 // Default
-		joinResult, err := discoverer.AnalyzeJoin(ctx,
-			sourceTable.SchemaName, sourceTable.TableName, sourceCol.ColumnName,
-			targetTable.SchemaName, targetTable.TableName, targetCol.ColumnName)
-		if err == nil {
-			cardinality = InferCardinality(joinResult)
-		}
-
-		rel := &models.EntityRelationship{
-			OntologyID:         ontologyID,
-			SourceEntityID:     sourceEntity.ID,
-			TargetEntityID:     targetEntity.ID,
-			SourceColumnSchema: sourceTable.SchemaName,
-			SourceColumnTable:  sourceTable.TableName,
-			SourceColumnName:   sourceCol.ColumnName,
-			SourceColumnID:     &sourceCol.ID,
-			TargetColumnSchema: targetTable.SchemaName,
-			TargetColumnTable:  targetTable.TableName,
-			TargetColumnName:   targetCol.ColumnName,
-			TargetColumnID:     &targetCol.ID,
-			DetectionMethod:    models.DetectionMethodForeignKey,
-			Confidence:         1.0, // DB-declared FKs have maximum confidence
-			Status:             models.RelationshipStatusConfirmed,
-			Cardinality:        cardinality,
-			Source:             models.SourceInferred.String(),
-		}
-
-		if err := s.relationshipRepo.Create(ctx, rel); err != nil {
-			s.logger.Warn("Failed to create FK relationship",
-				zap.String("source", fmt.Sprintf("%s.%s", sourceTable.TableName, sourceCol.ColumnName)),
-				zap.String("target", fmt.Sprintf("%s.%s", targetTable.TableName, targetCol.ColumnName)),
-				zap.Error(err))
-			continue
-		}
-		createdCount++
-	}
-
-	return createdCount, nil
-}
-
-// preserveColumnFeaturesFKs creates EntityRelationship records for columns where Phase 4
+// preserveColumnFeaturesFKs creates SchemaRelationship records for columns where Phase 4
 // (ColumnFeatureExtraction) already resolved FK targets with high confidence.
+// Writes to engine_schema_relationships (not engine_entity_relationships).
 func (s *llmRelationshipDiscoveryService) preserveColumnFeaturesFKs(
 	ctx context.Context,
-	ontologyID uuid.UUID,
-	_ uuid.UUID, // projectID - unused, available if needed for future extensions
+	projectID uuid.UUID,
 	columns []*models.SchemaColumn,
 	tableByID map[uuid.UUID]*models.SchemaTable,
 	tableByName map[string]*models.SchemaTable,
 	_ map[uuid.UUID]*models.SchemaColumn, // columnByID - unused, columns searched via iteration
-	entityByTable map[string]*models.OntologyEntity,
 	discoverer datasource.SchemaDiscoverer,
 ) (int, error) {
 	// Find columns with pre-resolved FK targets from ColumnFeatureExtraction
@@ -434,17 +327,6 @@ func (s *llmRelationshipDiscoveryService) preserveColumnFeaturesFKs(
 			continue
 		}
 
-		// Resolve entities
-		sourceEntity := entityByTable[sourceTable.TableName]
-		targetEntity := entityByTable[targetTable.TableName]
-
-		if sourceEntity == nil || targetEntity == nil {
-			s.logger.Debug("Skipping ColumnFeatures FK - missing entity for table",
-				zap.String("source_table", sourceTable.TableName),
-				zap.String("target_table", targetTable.TableName))
-			continue
-		}
-
 		// Find target column
 		targetColName := idFeatures.FKTargetColumn
 		if targetColName == "" {
@@ -471,26 +353,35 @@ func (s *llmRelationshipDiscoveryService) preserveColumnFeaturesFKs(
 			cardinality = InferCardinality(joinResult)
 		}
 
-		rel := &models.EntityRelationship{
-			OntologyID:         ontologyID,
-			SourceEntityID:     sourceEntity.ID,
-			TargetEntityID:     targetEntity.ID,
-			SourceColumnSchema: sourceTable.SchemaName,
-			SourceColumnTable:  sourceTable.TableName,
-			SourceColumnName:   col.ColumnName,
-			SourceColumnID:     &col.ID,
-			TargetColumnSchema: targetTable.SchemaName,
-			TargetColumnTable:  targetTable.TableName,
-			TargetColumnName:   targetCol.ColumnName,
-			TargetColumnID:     &targetCol.ID,
-			DetectionMethod:    models.DetectionMethodDataOverlap,
-			Confidence:         idFeatures.FKConfidence,
-			Status:             models.RelationshipStatusConfirmed,
-			Cardinality:        cardinality,
-			Source:             models.SourceInferred.String(),
+		inferenceMethod := models.InferenceMethodColumnFeatures
+		rel := &models.SchemaRelationship{
+			ProjectID:        projectID,
+			SourceTableID:    sourceTable.ID,
+			SourceColumnID:   col.ID,
+			TargetTableID:    targetTable.ID,
+			TargetColumnID:   targetCol.ID,
+			RelationshipType: models.RelationshipTypeInferred,
+			Cardinality:      cardinality,
+			Confidence:       idFeatures.FKConfidence,
+			InferenceMethod:  &inferenceMethod,
+			IsValidated:      true,
 		}
 
-		if err := s.relationshipRepo.Create(ctx, rel); err != nil {
+		// Build metrics for upsert
+		var sourceDistinct, targetDistinct int64
+		if col.DistinctCount != nil {
+			sourceDistinct = *col.DistinctCount
+		}
+		if targetCol.DistinctCount != nil {
+			targetDistinct = *targetCol.DistinctCount
+		}
+		metrics := &models.DiscoveryMetrics{
+			MatchRate:      idFeatures.FKConfidence,
+			SourceDistinct: sourceDistinct,
+			TargetDistinct: targetDistinct,
+		}
+
+		if err := s.schemaRepo.UpsertRelationshipWithMetrics(ctx, rel, metrics); err != nil {
 			s.logger.Warn("Failed to create ColumnFeatures FK relationship",
 				zap.String("source", fmt.Sprintf("%s.%s", sourceTable.TableName, col.ColumnName)),
 				zap.String("target", fmt.Sprintf("%s.%s", targetTable.TableName, targetCol.ColumnName)),
@@ -503,62 +394,61 @@ func (s *llmRelationshipDiscoveryService) preserveColumnFeaturesFKs(
 	return createdCount, nil
 }
 
-// createRelationshipFromValidation creates an EntityRelationship from a validated candidate.
-func (s *llmRelationshipDiscoveryService) createRelationshipFromValidation(
+// createSchemaRelationshipFromValidation creates a SchemaRelationship from a validated candidate.
+// Writes to engine_schema_relationships (not engine_entity_relationships).
+func (s *llmRelationshipDiscoveryService) createSchemaRelationshipFromValidation(
 	ctx context.Context,
-	ontologyID uuid.UUID,
+	projectID uuid.UUID,
 	vr *ValidatedRelationship,
-	entityByTable map[string]*models.OntologyEntity,
-	_ map[uuid.UUID]*models.SchemaColumn, // columnByID - unused, IDs come from candidate
 	tableByName map[string]*models.SchemaTable,
 ) error {
 	candidate := vr.Candidate
 	result := vr.Result
 
-	// Resolve entities
-	sourceEntity := entityByTable[candidate.SourceTable]
-	targetEntity := entityByTable[candidate.TargetTable]
+	// Resolve table IDs from table lookup
+	sourceTable := tableByName[candidate.SourceTable]
+	targetTable := tableByName[candidate.TargetTable]
 
-	if sourceEntity == nil || targetEntity == nil {
-		return fmt.Errorf("missing entity for table: source=%s (%v), target=%s (%v)",
-			candidate.SourceTable, sourceEntity != nil,
-			candidate.TargetTable, targetEntity != nil)
+	if sourceTable == nil || targetTable == nil {
+		return fmt.Errorf("missing table: source=%s (%v), target=%s (%v)",
+			candidate.SourceTable, sourceTable != nil,
+			candidate.TargetTable, targetTable != nil)
 	}
 
-	// Resolve schema names from table lookup
-	var sourceSchema, targetSchema string
-	if t := tableByName[candidate.SourceTable]; t != nil {
-		sourceSchema = t.SchemaName
+	// Compute cardinality from actual join data, not LLM response.
+	// The LLM tends to default to "N:1" without analyzing join statistics.
+	// InferCardinality uses the ratio of JoinCount to matched values to determine
+	// the actual relationship cardinality (1:1, N:1, 1:N, or N:M).
+	joinAnalysis := &datasource.JoinAnalysis{
+		JoinCount:     candidate.JoinCount,
+		SourceMatched: candidate.SourceMatched,
+		TargetMatched: candidate.TargetMatched,
 	}
-	if t := tableByName[candidate.TargetTable]; t != nil {
-		targetSchema = t.SchemaName
+	cardinality := InferCardinality(joinAnalysis)
+
+	inferenceMethod := models.InferenceMethodPKMatch
+	rel := &models.SchemaRelationship{
+		ProjectID:        projectID,
+		SourceTableID:    sourceTable.ID,
+		SourceColumnID:   candidate.SourceColumnID,
+		TargetTableID:    targetTable.ID,
+		TargetColumnID:   candidate.TargetColumnID,
+		RelationshipType: models.RelationshipTypeInferred,
+		Cardinality:      cardinality,
+		Confidence:       result.Confidence,
+		InferenceMethod:  &inferenceMethod,
+		IsValidated:      true,
 	}
 
-	rel := &models.EntityRelationship{
-		OntologyID:         ontologyID,
-		SourceEntityID:     sourceEntity.ID,
-		TargetEntityID:     targetEntity.ID,
-		SourceColumnSchema: sourceSchema,
-		SourceColumnTable:  candidate.SourceTable,
-		SourceColumnName:   candidate.SourceColumn,
-		SourceColumnID:     &candidate.SourceColumnID,
-		TargetColumnSchema: targetSchema,
-		TargetColumnTable:  candidate.TargetTable,
-		TargetColumnName:   candidate.TargetColumn,
-		TargetColumnID:     &candidate.TargetColumnID,
-		DetectionMethod:    models.DetectionMethodPKMatch,
-		Confidence:         result.Confidence,
-		Status:             models.RelationshipStatusConfirmed,
-		Cardinality:        result.Cardinality,
-		Source:             models.SourceInferred.String(),
+	// Build metrics from candidate join analysis
+	metrics := &models.DiscoveryMetrics{
+		SourceDistinct: int64(candidate.SourceDistinctCount),
+		TargetDistinct: int64(candidate.TargetDistinctCount),
+		MatchedCount:   int64(candidate.SourceMatched),
+	}
+	if candidate.SourceDistinctCount > 0 {
+		metrics.MatchRate = float64(candidate.SourceMatched) / float64(candidate.SourceDistinctCount)
 	}
 
-	// Add role-based description if LLM provided a source role
-	if result.SourceRole != "" {
-		desc := fmt.Sprintf("The %s in %s represents the %s.",
-			candidate.SourceColumn, candidate.SourceTable, result.SourceRole)
-		rel.Description = &desc
-	}
-
-	return s.relationshipRepo.Create(ctx, rel)
+	return s.schemaRepo.UpsertRelationshipWithMetrics(ctx, rel, metrics)
 }
