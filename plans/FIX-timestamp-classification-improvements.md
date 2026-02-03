@@ -315,7 +315,7 @@ func Test_TimestampClassifier_UncertaintyGeneratesQuestion(t *testing.T) {
 [x] Update NeedsCrossColumnCheck flagging logic (line 937-939)
 [ ] Add NeedsClarification fields to response schema
 [ ] Add NeedsClarification fields to ColumnFeatures model
-[ ] Update parseResponse to handle clarification
+[x] Update parseResponse to handle clarification
 [ ] Add question creation in ClassifyColumnsInBatch
 [ ] Add unit tests for each change
 [ ] Run make check - all tests pass

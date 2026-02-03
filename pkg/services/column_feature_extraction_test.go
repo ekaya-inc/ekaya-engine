@@ -1582,14 +1582,14 @@ func TestTimestampClassifier_NeedsCrossColumnCheck_NullableTimestamps(t *testing
 		isNullable bool
 		wantFlag   bool
 	}{
-		{"soft_delete_rare_2pct", 0.98, true, true},       // 2% deleted - flagged
-		{"soft_delete_common_50pct", 0.50, true, true},    // 50% deleted - flagged
-		{"completed_at_70pct", 0.30, true, true},          // 70% completed - flagged
-		{"created_at_required", 0.0, false, false},        // NOT NULL - not flagged
+		{"soft_delete_rare_2pct", 0.98, true, true},        // 2% deleted - flagged
+		{"soft_delete_common_50pct", 0.50, true, true},     // 50% deleted - flagged
+		{"completed_at_70pct", 0.30, true, true},           // 70% completed - flagged
+		{"created_at_required", 0.0, false, false},         // NOT NULL - not flagged
 		{"created_at_nullable_no_nulls", 0.0, true, false}, // nullable but no nulls - not flagged
-		{"all_null_no_data", 1.0, true, false},            // 100% null (no data yet) - not flagged
-		{"mostly_null_99pct", 0.99, true, true},           // 1% non-null - flagged
-		{"mostly_non_null_1pct", 0.01, true, true},        // 99% non-null - flagged
+		{"all_null_no_data", 1.0, true, false},             // 100% null (no data yet) - not flagged
+		{"mostly_null_99pct", 0.99, true, true},            // 1% non-null - flagged
+		{"mostly_non_null_1pct", 0.01, true, true},         // 99% non-null - flagged
 	}
 
 	classifier := &timestampClassifier{logger: zap.NewNop()}
@@ -1663,6 +1663,159 @@ func TestTimestampClassifier_NeedsCrossColumnCheck_SoftDeleteNotSpecial(t *testi
 	// Even though IsSoftDelete=true, non-nullable means no cross-column check needed
 	if features.NeedsCrossColumnCheck {
 		t.Error("NeedsCrossColumnCheck should be false for non-nullable columns, even if classified as soft_delete")
+	}
+}
+
+func TestTimestampClassifier_UncertaintyGeneratesQuestion(t *testing.T) {
+	// Test that when LLM returns low confidence with needs_clarification=true,
+	// the features are flagged for clarification
+	classifier := &timestampClassifier{logger: zap.NewNop()}
+
+	profile := &models.ColumnDataProfile{
+		ColumnID:   uuid.New(),
+		ColumnName: "processed_at",
+		TableName:  "orders",
+		DataType:   "timestamp with time zone",
+		IsNullable: true,
+		NullRate:   0.5,
+		RowCount:   10000,
+	}
+
+	// LLM is uncertain and asks a clarification question
+	mockResponse := `{
+		"purpose": "event_time",
+		"confidence": 0.55,
+		"is_soft_delete": false,
+		"is_audit_field": false,
+		"description": "Unclear purpose - could be event time or soft delete indicator",
+		"needs_clarification": true,
+		"clarification_question": "Is this column used for soft deletes or tracking when an order was processed?"
+	}`
+
+	features, err := classifier.parseResponse(profile, mockResponse, "test-model")
+	if err != nil {
+		t.Fatalf("parseResponse error: %v", err)
+	}
+
+	if !features.NeedsClarification {
+		t.Error("NeedsClarification should be true when LLM returns needs_clarification=true with low confidence")
+	}
+
+	if features.ClarificationQuestion == "" {
+		t.Error("ClarificationQuestion should not be empty when LLM provides a question")
+	}
+
+	expectedQuestion := "Is this column used for soft deletes or tracking when an order was processed?"
+	if features.ClarificationQuestion != expectedQuestion {
+		t.Errorf("ClarificationQuestion = %q, want %q", features.ClarificationQuestion, expectedQuestion)
+	}
+
+	if features.Confidence >= 0.7 {
+		t.Errorf("Confidence should be less than 0.7 for uncertain classifications, got %v", features.Confidence)
+	}
+}
+
+func TestTimestampClassifier_NoQuestionWhenConfident(t *testing.T) {
+	// Test that even if LLM sets needs_clarification=true but confidence >= 0.7,
+	// we don't flag for clarification (the condition requires all three)
+	classifier := &timestampClassifier{logger: zap.NewNop()}
+
+	profile := &models.ColumnDataProfile{
+		ColumnID:   uuid.New(),
+		ColumnName: "created_at",
+		TableName:  "users",
+		DataType:   "timestamp with time zone",
+		IsNullable: false,
+		NullRate:   0.0,
+		RowCount:   10000,
+	}
+
+	// LLM says needs_clarification but has high confidence (edge case)
+	mockResponse := `{
+		"purpose": "audit_created",
+		"confidence": 0.85,
+		"is_soft_delete": false,
+		"is_audit_field": true,
+		"description": "Records when the record was created",
+		"needs_clarification": true,
+		"clarification_question": "Some question that shouldn't be used"
+	}`
+
+	features, err := classifier.parseResponse(profile, mockResponse, "test-model")
+	if err != nil {
+		t.Fatalf("parseResponse error: %v", err)
+	}
+
+	if features.NeedsClarification {
+		t.Error("NeedsClarification should be false when confidence >= 0.7")
+	}
+
+	if features.ClarificationQuestion != "" {
+		t.Errorf("ClarificationQuestion should be empty when not flagged for clarification, got %q", features.ClarificationQuestion)
+	}
+}
+
+func TestTimestampClassifier_NoQuestionWhenEmptyQuestion(t *testing.T) {
+	// Test that needs_clarification=true requires a non-empty question
+	classifier := &timestampClassifier{logger: zap.NewNop()}
+
+	profile := &models.ColumnDataProfile{
+		ColumnID:   uuid.New(),
+		ColumnName: "updated_at",
+		TableName:  "users",
+		DataType:   "timestamp with time zone",
+		IsNullable: true,
+		NullRate:   0.5,
+		RowCount:   10000,
+	}
+
+	// LLM says needs_clarification but provides empty question
+	mockResponse := `{
+		"purpose": "audit_updated",
+		"confidence": 0.55,
+		"is_soft_delete": false,
+		"is_audit_field": true,
+		"description": "Probably an audit field",
+		"needs_clarification": true,
+		"clarification_question": ""
+	}`
+
+	features, err := classifier.parseResponse(profile, mockResponse, "test-model")
+	if err != nil {
+		t.Fatalf("parseResponse error: %v", err)
+	}
+
+	if features.NeedsClarification {
+		t.Error("NeedsClarification should be false when clarification_question is empty")
+	}
+}
+
+func TestTimestampClassifier_PromptIncludesClarificationFields(t *testing.T) {
+	// Verify the prompt includes clarification field documentation
+	classifier := &timestampClassifier{logger: zap.NewNop()}
+
+	profile := &models.ColumnDataProfile{
+		ColumnName: "test_timestamp",
+		TableName:  "test_table",
+		DataType:   "timestamp with time zone",
+		NullRate:   0.5,
+		RowCount:   1000,
+	}
+
+	prompt := classifier.buildPrompt(profile)
+
+	// Check that clarification fields are in the JSON example
+	if !containsStr(prompt, "needs_clarification") {
+		t.Error("Prompt should include needs_clarification field in JSON example")
+	}
+
+	if !containsStr(prompt, "clarification_question") {
+		t.Error("Prompt should include clarification_question field in JSON example")
+	}
+
+	// Check that the instruction about when to use clarification is present
+	if !containsStr(prompt, "confidence < 0.7") {
+		t.Error("Prompt should explain when to use clarification fields")
 	}
 }
 

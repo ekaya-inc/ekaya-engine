@@ -883,20 +883,25 @@ func (c *timestampClassifier) buildPrompt(profile *models.ColumnDataProfile) str
 	sb.WriteString("  \"confidence\": 0.85,\n")
 	sb.WriteString("  \"is_soft_delete\": false,\n")
 	sb.WriteString("  \"is_audit_field\": true,\n")
-	sb.WriteString("  \"description\": \"Records when the record was created.\"\n")
+	sb.WriteString("  \"description\": \"Records when the record was created.\",\n")
+	sb.WriteString("  \"needs_clarification\": false,\n")
+	sb.WriteString("  \"clarification_question\": \"\"\n")
 	sb.WriteString("}\n")
-	sb.WriteString("```\n")
+	sb.WriteString("```\n\n")
+	sb.WriteString("If you are uncertain (confidence < 0.7), set `needs_clarification: true` and provide a specific question.\n")
 
 	return sb.String()
 }
 
 // timestampClassificationResponse is the expected JSON response from the LLM.
 type timestampClassificationResponse struct {
-	Purpose      string  `json:"purpose"`
-	Confidence   float64 `json:"confidence"`
-	IsSoftDelete bool    `json:"is_soft_delete"`
-	IsAuditField bool    `json:"is_audit_field"`
-	Description  string  `json:"description"`
+	Purpose               string  `json:"purpose"`
+	Confidence            float64 `json:"confidence"`
+	IsSoftDelete          bool    `json:"is_soft_delete"`
+	IsAuditField          bool    `json:"is_audit_field"`
+	Description           string  `json:"description"`
+	NeedsClarification    bool    `json:"needs_clarification,omitempty"`
+	ClarificationQuestion string  `json:"clarification_question,omitempty"`
 }
 
 func (c *timestampClassifier) parseResponse(profile *models.ColumnDataProfile, content, model string) (*models.ColumnFeatures, error) {
@@ -942,6 +947,12 @@ func (c *timestampClassifier) parseResponse(profile *models.ColumnDataProfile, c
 	// to understand the semantic meaning of nullability
 	if profile.IsNullable && profile.NullRate > 0 && profile.NullRate < 1.0 {
 		features.NeedsCrossColumnCheck = true
+	}
+
+	// If LLM is uncertain, flag for clarification question
+	if response.NeedsClarification && response.ClarificationQuestion != "" && response.Confidence < 0.7 {
+		features.NeedsClarification = true
+		features.ClarificationQuestion = response.ClarificationQuestion
 	}
 
 	return features, nil
