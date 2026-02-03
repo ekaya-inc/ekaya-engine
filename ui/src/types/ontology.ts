@@ -504,6 +504,7 @@ export type DAGNodeName =
   | 'EntityDiscovery'
   | 'EntityEnrichment'
   | 'FKDiscovery'
+  | 'TableFeatureExtraction'
   | 'PKMatchDiscovery'
   | 'RelationshipDiscovery'
   | 'RelationshipEnrichment'
@@ -647,6 +648,10 @@ export const DAGNodeDescriptions: Record<DAGNodeName, { title: string; descripti
   FKDiscovery: {
     title: 'Discovering Foreign Keys',
     description: 'Discovering foreign key relationships',
+  },
+  TableFeatureExtraction: {
+    title: 'Extracting Table Features',
+    description: 'Analyzing table metadata and usage patterns',
   },
   PKMatchDiscovery: {
     title: 'Discovering Primary Key Matches',
