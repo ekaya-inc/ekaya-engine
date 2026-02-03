@@ -866,6 +866,14 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 				continue
 			}
 
+			// Semantic validation: Check that column names suggest the same entity.
+			// This prevents false positives where UUIDs overlap by chance.
+			// For example, account_id values might exist in channel_id by coincidence,
+			// but "account_id → channel_id" is semantically invalid.
+			if !areColumnNamesSemanticallyCompatible(candidate.column.ColumnName, target.column.ColumnName, target.table.TableName) {
+				continue
+			}
+
 			// Run join analysis
 			joinResult, err := discoverer.AnalyzeJoin(ctx,
 				candidate.schema, candidate.table, candidate.column.ColumnName,
@@ -1084,3 +1092,107 @@ func areTypesCompatibleForFK(sourceType, targetType string) bool {
 // NOTE: isPKMatchExcludedName has been removed. Column classification is now handled by the
 // column_feature_extraction service. Columns are excluded based on their stored Purpose
 // (timestamp, flag, measure, enum) rather than name patterns.
+
+// areColumnNamesSemanticallyCompatible checks if source and target column names suggest
+// they could reference the same entity. This prevents false positives where UUIDs overlap
+// by chance (e.g., account_id → channel_id values coincidentally exist).
+//
+// The check is conservative - it REJECTS relationships where:
+//   - Source has an explicit entity reference (e.g., "account" from "account_id")
+//   - Target has a DIFFERENT explicit entity reference (e.g., "channel" from "channel_id")
+//   - The source entity doesn't match the target table name
+//
+// This means the following are allowed:
+//   - source_id → table.id (generic target)
+//   - entity_id → entity_table.id (entity matches table)
+//   - entity_id → table.entity_id (entity matches)
+//
+// Note: Role-based FKs like visitor_id → users.user_id are rejected by this check.
+// These relationships can be discovered via the LLM validation path instead.
+func areColumnNamesSemanticallyCompatible(sourceColumn, targetColumn, targetTable string) bool {
+	sourceEntity := extractEntityFromColumnName(sourceColumn)
+	targetEntity := extractEntityFromColumnName(targetColumn)
+	normalizedTargetTable := normalizeTableName(targetTable)
+
+	// Case 1: Target column is generic "id" - allow any FK to reference it
+	// This handles references like user_id → users.id, visitor_id → users.id
+	if targetColumn == "id" {
+		return true
+	}
+
+	// Case 2: Source has no entity reference (generic column like "id", "key")
+	// Allow these through - the join stats will determine validity
+	if sourceEntity == "" {
+		return true
+	}
+
+	// Case 3: Target has no entity reference
+	// Allow these through since target is generic
+	if targetEntity == "" {
+		return true
+	}
+
+	// Case 4: Source and target reference the same entity
+	// e.g., user_id → user_id, account_id → account_id
+	if sourceEntity == targetEntity {
+		return true
+	}
+
+	// Case 5: Source entity matches target table name
+	// e.g., account_id (entity=account) → accounts.account_id (table=account)
+	if sourceEntity == normalizedTargetTable {
+		return true
+	}
+
+	// REJECT: Source and target have DIFFERENT explicit entity references
+	// AND source doesn't match target table.
+	// This catches false positives like account_id → channels.channel_id
+	return false
+}
+
+// extractEntityFromColumnName extracts the entity name from a column name.
+// For example: "user_id" → "user", "account_fk" → "account", "host_id" → "host".
+// Returns empty string if no entity can be extracted.
+func extractEntityFromColumnName(column string) string {
+	column = strings.ToLower(column)
+
+	// Strip common FK suffixes
+	suffixes := []string{"_id", "_fk", "_key", "_uuid"}
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(column, suffix) {
+			return strings.TrimSuffix(column, suffix)
+		}
+	}
+
+	// No suffix found - return empty (generic column names like "id" have no entity)
+	return ""
+}
+
+// normalizeTableName normalizes a table name for entity matching.
+// Converts to lowercase and removes common plural suffixes.
+// For example: "users" → "user", "accounts" → "account", "Companies" → "companie".
+func normalizeTableName(table string) string {
+	table = strings.ToLower(table)
+
+	// Remove common plural suffixes (simple heuristic)
+	// Note: This is imperfect but handles common cases
+	if strings.HasSuffix(table, "ies") {
+		// categories → category (but this becomes "categorie" - not perfect)
+		return strings.TrimSuffix(table, "ies") + "y"
+	}
+	if strings.HasSuffix(table, "es") && !strings.HasSuffix(table, "ies") {
+		// Only strip "es" if it's after s, x, z, ch, sh (common English plurals)
+		base := strings.TrimSuffix(table, "es")
+		if strings.HasSuffix(base, "s") || strings.HasSuffix(base, "x") ||
+			strings.HasSuffix(base, "z") || strings.HasSuffix(base, "ch") ||
+			strings.HasSuffix(base, "sh") {
+			return base
+		}
+		// Otherwise don't strip "es" (e.g., "files" should strip just "s")
+	}
+	if strings.HasSuffix(table, "s") && !strings.HasSuffix(table, "ss") {
+		return strings.TrimSuffix(table, "s")
+	}
+
+	return table
+}

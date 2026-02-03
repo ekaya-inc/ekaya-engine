@@ -1695,6 +1695,9 @@ func (m *mockTestSchemaRepo) ClearColumnFeaturesByProject(ctx context.Context, p
 func (m *mockTestSchemaRepo) GetRelationshipsByMethod(ctx context.Context, projectID, datasourceID uuid.UUID, method string) ([]*models.SchemaRelationship, error) {
 	return nil, nil
 }
+func (m *mockTestSchemaRepo) DeleteInferredRelationshipsByProject(ctx context.Context, projectID uuid.UUID) (int64, error) {
+	return 0, nil
+}
 
 // TestPKMatch_SmallIntegerValues tests that columns with all small integer values (1-10)
 // are rejected unless the target table is also small (lookup table scenario)
@@ -3437,6 +3440,9 @@ func TestPKMatch_LowCardinalityRatio_IDColumn(t *testing.T) {
 	usersTableID := uuid.New()
 	billingTableID := uuid.New()
 
+	// Note: Using generic "id" as target column to pass semantic check.
+	// Role-based FKs (visitor_id → user_id) are now rejected by semantic check
+	// and must be discovered via LLM validation instead.
 	mocks.schemaRepo.tables = []*models.SchemaTable{
 		{
 			ID:         usersTableID,
@@ -3446,7 +3452,7 @@ func TestPKMatch_LowCardinalityRatio_IDColumn(t *testing.T) {
 			Columns: []models.SchemaColumn{
 				{
 					SchemaTableID: usersTableID,
-					ColumnName:    "user_id",
+					ColumnName:    "id",   // Generic "id" passes semantic check
 					DataType:      "text", // text UUID
 					IsPrimaryKey:  true,
 					IsJoinable:    &isJoinableTrue,
@@ -3470,7 +3476,7 @@ func TestPKMatch_LowCardinalityRatio_IDColumn(t *testing.T) {
 				},
 				{
 					SchemaTableID: billingTableID,
-					ColumnName:    "visitor_id", // FK to users.user_id
+					ColumnName:    "visitor_id", // FK to users.id
 					DataType:      "text",
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
@@ -3511,7 +3517,7 @@ func TestPKMatch_LowCardinalityRatio_IDColumn(t *testing.T) {
 		t.Errorf("expected at least 1 inferred relationship (visitor_id → user_id), got %d", result.InferredRelationships)
 	}
 
-	// Verify: at least one relationship exists for billing_engagements.visitor_id → users.user_id
+	// Verify: at least one relationship exists for billing_engagements.visitor_id → users.id
 	var foundVisitorRelationship bool
 	for _, rel := range mocks.schemaRepo.upsertedRelationships {
 		// SchemaRelationship uses table IDs, so check for billing_engagements -> users
@@ -3521,7 +3527,7 @@ func TestPKMatch_LowCardinalityRatio_IDColumn(t *testing.T) {
 		}
 	}
 	if !foundVisitorRelationship {
-		t.Error("expected relationship billing_engagements.visitor_id → users.user_id to be discovered")
+		t.Error("expected relationship billing_engagements.visitor_id → users.id to be discovered")
 	}
 }
 
@@ -3530,10 +3536,13 @@ func TestPKMatch_LowCardinalityRatio_IDColumn(t *testing.T) {
 // 4+ relationships. This is the verification test for BUG-9 fix.
 //
 // Scenario: billing_engagements table has:
-// - visitor_id → users.user_id (role: visitor)
-// - host_id → users.user_id (role: host)
+// - visitor_id → users.id (role: visitor, generic target)
+// - host_id → users.id (role: host, generic target)
 // - session_id → sessions.session_id
 // - offer_id → offers.offer_id
+//
+// Note: Using generic "id" for users table to pass semantic check. Role-based FKs
+// (visitor_id → user_id) require LLM validation when target has entity-specific name.
 //
 // All FKs use text UUIDs (soft FKs) with low cardinality ratios that would have been
 // filtered out by the old 5% threshold.
@@ -3623,7 +3632,7 @@ func TestPKMatch_BillingEngagement_MultiSoftFK_Discovery(t *testing.T) {
 			Columns: []models.SchemaColumn{
 				{
 					SchemaTableID: usersTableID,
-					ColumnName:    "user_id",
+					ColumnName:    "id",   // Generic "id" to pass semantic check for role-based FKs
 					DataType:      "text", // text UUID
 					IsPrimaryKey:  true,
 					IsJoinable:    &isJoinableTrue,
@@ -3679,7 +3688,7 @@ func TestPKMatch_BillingEngagement_MultiSoftFK_Discovery(t *testing.T) {
 				},
 				{
 					SchemaTableID: billingTableID,
-					ColumnName:    "visitor_id", // FK to users.user_id (role: visitor)
+					ColumnName:    "visitor_id", // FK to users.id (role: visitor)
 					DataType:      "text",
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
@@ -3692,7 +3701,7 @@ func TestPKMatch_BillingEngagement_MultiSoftFK_Discovery(t *testing.T) {
 				},
 				{
 					SchemaTableID: billingTableID,
-					ColumnName:    "host_id", // FK to users.user_id (role: host)
+					ColumnName:    "host_id", // FK to users.id (role: host)
 					DataType:      "text",
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
@@ -3783,8 +3792,8 @@ func TestPKMatch_BillingEngagement_MultiSoftFK_Discovery(t *testing.T) {
 		description   string
 	}
 	expectedRels := []expectedRel{
-		{billingTableID, usersTableID, "billing_engagements.visitor_id → users.user_id"},
-		{billingTableID, usersTableID, "billing_engagements.host_id → users.user_id"},
+		{billingTableID, usersTableID, "billing_engagements.visitor_id → users.id"},
+		{billingTableID, usersTableID, "billing_engagements.host_id → users.id"},
 		{billingTableID, sessionsTableID, "billing_engagements.session_id → sessions.session_id"},
 		{billingTableID, offersTableID, "billing_engagements.offer_id → offers.offer_id"},
 	}
@@ -4090,6 +4099,296 @@ func TestPKMatch_ReversedDirectionRejected(t *testing.T) {
 		}
 		if rel.InferenceMethod == nil || *rel.InferenceMethod != models.InferenceMethodPKMatch {
 			t.Errorf("expected InferenceMethod=%q, got %v", models.InferenceMethodPKMatch, rel.InferenceMethod)
+		}
+	}
+}
+
+// ============================================================================
+// areColumnNamesSemanticallyCompatible Tests
+// ============================================================================
+
+// TestAreColumnNamesSemanticallyCompatible verifies that the semantic check
+// rejects obvious mismatches (account_id → channel_id) while allowing valid
+// patterns (entity_id → entity_table.id, role_id → entity_table.entity_id).
+func TestAreColumnNamesSemanticallyCompatible(t *testing.T) {
+	tests := []struct {
+		name         string
+		sourceColumn string
+		targetColumn string
+		targetTable  string
+		want         bool
+		reason       string
+	}{
+		// REJECT: Different entity references
+		{
+			name:         "rejects account_id → channel_id (different entities)",
+			sourceColumn: "account_id",
+			targetColumn: "channel_id",
+			targetTable:  "channels",
+			want:         false,
+			reason:       "account != channel, should be rejected",
+		},
+		{
+			name:         "rejects user_id → order_id (different entities)",
+			sourceColumn: "user_id",
+			targetColumn: "order_id",
+			targetTable:  "orders",
+			want:         false,
+			reason:       "user != order, should be rejected",
+		},
+
+		// ALLOW: Same entity reference
+		{
+			name:         "allows account_id → account_id (same entity)",
+			sourceColumn: "account_id",
+			targetColumn: "account_id",
+			targetTable:  "accounts",
+			want:         true,
+			reason:       "account == account",
+		},
+		{
+			name:         "allows user_id → user_id (same entity)",
+			sourceColumn: "user_id",
+			targetColumn: "user_id",
+			targetTable:  "users",
+			want:         true,
+			reason:       "user == user",
+		},
+
+		// ALLOW: Source entity matches target table
+		{
+			name:         "allows user_id → id (source matches table)",
+			sourceColumn: "user_id",
+			targetColumn: "id",
+			targetTable:  "users",
+			want:         true,
+			reason:       "user == users (normalized)",
+		},
+		{
+			name:         "allows account_id → id (source matches table)",
+			sourceColumn: "account_id",
+			targetColumn: "id",
+			targetTable:  "accounts",
+			want:         true,
+			reason:       "account == accounts (normalized)",
+		},
+
+		// REJECT: Role-based references are now rejected (stricter semantic check)
+		// These can be discovered via LLM validation instead
+		{
+			name:         "rejects visitor_id → user_id (role-based, needs LLM validation)",
+			sourceColumn: "visitor_id",
+			targetColumn: "user_id",
+			targetTable:  "users",
+			want:         false,
+			reason:       "visitor != user, role-based FKs need LLM validation",
+		},
+		{
+			name:         "rejects host_id → user_id (role-based, needs LLM validation)",
+			sourceColumn: "host_id",
+			targetColumn: "user_id",
+			targetTable:  "users",
+			want:         false,
+			reason:       "host != user, role-based FKs need LLM validation",
+		},
+		{
+			name:         "rejects buyer_id → user_id (role-based, needs LLM validation)",
+			sourceColumn: "buyer_id",
+			targetColumn: "user_id",
+			targetTable:  "users",
+			want:         false,
+			reason:       "buyer != user, role-based FKs need LLM validation",
+		},
+		{
+			name:         "rejects owner_id → account_id (role-based, needs LLM validation)",
+			sourceColumn: "owner_id",
+			targetColumn: "account_id",
+			targetTable:  "accounts",
+			want:         false,
+			reason:       "owner != account, role-based FKs need LLM validation",
+		},
+
+		// ALLOW: Role-based references to generic "id" still work
+		{
+			name:         "allows visitor_id → users.id (generic target PK)",
+			sourceColumn: "visitor_id",
+			targetColumn: "id",
+			targetTable:  "users",
+			want:         true,
+			reason:       "target is generic 'id', role-based FK allowed",
+		},
+		{
+			name:         "allows host_id → users.id (generic target PK)",
+			sourceColumn: "host_id",
+			targetColumn: "id",
+			targetTable:  "users",
+			want:         true,
+			reason:       "target is generic 'id', role-based FK allowed",
+		},
+
+		// ALLOW: Generic target column (id)
+		{
+			name:         "allows any_id → generic id",
+			sourceColumn: "foo_id",
+			targetColumn: "id",
+			targetTable:  "bars",
+			want:         true,
+			reason:       "target is generic 'id'",
+		},
+
+		// ALLOW: Source has no entity reference
+		{
+			name:         "allows generic source",
+			sourceColumn: "key",
+			targetColumn: "user_id",
+			targetTable:  "users",
+			want:         true,
+			reason:       "source has no entity reference",
+		},
+
+		// Edge case: Target has no entity reference
+		{
+			name:         "allows source_id → generic key",
+			sourceColumn: "user_id",
+			targetColumn: "key",
+			targetTable:  "users",
+			want:         true,
+			reason:       "target has no entity reference",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := areColumnNamesSemanticallyCompatible(tt.sourceColumn, tt.targetColumn, tt.targetTable)
+			if got != tt.want {
+				t.Errorf("areColumnNamesSemanticallyCompatible(%q, %q, %q) = %v, want %v (%s)",
+					tt.sourceColumn, tt.targetColumn, tt.targetTable, got, tt.want, tt.reason)
+			}
+		})
+	}
+}
+
+// TestPKMatch_SemanticColumnNameRejection is an end-to-end test that verifies
+// the pk_match discovery rejects relationships where column names semantically
+// don't match (e.g., account_id → channel_id), even when UUIDs overlap.
+func TestPKMatch_SemanticColumnNameRejection(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+
+	highDistinct := int64(1000)
+	rowCount := int64(5000)
+	isJoinableTrue := true
+
+	mocks := setupMocks(projectID, ontologyID, datasourceID, uuid.New())
+
+	// Mock discoverer: If called, return 0 orphans (all source values exist in target)
+	// This simulates UUID overlap by chance
+	joinAnalysisCalled := false
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		joinAnalysisCalled = true
+		// Return perfect join match - would create relationship if semantic check didn't exist
+		return &datasource.JoinAnalysis{
+			OrphanCount:   0,
+			SourceMatched: 100,
+			TargetMatched: 100,
+		}, nil
+	}
+
+	accountsTableID := uuid.New()
+	channelsTableID := uuid.New()
+	accountsAcctIDColID := uuid.New()
+	channelsChannelIDColID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         accountsTableID,
+			SchemaName: "public",
+			TableName:  "accounts",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            uuid.New(),
+					SchemaTableID: accountsTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+				{
+					ID:            accountsAcctIDColID,
+					SchemaTableID: accountsTableID,
+					ColumnName:    "account_id", // This could be the public-facing account_id
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+			},
+		},
+		{
+			ID:         channelsTableID,
+			SchemaName: "public",
+			TableName:  "channels",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            channelsChannelIDColID,
+					SchemaTableID: channelsTableID,
+					ColumnName:    "channel_id", // PK of channels table
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+			},
+		},
+	}
+
+	// Flatten columns for schemaRepo
+	var allColumns []*models.SchemaColumn
+	for _, table := range mocks.schemaRepo.tables {
+		for i := range table.Columns {
+			allColumns = append(allColumns, &table.Columns[i])
+		}
+	}
+	mocks.schemaRepo.columns = allColumns
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: No relationship created between account_id → channel_id
+	// The semantic check should reject this even if UUIDs overlap
+	if result.InferredRelationships != 0 {
+		t.Errorf("expected 0 inferred relationships (semantic mismatch: account_id → channel_id), got %d", result.InferredRelationships)
+	}
+
+	// Verify: Join analysis should NOT have been called for account_id → channel_id
+	// because semantic check filters it out before the SQL join
+	if joinAnalysisCalled {
+		t.Error("join analysis should NOT be called - semantic check should filter out account_id → channel_id before SQL join")
+	}
+
+	// Verify: No SchemaRelationships created
+	if len(mocks.schemaRepo.upsertedRelationships) != 0 {
+		t.Errorf("expected 0 SchemaRelationships, got %d", len(mocks.schemaRepo.upsertedRelationships))
+		for _, rel := range mocks.schemaRepo.upsertedRelationships {
+			t.Logf("  Unexpected: sourceTableID=%v → targetTableID=%v", rel.SourceTableID, rel.TargetTableID)
 		}
 	}
 }
