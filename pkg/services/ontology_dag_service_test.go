@@ -336,7 +336,9 @@ func (m *mockDAGRepository) GetNextPendingNode(ctx context.Context, dagID uuid.U
 
 // mockKnowledgeRepository is a mock implementation of KnowledgeRepository for testing Start.
 type mockKnowledgeRepository struct {
-	createFunc func(ctx context.Context, fact *models.KnowledgeFact) error
+	createFunc    func(ctx context.Context, fact *models.KnowledgeFact) error
+	updateFunc    func(ctx context.Context, fact *models.KnowledgeFact) error
+	getByTypeFunc func(ctx context.Context, projectID uuid.UUID, factType string) ([]*models.KnowledgeFact, error)
 }
 
 func (m *mockKnowledgeRepository) Create(ctx context.Context, fact *models.KnowledgeFact) error {
@@ -346,7 +348,10 @@ func (m *mockKnowledgeRepository) Create(ctx context.Context, fact *models.Knowl
 	return nil
 }
 
-func (m *mockKnowledgeRepository) Update(_ context.Context, _ *models.KnowledgeFact) error {
+func (m *mockKnowledgeRepository) Update(ctx context.Context, fact *models.KnowledgeFact) error {
+	if m.updateFunc != nil {
+		return m.updateFunc(ctx, fact)
+	}
 	return nil
 }
 
@@ -354,7 +359,10 @@ func (m *mockKnowledgeRepository) GetByProject(_ context.Context, _ uuid.UUID) (
 	return nil, nil
 }
 
-func (m *mockKnowledgeRepository) GetByType(_ context.Context, _ uuid.UUID, _ string) ([]*models.KnowledgeFact, error) {
+func (m *mockKnowledgeRepository) GetByType(ctx context.Context, projectID uuid.UUID, factType string) ([]*models.KnowledgeFact, error) {
+	if m.getByTypeFunc != nil {
+		return m.getByTypeFunc(ctx, projectID, factType)
+	}
 	return nil, nil
 }
 
@@ -467,6 +475,105 @@ func TestStart_StoresProjectOverview(t *testing.T) {
 	assert.Equal(t, projectID, capturedFact.ProjectID, "ProjectID should match")
 	assert.Equal(t, "project_overview", capturedFact.FactType, "FactType should be 'project_overview'")
 	assert.Equal(t, projectOverview, capturedFact.Value, "Value should match the overview text")
+}
+
+// TestStart_UpdatesExistingProjectOverview verifies that when a project_overview
+// already exists, it is updated rather than creating a duplicate.
+func TestStart_UpdatesExistingProjectOverview(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userID := uuid.New()
+	existingOverviewID := uuid.New()
+	originalOverview := "Original project overview"
+	newOverview := "Updated project overview with more details"
+
+	// Track calls
+	var createCalled bool
+	var updateCalled bool
+	var updatedFact *models.KnowledgeFact
+
+	mockKnowledgeRepo := &mockKnowledgeRepository{
+		getByTypeFunc: func(_ context.Context, _ uuid.UUID, factType string) ([]*models.KnowledgeFact, error) {
+			if factType == "project_overview" {
+				// Return existing project_overview
+				return []*models.KnowledgeFact{
+					{
+						ID:        existingOverviewID,
+						ProjectID: projectID,
+						FactType:  "project_overview",
+						Value:     originalOverview,
+					},
+				}, nil
+			}
+			return nil, nil
+		},
+		createFunc: func(_ context.Context, _ *models.KnowledgeFact) error {
+			createCalled = true
+			return nil
+		},
+		updateFunc: func(ctx context.Context, fact *models.KnowledgeFact) error {
+			updateCalled = true
+			updatedFact = fact
+
+			// Verify provenance was set correctly (manual provenance)
+			prov, ok := models.GetProvenance(ctx)
+			assert.True(t, ok, "Provenance should be set in context")
+			assert.Equal(t, models.SourceManual, prov.Source, "Source should be manual")
+			assert.Equal(t, userID, prov.UserID, "UserID should match the authenticated user")
+
+			return nil
+		},
+	}
+
+	dagID := uuid.New()
+	mockDAGRepo := &mockDAGRepository{
+		getActiveByDatasourceFunc: func(_ context.Context, _ uuid.UUID) (*models.OntologyDAG, error) {
+			return nil, nil
+		},
+		getByIDWithNodesFunc: func(_ context.Context, _ uuid.UUID) (*models.OntologyDAG, error) {
+			return &models.OntologyDAG{
+				ID:        dagID,
+				ProjectID: projectID,
+				Nodes:     []models.DAGNode{},
+			}, nil
+		},
+	}
+
+	mockOntologyRepo := &mockOntologyRepository{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+		},
+	}
+
+	mockEntityRepo := &mockOntologyEntityRepository{}
+	mockRelationshipRepo := &mockEntityRelationshipRepository{}
+
+	logger := zap.NewNop()
+	service := &ontologyDAGService{
+		dagRepo:          mockDAGRepo,
+		knowledgeRepo:    mockKnowledgeRepo,
+		ontologyRepo:     mockOntologyRepo,
+		entityRepo:       mockEntityRepo,
+		relationshipRepo: mockRelationshipRepo,
+		logger:           logger,
+		getTenantCtx: func(ctx context.Context, _ uuid.UUID) (context.Context, func(), error) {
+			return ctx, func() {}, nil
+		},
+	}
+
+	ctx := createAuthenticatedContext(userID)
+
+	// Call Start with new overview
+	_, _ = service.Start(ctx, projectID, datasourceID, newOverview)
+
+	// Verify Update was called instead of Create
+	assert.False(t, createCalled, "Create should NOT be called when project_overview exists")
+	assert.True(t, updateCalled, "Update should be called when project_overview exists")
+	assert.NotNil(t, updatedFact, "Updated fact should be captured")
+	assert.Equal(t, existingOverviewID, updatedFact.ID, "Should update the existing fact")
+	assert.Equal(t, newOverview, updatedFact.Value, "Value should be updated to new overview")
 }
 
 // TestStart_SkipsOverviewStorageWhenEmpty verifies that when an empty project

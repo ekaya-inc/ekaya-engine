@@ -246,10 +246,10 @@ func main() {
 	relationshipCandidateCollector := services.NewRelationshipCandidateCollector(
 		schemaRepo, adapterFactory, datasourceService, logger)
 	relationshipValidator := services.NewRelationshipValidator(
-		llmFactory, llmWorkerPool, llmCircuitBreaker, convRepo, logger)
+		llmFactory, llmWorkerPool, llmCircuitBreaker, convRepo, getTenantCtx, logger)
 	llmRelationshipDiscoveryService := services.NewLLMRelationshipDiscoveryService(
 		relationshipCandidateCollector, relationshipValidator, datasourceService, adapterFactory,
-		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, logger)
+		schemaRepo, logger)
 	ontologyDAGService.SetLLMRelationshipDiscoveryMethods(services.NewLLMRelationshipDiscoveryAdapter(llmRelationshipDiscoveryService))
 	ontologyDAGService.SetRelationshipEnrichmentMethods(services.NewRelationshipEnrichmentAdapter(relationshipEnrichmentService))
 	entityPromotionService := services.NewEntityPromotionService(

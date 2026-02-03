@@ -50,20 +50,20 @@ type ontologyDAGService struct {
 	glossaryRepo     repositories.GlossaryRepository
 
 	// Adapted service methods for dag package
-	knowledgeSeedingMethods        dag.KnowledgeSeedingMethods
-	columnFeatureExtractionMethods dag.ColumnFeatureExtractionMethods
-	tableFeatureExtractionMethods  dag.TableFeatureExtractionMethods
-	entityDiscoveryMethods         dag.EntityDiscoveryMethods
-	entityEnrichmentMethods        dag.EntityEnrichmentMethods
-	fkDiscoveryMethods                dag.FKDiscoveryMethods
-	pkMatchDiscoveryMethods           dag.PKMatchDiscoveryMethods
-	llmRelationshipDiscoveryMethods   dag.LLMRelationshipDiscoveryMethods
-	relationshipEnrichmentMethods     dag.RelationshipEnrichmentMethods
-	entityPromotionMethods         dag.EntityPromotionMethods
-	finalizationMethods            dag.OntologyFinalizationMethods
-	columnEnrichmentMethods        dag.ColumnEnrichmentMethods
-	glossaryDiscoveryMethods       dag.GlossaryDiscoveryMethods
-	glossaryEnrichmentMethods      dag.GlossaryEnrichmentMethods
+	knowledgeSeedingMethods         dag.KnowledgeSeedingMethods
+	columnFeatureExtractionMethods  dag.ColumnFeatureExtractionMethods
+	tableFeatureExtractionMethods   dag.TableFeatureExtractionMethods
+	entityDiscoveryMethods          dag.EntityDiscoveryMethods
+	entityEnrichmentMethods         dag.EntityEnrichmentMethods
+	fkDiscoveryMethods              dag.FKDiscoveryMethods
+	pkMatchDiscoveryMethods         dag.PKMatchDiscoveryMethods
+	llmRelationshipDiscoveryMethods dag.LLMRelationshipDiscoveryMethods
+	relationshipEnrichmentMethods   dag.RelationshipEnrichmentMethods
+	entityPromotionMethods          dag.EntityPromotionMethods
+	finalizationMethods             dag.OntologyFinalizationMethods
+	columnEnrichmentMethods         dag.ColumnEnrichmentMethods
+	glossaryDiscoveryMethods        dag.GlossaryDiscoveryMethods
+	glossaryEnrichmentMethods       dag.GlossaryEnrichmentMethods
 
 	getTenantCtx TenantContextFunc
 	logger       *zap.Logger
@@ -207,22 +207,46 @@ func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID 
 	// Store project overview as knowledge if provided.
 	// Uses manual provenance since this is user-provided context.
 	// Knowledge facts have project-lifecycle scope and persist across re-extractions.
+	// project_overview is a singleton - update existing if present, create if not.
 	if projectOverview != "" {
 		manualCtx := models.WithManualProvenance(ctx, userID)
-		overviewFact := &models.KnowledgeFact{
-			ProjectID: projectID,
-			FactType:  "project_overview",
-			Value:     projectOverview,
-		}
-		if err := s.knowledgeRepo.Create(manualCtx, overviewFact); err != nil {
-			s.logger.Warn("Failed to store project overview, continuing with extraction",
+
+		// Check if project_overview already exists
+		existingOverviews, err := s.knowledgeRepo.GetByType(ctx, projectID, "project_overview")
+		if err != nil {
+			s.logger.Warn("Failed to check existing project overview",
 				zap.String("project_id", projectID.String()),
 				zap.Error(err))
-			// Non-fatal - continue with extraction
+		}
+
+		if len(existingOverviews) > 0 {
+			// Update existing project_overview (use the first one - there should only be one)
+			existingOverviews[0].Value = projectOverview
+			if err := s.knowledgeRepo.Update(manualCtx, existingOverviews[0]); err != nil {
+				s.logger.Warn("Failed to update project overview, continuing with extraction",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err))
+			} else {
+				s.logger.Info("Updated existing project overview",
+					zap.String("project_id", projectID.String()),
+					zap.Int("overview_length", len(projectOverview)))
+			}
 		} else {
-			s.logger.Info("Stored project overview",
-				zap.String("project_id", projectID.String()),
-				zap.Int("overview_length", len(projectOverview)))
+			// Create new project_overview
+			overviewFact := &models.KnowledgeFact{
+				ProjectID: projectID,
+				FactType:  "project_overview",
+				Value:     projectOverview,
+			}
+			if err := s.knowledgeRepo.Create(manualCtx, overviewFact); err != nil {
+				s.logger.Warn("Failed to store project overview, continuing with extraction",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err))
+			} else {
+				s.logger.Info("Stored project overview",
+					zap.String("project_id", projectID.String()),
+					zap.Int("overview_length", len(projectOverview)))
+			}
 		}
 	}
 
@@ -429,6 +453,16 @@ func (s *ontologyDAGService) Delete(ctx context.Context, projectID uuid.UUID) er
 		return fmt.Errorf("clear column features: %w", err)
 	}
 	s.logger.Debug("Cleared column features", zap.String("project_id", projectID.String()))
+
+	// Delete inferred schema relationships only.
+	// Preserves FK (from DB schema) and manual (user-created) relationships.
+	// Inferred relationships will be re-discovered during the next ontology extraction.
+	deletedRels, err := s.schemaRepo.DeleteInferredRelationshipsByProject(ctx, projectID)
+	if err != nil {
+		s.logger.Error("Failed to delete inferred relationships", zap.String("project_id", projectID.String()), zap.Error(err))
+		return fmt.Errorf("delete inferred relationships: %w", err)
+	}
+	s.logger.Debug("Deleted inferred relationships", zap.String("project_id", projectID.String()), zap.Int64("count", deletedRels))
 
 	// Delete ontologies (CASCADE handles: relationships, entities → aliases/key_columns)
 	if err := s.ontologyRepo.DeleteByProject(ctx, projectID); err != nil {
