@@ -581,9 +581,9 @@ func TestAddStatisticsToColumnDetail(t *testing.T) {
 		{
 			name: "missing null count but has non_null_count - calculates null_rate",
 			schemaCol: &models.SchemaColumn{
-				DistinctCount:    ptrInt64(100),
-				RowCount:         ptrInt64(1000),
-				NonNullCount:     ptrInt64(950), // 950 non-null = 50 nulls = 5% null rate
+				DistinctCount: ptrInt64(100),
+				RowCount:      ptrInt64(1000),
+				NonNullCount:  ptrInt64(950), // 950 non-null = 50 nulls = 5% null rate
 			},
 			datasourceCol:    &models.DatasourceColumn{},
 			expectFields:     []string{"distinct_count", "row_count", "cardinality_ratio", "null_rate"},
