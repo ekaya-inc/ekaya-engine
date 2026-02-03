@@ -464,6 +464,9 @@ func (m *mockSchemaRepository) UpdateColumnFeatures(ctx context.Context, project
 func (m *mockSchemaRepository) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
 	return nil
 }
+func (m *mockSchemaRepository) DeleteInferredRelationshipsByProject(ctx context.Context, projectID uuid.UUID) (int64, error) {
+	return 0, nil
+}
 
 // mockColumnMetadataRepository implements repositories.ColumnMetadataRepository for testing.
 type mockColumnMetadataRepository struct {

@@ -382,6 +382,9 @@ func (m *mockSchemaRepository) ClearColumnFeaturesByProject(ctx context.Context,
 func (m *mockSchemaRepository) GetRelationshipsByMethod(ctx context.Context, projectID, datasourceID uuid.UUID, method string) ([]*models.SchemaRelationship, error) {
 	return nil, nil
 }
+func (m *mockSchemaRepository) DeleteInferredRelationshipsByProject(ctx context.Context, projectID uuid.UUID) (int64, error) {
+	return 0, nil
+}
 
 // mockDatasourceService is a mock for DatasourceService.
 type mockDatasourceService struct {

@@ -410,6 +410,9 @@ func (m *mockSchemaRepoForFinalization) ClearColumnFeaturesByProject(ctx context
 func (m *mockSchemaRepoForFinalization) GetRelationshipsByMethod(ctx context.Context, projectID, datasourceID uuid.UUID, method string) ([]*models.SchemaRelationship, error) {
 	return nil, nil
 }
+func (m *mockSchemaRepoForFinalization) DeleteInferredRelationshipsByProject(ctx context.Context, projectID uuid.UUID) (int64, error) {
+	return 0, nil
+}
 
 type mockLLMClient struct {
 	responseContent string

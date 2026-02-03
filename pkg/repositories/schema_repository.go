@@ -90,6 +90,13 @@ type SchemaRepository interface {
 	// ClearColumnFeaturesByProject removes column_features from metadata for all columns in a project.
 	// Used when deleting ontology to clear enrichment data.
 	ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error
+
+	// DeleteInferredRelationshipsByProject hard-deletes all relationships for a project.
+	// This includes both inferred relationships (column_features, pk_match) and DB-declared FKs.
+	// Returns the count of deleted relationships.
+	// Used when deleting ontology to give a clean slate - DB-declared FKs will be
+	// re-imported during the next schema refresh.
+	DeleteInferredRelationshipsByProject(ctx context.Context, projectID uuid.UUID) (int64, error)
 }
 
 type schemaRepository struct{}
@@ -1867,4 +1874,35 @@ func (r *schemaRepository) ClearColumnFeaturesByProject(ctx context.Context, pro
 		return fmt.Errorf("clear column features: %w", err)
 	}
 	return nil
+}
+
+// DeleteInferredRelationshipsByProject hard-deletes inferred relationships for a project.
+// Only deletes relationships with relationship_type = 'inferred' or 'review'.
+// Preserves:
+//   - 'fk' (DB-declared foreign keys from schema discovery)
+//   - 'manual' (user-created relationships)
+//
+// This is a hard delete (not soft delete) because inferred relationships are re-generated
+// during ontology extraction. Soft-deleted records would block re-discovery due to upsert key conflicts.
+func (r *schemaRepository) DeleteInferredRelationshipsByProject(ctx context.Context, projectID uuid.UUID) (int64, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return 0, fmt.Errorf("no tenant scope in context")
+	}
+
+	// Only delete inferred and review relationships.
+	// FK and manual relationships are preserved because they represent:
+	// - FK: Database-declared constraints (source of truth is the DB schema)
+	// - Manual: User-specified relationships (should persist across re-extractions)
+	query := `
+		DELETE FROM engine_schema_relationships
+		WHERE project_id = $1
+		  AND relationship_type IN ('inferred', 'review')`
+
+	result, err := scope.Conn.Exec(ctx, query, projectID)
+	if err != nil {
+		return 0, fmt.Errorf("delete inferred relationships: %w", err)
+	}
+
+	return result.RowsAffected(), nil
 }
