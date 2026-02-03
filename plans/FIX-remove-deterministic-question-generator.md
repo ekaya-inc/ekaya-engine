@@ -196,9 +196,9 @@ This follows the project philosophy: deterministic detection feeds into LLM deci
 
 ```
 [x] Run make check - verify tests pass before deletion
-[ ] Delete pkg/services/deterministic_question_generation.go
-[ ] Delete pkg/services/deterministic_question_generation_test.go
-[ ] Run go build ./... - verify no build errors
+[x] Delete pkg/services/deterministic_question_generation.go
+[x] Delete pkg/services/deterministic_question_generation_test.go
+[x] Run go build ./... - verify no build errors
 [ ] Run make check - verify tests still pass
 [ ] Run go mod tidy - clean up modules
 [ ] Commit with message explaining removal rationale
