@@ -22,29 +22,82 @@ const COLUMN_FEATURE_EXTRACTION_PHASES: readonly ExtractionPhase[] = [
   { id: 'phase1', name: 'Collecting column metadata', status: 'pending' },
   { id: 'phase2', name: 'Classifying columns', status: 'pending' },
   { id: 'phase3', name: 'Analyzing enum values', status: 'pending' },
-  { id: 'phase4', name: 'Resolving FK targets', status: 'pending' },
+  { id: 'phase4', name: 'Resolving foreign key targets', status: 'pending' },
   { id: 'phase5', name: 'Analyzing column relationships', status: 'pending' },
   { id: 'phase6', name: 'Saving results', status: 'pending' },
 ] as const;
 
 /**
- * Maps progress message patterns to phase IDs.
+ * Maps progress message patterns to phase IDs for ColumnFeatureExtraction.
  * Order matters - first match wins.
  */
-const MESSAGE_TO_PHASE: readonly [RegExp, string][] = [
+const COLUMN_FEATURE_MESSAGE_TO_PHASE: readonly [RegExp, string][] = [
   [/collecting.*column.*metadata|found.*columns.*in.*tables/i, 'phase1'],
   [/classifying.*columns/i, 'phase2'],
   [/analyzing.*enum.*values|labeled.*enum/i, 'phase3'],
-  [/resolving.*fk|resolved.*fk/i, 'phase4'],
+  [/resolving.*(fk|foreign\s*key)|resolved.*(fk|foreign\s*key)/i, 'phase4'],
   [/analyzing.*column.*relationships|cross.?column|monetary.*pair|soft.*delete/i, 'phase5'],
   [/saving|complete/i, 'phase6'],
 ];
+
+/**
+ * Default phases for PK Match Discovery workflow (relationship discovery).
+ * These match the phases in pkg/services/relationship_discovery_service.go
+ */
+const PK_MATCH_DISCOVERY_PHASES: readonly ExtractionPhase[] = [
+  { id: 'phase1', name: 'Preserving datasource foreign keys', status: 'pending' },
+  { id: 'phase2', name: 'Processing pre-resolved foreign keys', status: 'pending' },
+  { id: 'phase3', name: 'Collecting relationship candidates', status: 'pending' },
+  { id: 'phase4', name: 'Validating relationships', status: 'pending' },
+  { id: 'phase5', name: 'Storing results', status: 'pending' },
+] as const;
+
+/**
+ * Maps progress message patterns to phase IDs for PKMatchDiscovery.
+ * Order matters - first match wins.
+ */
+const PK_MATCH_MESSAGE_TO_PHASE: readonly [RegExp, string][] = [
+  [/preserving.*db.*fk/i, 'phase1'],
+  [/processing.*columnfeatures|columnfeatures.*fk/i, 'phase2'],
+  [/collecting.*candidates|loading.*schema|found.*potential.*fk|fk.*targets|generated.*candidate|analyzing.*candidates/i, 'phase3'],
+  [/validating.*relationships/i, 'phase4'],
+  [/storing.*results|discovery.*complete/i, 'phase5'],
+];
+
+/** Supported node types for multi-phase progress display */
+export type ProgressNodeType = 'ColumnFeatureExtraction' | 'PKMatchDiscovery';
+
+/** Get phases config for a node type */
+const getPhasesForNode = (nodeType: ProgressNodeType): readonly ExtractionPhase[] => {
+  switch (nodeType) {
+    case 'PKMatchDiscovery':
+      return PK_MATCH_DISCOVERY_PHASES;
+    case 'ColumnFeatureExtraction':
+    default:
+      return COLUMN_FEATURE_EXTRACTION_PHASES;
+  }
+};
+
+/** Get message-to-phase mapping for a node type */
+const getMessageToPhaseMappingForNode = (
+  nodeType: ProgressNodeType
+): readonly [RegExp, string][] => {
+  switch (nodeType) {
+    case 'PKMatchDiscovery':
+      return PK_MATCH_MESSAGE_TO_PHASE;
+    case 'ColumnFeatureExtraction':
+    default:
+      return COLUMN_FEATURE_MESSAGE_TO_PHASE;
+  }
+};
 
 interface ExtractionProgressProps {
   /** Progress data from the DAG node */
   progress: DAGNodeProgress | undefined;
   /** Node status (running, completed, failed, etc.) */
   nodeStatus: string | undefined;
+  /** Node type to determine which phases to show */
+  nodeType?: ProgressNodeType;
   /** Optional class name for styling */
   className?: string;
 }
@@ -105,10 +158,14 @@ const getPhaseBackground = (status: ExtractionPhaseStatus): string => {
 /**
  * Detect current phase from progress message
  */
-const detectPhaseFromMessage = (message: string | undefined): string | null => {
+const detectPhaseFromMessage = (
+  message: string | undefined,
+  nodeType: ProgressNodeType
+): string | null => {
   if (!message) return null;
 
-  for (const [pattern, phaseId] of MESSAGE_TO_PHASE) {
+  const messageToPhase = getMessageToPhaseMappingForNode(nodeType);
+  for (const [pattern, phaseId] of messageToPhase) {
     if (pattern.test(message)) {
       return phaseId;
     }
@@ -121,10 +178,12 @@ const detectPhaseFromMessage = (message: string | undefined): string | null => {
  */
 const buildPhasesFromProgress = (
   progress: DAGNodeProgress | undefined,
-  nodeStatus: string | undefined
+  nodeStatus: string | undefined,
+  nodeType: ProgressNodeType
 ): ExtractionPhase[] => {
-  // Clone the default phases
-  const phases: ExtractionPhase[] = COLUMN_FEATURE_EXTRACTION_PHASES.map((p) => ({ ...p }));
+  // Clone the default phases for this node type
+  const defaultPhases = getPhasesForNode(nodeType);
+  const phases: ExtractionPhase[] = defaultPhases.map((p) => ({ ...p }));
 
   // If node is not running or has no progress, return pending phases
   if (!progress?.message) {
@@ -140,7 +199,7 @@ const buildPhasesFromProgress = (
   }
 
   // Detect current phase from message
-  const currentPhaseId = detectPhaseFromMessage(progress.message);
+  const currentPhaseId = detectPhaseFromMessage(progress.message, nodeType);
   const currentPhaseIndex = phases.findIndex((p) => p.id === currentPhaseId);
 
   // Mark phases based on current position
@@ -176,10 +235,11 @@ const buildPhasesFromProgress = (
 };
 
 /**
- * Format progress as a string (e.g., "23/38" or empty if no total)
+ * Format progress as a string (e.g., "23/38" or empty if not meaningful)
+ * Returns empty for atomic operations (total <= 1) since showing "0/1" or "1/1" is distracting.
  */
 const formatProgress = (phase: ExtractionPhase): string => {
-  if (phase.totalItems === undefined || phase.totalItems === 0) {
+  if (phase.totalItems === undefined || phase.totalItems <= 1) {
     return '';
   }
   return `${phase.completedItems ?? 0}/${phase.totalItems}`;
@@ -204,16 +264,17 @@ const getProgressPercent = (phase: ExtractionPhase): number => {
 export const ExtractionProgress = ({
   progress,
   nodeStatus,
+  nodeType = 'ColumnFeatureExtraction',
   className = '',
 }: ExtractionProgressProps) => {
-  const phases = buildPhasesFromProgress(progress, nodeStatus);
+  const phases = buildPhasesFromProgress(progress, nodeStatus, nodeType);
 
   return (
     <div className={`space-y-1 ${className}`} role="list" aria-label="Extraction phases">
       {phases.map((phase) => {
         const progressText = formatProgress(phase);
         const progressPercent = getProgressPercent(phase);
-        const hasProgress = phase.totalItems !== undefined && phase.totalItems > 0;
+        const hasProgress = phase.totalItems !== undefined && phase.totalItems > 1;
 
         return (
           <div

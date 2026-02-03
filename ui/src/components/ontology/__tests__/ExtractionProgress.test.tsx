@@ -12,7 +12,7 @@ describe('ExtractionProgress', () => {
       expect(screen.getByText('Collecting column metadata')).toBeInTheDocument();
       expect(screen.getByText('Classifying columns')).toBeInTheDocument();
       expect(screen.getByText('Analyzing enum values')).toBeInTheDocument();
-      expect(screen.getByText('Resolving FK targets')).toBeInTheDocument();
+      expect(screen.getByText('Resolving foreign key targets')).toBeInTheDocument();
       expect(screen.getByText('Analyzing column relationships')).toBeInTheDocument();
       expect(screen.getByText('Saving results')).toBeInTheDocument();
     });
@@ -104,17 +104,17 @@ describe('ExtractionProgress', () => {
       expect(screen.getByText('3/7')).toBeInTheDocument();
     });
 
-    it('detects phase 4 from "Resolving FK targets" message', () => {
+    it('detects phase 4 from "Resolving foreign key targets" message', () => {
       const progress: DAGNodeProgress = {
         current: 2,
         total: 4,
-        message: 'Resolving FK targets',
+        message: 'Resolving foreign key targets',
       };
 
       render(<ExtractionProgress progress={progress} nodeStatus="running" />);
 
       // Phase 4 should be in progress
-      const phase4Row = screen.getByText('Resolving FK targets').closest('[role="listitem"]');
+      const phase4Row = screen.getByText('Resolving foreign key targets').closest('[role="listitem"]');
       expect(phase4Row).toHaveAttribute('aria-current', 'step');
     });
 
@@ -145,7 +145,7 @@ describe('ExtractionProgress', () => {
       expect(within(screen.getByText('Collecting column metadata').closest('[role="listitem"]') as HTMLElement).getByLabelText('Complete')).toBeInTheDocument();
       expect(within(screen.getByText('Classifying columns').closest('[role="listitem"]') as HTMLElement).getByLabelText('Complete')).toBeInTheDocument();
       expect(within(screen.getByText('Analyzing enum values').closest('[role="listitem"]') as HTMLElement).getByLabelText('Complete')).toBeInTheDocument();
-      expect(within(screen.getByText('Resolving FK targets').closest('[role="listitem"]') as HTMLElement).getByLabelText('Complete')).toBeInTheDocument();
+      expect(within(screen.getByText('Resolving foreign key targets').closest('[role="listitem"]') as HTMLElement).getByLabelText('Complete')).toBeInTheDocument();
       expect(within(screen.getByText('Analyzing column relationships').closest('[role="listitem"]') as HTMLElement).getByLabelText('Complete')).toBeInTheDocument();
 
       // Phase 6 should be in progress
