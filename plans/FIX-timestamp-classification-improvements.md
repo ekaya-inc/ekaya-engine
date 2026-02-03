@@ -310,8 +310,8 @@ func Test_TimestampClassifier_UncertaintyGeneratesQuestion(t *testing.T) {
 ## Checklist
 
 ```
-[ ] Prerequisite: FIX-null-count-calculation.md is complete
-[ ] Update timestamp classification prompt (lines 854-872)
+[x] Prerequisite: FIX-null-count-calculation.md is complete
+[x] Update timestamp classification prompt (lines 854-872)
 [ ] Update NeedsCrossColumnCheck flagging logic (line 937-939)
 [ ] Add NeedsClarification fields to response schema
 [ ] Add NeedsClarification fields to ColumnFeatures model

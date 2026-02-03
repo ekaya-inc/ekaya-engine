@@ -327,7 +327,7 @@ Once this fix is applied, the following symptoms will be resolved:
 [x] Apply fix to pkg/mcp/tools/probe.go:283-286
 [x] Add unit tests for NullRate calculation
 [x] Run make check - all tests pass
-[ ] Manual verification: re-run ontology extraction on test project
-[ ] Verify deleted_at columns now classified as soft_delete
-[ ] Verify no more "unknown column" warnings in logs
+[x] Manual verification: re-run ontology extraction on test project
+[x] Verify deleted_at columns now classified as soft_delete
+[x] Verify no more "unknown column" warnings in logs
 ```

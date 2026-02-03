@@ -855,24 +855,26 @@ func (c *timestampClassifier) buildPrompt(profile *models.ColumnDataProfile) str
 	}
 
 	sb.WriteString("\n## Task\n\n")
-	sb.WriteString("Based on the DATA characteristics (especially null rate), determine the timestamp's purpose.\n\n")
+	sb.WriteString("Based on the column's data characteristics and semantic context, determine the timestamp's purpose.\n\n")
 
-	sb.WriteString("**Classification rules:**\n")
-	sb.WriteString("- **90-100% NULL:** Likely soft delete or optional event timestamp\n")
-	sb.WriteString("- **0-5% NULL:** Likely required audit field (created_at, updated_at) or event time\n")
-	sb.WriteString("- **5-90% NULL:** Conditional timestamp (populated under certain conditions)\n")
+	sb.WriteString("**Analysis guidance:**\n")
+	sb.WriteString("- Consider what NULL vs non-NULL means semantically for this column\n")
+	sb.WriteString("- NULL might mean: 'not yet happened', 'never will happen', 'was removed/deleted', or 'unknown'\n")
+	sb.WriteString("- Non-NULL might mean: 'event occurred at this time', 'record was modified', 'soft deleted'\n")
+	sb.WriteString("- The null rate indicates frequency, not purpose - a 2% non-null rate can still indicate soft delete\n")
+	sb.WriteString("- Column name provides context but DATA characteristics should inform your decision\n")
 	if timestampScale == "nanoseconds" {
-		sb.WriteString("- **Nanosecond precision:** Suggests cursor/pagination use (high precision for ordering)\n")
+		sb.WriteString("- Nanosecond precision suggests cursor/pagination use (high precision for ordering)\n")
 	}
 
 	sb.WriteString("\n**Possible purposes:**\n")
-	sb.WriteString("- `audit_created`: Records when the row was created\n")
-	sb.WriteString("- `audit_updated`: Records when the row was last modified\n")
-	sb.WriteString("- `soft_delete`: Records when the row was soft-deleted (high null rate)\n")
-	sb.WriteString("- `event_time`: Records when a business event occurred\n")
-	sb.WriteString("- `scheduled_time`: Records when something is scheduled\n")
-	sb.WriteString("- `expiration`: Records when something expires\n")
-	sb.WriteString("- `cursor`: Used for pagination/ordering\n")
+	sb.WriteString("- `audit_created`: Records when the row was created (typically NOT NULL, set once)\n")
+	sb.WriteString("- `audit_updated`: Records when the row was last modified (typically NOT NULL, updated frequently)\n")
+	sb.WriteString("- `soft_delete`: Records when the row was logically deleted (NULL = active, non-NULL = deleted)\n")
+	sb.WriteString("- `event_time`: Records when a specific business event occurred\n")
+	sb.WriteString("- `scheduled_time`: Records when something is scheduled to happen\n")
+	sb.WriteString("- `expiration`: Records when something expires or becomes invalid\n")
+	sb.WriteString("- `cursor`: Used for pagination/ordering (typically high precision)\n")
 
 	sb.WriteString("\n## Response Format\n\n")
 	sb.WriteString("```json\n")

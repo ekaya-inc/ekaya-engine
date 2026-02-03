@@ -1493,6 +1493,86 @@ func TestUnknownClassifier_NoLLMCall(t *testing.T) {
 	}
 }
 
+func TestTimestampClassifier_BuildPrompt_SemanticGuidance(t *testing.T) {
+	classifier := &timestampClassifier{logger: zap.NewNop()}
+
+	// Test with a deleted_at column that has low non-null rate (2% deleted)
+	// This should still be classified as soft_delete based on semantics, not threshold
+	profile := &models.ColumnDataProfile{
+		ColumnID:   uuid.New(),
+		ColumnName: "deleted_at",
+		TableName:  "users",
+		DataType:   "timestamp with time zone",
+		NullRate:   0.98, // 98% null = 2% deleted
+		RowCount:   10000,
+		IsNullable: true,
+	}
+
+	prompt := classifier.buildPrompt(profile)
+
+	// Verify prompt does NOT contain rigid threshold-based rules
+	forbiddenPatterns := []string{
+		"90-100% NULL",
+		"0-5% NULL",
+		"5-90% NULL",
+		"high null rate", // from old soft_delete description
+	}
+	for _, forbidden := range forbiddenPatterns {
+		if strings.Contains(prompt, forbidden) {
+			t.Errorf("Prompt should NOT contain rigid threshold guidance %q", forbidden)
+		}
+	}
+
+	// Verify prompt contains semantic guidance
+	expectedContents := []string{
+		"null rate indicates frequency, not purpose",
+		"Consider what NULL vs non-NULL means semantically",
+		"DATA characteristics should inform your decision",
+		"audit_created",
+		"audit_updated",
+		"soft_delete",
+		"event_time",
+		"scheduled_time",
+		"expiration",
+		"cursor",
+		// Verify descriptions include semantic meaning
+		"NULL = active, non-NULL = deleted", // soft_delete description
+		"typically NOT NULL",                // audit field descriptions
+	}
+
+	for _, expected := range expectedContents {
+		if !strings.Contains(prompt, expected) {
+			t.Errorf("Prompt should contain semantic guidance %q", expected)
+		}
+	}
+}
+
+func TestTimestampClassifier_BuildPrompt_NanosecondPrecision(t *testing.T) {
+	classifier := &timestampClassifier{logger: zap.NewNop()}
+
+	// Test with a bigint column that has nanosecond-scale timestamps
+	// The nanosecond pattern is detected from DetectedPatterns, not raw sample values
+	profile := &models.ColumnDataProfile{
+		ColumnID:     uuid.New(),
+		ColumnName:   "event_ns",
+		TableName:    "events",
+		DataType:     "bigint",
+		NullRate:     0.0,
+		RowCount:     1000,
+		SampleValues: []string{"1704067200000000000", "1704067200123456789"},
+		DetectedPatterns: []models.DetectedPattern{
+			{PatternName: models.PatternUnixNanos, MatchRate: 1.0},
+		},
+	}
+
+	prompt := classifier.buildPrompt(profile)
+
+	// Verify nanosecond precision guidance is included
+	if !strings.Contains(prompt, "Nanosecond precision suggests cursor/pagination use") {
+		t.Error("Prompt should contain nanosecond precision guidance for high-precision timestamps")
+	}
+}
+
 // containsStr is a local helper since strings.Contains is the right function to use
 // This is just to avoid name collision with datasource_test.go's contains function
 func containsStr(s, substr string) bool {
