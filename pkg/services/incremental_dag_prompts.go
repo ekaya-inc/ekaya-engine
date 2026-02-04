@@ -11,6 +11,12 @@ import (
 
 // LLM response structures for incremental enrichment
 
+// keyColumnEnrichment holds enrichment data for a key column.
+type keyColumnEnrichment struct {
+	Name     string   `json:"name"`
+	Synonyms []string `json:"synonyms,omitempty"`
+}
+
 // singleEntityEnrichment holds LLM-generated metadata for a single entity.
 type singleEntityEnrichment struct {
 	EntityName       string                `json:"entity_name"`
@@ -128,10 +134,11 @@ func (s *incrementalDAGService) buildSingleEntityPrompt(tableName string, column
 }
 
 // enrichColumnWithLLM generates column metadata using LLM.
+// Note: entity parameter is deprecated and ignored (kept for API compatibility).
 func (s *incrementalDAGService) enrichColumnWithLLM(
 	ctx context.Context,
 	llmClient llm.LLMClient,
-	entity *models.OntologyEntity,
+	_ any, // entity parameter removed for v1.0
 	column *models.SchemaColumn,
 ) (*singleColumnEnrichment, error) {
 	if column == nil {
@@ -142,7 +149,7 @@ func (s *incrementalDAGService) enrichColumnWithLLM(
 
 Be concise and focus on the business meaning of the column.`
 
-	prompt := s.buildSingleColumnPrompt(entity, column)
+	prompt := s.buildSingleColumnPrompt(column)
 
 	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.3, false)
 	if err != nil {
@@ -157,21 +164,18 @@ Be concise and focus on the business meaning of the column.`
 	return &response.Column, nil
 }
 
-func (s *incrementalDAGService) buildSingleColumnPrompt(entity *models.OntologyEntity, column *models.SchemaColumn) string {
+func (s *incrementalDAGService) buildSingleColumnPrompt(column *models.SchemaColumn) string {
 	var sb strings.Builder
 
 	sb.WriteString("# Analyze This Column\n\n")
 
-	// Entity context if available
-	if entity != nil {
-		sb.WriteString(fmt.Sprintf("**Table:** `%s` (Entity: \"%s\"", entity.PrimaryTable, entity.Name))
-		if entity.Description != "" {
-			sb.WriteString(fmt.Sprintf(" - %s", entity.Description))
-		}
-		sb.WriteString(")\n\n")
-	} else {
-		sb.WriteString(fmt.Sprintf("**Table:** `%s`\n\n", column.ColumnName))
+	// Get table name from column if available
+	tableName := "unknown"
+	if column != nil {
+		// Column name is used as fallback if table info not available
+		tableName = column.ColumnName
 	}
+	sb.WriteString(fmt.Sprintf("**Table:** `%s`\n\n", tableName))
 
 	sb.WriteString("**Column:**\n")
 	sb.WriteString(fmt.Sprintf("- Name: `%s`\n", column.ColumnName))
@@ -208,81 +212,6 @@ func (s *incrementalDAGService) buildSingleColumnPrompt(entity *models.OntologyE
 	return sb.String()
 }
 
-// enrichRelationshipWithLLM generates relationship metadata using LLM.
-func (s *incrementalDAGService) enrichRelationshipWithLLM(
-	ctx context.Context,
-	llmClient llm.LLMClient,
-	sourceEntity *models.OntologyEntity,
-	targetEntity *models.OntologyEntity,
-	sourceColumn string,
-) (*incrementalRelEnrichment, error) {
-	systemMsg := `You are a data modeling expert. Your task is to describe the business relationship between two entities based on a foreign key column.
-
-Focus on the business meaning of the relationship, not the technical implementation.`
-
-	prompt := s.buildRelationshipPrompt(sourceEntity, targetEntity, sourceColumn)
-
-	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.3, false)
-	if err != nil {
-		return nil, fmt.Errorf("LLM call failed: %w", err)
-	}
-
-	response, err := llm.ParseJSONResponse[relationshipResponse](result.Content)
-	if err != nil {
-		return nil, fmt.Errorf("parse response: %w", err)
-	}
-
-	return &response.Relationship, nil
-}
-
-func (s *incrementalDAGService) buildRelationshipPrompt(
-	sourceEntity *models.OntologyEntity,
-	targetEntity *models.OntologyEntity,
-	sourceColumn string,
-) string {
-	var sb strings.Builder
-
-	sb.WriteString("# Analyze This Relationship\n\n")
-
-	sb.WriteString("**Source Entity:**\n")
-	sb.WriteString(fmt.Sprintf("- Name: %s\n", sourceEntity.Name))
-	sb.WriteString(fmt.Sprintf("- Table: %s\n", sourceEntity.PrimaryTable))
-	if sourceEntity.Description != "" {
-		sb.WriteString(fmt.Sprintf("- Description: %s\n", sourceEntity.Description))
-	}
-	sb.WriteString("\n")
-
-	sb.WriteString("**Target Entity:**\n")
-	sb.WriteString(fmt.Sprintf("- Name: %s\n", targetEntity.Name))
-	sb.WriteString(fmt.Sprintf("- Table: %s\n", targetEntity.PrimaryTable))
-	if targetEntity.Description != "" {
-		sb.WriteString(fmt.Sprintf("- Description: %s\n", targetEntity.Description))
-	}
-	sb.WriteString("\n")
-
-	sb.WriteString(fmt.Sprintf("**FK Column:** `%s.%s` → `%s`\n\n", sourceEntity.PrimaryTable, sourceColumn, targetEntity.PrimaryTable))
-
-	sb.WriteString("## Task\n\n")
-	sb.WriteString("Describe the business relationship:\n\n")
-	sb.WriteString("1. **description**: A sentence describing what this relationship means in business terms\n")
-	sb.WriteString("2. **association**: A short verb/phrase describing the relationship (e.g., \"owns\", \"created_by\", \"assigned_to\")\n")
-	sb.WriteString("3. **label**: Optional short label for UI display\n\n")
-
-	sb.WriteString("## Examples\n")
-	sb.WriteString("- Order → User via `user_id`: association=\"placed_by\", description=\"The user who placed this order\"\n")
-	sb.WriteString("- Task → User via `assignee_id`: association=\"assigned_to\", description=\"The user assigned to work on this task\"\n")
-	sb.WriteString("- Comment → Post via `post_id`: association=\"belongs_to\", description=\"The post this comment is attached to\"\n\n")
-
-	sb.WriteString("## Response Format (JSON)\n")
-	sb.WriteString("```json\n")
-	sb.WriteString("{\n")
-	sb.WriteString("  \"relationship\": {\n")
-	sb.WriteString("    \"description\": \"The user who owns this account\",\n")
-	sb.WriteString("    \"association\": \"owned_by\",\n")
-	sb.WriteString("    \"label\": \"owner\"\n")
-	sb.WriteString("  }\n")
-	sb.WriteString("}\n")
-	sb.WriteString("```\n")
-
-	return sb.String()
-}
+// Note: enrichRelationshipWithLLM and buildRelationshipPrompt have been removed
+// for v1.0 simplification. Entity-based relationship enrichment is no longer supported.
+// Relationships are now stored at the schema level (SchemaRelationship).
