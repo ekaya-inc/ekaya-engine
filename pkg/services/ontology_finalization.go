@@ -14,16 +14,14 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
 
-// OntologyFinalizationService generates domain-level summary after entity and relationship extraction.
+// OntologyFinalizationService generates domain-level summary from schema analysis.
 type OntologyFinalizationService interface {
-	// Finalize generates domain description and aggregates primary domains from entities.
+	// Finalize generates domain description and discovers project conventions from schema.
 	Finalize(ctx context.Context, projectID uuid.UUID) error
 }
 
 type ontologyFinalizationService struct {
 	ontologyRepo     repositories.OntologyRepository
-	entityRepo       repositories.OntologyEntityRepository
-	relationshipRepo repositories.EntityRelationshipRepository
 	schemaRepo       repositories.SchemaRepository
 	conversationRepo repositories.ConversationRepository
 	llmFactory       llm.LLMClientFactory
@@ -34,8 +32,6 @@ type ontologyFinalizationService struct {
 // NewOntologyFinalizationService creates a new ontology finalization service.
 func NewOntologyFinalizationService(
 	ontologyRepo repositories.OntologyRepository,
-	entityRepo repositories.OntologyEntityRepository,
-	relationshipRepo repositories.EntityRelationshipRepository,
 	schemaRepo repositories.SchemaRepository,
 	conversationRepo repositories.ConversationRepository,
 	llmFactory llm.LLMClientFactory,
@@ -44,8 +40,6 @@ func NewOntologyFinalizationService(
 ) OntologyFinalizationService {
 	return &ontologyFinalizationService{
 		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relationshipRepo,
 		schemaRepo:       schemaRepo,
 		conversationRepo: conversationRepo,
 		llmFactory:       llmFactory,
@@ -59,30 +53,34 @@ var _ OntologyFinalizationService = (*ontologyFinalizationService)(nil)
 func (s *ontologyFinalizationService) Finalize(ctx context.Context, projectID uuid.UUID) error {
 	s.logger.Info("Starting ontology finalization", zap.String("project_id", projectID.String()))
 
-	// Get all entities (with domains populated from entity extraction)
-	entities, err := s.entityRepo.GetByProject(ctx, projectID)
+	// Get the active ontology to retrieve datasource ID
+	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
 	if err != nil {
-		return fmt.Errorf("get entities: %w", err)
+		return fmt.Errorf("get active ontology: %w", err)
 	}
-
-	if len(entities) == 0 {
-		s.logger.Info("No entities found, skipping finalization", zap.String("project_id", projectID.String()))
+	if ontology == nil {
+		s.logger.Info("No active ontology found, skipping finalization", zap.String("project_id", projectID.String()))
 		return nil
 	}
 
-	// Get all relationships
-	relationships, err := s.relationshipRepo.GetByProject(ctx, projectID)
+	// Get all tables for the project to build conventions
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil, true) // uuid.Nil gets all datasources
 	if err != nil {
-		return fmt.Errorf("get relationships: %w", err)
+		return fmt.Errorf("list tables: %w", err)
 	}
 
-	// Get table names from entities for column lookup
-	tableNames := make([]string, 0, len(entities))
-	for _, e := range entities {
-		tableNames = append(tableNames, e.PrimaryTable)
+	if len(tables) == 0 {
+		s.logger.Info("No tables found, skipping finalization", zap.String("project_id", projectID.String()))
+		return nil
 	}
 
-	// Get all columns for these tables (needed for ColumnFeatures analysis)
+	// Get table names for column lookup
+	tableNames := make([]string, 0, len(tables))
+	for _, t := range tables {
+		tableNames = append(tableNames, t.TableName)
+	}
+
+	// Get all columns for these tables (needed for ColumnFeatures analysis and convention discovery)
 	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames, true)
 	if err != nil {
 		return fmt.Errorf("get columns by tables: %w", err)
@@ -100,67 +98,25 @@ func (s *ontologyFinalizationService) Finalize(ctx context.Context, projectID uu
 		zap.Int("external_services", len(insights.externalServices)),
 	)
 
-	// Aggregate unique domains from entity.Domain fields
-	primaryDomains := s.aggregateUniqueDomains(entities)
-
-	// Build entity lookups for relationship display and graph building
-	entityNameByID := make(map[uuid.UUID]string, len(entities))
-	entityByID := make(map[uuid.UUID]*models.OntologyEntity, len(entities))
-	for _, e := range entities {
-		entityNameByID[e.ID] = e.Name
-		entityByID[e.ID] = e
-	}
-
-	// Generate domain description via LLM (include ColumnFeature insights for richer context)
-	description, err := s.generateDomainDescription(ctx, projectID, entities, relationships, entityNameByID, insights)
+	// Generate domain description via LLM based on tables
+	description, err := s.generateDomainDescription(ctx, projectID, tables, insights)
 	if err != nil {
 		return fmt.Errorf("generate domain description: %w", err)
 	}
 
 	// Discover project conventions using pre-extracted insights
-	conventions, err := s.discoverConventionsWithInsights(ctx, projectID, entities, columnsByTable, insights)
+	conventions, err := s.discoverConventionsWithInsights(ctx, projectID, tables, columnsByTable, insights)
 	if err != nil {
 		s.logger.Debug("Failed to discover conventions, continuing without", zap.Error(err))
 		// Non-fatal - continue without conventions
 	}
 
-	// Build relationship graph from confirmed/pending relationships
-	var relationshipGraph []models.RelationshipEdge
-	for _, rel := range relationships {
-		if rel.Status == models.RelationshipStatusRejected {
-			continue
-		}
-		source := entityByID[rel.SourceEntityID]
-		target := entityByID[rel.TargetEntityID]
-		if source != nil && target != nil {
-			edge := models.RelationshipEdge{
-				From: source.Name,
-				To:   target.Name,
-			}
-			if rel.Description != nil && *rel.Description != "" {
-				edge.Label = *rel.Description
-			}
-			relationshipGraph = append(relationshipGraph, edge)
-		}
-	}
-
-	// Build and save entity summaries
-	entitySummaries, err := s.buildEntitySummaries(ctx, projectID, entities, relationships, entityByID)
-	if err != nil {
-		return fmt.Errorf("build entity summaries: %w", err)
-	}
-
-	if err := s.ontologyRepo.UpdateEntitySummaries(ctx, projectID, entitySummaries); err != nil {
-		return fmt.Errorf("update entity summaries: %w", err)
-	}
-
 	// Save to domain_summary JSONB
 	domainSummary := &models.DomainSummary{
-		Description:       description,
-		Domains:           primaryDomains,
-		Conventions:       conventions,
-		RelationshipGraph: relationshipGraph,
-		SampleQuestions:   nil, // Feature removed, may be reimplemented later
+		Description:     description,
+		Domains:         nil, // No domains without entities
+		Conventions:     conventions,
+		SampleQuestions: nil, // Feature removed, may be reimplemented later
 	}
 
 	if err := s.ontologyRepo.UpdateDomainSummary(ctx, projectID, domainSummary); err != nil {
@@ -169,131 +125,17 @@ func (s *ontologyFinalizationService) Finalize(ctx context.Context, projectID uu
 
 	s.logger.Info("Ontology finalization complete",
 		zap.String("project_id", projectID.String()),
-		zap.Int("entity_count", len(entities)),
-		zap.Int("domain_count", len(primaryDomains)),
+		zap.Int("table_count", len(tables)),
 	)
 
 	return nil
 }
 
-// aggregateUniqueDomains collects unique domain values from entities.
-// Returns domains sorted alphabetically for deterministic output.
-func (s *ontologyFinalizationService) aggregateUniqueDomains(entities []*models.OntologyEntity) []string {
-	domainSet := make(map[string]struct{})
-	for _, e := range entities {
-		if e.Domain != "" {
-			domainSet[e.Domain] = struct{}{}
-		}
-	}
-
-	domains := make([]string, 0, len(domainSet))
-	for domain := range domainSet {
-		domains = append(domains, domain)
-	}
-	sort.Strings(domains)
-	return domains
-}
-
-// buildEntitySummaries creates entity summaries from entities, their key columns, aliases, and relationships.
-func (s *ontologyFinalizationService) buildEntitySummaries(
-	ctx context.Context,
-	projectID uuid.UUID,
-	entities []*models.OntologyEntity,
-	relationships []*models.EntityRelationship,
-	entityByID map[uuid.UUID]*models.OntologyEntity,
-) (map[string]*models.EntitySummary, error) {
-	// Get all aliases by entity ID
-	aliasesByEntity, err := s.entityRepo.GetAllAliasesByProject(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("get aliases: %w", err)
-	}
-
-	// Get all key columns by entity ID
-	keyColumnsByEntity, err := s.entityRepo.GetAllKeyColumnsByProject(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("get key columns: %w", err)
-	}
-
-	// Get table names for column count lookup
-	tableNames := make([]string, 0, len(entities))
-	for _, e := range entities {
-		tableNames = append(tableNames, e.PrimaryTable)
-	}
-
-	// Get column counts per table
-	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames, true)
-	if err != nil {
-		return nil, fmt.Errorf("get columns by tables: %w", err)
-	}
-
-	// Build relationship targets by source entity ID
-	relationshipTargets := make(map[uuid.UUID][]string)
-	for _, rel := range relationships {
-		if rel.Status == models.RelationshipStatusRejected {
-			continue
-		}
-		targetEntity := entityByID[rel.TargetEntityID]
-		if targetEntity != nil {
-			relationshipTargets[rel.SourceEntityID] = append(relationshipTargets[rel.SourceEntityID], targetEntity.Name)
-		}
-	}
-
-	// Build entity summaries
-	summaries := make(map[string]*models.EntitySummary, len(entities))
-	for _, e := range entities {
-		// Get aliases as synonyms
-		var synonyms []string
-		if aliases, ok := aliasesByEntity[e.ID]; ok {
-			for _, alias := range aliases {
-				synonyms = append(synonyms, alias.Alias)
-			}
-		}
-
-		// Get key columns
-		var keyColumns []models.KeyColumn
-		if kcs, ok := keyColumnsByEntity[e.ID]; ok {
-			for _, kc := range kcs {
-				keyColumns = append(keyColumns, models.KeyColumn{
-					Name:     kc.ColumnName,
-					Synonyms: kc.Synonyms,
-				})
-			}
-		}
-
-		// Get column count
-		columnCount := 0
-		if cols, ok := columnsByTable[e.PrimaryTable]; ok {
-			columnCount = len(cols)
-		}
-
-		// Get relationship targets
-		var rels []string
-		if targets, ok := relationshipTargets[e.ID]; ok {
-			rels = targets
-		}
-
-		summaries[e.Name] = &models.EntitySummary{
-			TableName:     e.PrimaryTable,
-			BusinessName:  e.Name,
-			Description:   e.Description,
-			Domain:        e.Domain,
-			Synonyms:      synonyms,
-			KeyColumns:    keyColumns,
-			ColumnCount:   columnCount,
-			Relationships: rels,
-		}
-	}
-
-	return summaries, nil
-}
-
-// generateDomainDescription calls the LLM to generate a business description.
+// generateDomainDescription calls the LLM to generate a business description based on tables.
 func (s *ontologyFinalizationService) generateDomainDescription(
 	ctx context.Context,
 	projectID uuid.UUID,
-	entities []*models.OntologyEntity,
-	relationships []*models.EntityRelationship,
-	entityNameByID map[uuid.UUID]string,
+	tables []*models.SchemaTable,
 	insights *columnFeatureInsights,
 ) (string, error) {
 	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
@@ -302,7 +144,7 @@ func (s *ontologyFinalizationService) generateDomainDescription(
 	}
 
 	systemMessage := s.domainDescriptionSystemMessage()
-	prompt := s.buildDomainDescriptionPrompt(entities, relationships, entityNameByID, insights)
+	prompt := s.buildDomainDescriptionPrompt(tables, insights)
 
 	result, err := llmClient.GenerateResponse(ctx, prompt, systemMessage, 0.3, false)
 	if err != nil {
@@ -343,49 +185,27 @@ func (s *ontologyFinalizationService) domainDescriptionSystemMessage() string {
 }
 
 func (s *ontologyFinalizationService) buildDomainDescriptionPrompt(
-	entities []*models.OntologyEntity,
-	relationships []*models.EntityRelationship,
-	entityNameByID map[uuid.UUID]string,
+	tables []*models.SchemaTable,
 	insights *columnFeatureInsights,
 ) string {
 	var sb strings.Builder
 
 	sb.WriteString("# Database Schema Analysis\n\n")
-	sb.WriteString("Based on the following entities and their relationships, provide a 2-3 sentence business description of what this database represents.\n\n")
+	sb.WriteString("Based on the following tables and schema patterns, provide a 2-3 sentence business description of what this database represents.\n\n")
 
-	sb.WriteString("## Entities\n\n")
-	for _, e := range entities {
-		domain := e.Domain
-		if domain == "" {
-			domain = "general"
-		}
-		sb.WriteString(fmt.Sprintf("- **%s** (%s): %s\n", e.Name, domain, e.Description))
-	}
-
-	if len(relationships) > 0 {
-		sb.WriteString("\n## Key Relationships\n\n")
-		for _, rel := range relationships {
-			sourceName := entityNameByID[rel.SourceEntityID]
-			targetName := entityNameByID[rel.TargetEntityID]
-			if sourceName == "" || targetName == "" {
-				s.logger.Debug("Skipping relationship with missing entity name",
-					zap.String("source_entity_id", rel.SourceEntityID.String()),
-					zap.String("target_entity_id", rel.TargetEntityID.String()),
-					zap.String("source_name", sourceName),
-					zap.String("target_name", targetName))
-				continue
-			}
-			if rel.Description != nil && *rel.Description != "" {
-				sb.WriteString(fmt.Sprintf("- %s → %s (%s)\n", sourceName, targetName, *rel.Description))
-			} else {
-				sb.WriteString(fmt.Sprintf("- %s → %s\n", sourceName, targetName))
-			}
+	sb.WriteString("## Tables\n\n")
+	for _, t := range tables {
+		desc := t.Description
+		if desc == nil || *desc == "" {
+			sb.WriteString(fmt.Sprintf("- **%s**\n", t.TableName))
+		} else {
+			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", t.TableName, *desc))
 		}
 	}
 
 	// Include feature-derived insights if available
 	if insights != nil {
-		insightLines := s.buildFeatureInsightsSection(insights, len(entities))
+		insightLines := s.buildFeatureInsightsSection(insights, len(tables))
 		if len(insightLines) > 0 {
 			sb.WriteString("\n## Technical Patterns Detected\n\n")
 			for _, line := range insightLines {
@@ -408,7 +228,7 @@ func (s *ontologyFinalizationService) buildDomainDescriptionPrompt(
 // buildFeatureInsightsSection generates human-readable insights from ColumnFeatures analysis.
 func (s *ontologyFinalizationService) buildFeatureInsightsSection(
 	insights *columnFeatureInsights,
-	totalEntities int,
+	totalTables int,
 ) []string {
 	var lines []string
 
@@ -441,9 +261,9 @@ func (s *ontologyFinalizationService) buildFeatureInsightsSection(
 	// Audit column coverage
 	createdPct := 0.0
 	updatedPct := 0.0
-	if totalEntities > 0 {
-		createdPct = float64(len(insights.auditCreatedTables)) / float64(totalEntities) * 100
-		updatedPct = float64(len(insights.auditUpdatedTables)) / float64(totalEntities) * 100
+	if totalTables > 0 {
+		createdPct = float64(len(insights.auditCreatedTables)) / float64(totalTables) * 100
+		updatedPct = float64(len(insights.auditUpdatedTables)) / float64(totalTables) * 100
 	}
 	if createdPct >= 50 || updatedPct >= 50 {
 		lines = append(lines, fmt.Sprintf("Audit timestamps: created_at (%.0f%% coverage), updated_at (%.0f%% coverage)",
@@ -498,15 +318,15 @@ type columnFeatureInsights struct {
 func (s *ontologyFinalizationService) discoverConventionsWithInsights(
 	_ context.Context,
 	_ uuid.UUID,
-	entities []*models.OntologyEntity,
+	tables []*models.SchemaTable,
 	columnsByTable map[string][]*models.SchemaColumn,
 	insights *columnFeatureInsights,
 ) (*models.ProjectConventions, error) {
-	if len(entities) == 0 {
+	if len(tables) == 0 {
 		return nil, nil
 	}
 
-	totalTables := len(entities)
+	totalTables := len(tables)
 	conventions := &models.ProjectConventions{}
 
 	// Detect soft delete convention (prefer ColumnFeatures if available)

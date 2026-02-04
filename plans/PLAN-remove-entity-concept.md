@@ -166,19 +166,19 @@ The OntologyContextService builds context for LLM prompts. After this change, it
 
 ### 4.3 Remove entity references from ontology_finalization.go and ontology_dag_service.go
 
-Update `pkg/services/ontology_finalization.go`:
-- [ ] Remove entity summary building logic
-- [ ] Remove any entity-related imports
-- [ ] The finalization service should no longer write entity_summaries to the ontology
+- [x] Update `pkg/services/ontology_finalization.go`:
+  - Remove entity summary building logic
+  - Remove any entity-related imports
+  - The finalization service should no longer write entity_summaries to the ontology
 
-Update `pkg/services/ontology_finalization_test.go` to remove entity-related test cases.
+- [x] Update `pkg/services/ontology_finalization_test.go` to remove entity-related test cases.
 
-Update `pkg/services/ontology_dag_service.go`:
-- [ ] Remove entity node wiring (SetEntityDiscoveryMethods, SetEntityEnrichmentMethods, SetEntityPromotionMethods, etc.)
-- [ ] Remove entity-related DAG node creation
-- [ ] The DAG service orchestrates the ontology pipeline; it should no longer include entity discovery, enrichment, or promotion nodes
+- [x] Update `pkg/services/ontology_dag_service.go`:
+  - Remove entity node wiring (SetEntityDiscoveryMethods, SetEntityEnrichmentMethods, SetEntityPromotionMethods, etc.)
+  - Remove entity-related DAG node creation
+  - The DAG service orchestrates the ontology pipeline; it should no longer include entity discovery, enrichment, or promotion nodes
 
-Update `pkg/services/ontology_dag_service_test.go` to remove entity-related test cases.
+- [x] Update `pkg/services/ontology_dag_service_test.go` to remove entity-related test cases.
 
 ### 4.4 Remove entity references from relationship_enrichment.go and column_enrichment.go
 

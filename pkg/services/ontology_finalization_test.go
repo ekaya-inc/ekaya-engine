@@ -65,226 +65,18 @@ func (m *mockOntologyRepoForFinalization) DeleteByProject(ctx context.Context, p
 	return nil
 }
 
-type mockEntityRepoForFinalization struct {
-	entities        []*models.OntologyEntity
-	getByProjectErr error
-}
-
-func (m *mockEntityRepoForFinalization) Create(ctx context.Context, entity *models.OntologyEntity) error {
-	return nil
-}
-
-func (m *mockEntityRepoForFinalization) GetByID(ctx context.Context, entityID uuid.UUID) (*models.OntologyEntity, error) {
-	return nil, nil
-}
-
-func (m *mockEntityRepoForFinalization) GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
-	return m.entities, nil
-}
-
-func (m *mockEntityRepoForFinalization) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
-	if m.getByProjectErr != nil {
-		return nil, m.getByProjectErr
-	}
-	return m.entities, nil
-}
-
-func (m *mockEntityRepoForFinalization) GetPromotedByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
-	if m.getByProjectErr != nil {
-		return nil, m.getByProjectErr
-	}
-	var promoted []*models.OntologyEntity
-	for _, e := range m.entities {
-		if e.IsPromoted {
-			promoted = append(promoted, e)
-		}
-	}
-	return promoted, nil
-}
-
-func (m *mockEntityRepoForFinalization) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error) {
-	return nil, nil
-}
-
-func (m *mockEntityRepoForFinalization) GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error) {
-	return nil, nil
-}
-
-func (m *mockEntityRepoForFinalization) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
-	return nil
-}
-
-func (m *mockEntityRepoForFinalization) DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error {
-	return nil
-}
-
-func (m *mockEntityRepoForFinalization) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
-	return nil
-}
-
-func (m *mockEntityRepoForFinalization) Update(ctx context.Context, entity *models.OntologyEntity) error {
-	return nil
-}
-
-func (m *mockEntityRepoForFinalization) SoftDelete(ctx context.Context, entityID uuid.UUID, reason string) error {
-	return nil
-}
-
-func (m *mockEntityRepoForFinalization) Restore(ctx context.Context, entityID uuid.UUID) error {
-	return nil
-}
-
-func (m *mockEntityRepoForFinalization) CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error {
-	return nil
-}
-
-func (m *mockEntityRepoForFinalization) GetAliasesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityAlias, error) {
-	return nil, nil
-}
-
-func (m *mockEntityRepoForFinalization) DeleteAlias(ctx context.Context, aliasID uuid.UUID) error {
-	return nil
-}
-
-func (m *mockEntityRepoForFinalization) GetAllAliasesByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityAlias, error) {
-	return nil, nil
-}
-
-func (m *mockEntityRepoForFinalization) CreateKeyColumn(ctx context.Context, keyColumn *models.OntologyEntityKeyColumn) error {
-	return nil
-}
-
-func (m *mockEntityRepoForFinalization) GetKeyColumnsByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityKeyColumn, error) {
-	return nil, nil
-}
-
-func (m *mockEntityRepoForFinalization) GetAllKeyColumnsByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityKeyColumn, error) {
-	return nil, nil
-}
-
-func (m *mockEntityRepoForFinalization) CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error) {
-	return 0, nil
-}
-
-func (m *mockEntityRepoForFinalization) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
-	return nil, nil
-}
-
-func (m *mockEntityRepoForFinalization) MarkInferenceEntitiesStale(ctx context.Context, ontologyID uuid.UUID) error {
-	return nil
-}
-
-func (m *mockEntityRepoForFinalization) ClearStaleFlag(ctx context.Context, entityID uuid.UUID) error {
-	return nil
-}
-
-func (m *mockEntityRepoForFinalization) GetStaleEntities(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
-	return nil, nil
-}
-
-func (m *mockEntityRepoForFinalization) TransferAliasesToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
-	return 0, nil
-}
-
-func (m *mockEntityRepoForFinalization) TransferKeyColumnsToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
-	return 0, nil
-}
-
-type mockRelationshipRepoForFinalization struct {
-	relationships   []*models.EntityRelationship
-	getByProjectErr error
-}
-
-func (m *mockRelationshipRepoForFinalization) Create(ctx context.Context, rel *models.EntityRelationship) error {
-	return nil
-}
-
-func (m *mockRelationshipRepoForFinalization) GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
-	return m.relationships, nil
-}
-
-func (m *mockRelationshipRepoForFinalization) GetByOntologyGroupedByTarget(ctx context.Context, ontologyID uuid.UUID) (map[uuid.UUID][]*models.EntityRelationship, error) {
-	result := make(map[uuid.UUID][]*models.EntityRelationship)
-	for _, rel := range m.relationships {
-		result[rel.TargetEntityID] = append(result[rel.TargetEntityID], rel)
-	}
-	return result, nil
-}
-
-func (m *mockRelationshipRepoForFinalization) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error) {
-	if m.getByProjectErr != nil {
-		return nil, m.getByProjectErr
-	}
-	return m.relationships, nil
-}
-
-func (m *mockRelationshipRepoForFinalization) GetByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) ([]*models.EntityRelationship, error) {
-	return m.relationships, nil
-}
-
-func (m *mockRelationshipRepoForFinalization) UpdateDescription(ctx context.Context, id uuid.UUID, description string) error {
-	return nil
-}
-
-func (m *mockRelationshipRepoForFinalization) UpdateDescriptionAndAssociation(ctx context.Context, id uuid.UUID, description string, association string) error {
-	return nil
-}
-
-func (m *mockRelationshipRepoForFinalization) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
-	return nil
-}
-
-func (m *mockRelationshipRepoForFinalization) GetByTargetEntity(ctx context.Context, entityID uuid.UUID) ([]*models.EntityRelationship, error) {
-	return nil, nil
-}
-
-func (m *mockRelationshipRepoForFinalization) GetByEntityPair(ctx context.Context, ontologyID uuid.UUID, fromEntityID uuid.UUID, toEntityID uuid.UUID) (*models.EntityRelationship, error) {
-	return nil, nil
-}
-
-func (m *mockRelationshipRepoForFinalization) Upsert(ctx context.Context, rel *models.EntityRelationship) error {
-	return nil
-}
-
-func (m *mockRelationshipRepoForFinalization) Delete(ctx context.Context, id uuid.UUID) error {
-	return nil
-}
-
-func (m *mockRelationshipRepoForFinalization) GetByID(ctx context.Context, id uuid.UUID) (*models.EntityRelationship, error) {
-	return nil, nil
-}
-
-func (m *mockRelationshipRepoForFinalization) Update(ctx context.Context, rel *models.EntityRelationship) error {
-	return nil
-}
-
-func (m *mockRelationshipRepoForFinalization) MarkInferenceRelationshipsStale(ctx context.Context, ontologyID uuid.UUID) error {
-	return nil
-}
-
-func (m *mockRelationshipRepoForFinalization) ClearStaleFlag(ctx context.Context, relationshipID uuid.UUID) error {
-	return nil
-}
-
-func (m *mockRelationshipRepoForFinalization) GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
-	return nil, nil
-}
-
-func (m *mockRelationshipRepoForFinalization) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
-	return nil
-}
-
-func (m *mockRelationshipRepoForFinalization) UpdateSourceEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
-	return 0, nil
-}
-
-func (m *mockRelationshipRepoForFinalization) UpdateTargetEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
-	return 0, nil
-}
-
 type mockSchemaRepoForFinalization struct {
+	tables          []*models.SchemaTable
 	columnsByTable  map[string][]*models.SchemaColumn
+	listTablesErr   error
 	getColumnsByErr error
+}
+
+func (m *mockSchemaRepoForFinalization) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+	if m.listTablesErr != nil {
+		return nil, m.listTablesErr
+	}
+	return m.tables, nil
 }
 
 func (m *mockSchemaRepoForFinalization) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error) {
@@ -295,9 +87,6 @@ func (m *mockSchemaRepoForFinalization) GetColumnsByTables(ctx context.Context, 
 }
 
 // Stub implementations for SchemaRepository interface
-func (m *mockSchemaRepoForFinalization) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
-	return nil, nil
-}
 func (m *mockSchemaRepoForFinalization) GetTableByID(ctx context.Context, projectID, tableID uuid.UUID) (*models.SchemaTable, error) {
 	return nil, nil
 }
@@ -474,72 +263,16 @@ func (m *mockLLMFactoryForFinalization) CreateStreamingClient(ctx context.Contex
 // Tests
 // ============================================================================
 
-func TestOntologyFinalization_AggregatesDomains(t *testing.T) {
-	ctx := context.Background()
-	projectID := uuid.New()
-	ontologyID := uuid.New()
-	entityID1 := uuid.New()
-	entityID2 := uuid.New()
-	entityID3 := uuid.New()
-
-	entities := []*models.OntologyEntity{
-		{ID: entityID1, ProjectID: projectID, OntologyID: ontologyID, Name: "User", Domain: "customer"},
-		{ID: entityID2, ProjectID: projectID, OntologyID: ontologyID, Name: "Order", Domain: "sales"},
-		{ID: entityID3, ProjectID: projectID, OntologyID: ontologyID, Name: "Invoice", Domain: "sales"}, // Duplicate domain
-	}
-
-	ontologyRepo := &mockOntologyRepoForFinalization{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
-	entityRepo := &mockEntityRepoForFinalization{entities: entities}
-	relationshipRepo := &mockRelationshipRepoForFinalization{relationships: []*models.EntityRelationship{}}
-
-	llmClient := &mockLLMClient{
-		responseContent: `{"description": "An e-commerce platform managing users and sales."}`,
-	}
-	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
-
-	logger := zap.NewNop()
-
-	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: map[string][]*models.SchemaColumn{}}
-
-	svc := NewOntologyFinalizationService(
-		ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil,
-		llmFactory, nil, logger,
-	)
-
-	err := svc.Finalize(ctx, projectID)
-	require.NoError(t, err)
-
-	// Verify domain summary was updated
-	require.NotNil(t, ontologyRepo.updatedDomainSummary)
-
-	// Verify domains are aggregated and unique
-	domains := ontologyRepo.updatedDomainSummary.Domains
-	assert.Len(t, domains, 2) // "customer" and "sales"
-	assert.Contains(t, domains, "customer")
-	assert.Contains(t, domains, "sales")
-}
-
 func TestOntologyFinalization_GeneratesDomainDescription(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
 	ontologyID := uuid.New()
-	entityID1 := uuid.New()
-	entityID2 := uuid.New()
 
-	entities := []*models.OntologyEntity{
-		{ID: entityID1, ProjectID: projectID, OntologyID: ontologyID, Name: "User", Description: "Platform users", Domain: "customer"},
-		{ID: entityID2, ProjectID: projectID, OntologyID: ontologyID, Name: "Order", Description: "Customer orders", Domain: "sales"},
-	}
-
-	placesOrdersDesc := "places orders"
-	relationships := []*models.EntityRelationship{
-		{SourceEntityID: entityID1, TargetEntityID: entityID2, Description: &placesOrdersDesc},
+	desc1 := "Users of the platform"
+	desc2 := "Customer orders"
+	tables := []*models.SchemaTable{
+		{TableName: "users", Description: &desc1},
+		{TableName: "orders", Description: &desc2},
 	}
 
 	ontologyRepo := &mockOntologyRepoForFinalization{
@@ -549,8 +282,11 @@ func TestOntologyFinalization_GeneratesDomainDescription(t *testing.T) {
 			IsActive:  true,
 		},
 	}
-	entityRepo := &mockEntityRepoForFinalization{entities: entities}
-	relationshipRepo := &mockRelationshipRepoForFinalization{relationships: relationships}
+
+	schemaRepo := &mockSchemaRepoForFinalization{
+		tables:         tables,
+		columnsByTable: map[string][]*models.SchemaColumn{},
+	}
 
 	expectedDescription := "This is an e-commerce platform that tracks users and their orders."
 	llmClient := &mockLLMClient{
@@ -559,10 +295,9 @@ func TestOntologyFinalization_GeneratesDomainDescription(t *testing.T) {
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 
 	logger := zap.NewNop()
-	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: map[string][]*models.SchemaColumn{}}
 
 	svc := NewOntologyFinalizationService(
-		ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil,
+		ontologyRepo, schemaRepo, nil,
 		llmFactory, nil, logger,
 	)
 
@@ -574,20 +309,28 @@ func TestOntologyFinalization_GeneratesDomainDescription(t *testing.T) {
 	assert.Equal(t, expectedDescription, ontologyRepo.updatedDomainSummary.Description)
 }
 
-func TestOntologyFinalization_SkipsIfNoEntities(t *testing.T) {
+func TestOntologyFinalization_SkipsIfNoTables(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
+	ontologyID := uuid.New()
 
-	ontologyRepo := &mockOntologyRepoForFinalization{}
-	entityRepo := &mockEntityRepoForFinalization{entities: []*models.OntologyEntity{}}
-	relationshipRepo := &mockRelationshipRepoForFinalization{}
-	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: map[string][]*models.SchemaColumn{}}
+	ontologyRepo := &mockOntologyRepoForFinalization{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
+	schemaRepo := &mockSchemaRepoForFinalization{
+		tables:         []*models.SchemaTable{},
+		columnsByTable: map[string][]*models.SchemaColumn{},
+	}
 	llmFactory := &mockLLMFactoryForFinalization{}
 
 	logger := zap.NewNop()
 
 	svc := NewOntologyFinalizationService(
-		ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil,
+		ontologyRepo, schemaRepo, nil,
 		llmFactory, nil, logger,
 	)
 
@@ -598,106 +341,37 @@ func TestOntologyFinalization_SkipsIfNoEntities(t *testing.T) {
 	assert.Nil(t, ontologyRepo.updatedDomainSummary)
 }
 
-func TestOntologyFinalization_HandlesEmptyDomains(t *testing.T) {
+func TestOntologyFinalization_SkipsIfNoActiveOntology(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
-	entityID1 := uuid.New()
-
-	// Entity with empty domain
-	entities := []*models.OntologyEntity{
-		{ID: entityID1, ProjectID: projectID, OntologyID: ontologyID, Name: "User", Description: "Platform users", Domain: "", PrimaryTable: "users"},
-	}
 
 	ontologyRepo := &mockOntologyRepoForFinalization{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
+		activeOntology: nil, // No active ontology
 	}
-	entityRepo := &mockEntityRepoForFinalization{entities: entities}
-	relationshipRepo := &mockRelationshipRepoForFinalization{}
-	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: map[string][]*models.SchemaColumn{}}
-
-	llmClient := &mockLLMClient{
-		responseContent: `{"description": "A user management system."}`,
-	}
-	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
+	schemaRepo := &mockSchemaRepoForFinalization{}
+	llmFactory := &mockLLMFactoryForFinalization{}
 
 	logger := zap.NewNop()
 
 	svc := NewOntologyFinalizationService(
-		ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil,
+		ontologyRepo, schemaRepo, nil,
 		llmFactory, nil, logger,
 	)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
 
-	// Verify domain summary was updated
-	require.NotNil(t, ontologyRepo.updatedDomainSummary)
-
-	// Domains should be empty (no valid domains from entities)
-	assert.Empty(t, ontologyRepo.updatedDomainSummary.Domains)
-}
-
-func TestOntologyFinalization_HandlesRelationshipDisplay(t *testing.T) {
-	ctx := context.Background()
-	projectID := uuid.New()
-	ontologyID := uuid.New()
-	entityID1 := uuid.New()
-	entityID2 := uuid.New()
-
-	entities := []*models.OntologyEntity{
-		{ID: entityID1, ProjectID: projectID, OntologyID: ontologyID, Name: "Host", Description: "Property hosts", Domain: "hospitality", PrimaryTable: "hosts"},
-		{ID: entityID2, ProjectID: projectID, OntologyID: ontologyID, Name: "Guest", Description: "Property guests", Domain: "hospitality", PrimaryTable: "guests"},
-	}
-
-	hostsDesc := "hosts"
-	relationships := []*models.EntityRelationship{
-		{SourceEntityID: entityID1, TargetEntityID: entityID2, Description: &hostsDesc},
-	}
-
-	ontologyRepo := &mockOntologyRepoForFinalization{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
-	entityRepo := &mockEntityRepoForFinalization{entities: entities}
-	relationshipRepo := &mockRelationshipRepoForFinalization{relationships: relationships}
-	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: map[string][]*models.SchemaColumn{}}
-
-	llmClient := &mockLLMClient{
-		responseContent: `{"description": "A hospitality platform connecting hosts with guests."}`,
-	}
-	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
-
-	logger := zap.NewNop()
-
-	svc := NewOntologyFinalizationService(
-		ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil,
-		llmFactory, nil, logger,
-	)
-
-	err := svc.Finalize(ctx, projectID)
-	require.NoError(t, err)
-
-	require.NotNil(t, ontologyRepo.updatedDomainSummary)
-	assert.Equal(t, "A hospitality platform connecting hosts with guests.", ontologyRepo.updatedDomainSummary.Description)
-	assert.Contains(t, ontologyRepo.updatedDomainSummary.Domains, "hospitality")
+	// Verify no domain summary was updated (skipped)
+	assert.Nil(t, ontologyRepo.updatedDomainSummary)
 }
 
 func TestOntologyFinalization_LLMFailure(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
 	ontologyID := uuid.New()
-	entityID1 := uuid.New()
 
-	entities := []*models.OntologyEntity{
-		{ID: entityID1, ProjectID: projectID, OntologyID: ontologyID, Name: "User", Description: "Platform users", Domain: "customer", PrimaryTable: "users"},
+	tables := []*models.SchemaTable{
+		{TableName: "users"},
 	}
 
 	ontologyRepo := &mockOntologyRepoForFinalization{
@@ -707,9 +381,10 @@ func TestOntologyFinalization_LLMFailure(t *testing.T) {
 			IsActive:  true,
 		},
 	}
-	entityRepo := &mockEntityRepoForFinalization{entities: entities}
-	relationshipRepo := &mockRelationshipRepoForFinalization{}
-	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: map[string][]*models.SchemaColumn{}}
+	schemaRepo := &mockSchemaRepoForFinalization{
+		tables:         tables,
+		columnsByTable: map[string][]*models.SchemaColumn{},
+	}
 
 	llmClient := &mockLLMClient{
 		generateErr: errors.New("LLM unavailable"),
@@ -719,7 +394,7 @@ func TestOntologyFinalization_LLMFailure(t *testing.T) {
 	logger := zap.NewNop()
 
 	svc := NewOntologyFinalizationService(
-		ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil,
+		ontologyRepo, schemaRepo, nil,
 		llmFactory, nil, logger,
 	)
 
@@ -742,10 +417,10 @@ func TestOntologyFinalization_DiscoversSoftDelete_Timestamp(t *testing.T) {
 	projectID := uuid.New()
 	ontologyID := uuid.New()
 
-	// Two entities mapping to two tables
-	entities := []*models.OntologyEntity{
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "User", Domain: "customer", PrimaryTable: "users"},
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "Order", Domain: "sales", PrimaryTable: "orders"},
+	// Two tables
+	tables := []*models.SchemaTable{
+		{TableName: "users"},
+		{TableName: "orders"},
 	}
 
 	// Both tables have deleted_at column
@@ -763,14 +438,12 @@ func TestOntologyFinalization_DiscoversSoftDelete_Timestamp(t *testing.T) {
 	ontologyRepo := &mockOntologyRepoForFinalization{
 		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
 	}
-	entityRepo := &mockEntityRepoForFinalization{entities: entities}
-	relationshipRepo := &mockRelationshipRepoForFinalization{}
-	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: columnsByTable}
+	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, nil, llmFactory, nil, logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -791,9 +464,9 @@ func TestOntologyFinalization_DiscoversSoftDelete_Boolean(t *testing.T) {
 	projectID := uuid.New()
 	ontologyID := uuid.New()
 
-	entities := []*models.OntologyEntity{
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "User", Domain: "customer", PrimaryTable: "users"},
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "Order", Domain: "sales", PrimaryTable: "orders"},
+	tables := []*models.SchemaTable{
+		{TableName: "users"},
+		{TableName: "orders"},
 	}
 
 	// Both tables have is_deleted boolean column
@@ -811,14 +484,12 @@ func TestOntologyFinalization_DiscoversSoftDelete_Boolean(t *testing.T) {
 	ontologyRepo := &mockOntologyRepoForFinalization{
 		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
 	}
-	entityRepo := &mockEntityRepoForFinalization{entities: entities}
-	relationshipRepo := &mockRelationshipRepoForFinalization{}
-	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: columnsByTable}
+	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, nil, llmFactory, nil, logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -838,11 +509,11 @@ func TestOntologyFinalization_DiscoversSoftDelete_Coverage(t *testing.T) {
 	ontologyID := uuid.New()
 
 	// 4 tables, only 1 has deleted_at (25% coverage - below threshold)
-	entities := []*models.OntologyEntity{
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "User", Domain: "customer", PrimaryTable: "users"},
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "Order", Domain: "sales", PrimaryTable: "orders"},
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "Product", Domain: "inventory", PrimaryTable: "products"},
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "Category", Domain: "inventory", PrimaryTable: "categories"},
+	tables := []*models.SchemaTable{
+		{TableName: "users"},
+		{TableName: "orders"},
+		{TableName: "products"},
+		{TableName: "categories"},
 	}
 
 	columnsByTable := map[string][]*models.SchemaColumn{
@@ -855,14 +526,12 @@ func TestOntologyFinalization_DiscoversSoftDelete_Coverage(t *testing.T) {
 	ontologyRepo := &mockOntologyRepoForFinalization{
 		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
 	}
-	entityRepo := &mockEntityRepoForFinalization{entities: entities}
-	relationshipRepo := &mockRelationshipRepoForFinalization{}
-	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: columnsByTable}
+	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, nil, llmFactory, nil, logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -878,8 +547,8 @@ func TestOntologyFinalization_DiscoversCurrency_Cents(t *testing.T) {
 	projectID := uuid.New()
 	ontologyID := uuid.New()
 
-	entities := []*models.OntologyEntity{
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "Transaction", Domain: "billing", PrimaryTable: "transactions"},
+	tables := []*models.SchemaTable{
+		{TableName: "transactions"},
 	}
 
 	// Multiple integer amount columns
@@ -895,14 +564,12 @@ func TestOntologyFinalization_DiscoversCurrency_Cents(t *testing.T) {
 	ontologyRepo := &mockOntologyRepoForFinalization{
 		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
 	}
-	entityRepo := &mockEntityRepoForFinalization{entities: entities}
-	relationshipRepo := &mockRelationshipRepoForFinalization{}
-	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: columnsByTable}
+	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, nil, llmFactory, nil, logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -921,8 +588,8 @@ func TestOntologyFinalization_DiscoversCurrency_Dollars(t *testing.T) {
 	projectID := uuid.New()
 	ontologyID := uuid.New()
 
-	entities := []*models.OntologyEntity{
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "Transaction", Domain: "billing", PrimaryTable: "transactions"},
+	tables := []*models.SchemaTable{
+		{TableName: "transactions"},
 	}
 
 	// Decimal amount columns suggest dollars
@@ -937,14 +604,12 @@ func TestOntologyFinalization_DiscoversCurrency_Dollars(t *testing.T) {
 	ontologyRepo := &mockOntologyRepoForFinalization{
 		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
 	}
-	entityRepo := &mockEntityRepoForFinalization{entities: entities}
-	relationshipRepo := &mockRelationshipRepoForFinalization{}
-	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: columnsByTable}
+	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, nil, llmFactory, nil, logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -961,9 +626,9 @@ func TestOntologyFinalization_DiscoversAuditColumns_WithCoverage(t *testing.T) {
 	projectID := uuid.New()
 	ontologyID := uuid.New()
 
-	entities := []*models.OntologyEntity{
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "User", Domain: "customer", PrimaryTable: "users"},
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "Order", Domain: "sales", PrimaryTable: "orders"},
+	tables := []*models.SchemaTable{
+		{TableName: "users"},
+		{TableName: "orders"},
 	}
 
 	// Both tables have audit columns
@@ -984,14 +649,12 @@ func TestOntologyFinalization_DiscoversAuditColumns_WithCoverage(t *testing.T) {
 	ontologyRepo := &mockOntologyRepoForFinalization{
 		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
 	}
-	entityRepo := &mockEntityRepoForFinalization{entities: entities}
-	relationshipRepo := &mockRelationshipRepoForFinalization{}
-	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: columnsByTable}
+	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, nil, llmFactory, nil, logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -1025,8 +688,8 @@ func TestOntologyFinalization_NoConventions(t *testing.T) {
 	projectID := uuid.New()
 	ontologyID := uuid.New()
 
-	entities := []*models.OntologyEntity{
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "User", Domain: "customer", PrimaryTable: "users"},
+	tables := []*models.SchemaTable{
+		{TableName: "users"},
 	}
 
 	// No soft delete, no currency, no audit columns
@@ -1041,63 +704,18 @@ func TestOntologyFinalization_NoConventions(t *testing.T) {
 	ontologyRepo := &mockOntologyRepoForFinalization{
 		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
 	}
-	entityRepo := &mockEntityRepoForFinalization{entities: entities}
-	relationshipRepo := &mockRelationshipRepoForFinalization{}
-	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: columnsByTable}
+	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, nil, llmFactory, nil, logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
 
 	// Conventions should be nil when nothing detected
 	assert.Nil(t, ontologyRepo.updatedDomainSummary.Conventions)
-}
-
-func TestOntologyFinalization_SampleQuestionsAreEmpty(t *testing.T) {
-	ctx := context.Background()
-	projectID := uuid.New()
-	ontologyID := uuid.New()
-	entityID1 := uuid.New()
-
-	entities := []*models.OntologyEntity{
-		{ID: entityID1, ProjectID: projectID, OntologyID: ontologyID, Name: "User", Description: "Platform users", Domain: "customer", PrimaryTable: "users"},
-	}
-
-	ontologyRepo := &mockOntologyRepoForFinalization{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
-	entityRepo := &mockEntityRepoForFinalization{entities: entities}
-	relationshipRepo := &mockRelationshipRepoForFinalization{}
-	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: map[string][]*models.SchemaColumn{}}
-
-	llmClient := &mockLLMClient{
-		responseContent: `{"description": "A user management system."}`,
-	}
-	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
-
-	logger := zap.NewNop()
-
-	svc := NewOntologyFinalizationService(
-		ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil,
-		llmFactory, nil, logger,
-	)
-
-	err := svc.Finalize(ctx, projectID)
-	require.NoError(t, err)
-
-	// Verify domain summary was updated
-	require.NotNil(t, ontologyRepo.updatedDomainSummary)
-
-	// Verify sample questions are nil/empty (sample question generation code removed)
-	assert.Empty(t, ontologyRepo.updatedDomainSummary.SampleQuestions)
 }
 
 // ============================================================================
@@ -1109,9 +727,9 @@ func TestOntologyFinalization_ExtractsColumnFeatureInsights_SoftDelete(t *testin
 	projectID := uuid.New()
 	ontologyID := uuid.New()
 
-	entities := []*models.OntologyEntity{
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "User", Domain: "customer", PrimaryTable: "users"},
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "Order", Domain: "sales", PrimaryTable: "orders"},
+	tables := []*models.SchemaTable{
+		{TableName: "users"},
+		{TableName: "orders"},
 	}
 
 	// Columns with ColumnFeatures indicating soft-delete
@@ -1151,14 +769,12 @@ func TestOntologyFinalization_ExtractsColumnFeatureInsights_SoftDelete(t *testin
 	ontologyRepo := &mockOntologyRepoForFinalization{
 		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
 	}
-	entityRepo := &mockEntityRepoForFinalization{entities: entities}
-	relationshipRepo := &mockRelationshipRepoForFinalization{}
-	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: columnsByTable}
+	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, nil, llmFactory, nil, logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -1174,90 +790,14 @@ func TestOntologyFinalization_ExtractsColumnFeatureInsights_SoftDelete(t *testin
 	assert.Equal(t, 1.0, sd.Coverage) // 100% of tables
 }
 
-func TestOntologyFinalization_ExtractsColumnFeatureInsights_ExternalServices(t *testing.T) {
-	ctx := context.Background()
-	projectID := uuid.New()
-	ontologyID := uuid.New()
-
-	entities := []*models.OntologyEntity{
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "Payment", Domain: "billing", PrimaryTable: "payments"},
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "Notification", Domain: "messaging", PrimaryTable: "notifications"},
-	}
-
-	// Columns with ColumnFeatures indicating external service IDs
-	columnsByTable := map[string][]*models.SchemaColumn{
-		"payments": {
-			{ColumnName: "id", DataType: "uuid"},
-			{
-				ColumnName: "stripe_charge_id",
-				DataType:   "text",
-				Metadata: map[string]any{
-					"column_features": map[string]any{
-						"identifier_features": map[string]any{
-							"identifier_type":  "external_service_id",
-							"external_service": "stripe",
-						},
-					},
-				},
-			},
-			{
-				ColumnName: "stripe_customer_id",
-				DataType:   "text",
-				Metadata: map[string]any{
-					"column_features": map[string]any{
-						"identifier_features": map[string]any{
-							"identifier_type":  "external_service_id",
-							"external_service": "stripe",
-						},
-					},
-				},
-			},
-		},
-		"notifications": {
-			{ColumnName: "id", DataType: "uuid"},
-			{
-				ColumnName: "twilio_message_sid",
-				DataType:   "text",
-				Metadata: map[string]any{
-					"column_features": map[string]any{
-						"identifier_features": map[string]any{
-							"identifier_type":  "external_service_id",
-							"external_service": "twilio",
-						},
-					},
-				},
-			},
-		},
-	}
-
-	ontologyRepo := &mockOntologyRepoForFinalization{
-		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
-	}
-	entityRepo := &mockEntityRepoForFinalization{entities: entities}
-	relationshipRepo := &mockRelationshipRepoForFinalization{}
-	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: columnsByTable}
-	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
-	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
-	logger := zap.NewNop()
-
-	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
-
-	err := svc.Finalize(ctx, projectID)
-	require.NoError(t, err)
-
-	// The external services are included in the LLM prompt (visible in description generation)
-	// We verify this by checking that the service completes successfully
-	require.NotNil(t, ontologyRepo.updatedDomainSummary)
-}
-
 func TestOntologyFinalization_ExtractsColumnFeatureInsights_AuditColumns(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
 	ontologyID := uuid.New()
 
-	entities := []*models.OntologyEntity{
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "User", Domain: "customer", PrimaryTable: "users"},
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "Order", Domain: "sales", PrimaryTable: "orders"},
+	tables := []*models.SchemaTable{
+		{TableName: "users"},
+		{TableName: "orders"},
 	}
 
 	// Columns with ColumnFeatures indicating audit fields
@@ -1321,14 +861,12 @@ func TestOntologyFinalization_ExtractsColumnFeatureInsights_AuditColumns(t *test
 	ontologyRepo := &mockOntologyRepoForFinalization{
 		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
 	}
-	entityRepo := &mockEntityRepoForFinalization{entities: entities}
-	relationshipRepo := &mockRelationshipRepoForFinalization{}
-	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: columnsByTable}
+	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, nil, llmFactory, nil, logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -1354,76 +892,14 @@ func TestOntologyFinalization_ExtractsColumnFeatureInsights_AuditColumns(t *test
 	assert.Equal(t, 1.0, updatedAt.Coverage)
 }
 
-func TestOntologyFinalization_ExtractsColumnFeatureInsights_MonetaryColumns(t *testing.T) {
-	ctx := context.Background()
-	projectID := uuid.New()
-	ontologyID := uuid.New()
-
-	entities := []*models.OntologyEntity{
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "Transaction", Domain: "billing", PrimaryTable: "transactions"},
-	}
-
-	// Columns with ColumnFeatures indicating monetary columns with paired currency
-	columnsByTable := map[string][]*models.SchemaColumn{
-		"transactions": {
-			{ColumnName: "id", DataType: "uuid"},
-			{
-				ColumnName: "amount_cents",
-				DataType:   "bigint",
-				Metadata: map[string]any{
-					"column_features": map[string]any{
-						"monetary_features": map[string]any{
-							"is_monetary":            true,
-							"currency_unit":          "cents",
-							"paired_currency_column": "currency",
-						},
-					},
-				},
-			},
-			{
-				ColumnName: "fee_cents",
-				DataType:   "bigint",
-				Metadata: map[string]any{
-					"column_features": map[string]any{
-						"monetary_features": map[string]any{
-							"is_monetary":            true,
-							"currency_unit":          "cents",
-							"paired_currency_column": "currency",
-						},
-					},
-				},
-			},
-			{ColumnName: "currency", DataType: "text"},
-		},
-	}
-
-	ontologyRepo := &mockOntologyRepoForFinalization{
-		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
-	}
-	entityRepo := &mockEntityRepoForFinalization{entities: entities}
-	relationshipRepo := &mockRelationshipRepoForFinalization{}
-	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: columnsByTable}
-	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
-	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
-	logger := zap.NewNop()
-
-	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
-
-	err := svc.Finalize(ctx, projectID)
-	require.NoError(t, err)
-
-	// The monetary insights are included in the LLM prompt
-	require.NotNil(t, ontologyRepo.updatedDomainSummary)
-}
-
 func TestOntologyFinalization_FallsBackToPatternDetection_WhenNoColumnFeatures(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
 	ontologyID := uuid.New()
 
-	entities := []*models.OntologyEntity{
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "User", Domain: "customer", PrimaryTable: "users"},
-		{ID: uuid.New(), ProjectID: projectID, OntologyID: ontologyID, Name: "Order", Domain: "sales", PrimaryTable: "orders"},
+	tables := []*models.SchemaTable{
+		{TableName: "users"},
+		{TableName: "orders"},
 	}
 
 	// Columns WITHOUT ColumnFeatures - should fallback to pattern-based detection
@@ -1443,14 +919,12 @@ func TestOntologyFinalization_FallsBackToPatternDetection_WhenNoColumnFeatures(t
 	ontologyRepo := &mockOntologyRepoForFinalization{
 		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
 	}
-	entityRepo := &mockEntityRepoForFinalization{entities: entities}
-	relationshipRepo := &mockRelationshipRepoForFinalization{}
-	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: columnsByTable}
+	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, nil, llmFactory, nil, logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)

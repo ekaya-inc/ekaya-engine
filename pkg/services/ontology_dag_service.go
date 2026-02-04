@@ -39,27 +39,21 @@ type OntologyDAGService interface {
 }
 
 type ontologyDAGService struct {
-	dagRepo          repositories.OntologyDAGRepository
-	ontologyRepo     repositories.OntologyRepository
-	entityRepo       repositories.OntologyEntityRepository
-	schemaRepo       repositories.SchemaRepository
-	relationshipRepo repositories.EntityRelationshipRepository
-	questionRepo     repositories.OntologyQuestionRepository
-	chatRepo         repositories.OntologyChatRepository
-	knowledgeRepo    repositories.KnowledgeRepository
-	glossaryRepo     repositories.GlossaryRepository
+	dagRepo       repositories.OntologyDAGRepository
+	ontologyRepo  repositories.OntologyRepository
+	schemaRepo    repositories.SchemaRepository
+	questionRepo  repositories.OntologyQuestionRepository
+	chatRepo      repositories.OntologyChatRepository
+	knowledgeRepo repositories.KnowledgeRepository
+	glossaryRepo  repositories.GlossaryRepository
 
 	// Adapted service methods for dag package
 	knowledgeSeedingMethods         dag.KnowledgeSeedingMethods
 	columnFeatureExtractionMethods  dag.ColumnFeatureExtractionMethods
 	tableFeatureExtractionMethods   dag.TableFeatureExtractionMethods
-	entityDiscoveryMethods          dag.EntityDiscoveryMethods
-	entityEnrichmentMethods         dag.EntityEnrichmentMethods
 	fkDiscoveryMethods              dag.FKDiscoveryMethods
 	pkMatchDiscoveryMethods         dag.PKMatchDiscoveryMethods
 	llmRelationshipDiscoveryMethods dag.LLMRelationshipDiscoveryMethods
-	relationshipEnrichmentMethods   dag.RelationshipEnrichmentMethods
-	entityPromotionMethods          dag.EntityPromotionMethods
 	finalizationMethods             dag.OntologyFinalizationMethods
 	columnEnrichmentMethods         dag.ColumnEnrichmentMethods
 	glossaryDiscoveryMethods        dag.GlossaryDiscoveryMethods
@@ -81,9 +75,7 @@ type ontologyDAGService struct {
 func NewOntologyDAGService(
 	dagRepo repositories.OntologyDAGRepository,
 	ontologyRepo repositories.OntologyRepository,
-	entityRepo repositories.OntologyEntityRepository,
 	schemaRepo repositories.SchemaRepository,
-	relationshipRepo repositories.EntityRelationshipRepository,
 	questionRepo repositories.OntologyQuestionRepository,
 	chatRepo repositories.OntologyChatRepository,
 	knowledgeRepo repositories.KnowledgeRepository,
@@ -94,9 +86,7 @@ func NewOntologyDAGService(
 	return &ontologyDAGService{
 		dagRepo:          dagRepo,
 		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
 		schemaRepo:       schemaRepo,
-		relationshipRepo: relationshipRepo,
 		questionRepo:     questionRepo,
 		chatRepo:         chatRepo,
 		knowledgeRepo:    knowledgeRepo,
@@ -127,18 +117,6 @@ func (s *ontologyDAGService) SetTableFeatureExtractionMethods(methods dag.TableF
 	s.tableFeatureExtractionMethods = methods
 }
 
-// SetEntityDiscoveryMethods sets the entity discovery methods interface.
-// This is called after service construction to avoid circular dependencies.
-func (s *ontologyDAGService) SetEntityDiscoveryMethods(methods dag.EntityDiscoveryMethods) {
-	s.entityDiscoveryMethods = methods
-}
-
-// SetEntityEnrichmentMethods sets the entity enrichment methods interface.
-// This is called after service construction to avoid circular dependencies.
-func (s *ontologyDAGService) SetEntityEnrichmentMethods(methods dag.EntityEnrichmentMethods) {
-	s.entityEnrichmentMethods = methods
-}
-
 // SetFKDiscoveryMethods sets the FK discovery methods interface.
 func (s *ontologyDAGService) SetFKDiscoveryMethods(methods dag.FKDiscoveryMethods) {
 	s.fkDiscoveryMethods = methods
@@ -155,16 +133,6 @@ func (s *ontologyDAGService) SetPKMatchDiscoveryMethods(methods dag.PKMatchDisco
 // If set, this takes precedence over pkMatchDiscoveryMethods.
 func (s *ontologyDAGService) SetLLMRelationshipDiscoveryMethods(methods dag.LLMRelationshipDiscoveryMethods) {
 	s.llmRelationshipDiscoveryMethods = methods
-}
-
-// SetRelationshipEnrichmentMethods sets the relationship enrichment methods interface.
-func (s *ontologyDAGService) SetRelationshipEnrichmentMethods(methods dag.RelationshipEnrichmentMethods) {
-	s.relationshipEnrichmentMethods = methods
-}
-
-// SetEntityPromotionMethods sets the entity promotion methods interface.
-func (s *ontologyDAGService) SetEntityPromotionMethods(methods dag.EntityPromotionMethods) {
-	s.entityPromotionMethods = methods
 }
 
 // SetFinalizationMethods sets the ontology finalization methods interface.
@@ -266,16 +234,6 @@ func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID 
 	ontology, err := s.getOrCreateOntology(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("get or create ontology: %w", err)
-	}
-
-	// Mark inference-created entities and relationships as stale for re-evaluation
-	// Manual and MCP entities/relationships are preserved unchanged
-	// The stale flag will be cleared when items are re-discovered or re-enriched
-	if err := s.entityRepo.MarkInferenceEntitiesStale(ctx, ontology.ID); err != nil {
-		return nil, fmt.Errorf("mark inference entities stale: %w", err)
-	}
-	if err := s.relationshipRepo.MarkInferenceRelationshipsStale(ctx, ontology.ID); err != nil {
-		return nil, fmt.Errorf("mark inference relationships stale: %w", err)
 	}
 
 	// Create new DAG
@@ -517,13 +475,12 @@ func (s *ontologyDAGService) getOrCreateOntology(ctx context.Context, projectID 
 	}
 
 	ontology = &models.TieredOntology{
-		ID:              uuid.New(),
-		ProjectID:       projectID,
-		Version:         nextVersion,
-		IsActive:        true,
-		EntitySummaries: make(map[string]*models.EntitySummary),
-		ColumnDetails:   make(map[string][]models.ColumnDetail),
-		Metadata:        make(map[string]any),
+		ID:            uuid.New(),
+		ProjectID:     projectID,
+		Version:       nextVersion,
+		IsActive:      true,
+		ColumnDetails: make(map[string][]models.ColumnDetail),
+		Metadata:      make(map[string]any),
 	}
 
 	if err := s.ontologyRepo.Create(ctx, ontology); err != nil {
@@ -713,22 +670,6 @@ func (s *ontologyDAGService) getNodeExecutor(nodeName models.DAGNodeName, nodeID
 		node.SetCurrentNodeID(nodeID)
 		return node, nil
 
-	case models.DAGNodeEntityDiscovery:
-		if s.entityDiscoveryMethods == nil {
-			return nil, fmt.Errorf("entity discovery methods not set")
-		}
-		node := dag.NewEntityDiscoveryNode(s.dagRepo, s.ontologyRepo, s.entityRepo, s.entityDiscoveryMethods, s.logger)
-		node.SetCurrentNodeID(nodeID)
-		return node, nil
-
-	case models.DAGNodeEntityEnrichment:
-		if s.entityEnrichmentMethods == nil {
-			return nil, fmt.Errorf("entity enrichment methods not set")
-		}
-		node := dag.NewEntityEnrichmentNode(s.dagRepo, s.entityEnrichmentMethods, s.logger)
-		node.SetCurrentNodeID(nodeID)
-		return node, nil
-
 	case models.DAGNodeFKDiscovery:
 		if s.fkDiscoveryMethods == nil {
 			return nil, fmt.Errorf("FK discovery methods not set")
@@ -756,21 +697,6 @@ func (s *ontologyDAGService) getNodeExecutor(nodeName models.DAGNodeName, nodeID
 			return nil, fmt.Errorf("relationship discovery methods not set (neither LLM nor PKMatch)")
 		}
 		node := dag.NewPKMatchDiscoveryNode(s.dagRepo, s.pkMatchDiscoveryMethods, s.logger)
-		node.SetCurrentNodeID(nodeID)
-		return node, nil
-
-	case models.DAGNodeRelationshipEnrichment:
-		if s.relationshipEnrichmentMethods == nil {
-			return nil, fmt.Errorf("relationship enrichment methods not set")
-		}
-		node := dag.NewRelationshipEnrichmentNode(s.dagRepo, s.relationshipEnrichmentMethods, s.logger)
-		node.SetCurrentNodeID(nodeID)
-		return node, nil
-
-	case models.DAGNodeEntityPromotion:
-		// Entity promotion is optional - operates in no-op mode if not configured.
-		// This allows backward compatibility during the incremental rollout.
-		node := dag.NewEntityPromotionNode(s.dagRepo, s.entityPromotionMethods, s.logger)
 		node.SetCurrentNodeID(nodeID)
 		return node, nil
 
