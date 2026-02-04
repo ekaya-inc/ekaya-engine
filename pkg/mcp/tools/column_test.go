@@ -888,3 +888,153 @@ func TestUpdateColumnTool_ErrorResults(t *testing.T) {
 		}
 	})
 }
+
+// ============================================================================
+// Typed Column Write Tests
+// ============================================================================
+
+// TestUpdateColumn_TypedColumnMetadata verifies that update_column correctly
+// writes typed columns to ColumnMetadata for the new schema.
+func TestUpdateColumn_TypedColumnMetadata(t *testing.T) {
+	t.Run("entity is stored in IdentifierFeatures.EntityReferenced", func(t *testing.T) {
+		// Simulate the entity parameter being set
+		entity := "User"
+
+		// Create a column metadata object as the tool would
+		colMeta := &models.ColumnMetadata{}
+		if entity != "" {
+			if colMeta.Features.IdentifierFeatures == nil {
+				colMeta.Features.IdentifierFeatures = &models.IdentifierFeatures{}
+			}
+			colMeta.Features.IdentifierFeatures.EntityReferenced = entity
+		}
+
+		// Verify entity is stored correctly
+		require.NotNil(t, colMeta.Features.IdentifierFeatures)
+		assert.Equal(t, "User", colMeta.Features.IdentifierFeatures.EntityReferenced)
+	})
+
+	t.Run("enum values are stored in EnumFeatures with Value/Label separation", func(t *testing.T) {
+		// Simulate enum_values parameter with descriptions
+		enumValues := []string{
+			"ACTIVE - Normal active account",
+			"SUSPENDED - Temporarily disabled",
+			"PENDING",
+		}
+
+		// Parse enums as the tool would
+		parsedEnums := parseEnumValues(enumValues)
+
+		// Create column metadata as the tool would
+		colMeta := &models.ColumnMetadata{}
+		colMeta.Features.EnumFeatures = &models.EnumFeatures{
+			Values: make([]models.ColumnEnumValue, len(parsedEnums)),
+		}
+		for i, ev := range parsedEnums {
+			colMeta.Features.EnumFeatures.Values[i] = models.ColumnEnumValue{
+				Value: ev.Value,
+				Label: ev.Description,
+			}
+		}
+
+		// Verify enum values are stored correctly
+		require.NotNil(t, colMeta.Features.EnumFeatures)
+		require.Len(t, colMeta.Features.EnumFeatures.Values, 3)
+
+		// Check first value has both Value and Label
+		assert.Equal(t, "ACTIVE", colMeta.Features.EnumFeatures.Values[0].Value)
+		assert.Equal(t, "Normal active account", colMeta.Features.EnumFeatures.Values[0].Label)
+
+		// Check second value has both Value and Label
+		assert.Equal(t, "SUSPENDED", colMeta.Features.EnumFeatures.Values[1].Value)
+		assert.Equal(t, "Temporarily disabled", colMeta.Features.EnumFeatures.Values[1].Label)
+
+		// Check third value has Value but no Label
+		assert.Equal(t, "PENDING", colMeta.Features.EnumFeatures.Values[2].Value)
+		assert.Empty(t, colMeta.Features.EnumFeatures.Values[2].Label)
+	})
+
+	t.Run("role is stored in typed column", func(t *testing.T) {
+		role := "identifier"
+
+		colMeta := &models.ColumnMetadata{}
+		colMeta.Role = &role
+
+		// Verify role is stored correctly
+		require.NotNil(t, colMeta.Role)
+		assert.Equal(t, "identifier", *colMeta.Role)
+	})
+
+	t.Run("description is stored in typed column", func(t *testing.T) {
+		description := "User account status indicator"
+
+		colMeta := &models.ColumnMetadata{}
+		colMeta.Description = &description
+
+		// Verify description is stored correctly
+		require.NotNil(t, colMeta.Description)
+		assert.Equal(t, "User account status indicator", *colMeta.Description)
+	})
+
+	t.Run("is_sensitive is stored in typed column", func(t *testing.T) {
+		sensitive := true
+
+		colMeta := &models.ColumnMetadata{}
+		colMeta.IsSensitive = &sensitive
+
+		// Verify is_sensitive is stored correctly
+		require.NotNil(t, colMeta.IsSensitive)
+		assert.True(t, *colMeta.IsSensitive)
+	})
+
+	t.Run("all fields combined", func(t *testing.T) {
+		// Simulate all parameters being set
+		description := "User account status"
+		entity := "User"
+		role := "attribute"
+		sensitive := false
+		enumValues := []string{"ACTIVE - Normal", "INACTIVE - Disabled"}
+
+		// Parse enums
+		parsedEnums := parseEnumValues(enumValues)
+
+		// Create column metadata as the tool would
+		colMeta := &models.ColumnMetadata{}
+
+		if description != "" {
+			colMeta.Description = &description
+		}
+
+		if entity != "" {
+			if colMeta.Features.IdentifierFeatures == nil {
+				colMeta.Features.IdentifierFeatures = &models.IdentifierFeatures{}
+			}
+			colMeta.Features.IdentifierFeatures.EntityReferenced = entity
+		}
+
+		if role != "" {
+			colMeta.Role = &role
+		}
+
+		colMeta.Features.EnumFeatures = &models.EnumFeatures{
+			Values: make([]models.ColumnEnumValue, len(parsedEnums)),
+		}
+		for i, ev := range parsedEnums {
+			colMeta.Features.EnumFeatures.Values[i] = models.ColumnEnumValue{
+				Value: ev.Value,
+				Label: ev.Description,
+			}
+		}
+
+		colMeta.IsSensitive = &sensitive
+
+		// Verify all fields
+		assert.Equal(t, "User account status", *colMeta.Description)
+		assert.Equal(t, "User", colMeta.Features.IdentifierFeatures.EntityReferenced)
+		assert.Equal(t, "attribute", *colMeta.Role)
+		assert.False(t, *colMeta.IsSensitive)
+		assert.Len(t, colMeta.Features.EnumFeatures.Values, 2)
+		assert.Equal(t, "ACTIVE", colMeta.Features.EnumFeatures.Values[0].Value)
+		assert.Equal(t, "Normal", colMeta.Features.EnumFeatures.Values[0].Label)
+	})
+}

@@ -500,20 +500,27 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 			if description != "" {
 				colMeta.Description = &description
 			}
-			// Entity is now stored in Features.IdentifierFeatures, but for MCP edits
-			// we store it as part of the semantic annotation workflow. Entity relationships
-			// are handled separately via entity occurrence tracking.
-			// For now, we don't set entity directly - it's managed by the ontology extraction.
+			// Entity is stored in Features.IdentifierFeatures.EntityReferenced
+			if entity != "" {
+				if colMeta.Features.IdentifierFeatures == nil {
+					colMeta.Features.IdentifierFeatures = &models.IdentifierFeatures{}
+				}
+				colMeta.Features.IdentifierFeatures.EntityReferenced = entity
+			}
 			if role != "" {
 				colMeta.Role = &role
 			}
-			// Enum values are now stored in Features.EnumFeatures
+			// Enum values are stored in Features.EnumFeatures with Value/Label separation
 			if enumValues != nil {
+				parsedEnums := parseEnumValues(enumValues)
 				colMeta.Features.EnumFeatures = &models.EnumFeatures{
-					Values: make([]models.ColumnEnumValue, len(enumValues)),
+					Values: make([]models.ColumnEnumValue, len(parsedEnums)),
 				}
-				for i, v := range enumValues {
-					colMeta.Features.EnumFeatures.Values[i] = models.ColumnEnumValue{Value: v}
+				for i, ev := range parsedEnums {
+					colMeta.Features.EnumFeatures.Values[i] = models.ColumnEnumValue{
+						Value: ev.Value,
+						Label: ev.Description, // EnumValue.Description maps to ColumnEnumValue.Label
+					}
 				}
 			}
 			if isSensitive != nil {
