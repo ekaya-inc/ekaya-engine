@@ -276,14 +276,14 @@ Review and remove entity references from:
 ## Phase 8: Update main.go
 
 Remove entity wiring from `main.go`:
-- [ ] Remove `entityRepo` creation
-- [ ] Remove `entityRelationshipRepo` creation
-- [ ] Remove `entityService` creation
-- [ ] Remove `entityDiscoveryService` creation
-- [ ] Remove `entityPromotionService` creation
-- [ ] Remove `entityHandler` creation and route registration
-- [ ] Remove `entityRelationshipHandler` creation and route registration
-- [ ] Remove entity-related DAG node wiring (SetEntityDiscoveryMethods, SetEntityEnrichmentMethods, etc.)
+- [x] Remove `entityRepo` creation
+- [x] Remove `entityRelationshipRepo` creation
+- [x] Remove `entityService` creation
+- [x] Remove `entityDiscoveryService` creation
+- [x] Remove `entityPromotionService` creation
+- [x] Remove `entityHandler` creation and route registration
+- [x] Remove `entityRelationshipHandler` creation and route registration
+- [x] Remove entity-related DAG node wiring (SetEntityDiscoveryMethods, SetEntityEnrichmentMethods, etc.)
 
 ---
 
