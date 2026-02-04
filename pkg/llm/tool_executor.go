@@ -196,12 +196,10 @@ func (e *OntologyToolExecutor) querySchemaMetadata(ctx context.Context, argument
 
 	// Build response with table and column info
 	type columnInfo struct {
-		Name         string  `json:"name"`
-		DataType     string  `json:"data_type"`
-		IsPrimaryKey bool    `json:"is_primary_key"`
-		IsNullable   bool    `json:"is_nullable"`
-		BusinessName *string `json:"business_name,omitempty"`
-		Description  *string `json:"description,omitempty"`
+		Name         string `json:"name"`
+		DataType     string `json:"data_type"`
+		IsPrimaryKey bool   `json:"is_primary_key"`
+		IsNullable   bool   `json:"is_nullable"`
 	}
 
 	type tableInfo struct {
@@ -237,8 +235,6 @@ func (e *OntologyToolExecutor) querySchemaMetadata(ctx context.Context, argument
 				DataType:     c.DataType,
 				IsPrimaryKey: c.IsPrimaryKey,
 				IsNullable:   c.IsNullable,
-				BusinessName: c.BusinessName,
-				Description:  c.Description,
 			})
 		}
 

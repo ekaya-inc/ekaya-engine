@@ -161,14 +161,14 @@ func registerGetColumnMetadataTool(s *server.MCPServer, deps *ColumnToolDeps) {
 			}
 		}
 
-		// Fallback: check engine_column_metadata for additional metadata
-		if deps.ColumnMetadataRepo != nil {
-			columnMeta, err := deps.ColumnMetadataRepo.GetByTableColumn(tenantCtx, projectID, table, column)
+		// Fallback: check engine_ontology_column_metadata for additional metadata
+		// Column metadata is now keyed by schema_column_id (FK to engine_schema_columns)
+		if deps.ColumnMetadataRepo != nil && schemaColumn != nil {
+			columnMeta, err := deps.ColumnMetadataRepo.GetBySchemaColumnID(tenantCtx, schemaColumn.ID)
 			if err != nil {
 				deps.Logger.Warn("Failed to get column metadata fallback",
 					zap.String("project_id", projectID.String()),
-					zap.String("table", table),
-					zap.String("column", column),
+					zap.String("schema_column_id", schemaColumn.ID.String()),
 					zap.Error(err))
 			} else if columnMeta != nil {
 				// Initialize metadata section if not already present
@@ -180,14 +180,27 @@ func registerGetColumnMetadataTool(s *server.MCPServer, deps *ColumnToolDeps) {
 				if columnMeta.Description != nil && *columnMeta.Description != "" && response.Metadata.Description == "" {
 					response.Metadata.Description = *columnMeta.Description
 				}
-				if columnMeta.Entity != nil && *columnMeta.Entity != "" && response.Metadata.Entity == "" {
-					response.Metadata.Entity = *columnMeta.Entity
+				// Entity is now stored in Features.IdentifierFeatures.EntityReferenced
+				if idFeatures := columnMeta.GetIdentifierFeatures(); idFeatures != nil {
+					if idFeatures.EntityReferenced != "" && response.Metadata.Entity == "" {
+						response.Metadata.Entity = idFeatures.EntityReferenced
+					}
 				}
 				if columnMeta.Role != nil && *columnMeta.Role != "" && response.Metadata.Role == "" {
 					response.Metadata.Role = *columnMeta.Role
 				}
-				if len(columnMeta.EnumValues) > 0 && len(response.Metadata.EnumValues) == 0 {
-					response.Metadata.EnumValues = columnMeta.EnumValues
+				// EnumValues are now stored in Features.EnumFeatures
+				if enumFeatures := columnMeta.GetEnumFeatures(); enumFeatures != nil && len(enumFeatures.Values) > 0 && len(response.Metadata.EnumValues) == 0 {
+					// Convert ColumnEnumValue to strings
+					enumStrings := make([]string, len(enumFeatures.Values))
+					for i, ev := range enumFeatures.Values {
+						if ev.Label != "" {
+							enumStrings[i] = ev.Value + " - " + ev.Label
+						} else {
+							enumStrings[i] = ev.Value
+						}
+					}
+					response.Metadata.EnumValues = enumStrings
 				}
 				// Always include is_sensitive if set (it's a manual override)
 				if columnMeta.IsSensitive != nil {
@@ -455,9 +468,10 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 		}
 
 		// Also track provenance in column_metadata table if available
-		if deps.ColumnMetadataRepo != nil {
+		// Column metadata is now keyed by schema_column_id (FK to engine_schema_columns)
+		if deps.ColumnMetadataRepo != nil && schemaColumn != nil {
 			// Check if existing metadata exists and verify precedence
-			existing, err := deps.ColumnMetadataRepo.GetByTableColumn(tenantCtx, projectID, table, column)
+			existing, err := deps.ColumnMetadataRepo.GetBySchemaColumnID(tenantCtx, schemaColumn.ID)
 			if err != nil {
 				return nil, fmt.Errorf("failed to check existing column metadata: %w", err)
 			}
@@ -479,22 +493,28 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 			lastEditSource := models.ProvenanceMCP
 			colMeta := &models.ColumnMetadata{
 				ProjectID:      projectID,
-				TableName:      table,
-				ColumnName:     column,
+				SchemaColumnID: schemaColumn.ID,
 				Source:         models.ProvenanceMCP,
 				LastEditSource: &lastEditSource,
 			}
 			if description != "" {
 				colMeta.Description = &description
 			}
-			if entity != "" {
-				colMeta.Entity = &entity
-			}
+			// Entity is now stored in Features.IdentifierFeatures, but for MCP edits
+			// we store it as part of the semantic annotation workflow. Entity relationships
+			// are handled separately via entity occurrence tracking.
+			// For now, we don't set entity directly - it's managed by the ontology extraction.
 			if role != "" {
 				colMeta.Role = &role
 			}
+			// Enum values are now stored in Features.EnumFeatures
 			if enumValues != nil {
-				colMeta.EnumValues = enumValues
+				colMeta.Features.EnumFeatures = &models.EnumFeatures{
+					Values: make([]models.ColumnEnumValue, len(enumValues)),
+				}
+				for i, v := range enumValues {
+					colMeta.Features.EnumFeatures.Values[i] = models.ColumnEnumValue{Value: v}
+				}
 			}
 			if isSensitive != nil {
 				colMeta.IsSensitive = isSensitive

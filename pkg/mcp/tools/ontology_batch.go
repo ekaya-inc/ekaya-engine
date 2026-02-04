@@ -210,7 +210,7 @@ func registerUpdateColumnsTool(s *server.MCPServer, deps *ColumnToolDeps) {
 
 				// Track column metadata with provenance
 				if deps.ColumnMetadataRepo != nil {
-					if err := trackColumnMetadata(tenantCtx, deps, projectID, update); err != nil {
+					if err := trackColumnMetadata(tenantCtx, deps, projectID, datasourceID, update); err != nil {
 						// Log but don't fail - ontology update succeeded
 						deps.Logger.Warn("Failed to track column metadata provenance",
 							zap.String("table", update.Table),
@@ -351,8 +351,9 @@ func validateColumnUpdate(ctx context.Context, deps *ColumnToolDeps, projectID, 
 	}
 
 	// Check precedence if metadata repo is available
-	if deps.ColumnMetadataRepo != nil {
-		existing, err := deps.ColumnMetadataRepo.GetByTableColumn(ctx, projectID, update.Table, update.Column)
+	// Column metadata is now keyed by schema_column_id (FK to engine_schema_columns)
+	if deps.ColumnMetadataRepo != nil && schemaColumn != nil {
+		existing, err := deps.ColumnMetadataRepo.GetBySchemaColumnID(ctx, schemaColumn.ID)
 		if err != nil {
 			return fmt.Errorf("failed to check existing column metadata: %w", err)
 		}
@@ -371,26 +372,41 @@ func validateColumnUpdate(ctx context.Context, deps *ColumnToolDeps, projectID, 
 }
 
 // trackColumnMetadata tracks column metadata with provenance.
-func trackColumnMetadata(ctx context.Context, deps *ColumnToolDeps, projectID uuid.UUID, update ColumnUpdate) error {
+// Column metadata is now keyed by schema_column_id (FK to engine_schema_columns).
+func trackColumnMetadata(ctx context.Context, deps *ColumnToolDeps, projectID, datasourceID uuid.UUID, update ColumnUpdate) error {
+	// Look up the schema column to get its ID
+	schemaTable, err := deps.SchemaRepo.FindTableByName(ctx, projectID, datasourceID, update.Table)
+	if err != nil || schemaTable == nil {
+		return fmt.Errorf("table %q not found", update.Table)
+	}
+	schemaColumn, err := deps.SchemaRepo.GetColumnByName(ctx, schemaTable.ID, update.Column)
+	if err != nil || schemaColumn == nil {
+		return fmt.Errorf("column %q not found in table %q", update.Column, update.Table)
+	}
+
 	lastEditSource := models.ProvenanceMCP
 	colMeta := &models.ColumnMetadata{
 		ProjectID:      projectID,
-		TableName:      update.Table,
-		ColumnName:     update.Column,
+		SchemaColumnID: schemaColumn.ID,
 		Source:         models.ProvenanceMCP,
 		LastEditSource: &lastEditSource,
 	}
 	if update.Description != nil {
 		colMeta.Description = update.Description
 	}
-	if update.Entity != nil {
-		colMeta.Entity = update.Entity
-	}
+	// Entity is now stored in Features.IdentifierFeatures, handled by ontology extraction
+	// Role is still a direct field
 	if update.Role != nil {
 		colMeta.Role = update.Role
 	}
+	// EnumValues are now stored in Features.EnumFeatures
 	if update.EnumValues != nil {
-		colMeta.EnumValues = update.EnumValues
+		colMeta.Features.EnumFeatures = &models.EnumFeatures{
+			Values: make([]models.ColumnEnumValue, len(update.EnumValues)),
+		}
+		for i, v := range update.EnumValues {
+			colMeta.Features.EnumFeatures.Values[i] = models.ColumnEnumValue{Value: v}
+		}
 	}
 	return deps.ColumnMetadataRepo.Upsert(ctx, colMeta)
 }
