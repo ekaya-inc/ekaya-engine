@@ -51,9 +51,6 @@ func (r *ontologyRepository) Create(ctx context.Context, ontology *models.Tiered
 		domainJSON = nil
 	}
 
-	// entity_summaries column is retained for backward compatibility but no longer used
-	var entitiesJSON []byte = nil
-
 	columnsJSON, err := json.Marshal(ontology.ColumnDetails)
 	if err != nil {
 		return fmt.Errorf("failed to marshal column_details: %w", err)
@@ -92,12 +89,12 @@ func (r *ontologyRepository) Create(ctx context.Context, ontology *models.Tiered
 	query := `
 		INSERT INTO engine_ontologies (
 			id, project_id, version, is_active, domain_summary,
-			entity_summaries, column_details, metadata, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+			column_details, metadata, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
 
 	_, err = tx.Exec(ctx, query,
 		ontology.ID, ontology.ProjectID, ontology.Version, ontology.IsActive,
-		domainJSON, entitiesJSON, columnsJSON, metadataJSON, ontology.CreatedAt, ontology.UpdatedAt,
+		domainJSON, columnsJSON, metadataJSON, ontology.CreatedAt, ontology.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create ontology: %w", err)
@@ -118,7 +115,7 @@ func (r *ontologyRepository) GetActive(ctx context.Context, projectID uuid.UUID)
 
 	query := `
 		SELECT id, project_id, version, is_active,
-		       domain_summary, entity_summaries, column_details, metadata, created_at, updated_at
+		       domain_summary, column_details, metadata, created_at, updated_at
 		FROM engine_ontologies
 		WHERE project_id = $1 AND is_active = true
 		ORDER BY version DESC
@@ -253,11 +250,11 @@ func (r *ontologyRepository) DeleteByProject(ctx context.Context, projectID uuid
 
 func scanOntologyRow(row pgx.Row) (*models.TieredOntology, error) {
 	var o models.TieredOntology
-	var domainJSON, entitiesJSON, columnsJSON, metadataJSON []byte
+	var domainJSON, columnsJSON, metadataJSON []byte
 
 	err := row.Scan(
 		&o.ID, &o.ProjectID, &o.Version, &o.IsActive,
-		&domainJSON, &entitiesJSON, &columnsJSON, &metadataJSON, &o.CreatedAt, &o.UpdatedAt,
+		&domainJSON, &columnsJSON, &metadataJSON, &o.CreatedAt, &o.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -272,9 +269,6 @@ func scanOntologyRow(row pgx.Row) (*models.TieredOntology, error) {
 			return nil, fmt.Errorf("failed to unmarshal domain_summary: %w", err)
 		}
 	}
-
-	// entity_summaries column is scanned but no longer used (legacy column retained for backward compatibility)
-	_ = entitiesJSON
 
 	if len(columnsJSON) > 0 {
 		o.ColumnDetails = make(map[string][]models.ColumnDetail)

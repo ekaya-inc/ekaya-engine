@@ -209,14 +209,14 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 
 	// Create tool executor
 	toolExecutor := llm.NewOntologyToolExecutor(&llm.OntologyToolExecutorConfig{
-		ProjectID:          projectID,
-		OntologyID:         *dag.OntologyID,
-		DatasourceID:       dag.DatasourceID,
-		OntologyRepo:       s.ontologyRepo,
-		KnowledgeRepo:      s.knowledgeRepo,
-		SchemaRepo:         s.schemaRepo,
-		QueryExecutor:      queryExecutor,
-		Logger:             s.logger,
+		ProjectID:     projectID,
+		OntologyID:    *dag.OntologyID,
+		DatasourceID:  dag.DatasourceID,
+		OntologyRepo:  s.ontologyRepo,
+		KnowledgeRepo: s.knowledgeRepo,
+		SchemaRepo:    s.schemaRepo,
+		QueryExecutor: queryExecutor,
+		Logger:        s.logger,
 	})
 
 	// Create streaming client
