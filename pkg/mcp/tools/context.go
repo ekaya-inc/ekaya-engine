@@ -575,12 +575,8 @@ func buildColumnDetails(
 			"data_type":   col.DataType,
 			"is_nullable": col.IsNullable,
 		}
-		if col.BusinessName != "" {
-			colDetail["business_name"] = col.BusinessName
-		}
-		if col.Description != "" {
-			colDetail["description"] = col.Description
-		}
+		// Note: business_name and description are now in engine_ontology_column_metadata,
+		// retrieved via columnMetadataByColID below (from update_column MCP enrichment).
 
 		// Get corresponding schema column if available
 		var schemaCol *models.SchemaColumn
@@ -623,7 +619,7 @@ func buildColumnDetails(
 
 		// Add statistics if requested
 		if include.Statistics && schemaCol != nil {
-			addStatisticsToColumnDetail(colDetail, schemaCol, col)
+			addStatisticsToColumnDetail(colDetail, schemaCol)
 		}
 
 		// Add sample values if requested and available
@@ -720,7 +716,7 @@ func buildColumnDetails(
 }
 
 // addStatisticsToColumnDetail adds statistics fields to a column detail map from SchemaColumn.
-func addStatisticsToColumnDetail(colDetail map[string]any, schemaCol *models.SchemaColumn, datasourceCol *models.DatasourceColumn) {
+func addStatisticsToColumnDetail(colDetail map[string]any, schemaCol *models.SchemaColumn) {
 	// Add distinct_count if available
 	if schemaCol.DistinctCount != nil {
 		colDetail["distinct_count"] = *schemaCol.DistinctCount

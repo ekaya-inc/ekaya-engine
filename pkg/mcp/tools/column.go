@@ -211,12 +211,12 @@ type columnMetadataInfo struct {
 	Confidence         *float64 `json:"confidence,omitempty"`          // Classification confidence (0.0 - 1.0)
 
 	// Type-specific features (populated based on classification_path)
-	EnumValues        []string           `json:"enum_values,omitempty"`
-	Entity            string             `json:"entity,omitempty"`               // Entity this column references (from IdentifierFeatures)
-	TimestampFeatures *timestampFeatures `json:"timestamp_features,omitempty"`   // Populated for timestamp columns
-	BooleanFeatures   *booleanFeatures   `json:"boolean_features,omitempty"`     // Populated for boolean columns
+	EnumValues         []string            `json:"enum_values,omitempty"`
+	Entity             string              `json:"entity,omitempty"`              // Entity this column references (from IdentifierFeatures)
+	TimestampFeatures  *timestampFeatures  `json:"timestamp_features,omitempty"`  // Populated for timestamp columns
+	BooleanFeatures    *booleanFeatures    `json:"boolean_features,omitempty"`    // Populated for boolean columns
 	IdentifierFeatures *identifierFeatures `json:"identifier_features,omitempty"` // Populated for identifier columns
-	MonetaryFeatures  *monetaryFeatures  `json:"monetary_features,omitempty"`    // Populated for monetary columns
+	MonetaryFeatures   *monetaryFeatures   `json:"monetary_features,omitempty"`   // Populated for monetary columns
 
 	// User overrides
 	IsSensitive *bool `json:"is_sensitive,omitempty"` // nil=auto-detect, true=always sensitive, false=never sensitive

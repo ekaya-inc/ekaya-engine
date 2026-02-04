@@ -630,7 +630,7 @@ func TestAddStatisticsToColumnDetail(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			colDetail := make(map[string]any)
-			addStatisticsToColumnDetail(colDetail, tt.schemaCol, tt.datasourceCol)
+			addStatisticsToColumnDetail(colDetail, tt.schemaCol)
 
 			// Check expected fields are present
 			for _, field := range tt.expectFields {
@@ -867,20 +867,19 @@ func TestColumnMetadataEnrichment(t *testing.T) {
 			notExpectedFields: []string{"description", "entity", "role", "enum_values"},
 		},
 		{
-			name:       "metadata with description overrides datasource",
+			name:       "metadata provides description from ontology table",
 			columnName: "host_id",
 			datasourceCol: &models.DatasourceColumn{
-				ColumnName:  "host_id",
-				DataType:    "uuid",
-				IsNullable:  false,
-				Description: "Original datasource description",
+				ColumnName: "host_id",
+				DataType:   "uuid",
+				IsNullable: false,
 			},
 			columnMeta: &models.ColumnMetadata{
 				Description: ptrString("Use this to find all hosts who had engagements"),
 			},
 			expectedFields: map[string]any{
 				"column_name": "host_id",
-				"description": "Use this to find all hosts who had engagements", // Should override
+				"description": "Use this to find all hosts who had engagements",
 			},
 			notExpectedFields: []string{"entity", "role", "enum_values"},
 		},
@@ -985,22 +984,18 @@ func TestColumnMetadataEnrichment(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Build column detail as done in buildColumnDetails
+			// Note: business_name and description are now in engine_ontology_column_metadata,
+			// not DatasourceColumn
 			colDetail := map[string]any{
 				"column_name": tt.datasourceCol.ColumnName,
 				"data_type":   tt.datasourceCol.DataType,
 				"is_nullable": tt.datasourceCol.IsNullable,
 			}
-			if tt.datasourceCol.BusinessName != "" {
-				colDetail["business_name"] = tt.datasourceCol.BusinessName
-			}
-			if tt.datasourceCol.Description != "" {
-				colDetail["description"] = tt.datasourceCol.Description
-			}
 
 			// Apply column metadata enrichment (same logic as context.go)
 			// Column metadata now uses Features JSONB with typed sub-features
 			if tt.columnMeta != nil {
-				// Description from update_column overrides datasource description
+				// Description from column metadata (from ontology table)
 				if tt.columnMeta.Description != nil && *tt.columnMeta.Description != "" {
 					colDetail["description"] = *tt.columnMeta.Description
 				}
