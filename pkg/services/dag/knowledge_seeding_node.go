@@ -21,7 +21,7 @@ type KnowledgeSeedingMethods interface {
 
 // KnowledgeSeedingNode extracts domain knowledge facts from the project overview.
 // This node processes the user-provided project overview (if available) along with
-// schema context to extract business rules, conventions, domain terms, and entity hints
+// schema context to extract business rules, conventions, and domain terms
 // that will be used to improve downstream ontology extraction.
 type KnowledgeSeedingNode struct {
 	*BaseNode

@@ -129,8 +129,9 @@ Remove from `pkg/models/ontology_dag.go`:
 
 ## Phase 4: Delete Entity Services
 
-### 4.1 Delete service files
+### 4.1 Delete entity service files
 
+Delete all entity-related service files from `pkg/services/`:
 - [ ] `pkg/services/entity_service.go`
 - [ ] `pkg/services/entity_service_test.go`
 - [ ] `pkg/services/entity_discovery_service.go`
@@ -144,24 +145,68 @@ Remove from `pkg/models/ontology_dag.go`:
 - [ ] `pkg/services/entity_promotion_service_test.go`
 - [ ] `pkg/services/entity_promotion_integration_test.go`
 
-### 4.2 Update services that reference entities
+These files contain the entity discovery, promotion, and merge logic that is being removed for v1.0. Simply delete these files - they have no remaining dependencies after the earlier phases removed the entity models and repositories.
 
-Review and remove entity references from:
-- [ ] `pkg/services/ontology_context.go` - Remove entity fetching/formatting
+### 4.2 Remove entity references from ontology_context.go and its tests
+
+Update `pkg/services/ontology_context.go` to remove all entity-related code:
+- [ ] Remove any imports related to entity types
+- [ ] Remove entity fetching/formatting logic
+- [ ] Remove any methods that build entity context
+- [ ] Remove entity-related fields from service structs
+- [ ] Remove entity repository dependencies
+
+Also update the corresponding test files:
 - [ ] `pkg/services/ontology_context_test.go`
 - [ ] `pkg/services/ontology_context_integration_test.go`
-- [ ] `pkg/services/ontology_finalization.go` - Remove entity summary building
-- [ ] `pkg/services/ontology_finalization_test.go`
-- [ ] `pkg/services/ontology_dag_service.go` - Remove entity node wiring
-- [ ] `pkg/services/ontology_dag_service_test.go`
-- [ ] `pkg/services/relationship_enrichment.go` - Remove entity relationship enrichment
-- [ ] `pkg/services/relationship_enrichment_test.go`
-- [ ] `pkg/services/column_enrichment.go` - Remove entity column references
-- [ ] `pkg/services/column_enrichment_test.go`
-- [ ] `pkg/services/schema.go` - Remove entity references if any
-- [ ] `pkg/services/schema_test.go`
-- [ ] `pkg/services/projects.go` - Remove entity deletion in project cleanup
-- [ ] `pkg/services/projects_test.go`
+
+The OntologyContextService builds context for LLM prompts. After this change, it should only handle table/column metadata without the entity abstraction layer.
+
+### 4.3 Remove entity references from ontology_finalization.go and ontology_dag_service.go
+
+Update `pkg/services/ontology_finalization.go`:
+- [ ] Remove entity summary building logic
+- [ ] Remove any entity-related imports
+- [ ] The finalization service should no longer write entity_summaries to the ontology
+
+Update `pkg/services/ontology_finalization_test.go` to remove entity-related test cases.
+
+Update `pkg/services/ontology_dag_service.go`:
+- [ ] Remove entity node wiring (SetEntityDiscoveryMethods, SetEntityEnrichmentMethods, SetEntityPromotionMethods, etc.)
+- [ ] Remove entity-related DAG node creation
+- [ ] The DAG service orchestrates the ontology pipeline; it should no longer include entity discovery, enrichment, or promotion nodes
+
+Update `pkg/services/ontology_dag_service_test.go` to remove entity-related test cases.
+
+### 4.4 Remove entity references from relationship_enrichment.go and column_enrichment.go
+
+Update `pkg/services/relationship_enrichment.go`:
+- [ ] Remove entity relationship enrichment logic
+- [ ] The relationship enrichment may need significant changes or could potentially be deleted entirely if it only handled entity relationships
+- [ ] If it handles table-to-table FK relationships (non-entity), keep that functionality
+
+Update `pkg/services/relationship_enrichment_test.go` accordingly.
+
+Update `pkg/services/column_enrichment.go`:
+- [ ] Remove entity column references
+- [ ] Remove any logic that associates columns with entities
+- [ ] Keep column enrichment for semantic types, purposes, and features without entity associations
+
+Update `pkg/services/column_enrichment_test.go` accordingly.
+
+### 4.5 Remove entity references from schema.go and projects.go
+
+Update `pkg/services/schema.go`:
+- [ ] Search for and remove any entity references
+- [ ] This service handles schema discovery and metadata; it should not reference entity types
+
+Update `pkg/services/schema_test.go` accordingly.
+
+Update `pkg/services/projects.go`:
+- [ ] Remove entity deletion in project cleanup logic
+- [ ] When a project is deleted, the code currently deletes associated entities; remove this cleanup since entity tables no longer exist
+
+Update `pkg/services/projects_test.go` accordingly.
 
 ---
 
@@ -169,19 +214,19 @@ Review and remove entity references from:
 
 ### 5.1 Delete DAG node files
 
-- [ ] `pkg/services/dag/entity_discovery_node.go`
-- [ ] `pkg/services/dag/entity_enrichment_node.go`
-- [ ] `pkg/services/dag/entity_enrichment_node_test.go`
-- [ ] `pkg/services/dag/entity_promotion_node.go`
-- [ ] `pkg/services/dag/entity_promotion_node_test.go`
+- [x] `pkg/services/dag/entity_discovery_node.go`
+- [x] `pkg/services/dag/entity_enrichment_node.go`
+- [x] `pkg/services/dag/entity_enrichment_node_test.go`
+- [x] `pkg/services/dag/entity_promotion_node.go`
+- [x] `pkg/services/dag/entity_promotion_node_test.go`
 
 ### 5.2 Update remaining DAG nodes
 
 Review and remove entity references from:
-- [ ] `pkg/services/dag/relationship_enrichment_node.go` - May need significant changes or deletion
-- [ ] `pkg/services/dag/column_enrichment_node.go` - Remove entity column handling
-- [ ] `pkg/services/dag/knowledge_seeding_node.go` - Remove entity references if any
-- [ ] `pkg/services/dag/column_feature_extraction_node.go` - Remove entity references if any
+- [x] `pkg/services/dag/relationship_enrichment_node.go` - May need significant changes or deletion
+- [x] `pkg/services/dag/column_enrichment_node.go` - Remove entity column handling
+- [x] `pkg/services/dag/knowledge_seeding_node.go` - Remove entity references if any
+- [x] `pkg/services/dag/column_feature_extraction_node.go` - Remove entity references if any
 
 ---
 

@@ -22,7 +22,7 @@ type ColumnFeatureExtractionMethods interface {
 
 // ColumnFeatureExtractionNode extracts deterministic features from columns.
 // This node runs early in the DAG (after KnowledgeSeeding) to provide feature data
-// that can inform Entity Discovery, FK Discovery, and other downstream LLM-based nodes.
+// that can inform FK Discovery, Column Enrichment, and other downstream LLM-based nodes.
 //
 // Features extracted:
 // - Data types and nullable status

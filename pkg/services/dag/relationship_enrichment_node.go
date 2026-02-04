@@ -27,7 +27,7 @@ type RelationshipEnrichmentMethods interface {
 }
 
 // RelationshipEnrichmentNode wraps LLM-based relationship enrichment.
-// This generates business-meaningful descriptions for entity relationships.
+// This generates business-meaningful descriptions for table relationships.
 type RelationshipEnrichmentNode struct {
 	*BaseNode
 	relationshipEnrichmentSvc RelationshipEnrichmentMethods
