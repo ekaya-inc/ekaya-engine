@@ -182,19 +182,10 @@ The OntologyContextService builds context for LLM prompts. After this change, it
 
 ### 4.4 Remove entity references from relationship_enrichment.go and column_enrichment.go
 
-Update `pkg/services/relationship_enrichment.go`:
-- [ ] Remove entity relationship enrichment logic
-- [ ] The relationship enrichment may need significant changes or could potentially be deleted entirely if it only handled entity relationships
-- [ ] If it handles table-to-table FK relationships (non-entity), keep that functionality
-
-Update `pkg/services/relationship_enrichment_test.go` accordingly.
-
-Update `pkg/services/column_enrichment.go`:
-- [ ] Remove entity column references
-- [ ] Remove any logic that associates columns with entities
-- [ ] Keep column enrichment for semantic types, purposes, and features without entity associations
-
-Update `pkg/services/column_enrichment_test.go` accordingly.
+- [x] Deleted `pkg/services/relationship_enrichment.go` and test - only handled entity relationships
+- [x] Deleted `pkg/services/dag/relationship_enrichment_node.go` - DAG node for entity relationships
+- [x] Updated `pkg/services/column_enrichment.go` - removed entity column references
+- [x] Updated `pkg/services/column_enrichment_test.go` accordingly
 
 ### 4.5 Remove entity references from schema.go and projects.go
 
