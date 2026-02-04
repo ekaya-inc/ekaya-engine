@@ -110,7 +110,8 @@ func setupOntologyContextTest(t *testing.T) *ontologyContextTestContext {
 	projectService := &mockProjectServiceForIntegration{dsID: ontologyContextTestDSID}
 	logger := zap.NewNop()
 
-	service := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, logger)
+	columnMetadataRepo := repositories.NewColumnMetadataRepository()
+	service := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, columnMetadataRepo, projectService, logger)
 
 	tc := &ontologyContextTestContext{
 		t:                t,

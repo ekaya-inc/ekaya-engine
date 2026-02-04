@@ -28,13 +28,14 @@ type OntologyContextService interface {
 }
 
 type ontologyContextService struct {
-	ontologyRepo      repositories.OntologyRepository
-	entityRepo        repositories.OntologyEntityRepository
-	relationshipRepo  repositories.EntityRelationshipRepository
-	schemaRepo        repositories.SchemaRepository
-	tableMetadataRepo repositories.TableMetadataRepository
-	projectService    ProjectService // Reserved for Phase 2/3: project-level domain aggregation
-	logger            *zap.Logger
+	ontologyRepo       repositories.OntologyRepository
+	entityRepo         repositories.OntologyEntityRepository
+	relationshipRepo   repositories.EntityRelationshipRepository
+	schemaRepo         repositories.SchemaRepository
+	tableMetadataRepo  repositories.TableMetadataRepository
+	columnMetadataRepo repositories.ColumnMetadataRepository
+	projectService     ProjectService // Reserved for Phase 2/3: project-level domain aggregation
+	logger             *zap.Logger
 }
 
 // NewOntologyContextService creates a new OntologyContextService.
@@ -44,17 +45,19 @@ func NewOntologyContextService(
 	relationshipRepo repositories.EntityRelationshipRepository,
 	schemaRepo repositories.SchemaRepository,
 	tableMetadataRepo repositories.TableMetadataRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
 	projectService ProjectService,
 	logger *zap.Logger,
 ) OntologyContextService {
 	return &ontologyContextService{
-		ontologyRepo:      ontologyRepo,
-		entityRepo:        entityRepo,
-		relationshipRepo:  relationshipRepo,
-		schemaRepo:        schemaRepo,
-		tableMetadataRepo: tableMetadataRepo,
-		projectService:    projectService,
-		logger:            logger,
+		ontologyRepo:       ontologyRepo,
+		entityRepo:         entityRepo,
+		relationshipRepo:   relationshipRepo,
+		schemaRepo:         schemaRepo,
+		tableMetadataRepo:  tableMetadataRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		projectService:     projectService,
+		logger:             logger,
 	}
 }
 
@@ -269,25 +272,13 @@ func (s *ontologyContextService) GetEntitiesContext(ctx context.Context, project
 
 // GetTablesContext returns table summaries, optionally filtered by table names.
 func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID uuid.UUID, tableNames []string) (*models.OntologyTablesContext, error) {
-	// Get active ontology (contains enriched column_details for FK roles)
+	// Get active ontology (for checking it exists)
 	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get active ontology: %w", err)
 	}
 	if ontology == nil {
 		return nil, fmt.Errorf("no active ontology found")
-	}
-
-	// Build enriched column lookup from ontology.ColumnDetails for FK roles
-	// Key: tableName -> columnName -> ColumnDetail
-	enrichedColumns := make(map[string]map[string]models.ColumnDetail)
-	if ontology.ColumnDetails != nil {
-		for tableName, cols := range ontology.ColumnDetails {
-			enrichedColumns[tableName] = make(map[string]models.ColumnDetail)
-			for _, col := range cols {
-				enrichedColumns[tableName][col.Name] = col
-			}
-		}
 	}
 
 	// Get entities from normalized table to get business names/descriptions
@@ -332,6 +323,28 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 		return nil, fmt.Errorf("failed to get columns: %w", err)
 	}
 
+	// Collect all column IDs for metadata lookup
+	var allColumnIDs []uuid.UUID
+	for _, columns := range columnsByTable {
+		for _, col := range columns {
+			allColumnIDs = append(allColumnIDs, col.ID)
+		}
+	}
+
+	// Fetch column metadata from engine_ontology_column_metadata
+	columnMetadataByID := make(map[uuid.UUID]*models.ColumnMetadata)
+	if len(allColumnIDs) > 0 && s.columnMetadataRepo != nil {
+		metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, allColumnIDs)
+		if err != nil {
+			s.logger.Warn("Failed to fetch column metadata for tables context, continuing without",
+				zap.Error(err))
+		} else {
+			for _, meta := range metadataList {
+				columnMetadataByID[meta.SchemaColumnID] = meta
+			}
+		}
+	}
+
 	// Get relationships involving these tables
 	relationships, err := s.relationshipRepo.GetByTables(ctx, projectID, tablesToInclude)
 	if err != nil {
@@ -340,8 +353,13 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 
 	// Build relationship index by source table
 	relationshipsByTable := make(map[string][]*models.EntityRelationship)
+	// Also build index by source column ID for FK association lookup
+	relationshipBySourceColumnID := make(map[uuid.UUID]*models.EntityRelationship)
 	for _, rel := range relationships {
 		relationshipsByTable[rel.SourceColumnTable] = append(relationshipsByTable[rel.SourceColumnTable], rel)
+		if rel.SourceColumnID != nil {
+			relationshipBySourceColumnID[*rel.SourceColumnID] = rel
+		}
 	}
 
 	// Fetch table metadata if repository is available
@@ -380,9 +398,8 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 		}
 
 		schemaColumns := columnsByTable[tableName]
-		tableEnriched := enrichedColumns[tableName] // nil if not enriched
 
-		// Build column overview from schema columns, merging enriched data
+		// Build column overview from schema columns, merging metadata and relationship data
 		columns := make([]models.ColumnOverview, 0, len(schemaColumns))
 		for _, col := range schemaColumns {
 			overview := models.ColumnOverview{
@@ -391,11 +408,22 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 				IsPrimaryKey: col.IsPrimaryKey,
 			}
 
-			// Merge enriched data if available (Role, FKAssociation, HasEnumValues)
-			if enriched, ok := tableEnriched[col.ColumnName]; ok {
-				overview.Role = enriched.Role
-				overview.FKAssociation = enriched.FKAssociation
-				overview.HasEnumValues = len(enriched.EnumValues) > 0
+			// Merge column metadata if available (Role, HasEnumValues)
+			if meta, ok := columnMetadataByID[col.ID]; ok {
+				if meta.Role != nil {
+					overview.Role = *meta.Role
+				}
+				// Check for enum values in features
+				if enumFeatures := meta.GetEnumFeatures(); enumFeatures != nil && len(enumFeatures.Values) > 0 {
+					overview.HasEnumValues = true
+				}
+			}
+
+			// Get FK association from relationship (source of truth for FK semantics)
+			if rel, ok := relationshipBySourceColumnID[col.ID]; ok {
+				if rel.Association != nil {
+					overview.FKAssociation = *rel.Association
+				}
 			}
 
 			columns = append(columns, overview)
@@ -463,25 +491,13 @@ func (s *ontologyContextService) GetColumnsContext(ctx context.Context, projectI
 		return nil, fmt.Errorf("too many tables requested: maximum %d tables allowed for columns depth, got %d", MaxColumnsDepthTables, len(tableNames))
 	}
 
-	// Get active ontology (also contains enriched column_details)
+	// Get active ontology (for checking it exists)
 	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get active ontology: %w", err)
 	}
 	if ontology == nil {
 		return nil, fmt.Errorf("no active ontology found")
-	}
-
-	// Build enriched column lookup from ontology.ColumnDetails
-	// Key: tableName -> columnName -> ColumnDetail
-	enrichedColumns := make(map[string]map[string]models.ColumnDetail)
-	if ontology.ColumnDetails != nil {
-		for tableName, cols := range ontology.ColumnDetails {
-			enrichedColumns[tableName] = make(map[string]models.ColumnDetail)
-			for _, col := range cols {
-				enrichedColumns[tableName][col.Name] = col
-			}
-		}
 	}
 
 	// Get entities for business names/descriptions
@@ -502,19 +518,48 @@ func (s *ontologyContextService) GetColumnsContext(ctx context.Context, projectI
 		return nil, fmt.Errorf("failed to get columns: %w", err)
 	}
 
+	// Collect all column IDs for metadata lookup
+	var allColumnIDs []uuid.UUID
+	for _, columns := range columnsByTable {
+		for _, col := range columns {
+			allColumnIDs = append(allColumnIDs, col.ID)
+		}
+	}
+
+	// Fetch column metadata from engine_ontology_column_metadata
+	columnMetadataByID := make(map[uuid.UUID]*models.ColumnMetadata)
+	if len(allColumnIDs) > 0 && s.columnMetadataRepo != nil {
+		metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, allColumnIDs)
+		if err != nil {
+			s.logger.Warn("Failed to fetch column metadata for columns context, continuing without",
+				zap.Error(err))
+		} else {
+			for _, meta := range metadataList {
+				columnMetadataByID[meta.SchemaColumnID] = meta
+			}
+		}
+	}
+
 	// Get relationships to determine FK info
 	relationships, err := s.relationshipRepo.GetByTables(ctx, projectID, tableNames)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get relationships: %w", err)
 	}
 
-	// Build FK info index: table -> column -> target table
-	fkInfo := make(map[string]map[string]string)
+	// Build FK info index by source column ID for FK target table and association
+	type fkData struct {
+		targetTable string
+		association string
+	}
+	fkByColumnID := make(map[uuid.UUID]fkData)
 	for _, rel := range relationships {
-		if fkInfo[rel.SourceColumnTable] == nil {
-			fkInfo[rel.SourceColumnTable] = make(map[string]string)
+		if rel.SourceColumnID != nil {
+			data := fkData{targetTable: rel.TargetColumnTable}
+			if rel.Association != nil {
+				data.association = *rel.Association
+			}
+			fkByColumnID[*rel.SourceColumnID] = data
 		}
-		fkInfo[rel.SourceColumnTable][rel.SourceColumnName] = rel.TargetColumnTable
 	}
 
 	// Fetch table metadata if repository is available
@@ -553,38 +598,46 @@ func (s *ontologyContextService) GetColumnsContext(ctx context.Context, projectI
 		}
 
 		schemaColumns := columnsByTable[tableName]
-		tableEnriched := enrichedColumns[tableName] // nil if not enriched
 
-		// Build column details by merging enriched data with schema
+		// Build column details by merging column metadata with schema
 		columnDetails := make([]models.ColumnDetail, 0, len(schemaColumns))
 		for _, col := range schemaColumns {
-			// Get current FK info from relationships (source of truth)
-			tableFKInfo := fkInfo[tableName]
-			foreignTable := ""
-			isForeignKey := false
-			if tableFKInfo != nil {
-				if ft, ok := tableFKInfo[col.ColumnName]; ok {
-					foreignTable = ft
-					isForeignKey = true
+			detail := models.ColumnDetail{
+				Name:         col.ColumnName,
+				IsPrimaryKey: col.IsPrimaryKey,
+			}
+
+			// Get FK info from relationships (source of truth for FK target and association)
+			if fkData, ok := fkByColumnID[col.ID]; ok {
+				detail.IsForeignKey = true
+				detail.ForeignTable = fkData.targetTable
+				detail.FKAssociation = fkData.association
+			}
+
+			// Merge column metadata if available (Description, SemanticType, Role, EnumValues)
+			if meta, ok := columnMetadataByID[col.ID]; ok {
+				if meta.Description != nil {
+					detail.Description = *meta.Description
+				}
+				if meta.SemanticType != nil {
+					detail.SemanticType = *meta.SemanticType
+				}
+				if meta.Role != nil {
+					detail.Role = *meta.Role
+				}
+				// Convert enum features to EnumValue slice
+				if enumFeatures := meta.GetEnumFeatures(); enumFeatures != nil && len(enumFeatures.Values) > 0 {
+					detail.EnumValues = make([]models.EnumValue, 0, len(enumFeatures.Values))
+					for _, v := range enumFeatures.Values {
+						detail.EnumValues = append(detail.EnumValues, models.EnumValue{
+							Value: v.Value,
+							Label: v.Label,
+						})
+					}
 				}
 			}
 
-			// Check if we have enriched data for this column
-			if enriched, ok := tableEnriched[col.ColumnName]; ok {
-				// Use enriched data + overlay current schema PK/FK info
-				enriched.IsPrimaryKey = col.IsPrimaryKey
-				enriched.IsForeignKey = isForeignKey
-				enriched.ForeignTable = foreignTable
-				columnDetails = append(columnDetails, enriched)
-			} else {
-				// Fall back to schema-only (no enrichment yet)
-				columnDetails = append(columnDetails, models.ColumnDetail{
-					Name:         col.ColumnName,
-					IsPrimaryKey: col.IsPrimaryKey,
-					IsForeignKey: isForeignKey,
-					ForeignTable: foreignTable,
-				})
-			}
+			columnDetails = append(columnDetails, detail)
 		}
 
 		detail := models.TableDetail{

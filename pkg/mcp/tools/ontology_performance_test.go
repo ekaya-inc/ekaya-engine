@@ -226,6 +226,7 @@ func setupOntologyPerformanceTest(t *testing.T) *ontologyPerformanceTestContext 
 	entityRepo := repositories.NewOntologyEntityRepository()
 	relationshipRepo := repositories.NewEntityRelationshipRepository()
 	schemaRepo := repositories.NewSchemaRepository()
+	columnMetadataRepo := repositories.NewColumnMetadataRepository()
 
 	// Create mock project service for tests
 	projectService := &mockProjectService{defaultDatasourceID: ontologyPerfTestDSID}
@@ -237,6 +238,7 @@ func setupOntologyPerformanceTest(t *testing.T) *ontologyPerformanceTestContext 
 		relationshipRepo,
 		schemaRepo,
 		nil, // tableMetadataRepo
+		columnMetadataRepo,
 		projectService,
 		logger,
 	)

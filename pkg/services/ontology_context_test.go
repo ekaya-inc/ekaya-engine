@@ -371,6 +371,58 @@ func (m *mockProjectServiceForOntology) SetOntologySettings(ctx context.Context,
 	return nil
 }
 
+// mockColumnMetadataRepository implements repositories.ColumnMetadataRepository for testing.
+type mockColumnMetadataRepository struct {
+	metadataBySchemaColumnID map[uuid.UUID]*models.ColumnMetadata
+	err                      error
+}
+
+func (m *mockColumnMetadataRepository) Upsert(ctx context.Context, meta *models.ColumnMetadata) error {
+	return nil
+}
+
+func (m *mockColumnMetadataRepository) UpsertFromExtraction(ctx context.Context, meta *models.ColumnMetadata) error {
+	return nil
+}
+
+func (m *mockColumnMetadataRepository) GetBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.metadataBySchemaColumnID == nil {
+		return nil, nil
+	}
+	return m.metadataBySchemaColumnID[schemaColumnID], nil
+}
+
+func (m *mockColumnMetadataRepository) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.ColumnMetadata, error) {
+	return nil, nil
+}
+
+func (m *mockColumnMetadataRepository) GetBySchemaColumnIDs(ctx context.Context, schemaColumnIDs []uuid.UUID) ([]*models.ColumnMetadata, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.metadataBySchemaColumnID == nil {
+		return nil, nil
+	}
+	var result []*models.ColumnMetadata
+	for _, id := range schemaColumnIDs {
+		if meta, ok := m.metadataBySchemaColumnID[id]; ok {
+			result = append(result, meta)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockColumnMetadataRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (m *mockColumnMetadataRepository) DeleteBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) error {
+	return nil
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -487,7 +539,7 @@ func TestGetDomainContext(t *testing.T) {
 	}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetDomainContext(ctx, projectID)
 
@@ -531,7 +583,7 @@ func TestGetDomainContext_NoActiveOntology(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetDomainContext(ctx, projectID)
 
@@ -636,7 +688,7 @@ func TestGetEntitiesContext(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetEntitiesContext(ctx, projectID)
 
@@ -710,7 +762,7 @@ func TestGetTablesContext(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, nil, projectService, zap.NewNop())
 
 	// Test with specific table filter
 	result, err := svc.GetTablesContext(ctx, projectID, []string{"users"})
@@ -770,7 +822,7 @@ func TestGetTablesContext_AllTables(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, nil, projectService, zap.NewNop())
 
 	// Test without filter - should return all entity tables
 	result, err := svc.GetTablesContext(ctx, projectID, nil)
@@ -781,27 +833,26 @@ func TestGetTablesContext_AllTables(t *testing.T) {
 }
 
 func TestGetTablesContext_FKRoles(t *testing.T) {
-	// Tests that FK roles and analytical roles from enriched column_details are exposed at tables depth
+	// Tests that FK roles and analytical roles from column metadata are exposed at tables depth
 	ctx := context.Background()
 	projectID := uuid.New()
 	ontologyID := uuid.New()
 	entityID1 := uuid.New()
+	userEntityID := uuid.New()
 	tableID := uuid.New()
 
-	// Ontology with enriched column_details containing FK roles and analytical roles
+	// Create column IDs upfront so they can be referenced by metadata and relationships
+	idColID := uuid.New()
+	hostIDColID := uuid.New()
+	visitorIDColID := uuid.New()
+	statusColID := uuid.New()
+	amountColID := uuid.New()
+
+	// Ontology (no ColumnDetails - those are now in column_metadata table)
 	ontology := &models.TieredOntology{
 		ID:        ontologyID,
 		ProjectID: projectID,
 		IsActive:  true,
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"billing_engagements": {
-				{Name: "id", IsPrimaryKey: true, Role: models.ColumnRoleIdentifier},
-				{Name: "host_id", IsForeignKey: true, ForeignTable: "users", FKAssociation: "host", Role: models.ColumnRoleDimension},
-				{Name: "visitor_id", IsForeignKey: true, ForeignTable: "users", FKAssociation: "visitor", Role: models.ColumnRoleDimension},
-				{Name: "status", EnumValues: []models.EnumValue{{Value: "active"}, {Value: "completed"}}, Role: models.ColumnRoleDimension},
-				{Name: "amount", Role: models.ColumnRoleMeasure},
-			},
-		},
 	}
 
 	entities := []*models.OntologyEntity{
@@ -819,23 +870,78 @@ func TestGetTablesContext_FKRoles(t *testing.T) {
 
 	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
 	entityRepo := &mockOntologyEntityRepository{entities: entities}
-	relationshipRepo := &mockEntityRelationshipRepository{}
+
+	// Relationships provide FK associations
+	hostAssoc := "host"
+	visitorAssoc := "visitor"
+	relationshipRepo := &mockEntityRelationshipRepository{
+		relationships: []*models.EntityRelationship{
+			{
+				ID:                uuid.New(),
+				SourceEntityID:    entityID1,
+				TargetEntityID:    userEntityID,
+				SourceColumnTable: "billing_engagements",
+				SourceColumnName:  "host_id",
+				SourceColumnID:    &hostIDColID,
+				TargetColumnTable: "users",
+				TargetColumnName:  "id",
+				Association:       &hostAssoc,
+			},
+			{
+				ID:                uuid.New(),
+				SourceEntityID:    entityID1,
+				TargetEntityID:    userEntityID,
+				SourceColumnTable: "billing_engagements",
+				SourceColumnName:  "visitor_id",
+				SourceColumnID:    &visitorIDColID,
+				TargetColumnTable: "users",
+				TargetColumnName:  "id",
+				Association:       &visitorAssoc,
+			},
+		},
+	}
 
 	// Mock schema columns for the table
 	schemaRepo := &mockSchemaRepository{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"billing_engagements": {
-				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
-				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "host_id", DataType: "uuid", IsPrimaryKey: false},
-				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "visitor_id", DataType: "uuid", IsPrimaryKey: false},
-				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "status", DataType: "varchar", IsPrimaryKey: false},
-				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "amount", DataType: "numeric", IsPrimaryKey: false},
+				{ID: idColID, SchemaTableID: tableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+				{ID: hostIDColID, SchemaTableID: tableID, ColumnName: "host_id", DataType: "uuid", IsPrimaryKey: false},
+				{ID: visitorIDColID, SchemaTableID: tableID, ColumnName: "visitor_id", DataType: "uuid", IsPrimaryKey: false},
+				{ID: statusColID, SchemaTableID: tableID, ColumnName: "status", DataType: "varchar", IsPrimaryKey: false},
+				{ID: amountColID, SchemaTableID: tableID, ColumnName: "amount", DataType: "numeric", IsPrimaryKey: false},
 			},
 		},
 	}
+
+	// Column metadata provides role and enum features
+	roleIdentifier := models.ColumnRoleIdentifier
+	roleDimension := models.ColumnRoleDimension
+	roleMeasure := models.ColumnRoleMeasure
+	columnMetadataRepo := &mockColumnMetadataRepository{
+		metadataBySchemaColumnID: map[uuid.UUID]*models.ColumnMetadata{
+			idColID:        {SchemaColumnID: idColID, Role: &roleIdentifier},
+			hostIDColID:    {SchemaColumnID: hostIDColID, Role: &roleDimension},
+			visitorIDColID: {SchemaColumnID: visitorIDColID, Role: &roleDimension},
+			statusColID: {
+				SchemaColumnID: statusColID,
+				Role:           &roleDimension,
+				Features: models.ColumnMetadataFeatures{
+					EnumFeatures: &models.EnumFeatures{
+						Values: []models.ColumnEnumValue{
+							{Value: "active"},
+							{Value: "completed"},
+						},
+					},
+				},
+			},
+			amountColID: {SchemaColumnID: amountColID, Role: &roleMeasure},
+		},
+	}
+
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, columnMetadataRepo, projectService, zap.NewNop())
 
 	result, err := svc.GetTablesContext(ctx, projectID, []string{"billing_engagements"})
 
@@ -912,7 +1018,7 @@ func TestGetColumnsContext(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetColumnsContext(ctx, projectID, []string{"users"})
 
@@ -939,7 +1045,7 @@ func TestGetColumnsContext_RequiresTableFilter(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetColumnsContext(ctx, projectID, nil)
 
@@ -966,7 +1072,7 @@ func TestGetColumnsContext_MissingTable(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, nil, projectService, zap.NewNop())
 
 	// Should not error, but table won't be in results (no entity matches)
 	result, err := svc.GetColumnsContext(ctx, projectID, []string{"nonexistent"})
@@ -986,7 +1092,7 @@ func TestGetColumnsContext_TooManyTables(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, nil, projectService, zap.NewNop())
 
 	// Create list of tables exceeding the limit
 	tables := make([]string, MaxColumnsDepthTables+1)
@@ -1081,7 +1187,7 @@ func TestGetDomainContext_DeduplicatesRelationships(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetDomainContext(ctx, projectID)
 
@@ -1142,7 +1248,7 @@ func TestGetDomainContext_DeduplicatesRelationships_FirstWinsWhenSameLength(t *t
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetDomainContext(ctx, projectID)
 
@@ -1203,7 +1309,7 @@ func TestGetEntitiesContext_FiltersPromotedEntities(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetEntitiesContext(ctx, projectID)
 
@@ -1268,7 +1374,7 @@ func TestGetDomainContext_FiltersPromotedEntities(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetDomainContext(ctx, projectID)
 

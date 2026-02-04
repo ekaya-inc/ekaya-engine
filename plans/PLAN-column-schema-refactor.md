@@ -312,7 +312,7 @@ CREATE TABLE engine_ontology_column_metadata (
 
   **Verification:** Run `make check` to ensure all tests pass.
 
-- [ ] 4.3 Update `OntologyContextService` to fetch from ontology table
+- [x] 4.3 Update `OntologyContextService` to fetch from ontology table ✓
 
 ### Phase 5: MCP Tool Updates
 

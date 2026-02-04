@@ -199,7 +199,7 @@ func main() {
 		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, columnMetadataRepo, convRepo, llmFactory, getTenantCtx, logger)
 	entityService := services.NewEntityService(ontologyEntityRepo, entityRelationshipRepo, ontologyRepo, logger)
 	ontologyContextService := services.NewOntologyContextService(
-		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, tableMetadataRepo, projectService, logger)
+		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, tableMetadataRepo, columnMetadataRepo, projectService, logger)
 
 	// Create worker pool for parallel LLM calls
 	workerPoolConfig := llm.DefaultWorkerPoolConfig()
