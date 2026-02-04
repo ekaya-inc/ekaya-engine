@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -17,45 +16,39 @@ import (
 // OntologyToolExecutor implements ToolExecutor for ontology chat and question answering.
 // It provides access to schema metadata, data sampling, and ontology updates.
 type OntologyToolExecutor struct {
-	projectID          uuid.UUID
-	ontologyID         uuid.UUID
-	datasourceID       uuid.UUID
-	ontologyRepo       repositories.OntologyRepository
-	knowledgeRepo      repositories.KnowledgeRepository
-	schemaRepo         repositories.SchemaRepository
-	ontologyEntityRepo repositories.OntologyEntityRepository
-	entityRelRepo      repositories.EntityRelationshipRepository
-	queryExecutor      datasource.QueryExecutor
-	logger             *zap.Logger
+	projectID     uuid.UUID
+	ontologyID    uuid.UUID
+	datasourceID  uuid.UUID
+	ontologyRepo  repositories.OntologyRepository
+	knowledgeRepo repositories.KnowledgeRepository
+	schemaRepo    repositories.SchemaRepository
+	queryExecutor datasource.QueryExecutor
+	logger        *zap.Logger
 }
 
 // OntologyToolExecutorConfig holds dependencies for creating an OntologyToolExecutor.
 type OntologyToolExecutorConfig struct {
-	ProjectID          uuid.UUID
-	OntologyID         uuid.UUID
-	DatasourceID       uuid.UUID
-	OntologyRepo       repositories.OntologyRepository
-	KnowledgeRepo      repositories.KnowledgeRepository
-	SchemaRepo         repositories.SchemaRepository
-	OntologyEntityRepo repositories.OntologyEntityRepository
-	EntityRelRepo      repositories.EntityRelationshipRepository
-	QueryExecutor      datasource.QueryExecutor
-	Logger             *zap.Logger
+	ProjectID     uuid.UUID
+	OntologyID    uuid.UUID
+	DatasourceID  uuid.UUID
+	OntologyRepo  repositories.OntologyRepository
+	KnowledgeRepo repositories.KnowledgeRepository
+	SchemaRepo    repositories.SchemaRepository
+	QueryExecutor datasource.QueryExecutor
+	Logger        *zap.Logger
 }
 
 // NewOntologyToolExecutor creates a new tool executor for ontology operations.
 func NewOntologyToolExecutor(cfg *OntologyToolExecutorConfig) *OntologyToolExecutor {
 	return &OntologyToolExecutor{
-		projectID:          cfg.ProjectID,
-		ontologyID:         cfg.OntologyID,
-		datasourceID:       cfg.DatasourceID,
-		ontologyRepo:       cfg.OntologyRepo,
-		knowledgeRepo:      cfg.KnowledgeRepo,
-		schemaRepo:         cfg.SchemaRepo,
-		ontologyEntityRepo: cfg.OntologyEntityRepo,
-		entityRelRepo:      cfg.EntityRelRepo,
-		queryExecutor:      cfg.QueryExecutor,
-		logger:             cfg.Logger.Named("tool-executor"),
+		projectID:     cfg.ProjectID,
+		ontologyID:    cfg.OntologyID,
+		datasourceID:  cfg.DatasourceID,
+		ontologyRepo:  cfg.OntologyRepo,
+		knowledgeRepo: cfg.KnowledgeRepo,
+		schemaRepo:    cfg.SchemaRepo,
+		queryExecutor: cfg.QueryExecutor,
+		logger:        cfg.Logger.Named("tool-executor"),
 	}
 }
 
@@ -75,14 +68,8 @@ func (e *OntologyToolExecutor) ExecuteTool(ctx context.Context, name string, arg
 		return e.querySchemaMetadata(ctx, arguments)
 	case "store_knowledge":
 		return e.storeKnowledge(ctx, arguments)
-	case "update_entity":
-		return e.updateEntity(ctx, arguments)
 	case "update_column":
 		return e.updateColumn(ctx, arguments)
-	case "create_domain_entity":
-		return e.createDomainEntity(ctx, arguments)
-	case "create_entity_relationship":
-		return e.createEntityRelationship(ctx, arguments)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
@@ -317,83 +304,6 @@ func (e *OntologyToolExecutor) storeKnowledge(ctx context.Context, arguments str
 }
 
 // ============================================================================
-// Tool: update_entity
-// ============================================================================
-
-type updateEntityArgs struct {
-	TableName    string   `json:"table_name"`
-	BusinessName string   `json:"business_name"`
-	Description  string   `json:"description"`
-	Domain       string   `json:"domain"`
-	Synonyms     []string `json:"synonyms"`
-}
-
-func (e *OntologyToolExecutor) updateEntity(ctx context.Context, arguments string) (string, error) {
-	var args updateEntityArgs
-	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
-
-	if args.TableName == "" {
-		return "", fmt.Errorf("table_name is required")
-	}
-
-	// Get the active ontology
-	ontology, err := e.ontologyRepo.GetActive(ctx, e.projectID)
-	if err != nil {
-		return "", fmt.Errorf("failed to get ontology: %w", err)
-	}
-	if ontology == nil {
-		return `{"error": "No active ontology found"}`, nil
-	}
-
-	// Get or create entity summary
-	summary := ontology.EntitySummaries[args.TableName]
-	if summary == nil {
-		summary = &models.EntitySummary{
-			TableName: args.TableName,
-		}
-	}
-
-	// Apply updates
-	if args.BusinessName != "" {
-		summary.BusinessName = args.BusinessName
-	}
-	if args.Description != "" {
-		summary.Description = args.Description
-	}
-	if args.Domain != "" {
-		summary.Domain = args.Domain
-	}
-	if len(args.Synonyms) > 0 {
-		summary.Synonyms = args.Synonyms
-	}
-
-	// Save the update
-	if err := e.ontologyRepo.UpdateEntitySummary(ctx, e.projectID, args.TableName, summary); err != nil {
-		return "", fmt.Errorf("failed to update entity: %w", err)
-	}
-
-	e.logger.Info("Updated entity",
-		zap.String("table", args.TableName),
-		zap.String("business_name", summary.BusinessName))
-
-	response := map[string]any{
-		"success":       true,
-		"table_name":    args.TableName,
-		"business_name": summary.BusinessName,
-		"description":   summary.Description,
-	}
-
-	responseJSON, err := json.Marshal(response)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal response: %w", err)
-	}
-
-	return string(responseJSON), nil
-}
-
-// ============================================================================
 // Tool: update_column
 // ============================================================================
 
@@ -488,194 +398,6 @@ func (e *OntologyToolExecutor) updateColumn(ctx context.Context, arguments strin
 		"success":     true,
 		"table_name":  args.TableName,
 		"column_name": args.ColumnName,
-	}
-
-	responseJSON, err := json.Marshal(response)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal response: %w", err)
-	}
-
-	return string(responseJSON), nil
-}
-
-// ============================================================================
-// Tool: create_domain_entity
-// ============================================================================
-
-type createDomainEntityArgs struct {
-	Name          string `json:"name"`
-	Description   string `json:"description"`
-	PrimaryTable  string `json:"primary_table"`
-	PrimaryColumn string `json:"primary_column"`
-}
-
-func (e *OntologyToolExecutor) createDomainEntity(ctx context.Context, arguments string) (string, error) {
-	var args createDomainEntityArgs
-	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
-
-	if args.Name == "" || args.Description == "" || args.PrimaryTable == "" || args.PrimaryColumn == "" {
-		return "", fmt.Errorf("name, description, primary_table, and primary_column are required")
-	}
-
-	// Check if entity repository is available
-	if e.ontologyEntityRepo == nil {
-		return `{"error": "Entity creation not available - repository not configured"}`, nil
-	}
-
-	// Get the active ontology to get ontologyID
-	ontology, err := e.ontologyRepo.GetActive(ctx, e.projectID)
-	if err != nil {
-		return "", fmt.Errorf("failed to get ontology: %w", err)
-	}
-	if ontology == nil {
-		return `{"error": "No active ontology found"}`, nil
-	}
-
-	// Create the domain entity
-	entity := &models.OntologyEntity{
-		OntologyID:    ontology.ID,
-		Name:          args.Name,
-		Description:   args.Description,
-		PrimarySchema: "public", // Default schema
-		PrimaryTable:  args.PrimaryTable,
-		PrimaryColumn: args.PrimaryColumn,
-	}
-
-	if err := e.ontologyEntityRepo.Create(ctx, entity); err != nil {
-		// Check if it's a duplicate
-		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
-			return fmt.Sprintf(`{"error": "Entity '%s' already exists"}`, args.Name), nil
-		}
-		return "", fmt.Errorf("failed to create entity: %w", err)
-	}
-
-	e.logger.Info("Created domain entity via chat",
-		zap.String("entity_name", args.Name),
-		zap.String("primary_table", args.PrimaryTable))
-
-	response := map[string]any{
-		"success":        true,
-		"entity_id":      entity.ID.String(),
-		"name":           entity.Name,
-		"description":    entity.Description,
-		"primary_table":  entity.PrimaryTable,
-		"primary_column": entity.PrimaryColumn,
-		"message":        fmt.Sprintf("Created domain entity '%s'", args.Name),
-	}
-
-	responseJSON, err := json.Marshal(response)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal response: %w", err)
-	}
-
-	return string(responseJSON), nil
-}
-
-// ============================================================================
-// Tool: create_entity_relationship
-// ============================================================================
-
-type createEntityRelationshipArgs struct {
-	SourceEntity string `json:"source_entity"`
-	TargetEntity string `json:"target_entity"`
-	SourceTable  string `json:"source_table"`
-	SourceColumn string `json:"source_column"`
-	TargetTable  string `json:"target_table"`
-	TargetColumn string `json:"target_column"`
-	Description  string `json:"description"`
-}
-
-func (e *OntologyToolExecutor) createEntityRelationship(ctx context.Context, arguments string) (string, error) {
-	var args createEntityRelationshipArgs
-	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
-
-	if args.SourceEntity == "" || args.TargetEntity == "" {
-		return "", fmt.Errorf("source_entity and target_entity are required")
-	}
-	if args.SourceTable == "" || args.SourceColumn == "" || args.TargetTable == "" || args.TargetColumn == "" {
-		return "", fmt.Errorf("source_table, source_column, target_table, and target_column are required")
-	}
-
-	// Check if repositories are available
-	if e.ontologyEntityRepo == nil || e.entityRelRepo == nil {
-		return `{"error": "Relationship creation not available - repositories not configured"}`, nil
-	}
-
-	// Get the active ontology
-	ontology, err := e.ontologyRepo.GetActive(ctx, e.projectID)
-	if err != nil {
-		return "", fmt.Errorf("failed to get ontology: %w", err)
-	}
-	if ontology == nil {
-		return `{"error": "No active ontology found"}`, nil
-	}
-
-	// Find the source entity by name
-	sourceEntity, err := e.ontologyEntityRepo.GetByName(ctx, ontology.ID, args.SourceEntity)
-	if err != nil {
-		return "", fmt.Errorf("failed to find source entity: %w", err)
-	}
-	if sourceEntity == nil {
-		return fmt.Sprintf(`{"error": "Source entity '%s' not found. Create it first using create_domain_entity."}`, args.SourceEntity), nil
-	}
-
-	// Find the target entity by name
-	targetEntity, err := e.ontologyEntityRepo.GetByName(ctx, ontology.ID, args.TargetEntity)
-	if err != nil {
-		return "", fmt.Errorf("failed to find target entity: %w", err)
-	}
-	if targetEntity == nil {
-		return fmt.Sprintf(`{"error": "Target entity '%s' not found. Create it first using create_domain_entity."}`, args.TargetEntity), nil
-	}
-
-	// Create the relationship
-	var description *string
-	if args.Description != "" {
-		description = &args.Description
-	}
-
-	relationship := &models.EntityRelationship{
-		OntologyID:         ontology.ID,
-		SourceEntityID:     sourceEntity.ID,
-		TargetEntityID:     targetEntity.ID,
-		SourceColumnSchema: "public", // Default schema
-		SourceColumnTable:  args.SourceTable,
-		SourceColumnName:   args.SourceColumn,
-		TargetColumnSchema: "public", // Default schema
-		TargetColumnTable:  args.TargetTable,
-		TargetColumnName:   args.TargetColumn,
-		DetectionMethod:    models.DetectionMethodManual,
-		Confidence:         1.0, // User-created through chat
-		Status:             models.RelationshipStatusConfirmed,
-		Description:        description,
-	}
-
-	if err := e.entityRelRepo.Create(ctx, relationship); err != nil {
-		// Check if it's a duplicate
-		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
-			return fmt.Sprintf(`{"error": "Relationship between '%s' and '%s' already exists for this column"}`, args.SourceEntity, args.TargetEntity), nil
-		}
-		return "", fmt.Errorf("failed to create relationship: %w", err)
-	}
-
-	e.logger.Info("Created entity relationship via chat",
-		zap.String("source_entity", args.SourceEntity),
-		zap.String("target_entity", args.TargetEntity),
-		zap.String("source_column", fmt.Sprintf("%s.%s", args.SourceTable, args.SourceColumn)),
-		zap.String("target_column", fmt.Sprintf("%s.%s", args.TargetTable, args.TargetColumn)))
-
-	response := map[string]any{
-		"success":         true,
-		"relationship_id": relationship.ID.String(),
-		"source_entity":   args.SourceEntity,
-		"target_entity":   args.TargetEntity,
-		"source_column":   fmt.Sprintf("%s.%s", args.SourceTable, args.SourceColumn),
-		"target_column":   fmt.Sprintf("%s.%s", args.TargetTable, args.TargetColumn),
-		"message":         fmt.Sprintf("Created relationship: %s -> %s", args.SourceEntity, args.TargetEntity),
 	}
 
 	responseJSON, err := json.Marshal(response)
