@@ -291,26 +291,26 @@ Remove entity wiring from `main.go`:
 
 ### 9.1 Delete UI files
 
-- [ ] `ui/src/types/entity.ts`
-- [ ] `ui/src/pages/EntitiesPage.tsx`
+- [x] `ui/src/types/entity.ts`
+- [x] `ui/src/pages/EntitiesPage.tsx`
 
 ### 9.2 Update UI files
 
-- [ ] `ui/src/App.tsx` - Remove `EntitiesPage` import and route (`path="entities"`)
-- [ ] `ui/src/types/index.ts` - Remove entity type exports
-- [ ] `ui/src/types/ontology.ts` - Remove entity references if any
-- [ ] `ui/src/services/engineApi.ts` - Remove `listEntities()` method and `EntitiesListResponse` import
-- [ ] `ui/src/pages/EnrichmentPage.tsx` - Remove entity references
-- [ ] `ui/src/components/ontology/AIAnsweringGuide.tsx` - Remove entity references
-- [ ] `ui/src/components/ontology/WorkQueue.tsx` - Remove entity references
-- [ ] `ui/src/components/ontology/ChatPane.tsx` - Remove entity references
-- [ ] `ui/src/components/ontology/RelationshipsView.tsx` - Remove entity references
-- [ ] `ui/src/components/ontology/TablesView.tsx` - Remove entity references
-- [ ] `ui/src/components/DatasourceConfiguration.tsx` - Remove entity references if any
+- [x] `ui/src/App.tsx` - Remove `EntitiesPage` import and route (`path="entities"`)
+- [x] `ui/src/types/index.ts` - Remove entity type exports
+- [x] `ui/src/types/ontology.ts` - Remove entity references if any
+- [x] `ui/src/services/engineApi.ts` - Remove `listEntities()` method and `EntitiesListResponse` import
+- [x] `ui/src/pages/EnrichmentPage.tsx` - Remove entity references
+- [x] `ui/src/components/ontology/AIAnsweringGuide.tsx` - Remove entity references
+- [x] `ui/src/components/ontology/WorkQueue.tsx` - Remove entity references
+- [x] `ui/src/components/ontology/ChatPane.tsx` - Remove entity references
+- [x] `ui/src/components/ontology/RelationshipsView.tsx` - Remove entity references
+- [x] `ui/src/components/ontology/TablesView.tsx` - Remove entity references
+- [x] `ui/src/components/DatasourceConfiguration.tsx` - Remove entity references if any
 
 ### 9.3 Update navigation
 
-- [ ] Remove any "Entities" links from navigation/sidebar components
+- [x] Remove any "Entities" links from navigation/sidebar components
 
 ---
 

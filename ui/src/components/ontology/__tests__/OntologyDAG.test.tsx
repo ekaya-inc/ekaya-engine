@@ -60,14 +60,14 @@ const mockCompletedDAG: DAGStatusResponse = {
   status: 'completed',
   nodes: [
     {
-      name: 'EntityDiscovery',
+      name: 'KnowledgeSeeding',
       status: 'completed',
-      progress: { current: 38, total: 38, message: 'Discovered 38 entities' },
+      progress: { current: 1, total: 1, message: 'Knowledge seeded' },
     },
     {
-      name: 'EntityEnrichment',
+      name: 'ColumnEnrichment',
       status: 'completed',
-      progress: { current: 38, total: 38, message: 'Enriched 38 entities' },
+      progress: { current: 38, total: 38, message: 'Enriched 38 columns' },
     },
   ],
   started_at: '2024-01-20T10:00:00Z',
@@ -77,10 +77,10 @@ const mockCompletedDAG: DAGStatusResponse = {
 const mockFailedDAG: DAGStatusResponse = {
   dag_id: 'dag-2',
   status: 'failed',
-  current_node: 'EntityDiscovery',
+  current_node: 'KnowledgeSeeding',
   nodes: [
     {
-      name: 'EntityDiscovery',
+      name: 'KnowledgeSeeding',
       status: 'failed',
       error: 'Connection failed',
     },
@@ -292,10 +292,10 @@ describe('OntologyDAG - Delete Ontology Functionality', () => {
   const mockRunningDAG: DAGStatusResponse = {
     dag_id: 'dag-running',
     status: 'running',
-    current_node: 'EntityDiscovery',
+    current_node: 'ColumnEnrichment',
     nodes: [
       {
-        name: 'EntityDiscovery',
+        name: 'ColumnEnrichment',
         status: 'running',
         progress: { current: 10, total: 38, message: 'Processing...' },
       },

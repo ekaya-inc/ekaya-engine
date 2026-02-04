@@ -64,7 +64,7 @@ export default function DeveloperToolsSection({
           <div className="flex-1">
             <span className="text-sm font-medium text-text-primary">Add Ontology Maintenance</span>
             <p className="text-sm text-text-secondary mt-1">
-              Include tools to manage the ontology: create/update entities, relationships, refresh
+              Include tools to manage the ontology: update columns, relationships, refresh
               schema, and review pending changes.
             </p>
           </div>

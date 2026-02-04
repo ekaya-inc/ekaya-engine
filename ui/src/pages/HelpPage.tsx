@@ -96,7 +96,7 @@ const HelpPage = () => {
     {
       question: "What is an ontology in this context?",
       answer:
-        "An ontology represents the semantic model of your data, including entities, relationships, and business rules that govern your data structure.",
+        "An ontology represents the semantic model of your data, including tables, columns, relationships, and business rules that govern your data structure.",
     },
     {
       question: "Can I save and reuse queries?",
