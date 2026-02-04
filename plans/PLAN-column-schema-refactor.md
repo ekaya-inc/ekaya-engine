@@ -131,7 +131,7 @@ CREATE TABLE engine_ontology_column_metadata (
   - Remove `BusinessName`, `Description`, `Metadata`, `IsSensitive`, `SampleValues`
   - Remove `GetColumnFeatures()` method
 
-- [ ] 2.2 Update `models.ColumnMetadata`:
+- [x] 2.2 Update `models.ColumnMetadata`:
   - Remove `TableName`, `ColumnName`
   - Add `SchemaColumnID uuid`
   - Add typed fields: `ClassificationPath`, `Purpose`, `SemanticType`, `Confidence`
