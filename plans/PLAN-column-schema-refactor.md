@@ -325,7 +325,7 @@ CREATE TABLE engine_ontology_column_metadata (
 ### Phase 6: Handler Updates
 
 - [x] 6.1 Update `SchemaHandler` - remove dropped field references
-- [ ] 6.2 Update `OntologyEnrichmentHandler` - fetch from ontology table
+- [x] 6.2 Update `OntologyEnrichmentHandler` - fetch from ontology table ✓
 
 ### Phase 7: Cleanup
 
