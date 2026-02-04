@@ -92,14 +92,6 @@ func (tc *ontologyTestContext) createTestOntology(ctx context.Context, version i
 			Description: "Test domain summary",
 			Domains:     []string{"sales", "customer"},
 		},
-		EntitySummaries: map[string]*models.EntitySummary{
-			"accounts": {
-				TableName:    "accounts",
-				BusinessName: "Accounts",
-				Description:  "Customer accounts",
-				Domain:       "customer",
-			},
-		},
 		Metadata: map[string]any{"test": true},
 	}
 	err := tc.repo.Create(ctx, ontology)
@@ -127,14 +119,6 @@ func TestOntologyRepository_Create_Success(t *testing.T) {
 		DomainSummary: &models.DomainSummary{
 			Description: "A test business domain",
 			Domains:     []string{"sales", "finance"},
-		},
-		EntitySummaries: map[string]*models.EntitySummary{
-			"orders": {
-				TableName:    "orders",
-				BusinessName: "Orders",
-				Description:  "Customer purchase orders",
-				Domain:       "sales",
-			},
 		},
 		ColumnDetails: map[string][]models.ColumnDetail{
 			"orders": {
@@ -168,9 +152,6 @@ func TestOntologyRepository_Create_Success(t *testing.T) {
 	if retrieved.DomainSummary.Description != "A test business domain" {
 		t.Errorf("expected description 'A test business domain', got %q", retrieved.DomainSummary.Description)
 	}
-	if len(retrieved.EntitySummaries) != 1 {
-		t.Errorf("expected 1 entity summary, got %d", len(retrieved.EntitySummaries))
-	}
 }
 
 func TestOntologyRepository_Create_WithNilFields(t *testing.T) {
@@ -198,9 +179,6 @@ func TestOntologyRepository_Create_WithNilFields(t *testing.T) {
 	}
 	if retrieved.DomainSummary != nil {
 		t.Error("expected nil DomainSummary")
-	}
-	if retrieved.EntitySummaries != nil {
-		t.Error("expected nil EntitySummaries")
 	}
 }
 
@@ -318,132 +296,6 @@ func TestOntologyRepository_UpdateDomainSummary_NoActive(t *testing.T) {
 	err := tc.repo.UpdateDomainSummary(ctx, tc.projectID, &models.DomainSummary{Description: "test"})
 	if err == nil {
 		t.Error("expected error when no active ontology")
-	}
-}
-
-// ============================================================================
-// UpdateEntitySummary Tests
-// ============================================================================
-
-func TestOntologyRepository_UpdateEntitySummary_Success(t *testing.T) {
-	tc := setupOntologyTest(t)
-	tc.cleanup()
-
-	ctx, cleanup := tc.createTestContext()
-	defer cleanup()
-
-	tc.createTestOntology(ctx, 1, true)
-
-	newSummary := &models.EntitySummary{
-		TableName:    "orders",
-		BusinessName: "Customer Orders",
-		Description:  "All customer purchase orders",
-		Domain:       "sales",
-		Synonyms:     []string{"purchases", "transactions"},
-	}
-
-	err := tc.repo.UpdateEntitySummary(ctx, tc.projectID, "orders", newSummary)
-	if err != nil {
-		t.Fatalf("UpdateEntitySummary failed: %v", err)
-	}
-
-	retrieved, err := tc.repo.GetActive(ctx, tc.projectID)
-	if err != nil {
-		t.Fatalf("GetActive failed: %v", err)
-	}
-
-	ordersSummary := retrieved.EntitySummaries["orders"]
-	if ordersSummary == nil {
-		t.Fatal("expected orders summary")
-	}
-	if ordersSummary.BusinessName != "Customer Orders" {
-		t.Errorf("expected 'Customer Orders', got %q", ordersSummary.BusinessName)
-	}
-	if len(ordersSummary.Synonyms) != 2 {
-		t.Errorf("expected 2 synonyms, got %d", len(ordersSummary.Synonyms))
-	}
-}
-
-func TestOntologyRepository_UpdateEntitySummary_AddNew(t *testing.T) {
-	tc := setupOntologyTest(t)
-	tc.cleanup()
-
-	ctx, cleanup := tc.createTestContext()
-	defer cleanup()
-
-	tc.createTestOntology(ctx, 1, true)
-
-	// Add a new entity (not in original)
-	newSummary := &models.EntitySummary{
-		TableName:    "products",
-		BusinessName: "Products",
-		Description:  "Product catalog",
-		Domain:       "product",
-	}
-
-	err := tc.repo.UpdateEntitySummary(ctx, tc.projectID, "products", newSummary)
-	if err != nil {
-		t.Fatalf("UpdateEntitySummary failed: %v", err)
-	}
-
-	retrieved, err := tc.repo.GetActive(ctx, tc.projectID)
-	if err != nil {
-		t.Fatalf("GetActive failed: %v", err)
-	}
-
-	// Should have both original and new
-	if len(retrieved.EntitySummaries) != 2 {
-		t.Errorf("expected 2 entities, got %d", len(retrieved.EntitySummaries))
-	}
-	if retrieved.EntitySummaries["products"] == nil {
-		t.Error("expected products entity")
-	}
-	if retrieved.EntitySummaries["accounts"] == nil {
-		t.Error("expected original accounts entity to remain")
-	}
-}
-
-// ============================================================================
-// UpdateEntitySummaries (Batch) Tests
-// ============================================================================
-
-func TestOntologyRepository_UpdateEntitySummaries_Batch(t *testing.T) {
-	tc := setupOntologyTest(t)
-	tc.cleanup()
-
-	ctx, cleanup := tc.createTestContext()
-	defer cleanup()
-
-	tc.createTestOntology(ctx, 1, true)
-
-	summaries := map[string]*models.EntitySummary{
-		"users": {
-			TableName:    "users",
-			BusinessName: "Users",
-			Description:  "Application users",
-			Domain:       "customer",
-		},
-		"roles": {
-			TableName:    "roles",
-			BusinessName: "User Roles",
-			Description:  "Role definitions",
-			Domain:       "customer",
-		},
-	}
-
-	err := tc.repo.UpdateEntitySummaries(ctx, tc.projectID, summaries)
-	if err != nil {
-		t.Fatalf("UpdateEntitySummaries failed: %v", err)
-	}
-
-	retrieved, err := tc.repo.GetActive(ctx, tc.projectID)
-	if err != nil {
-		t.Fatalf("GetActive failed: %v", err)
-	}
-
-	// Should have original + 2 new
-	if len(retrieved.EntitySummaries) != 3 {
-		t.Errorf("expected 3 entities, got %d", len(retrieved.EntitySummaries))
 	}
 }
 
@@ -677,18 +529,6 @@ func TestOntologyRepository_NoTenantScope(t *testing.T) {
 	err = tc.repo.UpdateDomainSummary(ctx, tc.projectID, &models.DomainSummary{})
 	if err == nil {
 		t.Error("expected error for UpdateDomainSummary without tenant scope")
-	}
-
-	// UpdateEntitySummary should fail
-	err = tc.repo.UpdateEntitySummary(ctx, tc.projectID, "test", &models.EntitySummary{})
-	if err == nil {
-		t.Error("expected error for UpdateEntitySummary without tenant scope")
-	}
-
-	// UpdateEntitySummaries should fail
-	err = tc.repo.UpdateEntitySummaries(ctx, tc.projectID, map[string]*models.EntitySummary{})
-	if err == nil {
-		t.Error("expected error for UpdateEntitySummaries without tenant scope")
 	}
 
 	// UpdateColumnDetails should fail
