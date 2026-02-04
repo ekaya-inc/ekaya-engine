@@ -1,0 +1,213 @@
+# PLAN: Column Schema Refactor
+
+## Problem
+
+Confused architecture for storing column information:
+
+1. **`engine_schema_columns`** has:
+   - Schema + stats (correct)
+   - `metadata` JSONB storing `ColumnFeatures` from extraction (should be in ontology table)
+   - `business_name`, `description` columns (vestigial, never used)
+   - `is_sensitive` (should be in ontology table)
+
+2. **`engine_ontology_column_metadata`** has:
+   - Semantic annotations with provenance (correct)
+   - Uses `table_name`/`column_name` as key instead of FK to `engine_schema_columns`
+   - Missing most fields from `ColumnFeatures` struct
+
+3. **Extraction writes to wrong place**: `ColumnFeatureExtractionService` writes to `engine_schema_columns.metadata` JSONB instead of the ontology table.
+
+## Solution
+
+Clear separation:
+- **`engine_schema_columns`** = schema discovery + data stats
+- **`engine_ontology_column_metadata`** = semantic enrichment with typed columns
+
+## Target Schema
+
+### `engine_schema_columns` (schema + stats)
+
+```sql
+CREATE TABLE engine_schema_columns (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES engine_projects(id) ON DELETE CASCADE,
+  schema_table_id uuid NOT NULL REFERENCES engine_schema_tables(id) ON DELETE CASCADE,
+  column_name text NOT NULL,
+  data_type text NOT NULL,
+  is_nullable boolean NOT NULL,
+  is_primary_key boolean NOT NULL DEFAULT false,
+  is_unique boolean NOT NULL DEFAULT false,
+  ordinal_position integer NOT NULL,
+  default_value text,
+  is_selected boolean NOT NULL DEFAULT false,
+  -- Stats from data scanning
+  distinct_count bigint,
+  null_count bigint,
+  row_count bigint,
+  non_null_count bigint,
+  min_length integer,
+  max_length integer,
+  is_joinable boolean,
+  joinability_reason text,
+  stats_updated_at timestamptz,
+  -- Lifecycle
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  deleted_at timestamptz
+);
+```
+
+**Removed:** `business_name`, `description`, `metadata`, `is_sensitive`, `sample_values`
+
+**Note:** `sample_values` removed to avoid persisting data from target datasource into engine database.
+
+### `engine_ontology_column_metadata` (semantic enrichment)
+
+```sql
+CREATE TABLE engine_ontology_column_metadata (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES engine_projects(id) ON DELETE CASCADE,
+  schema_column_id uuid NOT NULL REFERENCES engine_schema_columns(id) ON DELETE CASCADE,
+
+  -- Core classification (typed columns)
+  classification_path text,
+  purpose text,  -- identifier, timestamp, flag, measure, enum, text, json
+  semantic_type text,  -- soft_delete_timestamp, currency_cents, etc.
+  role text CHECK (role IS NULL OR role IN ('primary_key', 'foreign_key', 'attribute', 'measure', 'dimension', 'identifier')),
+  description text,
+  confidence numeric,
+
+  -- Type-specific features (single JSONB for extensibility)
+  features jsonb DEFAULT '{}',
+
+  -- Processing flags
+  needs_enum_analysis boolean NOT NULL DEFAULT false,
+  needs_fk_resolution boolean NOT NULL DEFAULT false,
+  needs_cross_column_check boolean NOT NULL DEFAULT false,
+  needs_clarification boolean NOT NULL DEFAULT false,
+  clarification_question text,
+
+  -- User overrides
+  is_sensitive boolean,
+
+  -- Analysis metadata
+  analyzed_at timestamptz,
+  llm_model_used text,
+
+  -- Provenance
+  source text NOT NULL DEFAULT 'inferred' CHECK (source IN ('inferred', 'mcp', 'manual')),
+  last_edit_source text CHECK (last_edit_source IS NULL OR last_edit_source IN ('inferred', 'mcp', 'manual')),
+  created_by uuid,
+  updated_by uuid,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+
+  UNIQUE (project_id, schema_column_id)
+);
+```
+
+**`features` JSONB structure:**
+```json
+{
+  "timestamp_features": {"timestamp_purpose": "...", "is_soft_delete": false, ...},
+  "boolean_features": {"true_meaning": "...", "false_meaning": "...", ...},
+  "enum_features": {"is_state_machine": false, "values": [...], ...},
+  "identifier_features": {"identifier_type": "...", "fk_target_table": "...", ...},
+  "monetary_features": {"currency_unit": "cents", ...}
+}
+```
+
+## Implementation Tasks
+
+### Phase 1: Database Migration
+
+- [x] 1.1 Create migration that drops and recreates `engine_schema_columns` with new schema
+- [ ] 1.2 Create migration that drops and recreates `engine_ontology_column_metadata` with new schema
+- [ ] 1.3 Add indexes and RLS policies
+
+### Phase 2: Model Updates
+
+- [ ] 2.1 Update `models.SchemaColumn`:
+  - Remove `BusinessName`, `Description`, `Metadata`, `IsSensitive`, `SampleValues`
+  - Remove `GetColumnFeatures()` method
+
+- [ ] 2.2 Update `models.ColumnMetadata`:
+  - Remove `TableName`, `ColumnName`
+  - Add `SchemaColumnID uuid`
+  - Add typed fields: `ClassificationPath`, `Purpose`, `SemanticType`, `Confidence`
+  - Add `Features` JSONB field
+  - Add processing flags
+  - Add `AnalyzedAt`, `LLMModelUsed`
+
+- [ ] 2.3 Add helper methods on `ColumnMetadata`:
+  - `GetTimestampFeatures() *TimestampFeatures`
+  - `GetBooleanFeatures() *BooleanFeatures`
+  - `GetEnumFeatures() *EnumFeatures`
+  - `GetIdentifierFeatures() *IdentifierFeatures`
+  - `GetMonetaryFeatures() *MonetaryFeatures`
+  - `SetFeatures(features *ColumnFeatures)`
+
+### Phase 3: Repository Updates
+
+- [ ] 3.1 Update `SchemaRepository`:
+  - Remove `UpdateColumnFeatures()`
+  - Remove `ClearColumnFeaturesByProject()`
+  - Update all queries to exclude dropped columns
+
+- [ ] 3.2 Update `ColumnMetadataRepository`:
+  - Change from `table_name`/`column_name` to `schema_column_id`
+  - Add `GetBySchemaColumnID()`
+  - Add `UpsertFromExtraction()` for extraction pipeline
+  - Update `Upsert()` for MCP/manual edits
+
+### Phase 4: Service Updates
+
+- [ ] 4.1 Update `ColumnFeatureExtractionService`:
+  - Write to `columnMetadataRepo.UpsertFromExtraction()` instead of `schemaRepo.UpdateColumnFeatures()`
+  - Set `source='inferred'`
+
+- [ ] 4.2 Update all services that read column features:
+  - `RelationshipCandidateCollector`
+  - `DeterministicRelationshipService`
+  - `TableFeatureExtractionService`
+  - `ColumnEnrichmentService`
+  - `OntologyFinalizationService`
+  - `RelationshipEnrichmentService`
+  - `DataChangeDetectionService`
+  - `ColumnFilterService`
+  - Fetch from `ColumnMetadataRepository` instead of `SchemaColumn.GetColumnFeatures()`
+
+- [ ] 4.3 Update `OntologyContextService` to fetch from ontology table
+
+### Phase 5: MCP Tool Updates
+
+- [ ] 5.1 Update `update_column` - use `schema_column_id`, write typed columns
+- [ ] 5.2 Update `get_column_metadata` - read typed columns
+- [ ] 5.3 Update `probe_column` - fetch from ontology table
+- [ ] 5.4 Update `get_context` - fetch from ontology table
+- [ ] 5.5 Update `search_schema` - remove dropped column references
+
+### Phase 6: Handler Updates
+
+- [ ] 6.1 Update `SchemaHandler` - remove dropped field references
+- [ ] 6.2 Update `OntologyEnrichmentHandler` - fetch from ontology table
+
+### Phase 7: Cleanup
+
+- [ ] 7.1 Delete dead code:
+  - `SchemaColumn.GetColumnFeatures()`
+  - `SchemaRepository.UpdateColumnFeatures()`
+  - `SchemaRepository.ClearColumnFeaturesByProject()`
+
+- [ ] 7.2 Update tests
+
+- [ ] 7.3 Update CLAUDE.md
+
+## Notes
+
+- Database will be dropped/recreated - no data migration needed
+- No backward compatibility concerns
+- After migration, run full ontology extraction to populate new schema
+- Enum values and labels stored in `features['enum_features']['values']` - this is the ontology source for enum semantics
+- `entity` column deferred - entity feature will be addressed separately after schema refactor
+- `sample_values` not persisted - avoids storing target datasource data in engine database
