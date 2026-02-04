@@ -40,13 +40,14 @@ type ColumnFeatureExtractionService interface {
 }
 
 type columnFeatureExtractionService struct {
-	schemaRepo        repositories.SchemaRepository
-	datasourceService DatasourceService
-	adapterFactory    datasource.DatasourceAdapterFactory
-	llmFactory        llm.LLMClientFactory
-	workerPool        *llm.WorkerPool
-	getTenantCtx      TenantContextFunc
-	logger            *zap.Logger
+	schemaRepo         repositories.SchemaRepository
+	columnMetadataRepo repositories.ColumnMetadataRepository
+	datasourceService  DatasourceService
+	adapterFactory     datasource.DatasourceAdapterFactory
+	llmFactory         llm.LLMClientFactory
+	workerPool         *llm.WorkerPool
+	getTenantCtx       TenantContextFunc
+	logger             *zap.Logger
 
 	// Dependencies for question creation when classifiers are uncertain
 	questionService OntologyQuestionService
@@ -60,12 +61,14 @@ type columnFeatureExtractionService struct {
 // NewColumnFeatureExtractionService creates a new column feature extraction service.
 func NewColumnFeatureExtractionService(
 	schemaRepo repositories.SchemaRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
 	logger *zap.Logger,
 ) ColumnFeatureExtractionService {
 	return &columnFeatureExtractionService{
-		schemaRepo:  schemaRepo,
-		logger:      logger.Named("column-feature-extraction"),
-		classifiers: make(map[models.ClassificationPath]ColumnClassifier),
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		logger:             logger.Named("column-feature-extraction"),
+		classifiers:        make(map[models.ClassificationPath]ColumnClassifier),
 	}
 }
 
@@ -73,18 +76,20 @@ func NewColumnFeatureExtractionService(
 // Use this constructor for full Phase 2+ functionality.
 func NewColumnFeatureExtractionServiceWithLLM(
 	schemaRepo repositories.SchemaRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
 	llmFactory llm.LLMClientFactory,
 	workerPool *llm.WorkerPool,
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) ColumnFeatureExtractionService {
 	return &columnFeatureExtractionService{
-		schemaRepo:   schemaRepo,
-		llmFactory:   llmFactory,
-		workerPool:   workerPool,
-		getTenantCtx: getTenantCtx,
-		logger:       logger.Named("column-feature-extraction"),
-		classifiers:  make(map[models.ClassificationPath]ColumnClassifier),
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		llmFactory:         llmFactory,
+		workerPool:         workerPool,
+		getTenantCtx:       getTenantCtx,
+		logger:             logger.Named("column-feature-extraction"),
+		classifiers:        make(map[models.ClassificationPath]ColumnClassifier),
 	}
 }
 
@@ -92,6 +97,7 @@ func NewColumnFeatureExtractionServiceWithLLM(
 // Use this constructor for full Phase 2-4 functionality including FK resolution with data overlap queries.
 func NewColumnFeatureExtractionServiceFull(
 	schemaRepo repositories.SchemaRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
 	datasourceService DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	llmFactory llm.LLMClientFactory,
@@ -102,16 +108,17 @@ func NewColumnFeatureExtractionServiceFull(
 	logger *zap.Logger,
 ) ColumnFeatureExtractionService {
 	return &columnFeatureExtractionService{
-		schemaRepo:        schemaRepo,
-		datasourceService: datasourceService,
-		adapterFactory:    adapterFactory,
-		llmFactory:        llmFactory,
-		workerPool:        workerPool,
-		getTenantCtx:      getTenantCtx,
-		questionService:   questionService,
-		ontologyRepo:      ontologyRepo,
-		logger:            logger.Named("column-feature-extraction"),
-		classifiers:       make(map[models.ClassificationPath]ColumnClassifier),
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		datasourceService:  datasourceService,
+		adapterFactory:     adapterFactory,
+		llmFactory:         llmFactory,
+		workerPool:         workerPool,
+		getTenantCtx:       getTenantCtx,
+		questionService:    questionService,
+		ontologyRepo:       ontologyRepo,
+		logger:             logger.Named("column-feature-extraction"),
+		classifiers:        make(map[models.ClassificationPath]ColumnClassifier),
 	}
 }
 
@@ -282,8 +289,10 @@ func (s *columnFeatureExtractionService) runPhase1DataCollection(
 		// Build the column profile
 		profile := s.buildColumnProfile(col, tableNameByID, tableRowCountByID)
 
-		// Detect patterns in sample values
-		profile.DetectedPatterns = s.detectPatternsInSamples(col.SampleValues)
+		// Note: Pattern detection requires sample values, which are no longer stored
+		// in engine_schema_columns. DetectedPatterns will be empty.
+		// Sample values are now fetched on-demand from the datasource when needed.
+		profile.DetectedPatterns = nil
 
 		// Route to classification path based on TYPE + DATA (not names)
 		profile.ClassificationPath = s.routeToClassificationPath(profile)
@@ -318,7 +327,9 @@ func (s *columnFeatureExtractionService) buildColumnProfile(
 		IsPrimaryKey: col.IsPrimaryKey,
 		IsUnique:     col.IsUnique,
 		IsNullable:   col.IsNullable,
-		SampleValues: col.SampleValues,
+		// Note: SampleValues are no longer stored in engine_schema_columns to avoid
+		// persisting target datasource data into the engine database.
+		// Sample values will be fetched on-demand from the datasource when needed.
 	}
 
 	// Get row count from table
@@ -3384,8 +3395,8 @@ func (s *columnFeatureExtractionService) mergeCrossColumnAnalysis(
 	}
 }
 
-// storeFeatures persists all column features to the database.
-// Each column's features are stored in the metadata JSONB field under the "column_features" key.
+// storeFeatures persists all column features to the ontology column metadata table.
+// Converts ColumnFeatures to ColumnMetadata and upserts with source='inferred'.
 func (s *columnFeatureExtractionService) storeFeatures(
 	ctx context.Context,
 	projectID uuid.UUID,
@@ -3419,7 +3430,35 @@ func (s *columnFeatureExtractionService) storeFeatures(
 			continue
 		}
 
-		err := s.schemaRepo.UpdateColumnFeatures(workCtx, projectID, f.ColumnID, f)
+		// Convert ColumnFeatures to ColumnMetadata
+		meta := &models.ColumnMetadata{
+			ProjectID:      projectID,
+			SchemaColumnID: f.ColumnID,
+			// Processing flags
+			NeedsEnumAnalysis:     f.NeedsEnumAnalysis,
+			NeedsFKResolution:     f.NeedsFKResolution,
+			NeedsCrossColumnCheck: f.NeedsCrossColumnCheck,
+			NeedsClarification:    f.NeedsClarification,
+		}
+
+		// Copy clarification question if present
+		if f.ClarificationQuestion != "" {
+			meta.ClarificationQuestion = &f.ClarificationQuestion
+		}
+
+		// Copy analysis metadata
+		if !f.AnalyzedAt.IsZero() {
+			meta.AnalyzedAt = &f.AnalyzedAt
+		}
+		if f.LLMModelUsed != "" {
+			meta.LLMModelUsed = &f.LLMModelUsed
+		}
+
+		// Use SetFeatures to populate classification fields and type-specific features
+		meta.SetFeatures(f)
+
+		// UpsertFromExtraction automatically sets source='inferred'
+		err := s.columnMetadataRepo.UpsertFromExtraction(workCtx, meta)
 		if err != nil {
 			s.logger.Error("Failed to store column features",
 				zap.String("column_id", f.ColumnID.String()),

@@ -217,7 +217,7 @@ CREATE TABLE engine_ontology_column_metadata (
 
 ### Phase 4: Service Updates
 
-- [ ] 4.1 Update `ColumnFeatureExtractionService`:
+- [x] 4.1 Update `ColumnFeatureExtractionService`:
   - Write to `columnMetadataRepo.UpsertFromExtraction()` instead of `schemaRepo.UpdateColumnFeatures()`
   - Set `source='inferred'`
 

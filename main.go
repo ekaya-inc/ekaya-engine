@@ -236,7 +236,7 @@ func main() {
 	knowledgeSeedingService := services.NewKnowledgeSeedingService(knowledgeService, schemaService, llmFactory, logger)
 	ontologyDAGService.SetKnowledgeSeedingMethods(knowledgeSeedingService)
 	columnFeatureExtractionService := services.NewColumnFeatureExtractionServiceFull(
-		schemaRepo, datasourceService, adapterFactory, llmFactory, llmWorkerPool, getTenantCtx,
+		schemaRepo, columnMetadataRepo, datasourceService, adapterFactory, llmFactory, llmWorkerPool, getTenantCtx,
 		ontologyQuestionService, ontologyRepo, logger)
 	ontologyDAGService.SetColumnFeatureExtractionMethods(columnFeatureExtractionService)
 	ontologyDAGService.SetEntityDiscoveryMethods(services.NewEntityDiscoveryAdapter(entityDiscoveryService))
