@@ -14,6 +14,10 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
 
+// NOTE: As of migration 020_schema_columns_refactor, engine_schema_columns no longer has:
+// - business_name, description, metadata, is_sensitive, sample_values
+// These semantic fields now live in engine_ontology_column_metadata.
+
 // TableKey identifies a table uniquely within a datasource.
 type TableKey struct {
 	SchemaName string
@@ -41,9 +45,6 @@ type SchemaRepository interface {
 	// If selectedOnly is true, only columns with is_selected=true are returned.
 	ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error)
 	ListColumnsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error)
-	// GetColumnsWithFeaturesByDatasource returns columns with features, grouped by table name.
-	// Only returns columns that have column_features in their metadata.
-	GetColumnsWithFeaturesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) (map[string][]*models.SchemaColumn, error)
 	// GetColumnsByTables returns columns for multiple tables, grouped by table name.
 	// If selectedOnly is true, only columns with is_selected=true are returned.
 	GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error)
@@ -53,11 +54,7 @@ type SchemaRepository interface {
 	UpsertColumn(ctx context.Context, column *models.SchemaColumn) error
 	SoftDeleteRemovedColumns(ctx context.Context, tableID uuid.UUID, activeColumnNames []string) (int64, error)
 	UpdateColumnSelection(ctx context.Context, projectID, columnID uuid.UUID, isSelected bool) error
-	UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64, sampleValues []string) error
-	UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error
-	// UpdateColumnFeatures stores column features (from LLM classification) in the column's metadata field.
-	// The features are stored under the "column_features" key in the metadata JSONB column.
-	UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error
+	UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64) error
 
 	// Relationships
 	ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error)
@@ -86,10 +83,6 @@ type SchemaRepository interface {
 	// SelectAllTablesAndColumns marks all tables and columns for a datasource as selected.
 	// Used after schema refresh to auto-select newly discovered tables.
 	SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error
-
-	// ClearColumnFeaturesByProject removes column_features from metadata for all columns in a project.
-	// Used when deleting ontology to clear enrichment data.
-	ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error
 
 	// DeleteInferredRelationshipsByProject hard-deletes all relationships for a project.
 	// This includes both inferred relationships (column_features, pk_match) and DB-declared FKs.
@@ -425,8 +418,7 @@ func (r *schemaRepository) ListColumnsByTable(ctx context.Context, projectID, ta
 		SELECT id, project_id, schema_table_id, column_name, data_type,
 		       is_nullable, is_primary_key, is_unique, is_selected, ordinal_position,
 		       default_value, distinct_count, null_count, min_length, max_length,
-		       business_name, description, metadata,
-		       created_at, updated_at, sample_values
+		       created_at, updated_at
 		FROM engine_schema_columns
 		WHERE project_id = $1 AND schema_table_id = $2 AND deleted_at IS NULL`
 	if selectedOnly {
@@ -465,11 +457,9 @@ func (r *schemaRepository) ListColumnsByDatasource(ctx context.Context, projectI
 	query := `
 		SELECT c.id, c.project_id, c.schema_table_id, c.column_name, c.data_type,
 		       c.is_nullable, c.is_primary_key, c.is_unique, c.is_selected, c.ordinal_position,
-		       c.distinct_count, c.null_count, c.min_length, c.max_length,
-		       c.business_name, c.description, c.metadata,
+		       c.default_value, c.distinct_count, c.null_count, c.min_length, c.max_length,
 		       c.created_at, c.updated_at,
-		       c.row_count, c.non_null_count, c.is_joinable, c.joinability_reason, c.stats_updated_at,
-		       c.sample_values
+		       c.row_count, c.non_null_count, c.is_joinable, c.joinability_reason, c.stats_updated_at
 		FROM engine_schema_columns c
 		JOIN engine_schema_tables t ON c.schema_table_id = t.id
 		WHERE c.project_id = $1 AND t.datasource_id = $2
@@ -497,61 +487,6 @@ func (r *schemaRepository) ListColumnsByDatasource(ctx context.Context, projectI
 	return columns, nil
 }
 
-func (r *schemaRepository) GetColumnsWithFeaturesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) (map[string][]*models.SchemaColumn, error) {
-	scope, ok := database.GetTenantScope(ctx)
-	if !ok {
-		return nil, fmt.Errorf("no tenant scope in context")
-	}
-
-	// Get columns with features (non-empty metadata), grouped by table name
-	query := `
-		SELECT c.id, c.project_id, c.schema_table_id, c.column_name, c.data_type,
-		       c.is_nullable, c.is_primary_key, c.is_unique, c.is_selected, c.ordinal_position,
-		       c.default_value, c.distinct_count, c.null_count, c.min_length, c.max_length,
-		       c.business_name, c.description, c.metadata,
-		       c.created_at, c.updated_at, c.sample_values,
-		       t.table_name
-		FROM engine_schema_columns c
-		JOIN engine_schema_tables t ON c.schema_table_id = t.id
-		WHERE c.project_id = $1 AND t.datasource_id = $2
-		  AND c.deleted_at IS NULL AND t.deleted_at IS NULL
-		  AND c.metadata ? 'column_features'
-		ORDER BY t.table_name, c.ordinal_position`
-
-	rows, err := scope.Conn.Query(ctx, query, projectID, datasourceID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get columns with features: %w", err)
-	}
-	defer rows.Close()
-
-	result := make(map[string][]*models.SchemaColumn)
-	for rows.Next() {
-		var c models.SchemaColumn
-		var metadata []byte
-		var tableName string
-		err := rows.Scan(
-			&c.ID, &c.ProjectID, &c.SchemaTableID, &c.ColumnName, &c.DataType,
-			&c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.IsSelected, &c.OrdinalPosition,
-			&c.DefaultValue, &c.DistinctCount, &c.NullCount, &c.MinLength, &c.MaxLength,
-			&c.BusinessName, &c.Description, &metadata,
-			&c.CreatedAt, &c.UpdatedAt, &c.SampleValues,
-			&tableName,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan column: %w", err)
-		}
-		if err := json.Unmarshal(metadata, &c.Metadata); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
-		}
-		result[tableName] = append(result[tableName], &c)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating columns: %w", err)
-	}
-
-	return result, nil
-}
-
 func (r *schemaRepository) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
@@ -566,8 +501,7 @@ func (r *schemaRepository) GetColumnsByTables(ctx context.Context, projectID uui
 		SELECT c.id, c.project_id, c.schema_table_id, c.column_name, c.data_type,
 		       c.is_nullable, c.is_primary_key, c.is_unique, c.is_selected, c.ordinal_position,
 		       c.default_value, c.distinct_count, c.null_count, c.min_length, c.max_length,
-		       c.business_name, c.description, c.metadata,
-		       c.created_at, c.updated_at, c.sample_values,
+		       c.created_at, c.updated_at,
 		       t.table_name
 		FROM engine_schema_columns c
 		JOIN engine_schema_tables t ON c.schema_table_id = t.id
@@ -589,21 +523,16 @@ func (r *schemaRepository) GetColumnsByTables(ctx context.Context, projectID uui
 	result := make(map[string][]*models.SchemaColumn)
 	for rows.Next() {
 		var c models.SchemaColumn
-		var metadata []byte
 		var tableName string
 		err := rows.Scan(
 			&c.ID, &c.ProjectID, &c.SchemaTableID, &c.ColumnName, &c.DataType,
 			&c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.IsSelected, &c.OrdinalPosition,
 			&c.DefaultValue, &c.DistinctCount, &c.NullCount, &c.MinLength, &c.MaxLength,
-			&c.BusinessName, &c.Description, &metadata,
-			&c.CreatedAt, &c.UpdatedAt, &c.SampleValues,
+			&c.CreatedAt, &c.UpdatedAt,
 			&tableName,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan column: %w", err)
-		}
-		if err := json.Unmarshal(metadata, &c.Metadata); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 		}
 		result[tableName] = append(result[tableName], &c)
 	}
@@ -647,8 +576,7 @@ func (r *schemaRepository) GetColumnByID(ctx context.Context, projectID, columnI
 		SELECT id, project_id, schema_table_id, column_name, data_type,
 		       is_nullable, is_primary_key, is_unique, is_selected, ordinal_position,
 		       default_value, distinct_count, null_count, min_length, max_length,
-		       business_name, description, metadata,
-		       created_at, updated_at, sample_values
+		       created_at, updated_at
 		FROM engine_schema_columns
 		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
 
@@ -674,8 +602,7 @@ func (r *schemaRepository) GetColumnByName(ctx context.Context, tableID uuid.UUI
 		SELECT id, project_id, schema_table_id, column_name, data_type,
 		       is_nullable, is_primary_key, is_unique, is_selected, ordinal_position,
 		       default_value, distinct_count, null_count, min_length, max_length,
-		       business_name, description, metadata,
-		       created_at, updated_at, sample_values
+		       created_at, updated_at
 		FROM engine_schema_columns
 		WHERE schema_table_id = $1 AND column_name = $2 AND deleted_at IS NULL`
 
@@ -704,14 +631,6 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 		column.CreatedAt = now
 	}
 
-	metadata, err := json.Marshal(column.Metadata)
-	if err != nil {
-		return fmt.Errorf("failed to marshal metadata: %w", err)
-	}
-	if column.Metadata == nil {
-		metadata = []byte("{}")
-	}
-
 	// First, try to reactivate a soft-deleted record
 	reactivateQuery := `
 		UPDATE engine_schema_columns
@@ -722,37 +641,31 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 		    is_unique = $7,
 		    ordinal_position = $8,
 		    default_value = $9,
-		    metadata = $10,
-		    updated_at = $11
+		    updated_at = $10
 		WHERE schema_table_id = $1
 		  AND column_name = $2
 		  AND project_id = $3
 		  AND deleted_at IS NOT NULL
-		RETURNING id, created_at, is_selected, distinct_count, null_count, business_name, description, sample_values`
+		RETURNING id, created_at, is_selected, distinct_count, null_count`
 
 	var existingID uuid.UUID
 	var existingCreatedAt time.Time
 	var existingIsSelected bool
 	var existingDistinctCount, existingNullCount *int64
-	var existingBusinessName, existingDescription *string
-	var existingSampleValues []string
-	err = scope.Conn.QueryRow(ctx, reactivateQuery,
+	err := scope.Conn.QueryRow(ctx, reactivateQuery,
 		column.SchemaTableID, column.ColumnName, column.ProjectID,
 		column.DataType, column.IsNullable, column.IsPrimaryKey, column.IsUnique, column.OrdinalPosition,
-		column.DefaultValue, metadata, now,
+		column.DefaultValue, now,
 	).Scan(&existingID, &existingCreatedAt, &existingIsSelected,
-		&existingDistinctCount, &existingNullCount, &existingBusinessName, &existingDescription, &existingSampleValues)
+		&existingDistinctCount, &existingNullCount)
 
 	if err == nil {
-		// Reactivated soft-deleted record - preserve user metadata and stats
+		// Reactivated soft-deleted record - preserve stats
 		column.ID = existingID
 		column.CreatedAt = existingCreatedAt
 		column.IsSelected = existingIsSelected
 		column.DistinctCount = existingDistinctCount
 		column.NullCount = existingNullCount
-		column.BusinessName = existingBusinessName
-		column.Description = existingDescription
-		column.SampleValues = existingSampleValues
 		return nil
 	}
 	if err != pgx.ErrNoRows {
@@ -764,9 +677,9 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 		INSERT INTO engine_schema_columns (
 			id, project_id, schema_table_id, column_name, data_type,
 			is_nullable, is_primary_key, is_unique, is_selected, ordinal_position,
-			default_value, distinct_count, null_count, business_name, description, metadata,
+			default_value, distinct_count, null_count,
 			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		ON CONFLICT (schema_table_id, column_name)
 			WHERE deleted_at IS NULL
 		DO UPDATE SET
@@ -776,17 +689,16 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 			is_unique = EXCLUDED.is_unique,
 			ordinal_position = EXCLUDED.ordinal_position,
 			default_value = EXCLUDED.default_value,
-			metadata = EXCLUDED.metadata,
 			updated_at = EXCLUDED.updated_at
-		RETURNING id, created_at, is_selected, distinct_count, null_count, business_name, description, sample_values`
+		RETURNING id, created_at, is_selected, distinct_count, null_count`
 
 	err = scope.Conn.QueryRow(ctx, upsertQuery,
 		column.ID, column.ProjectID, column.SchemaTableID, column.ColumnName, column.DataType,
 		column.IsNullable, column.IsPrimaryKey, column.IsUnique, column.IsSelected, column.OrdinalPosition,
-		column.DefaultValue, column.DistinctCount, column.NullCount, column.BusinessName, column.Description, metadata,
+		column.DefaultValue, column.DistinctCount, column.NullCount,
 		column.CreatedAt, column.UpdatedAt,
 	).Scan(&column.ID, &column.CreatedAt, &column.IsSelected,
-		&column.DistinctCount, &column.NullCount, &column.BusinessName, &column.Description, &column.SampleValues)
+		&column.DistinctCount, &column.NullCount)
 
 	if err != nil {
 		return fmt.Errorf("failed to upsert column: %w", err)
@@ -853,7 +765,7 @@ func (r *schemaRepository) UpdateColumnSelection(ctx context.Context, projectID,
 	return nil
 }
 
-func (r *schemaRepository) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64, sampleValues []string) error {
+func (r *schemaRepository) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64) error {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return fmt.Errorf("no tenant scope in context")
@@ -865,71 +777,12 @@ func (r *schemaRepository) UpdateColumnStats(ctx context.Context, columnID uuid.
 		    null_count = COALESCE($3, null_count),
 		    min_length = COALESCE($4, min_length),
 		    max_length = COALESCE($5, max_length),
-		    sample_values = COALESCE($6, sample_values),
 		    updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NULL`
 
-	result, err := scope.Conn.Exec(ctx, query, columnID, distinctCount, nullCount, minLength, maxLength, sampleValues)
+	result, err := scope.Conn.Exec(ctx, query, columnID, distinctCount, nullCount, minLength, maxLength)
 	if err != nil {
 		return fmt.Errorf("failed to update column stats: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return apperrors.ErrNotFound
-	}
-
-	return nil
-}
-
-func (r *schemaRepository) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
-	scope, ok := database.GetTenantScope(ctx)
-	if !ok {
-		return fmt.Errorf("no tenant scope in context")
-	}
-
-	query := `
-		UPDATE engine_schema_columns
-		SET business_name = COALESCE($3, business_name),
-		    description = COALESCE($4, description),
-		    updated_at = NOW()
-		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
-
-	result, err := scope.Conn.Exec(ctx, query, projectID, columnID, businessName, description)
-	if err != nil {
-		return fmt.Errorf("failed to update column metadata: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return apperrors.ErrNotFound
-	}
-
-	return nil
-}
-
-func (r *schemaRepository) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
-	scope, ok := database.GetTenantScope(ctx)
-	if !ok {
-		return fmt.Errorf("no tenant scope in context")
-	}
-
-	// Marshal features to JSON
-	featuresJSON, err := json.Marshal(features)
-	if err != nil {
-		return fmt.Errorf("failed to marshal column features: %w", err)
-	}
-
-	// Update the metadata field, merging with existing metadata using jsonb_set
-	// This preserves any existing metadata while adding/updating the column_features key
-	// Use both project_id and id in WHERE clause for defense in depth (in addition to RLS)
-	query := `
-		UPDATE engine_schema_columns
-		SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{column_features}', $3::jsonb),
-		    updated_at = NOW()
-		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
-
-	result, err := scope.Conn.Exec(ctx, query, projectID, columnID, featuresJSON)
-	if err != nil {
-		return fmt.Errorf("failed to update column features: %w", err)
 	}
 
 	if result.RowsAffected() == 0 {
@@ -1484,11 +1337,9 @@ func (r *schemaRepository) GetJoinableColumns(ctx context.Context, projectID, ta
 	query := `
 		SELECT id, project_id, schema_table_id, column_name, data_type,
 		       is_nullable, is_primary_key, is_unique, is_selected, ordinal_position,
-		       distinct_count, null_count, min_length, max_length,
-		       business_name, description, metadata,
+		       default_value, distinct_count, null_count, min_length, max_length,
 		       created_at, updated_at,
-		       row_count, non_null_count, is_joinable, joinability_reason, stats_updated_at,
-		       sample_values
+		       row_count, non_null_count, is_joinable, joinability_reason, stats_updated_at
 		FROM engine_schema_columns
 		WHERE project_id = $1
 		  AND schema_table_id = $2
@@ -1555,11 +1406,9 @@ func (r *schemaRepository) GetPrimaryKeyColumns(ctx context.Context, projectID, 
 	query := `
 		SELECT c.id, c.project_id, c.schema_table_id, c.column_name, c.data_type,
 		       c.is_nullable, c.is_primary_key, c.is_unique, c.is_selected, c.ordinal_position,
-		       c.distinct_count, c.null_count, c.min_length, c.max_length,
-		       c.business_name, c.description, c.metadata,
+		       c.default_value, c.distinct_count, c.null_count, c.min_length, c.max_length,
 		       c.created_at, c.updated_at,
-		       c.row_count, c.non_null_count, c.is_joinable, c.joinability_reason, c.stats_updated_at,
-		       c.sample_values
+		       c.row_count, c.non_null_count, c.is_joinable, c.joinability_reason, c.stats_updated_at
 		FROM engine_schema_columns c
 		JOIN engine_schema_tables t ON c.schema_table_id = t.id
 		WHERE c.project_id = $1
@@ -1601,11 +1450,9 @@ func (r *schemaRepository) GetNonPKColumnsByExactType(ctx context.Context, proje
 	query := `
 		SELECT c.id, c.project_id, c.schema_table_id, c.column_name, c.data_type,
 		       c.is_nullable, c.is_primary_key, c.is_unique, c.is_selected, c.ordinal_position,
-		       c.distinct_count, c.null_count, c.min_length, c.max_length,
-		       c.business_name, c.description, c.metadata,
+		       c.default_value, c.distinct_count, c.null_count, c.min_length, c.max_length,
 		       c.created_at, c.updated_at,
-		       c.row_count, c.non_null_count, c.is_joinable, c.joinability_reason, c.stats_updated_at,
-		       c.sample_values
+		       c.row_count, c.non_null_count, c.is_joinable, c.joinability_reason, c.stats_updated_at
 		FROM engine_schema_columns c
 		JOIN engine_schema_tables t ON c.schema_table_id = t.id
 		WHERE c.project_id = $1
@@ -1677,38 +1524,28 @@ func scanSchemaTableRow(row pgx.Row) (*models.SchemaTable, error) {
 
 func scanSchemaColumn(rows pgx.Rows) (*models.SchemaColumn, error) {
 	var c models.SchemaColumn
-	var metadata []byte
 	err := rows.Scan(
 		&c.ID, &c.ProjectID, &c.SchemaTableID, &c.ColumnName, &c.DataType,
 		&c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.IsSelected, &c.OrdinalPosition,
 		&c.DefaultValue, &c.DistinctCount, &c.NullCount, &c.MinLength, &c.MaxLength,
-		&c.BusinessName, &c.Description, &metadata,
-		&c.CreatedAt, &c.UpdatedAt, &c.SampleValues,
+		&c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan column: %w", err)
-	}
-	if err := json.Unmarshal(metadata, &c.Metadata); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 	}
 	return &c, nil
 }
 
 func scanSchemaColumnRow(row pgx.Row) (*models.SchemaColumn, error) {
 	var c models.SchemaColumn
-	var metadata []byte
 	err := row.Scan(
 		&c.ID, &c.ProjectID, &c.SchemaTableID, &c.ColumnName, &c.DataType,
 		&c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.IsSelected, &c.OrdinalPosition,
 		&c.DefaultValue, &c.DistinctCount, &c.NullCount, &c.MinLength, &c.MaxLength,
-		&c.BusinessName, &c.Description, &metadata,
-		&c.CreatedAt, &c.UpdatedAt, &c.SampleValues,
+		&c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
-	}
-	if err := json.Unmarshal(metadata, &c.Metadata); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 	}
 	return &c, nil
 }
@@ -1804,21 +1641,15 @@ func scanSchemaRelationshipRowWithDiscovery(row pgx.Row) (*models.SchemaRelation
 // scanSchemaColumnWithDiscovery scans a column row including discovery fields.
 func scanSchemaColumnWithDiscovery(rows pgx.Rows) (*models.SchemaColumn, error) {
 	var c models.SchemaColumn
-	var metadata []byte
 	err := rows.Scan(
 		&c.ID, &c.ProjectID, &c.SchemaTableID, &c.ColumnName, &c.DataType,
 		&c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.IsSelected, &c.OrdinalPosition,
-		&c.DistinctCount, &c.NullCount, &c.MinLength, &c.MaxLength,
-		&c.BusinessName, &c.Description, &metadata,
+		&c.DefaultValue, &c.DistinctCount, &c.NullCount, &c.MinLength, &c.MaxLength,
 		&c.CreatedAt, &c.UpdatedAt,
 		&c.RowCount, &c.NonNullCount, &c.IsJoinable, &c.JoinabilityReason, &c.StatsUpdatedAt,
-		&c.SampleValues,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan column with discovery: %w", err)
-	}
-	if err := json.Unmarshal(metadata, &c.Metadata); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 	}
 	return &c, nil
 }
@@ -1844,7 +1675,7 @@ func (r *schemaRepository) SelectAllTablesAndColumns(ctx context.Context, projec
 	_, err = scope.Conn.Exec(ctx, `
 		UPDATE engine_schema_columns
 		SET is_selected = true, updated_at = NOW()
-		WHERE table_id IN (
+		WHERE schema_table_id IN (
 			SELECT id FROM engine_schema_tables
 			WHERE project_id = $1 AND datasource_id = $2 AND deleted_at IS NULL
 		) AND deleted_at IS NULL
@@ -1853,26 +1684,6 @@ func (r *schemaRepository) SelectAllTablesAndColumns(ctx context.Context, projec
 		return fmt.Errorf("failed to select all columns: %w", err)
 	}
 
-	return nil
-}
-
-// ClearColumnFeaturesByProject removes column_features from metadata for all columns in a project.
-// This is used when deleting ontology data to clear enrichment results.
-func (r *schemaRepository) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
-	scope, ok := database.GetTenantScope(ctx)
-	if !ok {
-		return fmt.Errorf("no tenant scope in context")
-	}
-
-	query := `
-		UPDATE engine_schema_columns
-		SET metadata = metadata - 'column_features', updated_at = NOW()
-		WHERE project_id = $1 AND metadata ? 'column_features'`
-
-	_, err := scope.Conn.Exec(ctx, query, projectID)
-	if err != nil {
-		return fmt.Errorf("clear column features: %w", err)
-	}
 	return nil
 }
 

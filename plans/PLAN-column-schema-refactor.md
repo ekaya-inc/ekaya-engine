@@ -149,16 +149,71 @@ CREATE TABLE engine_ontology_column_metadata (
 
 ### Phase 3: Repository Updates
 
-- [ ] 3.1 Update `SchemaRepository`:
-  - Remove `UpdateColumnFeatures()`
-  - Remove `ClearColumnFeaturesByProject()`
-  - Update all queries to exclude dropped columns
+- [x] 3.1 Update `SchemaRepository` to remove column feature methods and dropped column references
 
-- [ ] 3.2 Update `ColumnMetadataRepository`:
-  - Change from `table_name`/`column_name` to `schema_column_id`
-  - Add `GetBySchemaColumnID()`
-  - Add `UpsertFromExtraction()` for extraction pipeline
-  - Update `Upsert()` for MCP/manual edits
+  **Context:** As part of the column schema refactor, `engine_schema_columns` no longer stores `metadata` JSONB (which contained `ColumnFeatures`), `business_name`, `description`, `is_sensitive`, or `sample_values`. These fields have been moved to `engine_ontology_column_metadata`.
+
+  **File:** `pkg/repositories/schema_repository.go`
+
+  **Changes required:**
+  1. Remove `UpdateColumnFeatures(ctx context.Context, columnID uuid.UUID, features *models.ColumnFeatures) error` method
+  2. Remove `ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error` method
+  3. Update all SQL queries that SELECT from `engine_schema_columns` to exclude dropped columns: `business_name`, `description`, `metadata`, `is_sensitive`, `sample_values`
+  4. Update any INSERT/UPDATE queries to exclude these columns
+  5. Update the `SchemaRepository` interface in `pkg/repositories/interfaces.go` to remove the deleted method signatures
+
+  **Verification:** Run `make check` to ensure all tests pass and no code references the removed methods.
+
+- [ ] 3.2 Update `ColumnMetadataRepository` to use `schema_column_id` FK
+
+  **Context:** `engine_ontology_column_metadata` has been refactored to use `schema_column_id uuid` as a foreign key to `engine_schema_columns` instead of `table_name`/`column_name` text fields. The table also has new typed columns for features.
+
+  **File:** `pkg/repositories/column_metadata_repository.go`
+
+  **Schema reference (from migration):**
+  ```sql
+  CREATE TABLE engine_ontology_column_metadata (
+    id uuid PRIMARY KEY,
+    project_id uuid NOT NULL,
+    schema_column_id uuid NOT NULL REFERENCES engine_schema_columns(id),
+    classification_path text,
+    purpose text,
+    semantic_type text,
+    role text,
+    description text,
+    confidence numeric,
+    features jsonb DEFAULT '{}',
+    needs_enum_analysis boolean NOT NULL DEFAULT false,
+    needs_fk_resolution boolean NOT NULL DEFAULT false,
+    needs_cross_column_check boolean NOT NULL DEFAULT false,
+    needs_clarification boolean NOT NULL DEFAULT false,
+    clarification_question text,
+    is_sensitive boolean,
+    analyzed_at timestamptz,
+    llm_model_used text,
+    source text NOT NULL DEFAULT 'inferred',
+    last_edit_source text,
+    created_by uuid,
+    updated_by uuid,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (project_id, schema_column_id)
+  );
+  ```
+
+  **Changes required:**
+  1. Update all existing methods that use `table_name`/`column_name` to use `schema_column_id` instead
+  2. Add `GetBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error)` method
+  3. Add `UpsertFromExtraction(ctx context.Context, metadata *models.ColumnMetadata) error` method for the extraction pipeline (sets `source='inferred'`)
+  4. Update `Upsert()` method to handle MCP/manual edits (respects `source` parameter, updates `last_edit_source`)
+  5. Update all SQL queries to use the new typed columns instead of the old `table_name`/`column_name` approach
+  6. Update the `ColumnMetadataRepository` interface in `pkg/repositories/interfaces.go`
+
+  **Key distinction:**
+  - `UpsertFromExtraction()` is for automated extraction pipeline - always sets `source='inferred'`
+  - `Upsert()` is for MCP tools and manual edits - respects the provided `source` value and sets `last_edit_source`
+
+  **Verification:** Run `make check` to ensure all tests pass.
 
 ### Phase 4: Service Updates
 

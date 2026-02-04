@@ -598,17 +598,16 @@ func TestSchemaRepository_UpsertColumn_Update(t *testing.T) {
 	table := tc.createTestTable(ctx, "public", "products")
 	column := tc.createTestColumn(ctx, table.ID, "price", 1)
 
-	// Set stats and business metadata via direct SQL
+	// Set stats via direct SQL
 	scope, _ := database.GetTenantScope(ctx)
-	businessName := "Product Price"
 	distinctCount := int64(1000)
 	_, err := scope.Conn.Exec(ctx, `
 		UPDATE engine_schema_columns
-		SET business_name = $1, distinct_count = $2
-		WHERE id = $3
-	`, businessName, distinctCount, column.ID)
+		SET distinct_count = $1
+		WHERE id = $2
+	`, distinctCount, column.ID)
 	if err != nil {
-		t.Fatalf("Failed to set column metadata: %v", err)
+		t.Fatalf("Failed to set column stats: %v", err)
 	}
 
 	originalID := column.ID
@@ -631,11 +630,6 @@ func TestSchemaRepository_UpsertColumn_Update(t *testing.T) {
 	// Verify CreatedAt preserved
 	if !column.CreatedAt.Equal(originalCreatedAt) {
 		t.Error("expected CreatedAt to be preserved")
-	}
-
-	// Verify business metadata preserved
-	if column.BusinessName == nil || *column.BusinessName != businessName {
-		t.Errorf("expected BusinessName preserved, got %v", column.BusinessName)
 	}
 
 	// Verify stats preserved
@@ -667,7 +661,7 @@ func TestSchemaRepository_UpsertColumn_ReactivateSoftDeleted(t *testing.T) {
 	// Set stats
 	distinctCount := int64(500)
 	nullCount := int64(10)
-	err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, &nullCount, nil, nil, nil)
+	err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, &nullCount, nil, nil)
 	if err != nil {
 		t.Fatalf("UpdateColumnStats failed: %v", err)
 	}
@@ -983,7 +977,7 @@ func TestSchemaRepository_UpdateColumnStats(t *testing.T) {
 	distinctCount := int64(1500)
 	nullCount := int64(25)
 
-	err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, &nullCount, nil, nil, nil)
+	err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, &nullCount, nil, nil)
 	if err != nil {
 		t.Fatalf("UpdateColumnStats failed: %v", err)
 	}
@@ -1004,8 +998,6 @@ func TestSchemaRepository_UpdateColumnStats(t *testing.T) {
 
 // TestSchemaRepository_UpdateColumnStats_PreservesExistingValues ensures that passing nil
 // to UpdateColumnStats preserves existing values (COALESCE behavior), not overwrites with NULL.
-// This is critical for the sample_values update flow that only wants to set sample_values
-// without clearing other stats like distinct_count.
 func TestSchemaRepository_UpdateColumnStats_PreservesExistingValues(t *testing.T) {
 	tc := setupSchemaTest(t)
 	tc.cleanup()
@@ -1022,7 +1014,7 @@ func TestSchemaRepository_UpdateColumnStats_PreservesExistingValues(t *testing.T
 	minLength := int64(5)
 	maxLength := int64(50)
 
-	err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, &nullCount, &minLength, &maxLength, nil)
+	err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, &nullCount, &minLength, &maxLength)
 	if err != nil {
 		t.Fatalf("Initial UpdateColumnStats failed: %v", err)
 	}
@@ -1036,15 +1028,14 @@ func TestSchemaRepository_UpdateColumnStats_PreservesExistingValues(t *testing.T
 		t.Fatalf("Initial distinct_count not set correctly: got %v, want %d", retrieved.DistinctCount, distinctCount)
 	}
 
-	// Now update only sample_values, passing nil for all stats
+	// Now update with nil for all stats
 	// This should PRESERVE the existing stats, not clear them
-	sampleValues := []string{"value1", "value2", "value3"}
-	err = tc.repo.UpdateColumnStats(ctx, column.ID, nil, nil, nil, nil, sampleValues)
+	err = tc.repo.UpdateColumnStats(ctx, column.ID, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("UpdateColumnStats with nil stats failed: %v", err)
 	}
 
-	// Verify stats are preserved and sample_values is set
+	// Verify stats are preserved
 	retrieved, err = tc.repo.GetColumnByID(ctx, tc.projectID, column.ID)
 	if err != nil {
 		t.Fatalf("GetColumnByID failed: %v", err)
@@ -1061,9 +1052,6 @@ func TestSchemaRepository_UpdateColumnStats_PreservesExistingValues(t *testing.T
 	}
 	if retrieved.MaxLength == nil || *retrieved.MaxLength != maxLength {
 		t.Errorf("max_length was not preserved: got %v, want %d", retrieved.MaxLength, maxLength)
-	}
-	if len(retrieved.SampleValues) != len(sampleValues) {
-		t.Errorf("sample_values not set correctly: got %v, want %v", retrieved.SampleValues, sampleValues)
 	}
 }
 
@@ -1550,7 +1538,7 @@ func TestSchemaRepository_NotFound(t *testing.T) {
 
 	// UpdateColumnStats with non-existent column
 	distinctCount := int64(100)
-	err = tc.repo.UpdateColumnStats(ctx, nonExistentID, &distinctCount, nil, nil, nil, nil)
+	err = tc.repo.UpdateColumnStats(ctx, nonExistentID, &distinctCount, nil, nil, nil)
 	if err != apperrors.ErrNotFound {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
@@ -1614,107 +1602,6 @@ func TestSchemaRepository_PerformanceBaseline(t *testing.T) {
 	}
 
 	t.Logf("Created 50 tables with 250 columns and listed them in %v", elapsed)
-}
-
-// ============================================================================
-// ClearColumnFeaturesByProject Tests
-// ============================================================================
-
-func TestSchemaRepository_ClearColumnFeaturesByProject(t *testing.T) {
-	tc := setupSchemaTest(t)
-	tc.cleanup()
-
-	ctx, cleanup := tc.createTestContext()
-	defer cleanup()
-
-	// Create test table
-	table := tc.createTestTable(ctx, "public", "test_features")
-
-	// Create test columns with column_features in metadata
-	col1 := tc.createTestColumn(ctx, table.ID, "col1", 1)
-	col2 := tc.createTestColumn(ctx, table.ID, "col2", 2)
-	col3 := tc.createTestColumn(ctx, table.ID, "col3", 3) // without features
-
-	// Set column_features on col1 and col2
-	features1 := &models.ColumnFeatures{
-		SemanticType: "identifier",
-		Role:         "primary_key",
-	}
-	features2 := &models.ColumnFeatures{
-		SemanticType: "attribute",
-		Role:         "dimension",
-	}
-
-	err := tc.repo.UpdateColumnFeatures(ctx, tc.projectID, col1.ID, features1)
-	if err != nil {
-		t.Fatalf("UpdateColumnFeatures for col1 failed: %v", err)
-	}
-
-	err = tc.repo.UpdateColumnFeatures(ctx, tc.projectID, col2.ID, features2)
-	if err != nil {
-		t.Fatalf("UpdateColumnFeatures for col2 failed: %v", err)
-	}
-
-	// Verify features were set
-	retrievedCol1, err := tc.repo.GetColumnByID(ctx, tc.projectID, col1.ID)
-	if err != nil {
-		t.Fatalf("GetColumnByID for col1 failed: %v", err)
-	}
-	if retrievedCol1.GetColumnFeatures() == nil {
-		t.Error("expected col1 to have column_features before clear")
-	}
-
-	// Clear column features for the project
-	err = tc.repo.ClearColumnFeaturesByProject(ctx, tc.projectID)
-	if err != nil {
-		t.Fatalf("ClearColumnFeaturesByProject failed: %v", err)
-	}
-
-	// Verify col1 features were cleared
-	retrievedCol1, err = tc.repo.GetColumnByID(ctx, tc.projectID, col1.ID)
-	if err != nil {
-		t.Fatalf("GetColumnByID for col1 after clear failed: %v", err)
-	}
-	if retrievedCol1.GetColumnFeatures() != nil {
-		t.Errorf("expected col1 to have no column_features after clear, got %+v", retrievedCol1.GetColumnFeatures())
-	}
-
-	// Verify col2 features were cleared
-	retrievedCol2, err := tc.repo.GetColumnByID(ctx, tc.projectID, col2.ID)
-	if err != nil {
-		t.Fatalf("GetColumnByID for col2 after clear failed: %v", err)
-	}
-	if retrievedCol2.GetColumnFeatures() != nil {
-		t.Errorf("expected col2 to have no column_features after clear, got %+v", retrievedCol2.GetColumnFeatures())
-	}
-
-	// Verify col3 is unaffected (never had features)
-	retrievedCol3, err := tc.repo.GetColumnByID(ctx, tc.projectID, col3.ID)
-	if err != nil {
-		t.Fatalf("GetColumnByID for col3 after clear failed: %v", err)
-	}
-	if retrievedCol3.GetColumnFeatures() != nil {
-		t.Error("expected col3 to still have no column_features")
-	}
-}
-
-func TestSchemaRepository_ClearColumnFeaturesByProject_NoFeatures(t *testing.T) {
-	tc := setupSchemaTest(t)
-	tc.cleanup()
-
-	ctx, cleanup := tc.createTestContext()
-	defer cleanup()
-
-	// Create test table with columns that have no features
-	table := tc.createTestTable(ctx, "public", "test_no_features")
-	tc.createTestColumn(ctx, table.ID, "col1", 1)
-	tc.createTestColumn(ctx, table.ID, "col2", 2)
-
-	// Clear should not fail even when no columns have features
-	err := tc.repo.ClearColumnFeaturesByProject(ctx, tc.projectID)
-	if err != nil {
-		t.Fatalf("ClearColumnFeaturesByProject failed when no features exist: %v", err)
-	}
 }
 
 // ============================================================================
