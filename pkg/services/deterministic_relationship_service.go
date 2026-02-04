@@ -154,19 +154,21 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 		columnByID[c.ID] = c
 	}
 
-	// Fetch column metadata for all columns
-	columnIDs := make([]uuid.UUID, len(columns))
-	for i, col := range columns {
-		columnIDs[i] = col.ID
-	}
-	metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, columnIDs)
-	if err != nil {
-		s.logger.Warn("Failed to fetch column metadata, continuing without",
-			zap.Error(err))
-	}
+	// Fetch column metadata for all columns (if repo is available)
 	metadataByColumnID := make(map[uuid.UUID]*models.ColumnMetadata)
-	for _, meta := range metadataList {
-		metadataByColumnID[meta.SchemaColumnID] = meta
+	if s.columnMetadataRepo != nil {
+		columnIDs := make([]uuid.UUID, len(columns))
+		for i, col := range columns {
+			columnIDs[i] = col.ID
+		}
+		metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, columnIDs)
+		if err != nil {
+			s.logger.Warn("Failed to fetch column metadata, continuing without",
+				zap.Error(err))
+		}
+		for _, meta := range metadataList {
+			metadataByColumnID[meta.SchemaColumnID] = meta
+		}
 	}
 
 	// Get datasource to create schema discoverer for cardinality analysis
@@ -673,19 +675,21 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 		return nil, fmt.Errorf("list columns: %w", err)
 	}
 
-	// Fetch column metadata for all columns
-	columnIDs := make([]uuid.UUID, len(columns))
-	for i, col := range columns {
-		columnIDs[i] = col.ID
-	}
-	metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, columnIDs)
-	if err != nil {
-		s.logger.Warn("Failed to fetch column metadata, continuing without",
-			zap.Error(err))
-	}
+	// Fetch column metadata for all columns (if repo is available)
 	metadataByColumnID := make(map[uuid.UUID]*models.ColumnMetadata)
-	for _, meta := range metadataList {
-		metadataByColumnID[meta.SchemaColumnID] = meta
+	if s.columnMetadataRepo != nil {
+		columnIDs := make([]uuid.UUID, len(columns))
+		for i, col := range columns {
+			columnIDs[i] = col.ID
+		}
+		metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, columnIDs)
+		if err != nil {
+			s.logger.Warn("Failed to fetch column metadata, continuing without",
+				zap.Error(err))
+		}
+		for _, meta := range metadataList {
+			metadataByColumnID[meta.SchemaColumnID] = meta
+		}
 	}
 
 	// Build a map of column IDs that already have SchemaRelationships (from FKDiscovery).

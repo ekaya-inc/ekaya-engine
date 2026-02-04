@@ -106,9 +106,9 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 		allColumnIDs = append(allColumnIDs, c.ID)
 	}
 
-	// Fetch column metadata for feature analysis
+	// Fetch column metadata for feature analysis (if repo is available)
 	metadataByColumnID := make(map[uuid.UUID]*models.ColumnMetadata)
-	if len(allColumnIDs) > 0 {
+	if s.columnMetadataRepo != nil && len(allColumnIDs) > 0 {
 		metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, allColumnIDs)
 		if err != nil {
 			s.logger.Warn("Failed to fetch column metadata, continuing without ColumnFeatures FKs",
