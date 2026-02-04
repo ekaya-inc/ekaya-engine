@@ -139,7 +139,7 @@ CREATE TABLE engine_ontology_column_metadata (
   - Add processing flags
   - Add `AnalyzedAt`, `LLMModelUsed`
 
-- [ ] 2.3 Add helper methods on `ColumnMetadata`:
+- [x] 2.3 Add helper methods on `ColumnMetadata`:
   - `GetTimestampFeatures() *TimestampFeatures`
   - `GetBooleanFeatures() *BooleanFeatures`
   - `GetEnumFeatures() *EnumFeatures`

@@ -87,3 +87,82 @@ func (f *ColumnMetadataFeatures) Scan(value interface{}) error {
 func (f ColumnMetadataFeatures) Value() (interface{}, error) {
 	return json.Marshal(f)
 }
+
+// GetTimestampFeatures returns timestamp-specific features, or nil if not available.
+func (m *ColumnMetadata) GetTimestampFeatures() *TimestampFeatures {
+	return m.Features.TimestampFeatures
+}
+
+// GetBooleanFeatures returns boolean-specific features, or nil if not available.
+func (m *ColumnMetadata) GetBooleanFeatures() *BooleanFeatures {
+	return m.Features.BooleanFeatures
+}
+
+// GetEnumFeatures returns enum-specific features, or nil if not available.
+func (m *ColumnMetadata) GetEnumFeatures() *EnumFeatures {
+	return m.Features.EnumFeatures
+}
+
+// GetIdentifierFeatures returns identifier-specific features, or nil if not available.
+func (m *ColumnMetadata) GetIdentifierFeatures() *IdentifierFeatures {
+	return m.Features.IdentifierFeatures
+}
+
+// GetMonetaryFeatures returns monetary-specific features, or nil if not available.
+func (m *ColumnMetadata) GetMonetaryFeatures() *MonetaryFeatures {
+	return m.Features.MonetaryFeatures
+}
+
+// SetFeatures populates ColumnMetadata fields from a ColumnFeatures struct.
+// This is used by the extraction pipeline to convert analysis results into
+// the format stored in engine_ontology_column_metadata.
+func (m *ColumnMetadata) SetFeatures(features *ColumnFeatures) {
+	if features == nil {
+		return
+	}
+
+	// Set core classification fields
+	if features.ClassificationPath != "" {
+		path := string(features.ClassificationPath)
+		m.ClassificationPath = &path
+	}
+	if features.Purpose != "" {
+		m.Purpose = &features.Purpose
+	}
+	if features.SemanticType != "" {
+		m.SemanticType = &features.SemanticType
+	}
+	if features.Role != "" {
+		m.Role = &features.Role
+	}
+	if features.Description != "" {
+		m.Description = &features.Description
+	}
+	if features.Confidence > 0 {
+		m.Confidence = &features.Confidence
+	}
+
+	// Copy type-specific features
+	m.Features.TimestampFeatures = features.TimestampFeatures
+	m.Features.BooleanFeatures = features.BooleanFeatures
+	m.Features.EnumFeatures = features.EnumFeatures
+	m.Features.IdentifierFeatures = features.IdentifierFeatures
+	m.Features.MonetaryFeatures = features.MonetaryFeatures
+
+	// Copy processing flags
+	m.NeedsEnumAnalysis = features.NeedsEnumAnalysis
+	m.NeedsFKResolution = features.NeedsFKResolution
+	m.NeedsCrossColumnCheck = features.NeedsCrossColumnCheck
+	m.NeedsClarification = features.NeedsClarification
+	if features.ClarificationQuestion != "" {
+		m.ClarificationQuestion = &features.ClarificationQuestion
+	}
+
+	// Copy analysis metadata
+	if !features.AnalyzedAt.IsZero() {
+		m.AnalyzedAt = &features.AnalyzedAt
+	}
+	if features.LLMModelUsed != "" {
+		m.LLMModelUsed = &features.LLMModelUsed
+	}
+}
