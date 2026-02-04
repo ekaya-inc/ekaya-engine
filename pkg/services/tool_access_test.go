@@ -81,7 +81,7 @@ func TestToolAccessChecker_DeveloperToolsEnabled(t *testing.T) {
 		assert.True(t, checker.IsToolAccessible("get_ontology", state, false))
 		assert.True(t, checker.IsToolAccessible("list_approved_queries", state, false))
 		// Ontology Maintenance NOT accessible without AddOntologyMaintenance
-		assert.False(t, checker.IsToolAccessible("update_entity", state, false))
+		assert.False(t, checker.IsToolAccessible("update_table", state, false))
 		assert.False(t, checker.IsToolAccessible("update_column", state, false))
 	})
 
@@ -94,7 +94,7 @@ func TestToolAccessChecker_DeveloperToolsEnabled(t *testing.T) {
 		assert.True(t, checker.IsToolAccessible("echo", state, false))
 		assert.True(t, checker.IsToolAccessible("list_ontology_questions", state, false))
 		assert.True(t, checker.IsToolAccessible("resolve_ontology_question", state, false))
-		assert.True(t, checker.IsToolAccessible("update_entity", state, false))
+		assert.True(t, checker.IsToolAccessible("update_table", state, false))
 		assert.True(t, checker.IsToolAccessible("refresh_schema", state, false))
 
 		// Query tools NOT accessible
@@ -161,10 +161,10 @@ func TestToolAccessChecker_ApprovedQueriesEnabled(t *testing.T) {
 
 		// Developer Core + Ontology Maintenance
 		assert.True(t, checker.IsToolAccessible("echo", state, false))
-		assert.True(t, checker.IsToolAccessible("update_entity", state, false))
+		assert.True(t, checker.IsToolAccessible("update_table", state, false))
 		assert.True(t, checker.IsToolAccessible("update_column", state, false))
-		assert.True(t, checker.IsToolAccessible("update_relationship", state, false))
-		assert.True(t, checker.IsToolAccessible("delete_entity", state, false))
+		assert.True(t, checker.IsToolAccessible("update_glossary_term", state, false))
+		assert.True(t, checker.IsToolAccessible("delete_glossary_term", state, false))
 	})
 
 	t.Run("agent does not get approved_queries tools without agent_tools", func(t *testing.T) {
@@ -295,7 +295,7 @@ func TestToolAccessChecker_GetAccessibleTools(t *testing.T) {
 		assert.True(t, toolNames["sample"])
 		assert.True(t, toolNames["list_approved_queries"])
 		// Ontology Maintenance NOT included without AddOntologyMaintenance
-		assert.False(t, toolNames["update_entity"])
+		assert.False(t, toolNames["update_table"])
 	})
 
 	t.Run("approved_queries mode returns Developer Core tools for user", func(t *testing.T) {

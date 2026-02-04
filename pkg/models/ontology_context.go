@@ -4,14 +4,12 @@ package models
 // Ontology Context Response Types
 // ============================================================================
 // These types define the structured JSON responses for the get_ontology MCP tool
-// at different depth levels: domain, entities, tables, and columns.
+// at different depth levels: domain, tables, and columns.
 
 // OntologyDomainContext represents the top-level domain view (~200-500 tokens).
-// Returns high-level business context with entity list and relationships.
+// Returns high-level business context.
 type OntologyDomainContext struct {
-	Domain        DomainInfo         `json:"domain"`
-	Entities      []EntityBrief      `json:"entities"`
-	Relationships []RelationshipEdge `json:"relationships,omitempty"`
+	Domain DomainInfo `json:"domain"`
 }
 
 // DomainInfo provides high-level business context about the database.
@@ -21,53 +19,6 @@ type DomainInfo struct {
 	TableCount     int                 `json:"table_count"`
 	ColumnCount    int                 `json:"column_count"`
 	Conventions    *ProjectConventions `json:"conventions,omitempty"`
-}
-
-// EntityBrief provides a concise entity summary for domain-level view.
-type EntityBrief struct {
-	Name            string `json:"name"`
-	Description     string `json:"description"`
-	PrimaryTable    string `json:"primary_table"`
-	OccurrenceCount int    `json:"occurrence_count"`
-}
-
-// OntologyEntitiesContext returns entity details with occurrences (~500-1500 tokens).
-// Provides entity summaries with key columns and where they appear in the schema.
-type OntologyEntitiesContext struct {
-	Entities      map[string]EntityDetail      `json:"entities"`
-	Relationships []OntologyEntityRelationship `json:"relationships,omitempty"`
-}
-
-// EntityDetail provides full entity information including occurrences.
-type EntityDetail struct {
-	PrimaryTable string             `json:"primary_table"`
-	Description  string             `json:"description"`
-	Synonyms     []string           `json:"synonyms,omitempty"`
-	KeyColumns   []KeyColumnInfo    `json:"key_columns,omitempty"`
-	Occurrences  []EntityOccurrence `json:"occurrences"`
-}
-
-// KeyColumnInfo represents a key column in entity detail view.
-type KeyColumnInfo struct {
-	Name     string   `json:"name"`
-	Synonyms []string `json:"synonyms,omitempty"`
-}
-
-// EntityOccurrence describes where an entity appears in the schema.
-type EntityOccurrence struct {
-	Table       string  `json:"table"`
-	Column      string  `json:"column"`
-	Association *string `json:"association,omitempty"`
-}
-
-// OntologyEntityRelationship represents a relationship between entities in the ontology context.
-type OntologyEntityRelationship struct {
-	FromEntity  string `json:"from_entity"`
-	FromTable   string `json:"from_table"`
-	ToEntity    string `json:"to_entity"`
-	ToTable     string `json:"to_table"`
-	ViaColumn   string `json:"via_column"`
-	Cardinality string `json:"cardinality"`
 }
 
 // OntologyTablesContext returns table-level summaries with column overview.
@@ -96,14 +47,12 @@ type TableSummary struct {
 
 // ColumnOverview provides basic column information for table summary.
 type ColumnOverview struct {
-	Name              string  `json:"name"`
-	Type              string  `json:"type"`
-	Role              string  `json:"role"`
-	IsPrimaryKey      bool    `json:"is_primary_key"`
-	Entity            *string `json:"entity,omitempty"`
-	EntityAssociation *string `json:"entity_association,omitempty"`
-	HasEnumValues     bool    `json:"has_enum_values"`
-	FKAssociation     string  `json:"fk_association,omitempty"` // e.g., host, visitor, payer, payee
+	Name          string `json:"name"`
+	Type          string `json:"type"`
+	Role          string `json:"role"`
+	IsPrimaryKey  bool   `json:"is_primary_key"`
+	HasEnumValues bool   `json:"has_enum_values"`
+	FKAssociation string `json:"fk_association,omitempty"` // e.g., host, visitor, payer, payee
 }
 
 // TableRelationship represents a relationship at table level.

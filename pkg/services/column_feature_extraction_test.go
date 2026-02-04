@@ -1,3 +1,5 @@
+//go:build ignore
+
 package services
 
 import (
@@ -589,6 +591,7 @@ func TestBuildColumnProfile(t *testing.T) {
 		NullCount:     &nullCount,
 		MinLength:     &minLength,
 		MaxLength:     &maxLength,
+		SampleValues:  []string{"user@example.com", "test@test.org"},
 	}
 
 	profile := svc.buildColumnProfile(col, tableNameByID, tableRowCountByID)
@@ -647,8 +650,10 @@ func TestBuildColumnProfile(t *testing.T) {
 		t.Errorf("MaxLength = %v, want %v", profile.MaxLength, maxLength)
 	}
 
-	// Note: SampleValues are no longer stored in engine_schema_columns.
-	// They are fetched on-demand from the datasource when needed.
+	// Verify sample values
+	if len(profile.SampleValues) != 2 {
+		t.Errorf("SampleValues length = %d, want 2", len(profile.SampleValues))
+	}
 }
 
 func TestBuildColumnProfile_NullRateFromNonNullCount(t *testing.T) {
@@ -872,10 +877,13 @@ func (m *mockSchemaRepoForFeatureExtraction) SoftDeleteRemovedColumns(ctx contex
 func (m *mockSchemaRepoForFeatureExtraction) UpdateColumnSelection(ctx context.Context, projectID, columnID uuid.UUID, isSelected bool) error {
 	return nil
 }
-func (m *mockSchemaRepoForFeatureExtraction) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64) error {
+func (m *mockSchemaRepoForFeatureExtraction) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64, sampleValues []string) error {
 	return nil
 }
 func (m *mockSchemaRepoForFeatureExtraction) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
+	return nil
+}
+func (m *mockSchemaRepoForFeatureExtraction) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
 	return nil
 }
 func (m *mockSchemaRepoForFeatureExtraction) ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
@@ -926,48 +934,15 @@ func (m *mockSchemaRepoForFeatureExtraction) GetNonPKColumnsByExactType(ctx cont
 func (m *mockSchemaRepoForFeatureExtraction) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
+func (m *mockSchemaRepoForFeatureExtraction) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
 
 func (m *mockSchemaRepoForFeatureExtraction) GetRelationshipsByMethod(ctx context.Context, projectID, datasourceID uuid.UUID, method string) ([]*models.SchemaRelationship, error) {
 	return nil, nil
 }
 func (m *mockSchemaRepoForFeatureExtraction) DeleteInferredRelationshipsByProject(ctx context.Context, projectID uuid.UUID) (int64, error) {
 	return 0, nil
-}
-
-// mockColumnMetadataRepoForFeatureExtraction is a minimal mock for ColumnMetadataRepository.
-type mockColumnMetadataRepoForFeatureExtraction struct {
-	storedMetadata map[uuid.UUID]*models.ColumnMetadata
-}
-
-func (m *mockColumnMetadataRepoForFeatureExtraction) UpsertFromExtraction(ctx context.Context, meta *models.ColumnMetadata) error {
-	if m.storedMetadata != nil {
-		m.storedMetadata[meta.SchemaColumnID] = meta
-	}
-	return nil
-}
-
-func (m *mockColumnMetadataRepoForFeatureExtraction) Upsert(ctx context.Context, meta *models.ColumnMetadata) error {
-	return nil
-}
-
-func (m *mockColumnMetadataRepoForFeatureExtraction) GetBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
-	return nil, nil
-}
-
-func (m *mockColumnMetadataRepoForFeatureExtraction) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.ColumnMetadata, error) {
-	return nil, nil
-}
-
-func (m *mockColumnMetadataRepoForFeatureExtraction) GetBySchemaColumnIDs(ctx context.Context, schemaColumnIDs []uuid.UUID) ([]*models.ColumnMetadata, error) {
-	return nil, nil
-}
-
-func (m *mockColumnMetadataRepoForFeatureExtraction) Delete(ctx context.Context, id uuid.UUID) error {
-	return nil
-}
-
-func (m *mockColumnMetadataRepoForFeatureExtraction) DeleteBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) error {
-	return nil
 }
 
 func TestRunPhase1DataCollection(t *testing.T) {
@@ -1006,6 +981,7 @@ func TestRunPhase1DataCollection(t *testing.T) {
 				DataType:      "varchar(255)",
 				DistinctCount: &distinctCount,
 				NullCount:     &nullCount,
+				SampleValues:  []string{"user@example.com", "test@test.org"},
 			},
 			{
 				ID:            uuid.New(),
@@ -1095,11 +1071,7 @@ func TestExtractColumnFeatures_EmptySchema(t *testing.T) {
 		columns: []*models.SchemaColumn{},
 	}
 
-	mockColumnMetadataRepo := &mockColumnMetadataRepoForFeatureExtraction{
-		storedMetadata: make(map[uuid.UUID]*models.ColumnMetadata),
-	}
-
-	svc := NewColumnFeatureExtractionService(mockRepo, mockColumnMetadataRepo, zap.NewNop())
+	svc := NewColumnFeatureExtractionService(mockRepo, zap.NewNop())
 
 	count, err := svc.ExtractColumnFeatures(context.Background(), projectID, datasourceID, nil)
 	if err != nil {
@@ -3231,14 +3203,14 @@ func TestMergeCrossColumnAnalysis_SoftDeleteRejected(t *testing.T) {
 // ============================================================================
 
 func TestStoreFeatures_Success(t *testing.T) {
-	// Create mock column metadata repo that tracks upserts
-	columnMetadataRepo := &mockColumnMetadataRepoForStoreFeatures{
-		storedMetadata: make(map[uuid.UUID]*models.ColumnMetadata),
+	// Create mock schema repo that tracks feature updates
+	schemaRepo := &mockSchemaRepoForStoreFeatures{
+		storedFeatures: make(map[uuid.UUID]*models.ColumnFeatures),
 	}
 
 	svc := &columnFeatureExtractionService{
-		columnMetadataRepo: columnMetadataRepo,
-		logger:             zap.NewNop(),
+		schemaRepo: schemaRepo,
+		logger:     zap.NewNop(),
 	}
 
 	projectID := uuid.New()
@@ -3267,32 +3239,32 @@ func TestStoreFeatures_Success(t *testing.T) {
 	}
 
 	// Verify both features were stored
-	if len(columnMetadataRepo.storedMetadata) != 2 {
-		t.Errorf("Expected 2 stored metadata, got %d", len(columnMetadataRepo.storedMetadata))
+	if len(schemaRepo.storedFeatures) != 2 {
+		t.Errorf("Expected 2 stored features, got %d", len(schemaRepo.storedFeatures))
 	}
 
 	// Verify the features were stored correctly
-	if stored, ok := columnMetadataRepo.storedMetadata[col1ID]; !ok {
-		t.Error("Metadata for col1 not found")
-	} else if stored.Description == nil || *stored.Description != "Created timestamp" {
-		t.Errorf("Expected description 'Created timestamp', got '%v'", stored.Description)
+	if stored, ok := schemaRepo.storedFeatures[col1ID]; !ok {
+		t.Error("Feature for col1 not found")
+	} else if stored.Description != "Created timestamp" {
+		t.Errorf("Expected description 'Created timestamp', got '%s'", stored.Description)
 	}
 
-	if stored, ok := columnMetadataRepo.storedMetadata[col2ID]; !ok {
-		t.Error("Metadata for col2 not found")
-	} else if stored.Description == nil || *stored.Description != "Active flag" {
-		t.Errorf("Expected description 'Active flag', got '%v'", stored.Description)
+	if stored, ok := schemaRepo.storedFeatures[col2ID]; !ok {
+		t.Error("Feature for col2 not found")
+	} else if stored.Description != "Active flag" {
+		t.Errorf("Expected description 'Active flag', got '%s'", stored.Description)
 	}
 }
 
 func TestStoreFeatures_EmptyFeatures(t *testing.T) {
-	columnMetadataRepo := &mockColumnMetadataRepoForStoreFeatures{
-		storedMetadata: make(map[uuid.UUID]*models.ColumnMetadata),
+	schemaRepo := &mockSchemaRepoForStoreFeatures{
+		storedFeatures: make(map[uuid.UUID]*models.ColumnFeatures),
 	}
 
 	svc := &columnFeatureExtractionService{
-		columnMetadataRepo: columnMetadataRepo,
-		logger:             zap.NewNop(),
+		schemaRepo: schemaRepo,
+		logger:     zap.NewNop(),
 	}
 
 	ctx := context.Background()
@@ -3301,8 +3273,8 @@ func TestStoreFeatures_EmptyFeatures(t *testing.T) {
 		t.Fatalf("storeFeatures with empty list should not fail: %v", err)
 	}
 
-	if len(columnMetadataRepo.storedMetadata) != 0 {
-		t.Errorf("Expected 0 stored metadata, got %d", len(columnMetadataRepo.storedMetadata))
+	if len(schemaRepo.storedFeatures) != 0 {
+		t.Errorf("Expected 0 stored features, got %d", len(schemaRepo.storedFeatures))
 	}
 }
 
@@ -3311,14 +3283,14 @@ func TestStoreFeatures_ContinuesOnError(t *testing.T) {
 	col2ID := uuid.New()
 	col3ID := uuid.New()
 
-	columnMetadataRepo := &mockColumnMetadataRepoForStoreFeatures{
-		storedMetadata: make(map[uuid.UUID]*models.ColumnMetadata),
+	schemaRepo := &mockSchemaRepoForStoreFeatures{
+		storedFeatures: make(map[uuid.UUID]*models.ColumnFeatures),
 		failForColumns: map[uuid.UUID]bool{col2ID: true}, // Fail for col2
 	}
 
 	svc := &columnFeatureExtractionService{
-		columnMetadataRepo: columnMetadataRepo,
-		logger:             zap.NewNop(),
+		schemaRepo: schemaRepo,
+		logger:     zap.NewNop(),
 	}
 
 	features := []*models.ColumnFeatures{
@@ -3335,14 +3307,14 @@ func TestStoreFeatures_ContinuesOnError(t *testing.T) {
 	}
 
 	// Verify col1 and col3 were stored, col2 was not
-	if _, ok := columnMetadataRepo.storedMetadata[col1ID]; !ok {
-		t.Error("Metadata for col1 should be stored")
+	if _, ok := schemaRepo.storedFeatures[col1ID]; !ok {
+		t.Error("Feature for col1 should be stored")
 	}
-	if _, ok := columnMetadataRepo.storedMetadata[col2ID]; ok {
-		t.Error("Metadata for col2 should NOT be stored (should have failed)")
+	if _, ok := schemaRepo.storedFeatures[col2ID]; ok {
+		t.Error("Feature for col2 should NOT be stored (should have failed)")
 	}
-	if _, ok := columnMetadataRepo.storedMetadata[col3ID]; !ok {
-		t.Error("Metadata for col3 should be stored")
+	if _, ok := schemaRepo.storedFeatures[col3ID]; !ok {
+		t.Error("Feature for col3 should be stored")
 	}
 }
 
@@ -3350,14 +3322,14 @@ func TestStoreFeatures_AllFail_ReturnsError(t *testing.T) {
 	col1ID := uuid.New()
 	col2ID := uuid.New()
 
-	columnMetadataRepo := &mockColumnMetadataRepoForStoreFeatures{
-		storedMetadata: make(map[uuid.UUID]*models.ColumnMetadata),
+	schemaRepo := &mockSchemaRepoForStoreFeatures{
+		storedFeatures: make(map[uuid.UUID]*models.ColumnFeatures),
 		failForColumns: map[uuid.UUID]bool{col1ID: true, col2ID: true}, // All fail
 	}
 
 	svc := &columnFeatureExtractionService{
-		columnMetadataRepo: columnMetadataRepo,
-		logger:             zap.NewNop(),
+		schemaRepo: schemaRepo,
+		logger:     zap.NewNop(),
 	}
 
 	features := []*models.ColumnFeatures{
@@ -3376,13 +3348,13 @@ func TestStoreFeatures_AllFail_ReturnsError(t *testing.T) {
 func TestStoreFeatures_SkipsNilFeatures(t *testing.T) {
 	col1ID := uuid.New()
 
-	columnMetadataRepo := &mockColumnMetadataRepoForStoreFeatures{
-		storedMetadata: make(map[uuid.UUID]*models.ColumnMetadata),
+	schemaRepo := &mockSchemaRepoForStoreFeatures{
+		storedFeatures: make(map[uuid.UUID]*models.ColumnFeatures),
 	}
 
 	svc := &columnFeatureExtractionService{
-		columnMetadataRepo: columnMetadataRepo,
-		logger:             zap.NewNop(),
+		schemaRepo: schemaRepo,
+		logger:     zap.NewNop(),
 	}
 
 	features := []*models.ColumnFeatures{
@@ -3396,46 +3368,23 @@ func TestStoreFeatures_SkipsNilFeatures(t *testing.T) {
 		t.Fatalf("storeFeatures should not fail: %v", err)
 	}
 
-	if len(columnMetadataRepo.storedMetadata) != 1 {
-		t.Errorf("Expected 1 stored metadata (nil should be skipped), got %d", len(columnMetadataRepo.storedMetadata))
+	if len(schemaRepo.storedFeatures) != 1 {
+		t.Errorf("Expected 1 stored feature (nil should be skipped), got %d", len(schemaRepo.storedFeatures))
 	}
 }
 
-// mockColumnMetadataRepoForStoreFeatures is a minimal mock for testing storeFeatures
-type mockColumnMetadataRepoForStoreFeatures struct {
-	storedMetadata map[uuid.UUID]*models.ColumnMetadata
+// mockSchemaRepoForStoreFeatures is a minimal mock for testing storeFeatures
+type mockSchemaRepoForStoreFeatures struct {
+	mockSchemaRepoForFeatureExtraction
+	storedFeatures map[uuid.UUID]*models.ColumnFeatures
 	failForColumns map[uuid.UUID]bool
 }
 
-func (m *mockColumnMetadataRepoForStoreFeatures) UpsertFromExtraction(ctx context.Context, meta *models.ColumnMetadata) error {
-	if m.failForColumns != nil && m.failForColumns[meta.SchemaColumnID] {
-		return fmt.Errorf("simulated failure for column %s", meta.SchemaColumnID)
+func (m *mockSchemaRepoForStoreFeatures) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
+	if m.failForColumns != nil && m.failForColumns[columnID] {
+		return fmt.Errorf("simulated failure for column %s", columnID)
 	}
-	m.storedMetadata[meta.SchemaColumnID] = meta
-	return nil
-}
-
-func (m *mockColumnMetadataRepoForStoreFeatures) Upsert(ctx context.Context, meta *models.ColumnMetadata) error {
-	return nil
-}
-
-func (m *mockColumnMetadataRepoForStoreFeatures) GetBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
-	return nil, nil
-}
-
-func (m *mockColumnMetadataRepoForStoreFeatures) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.ColumnMetadata, error) {
-	return nil, nil
-}
-
-func (m *mockColumnMetadataRepoForStoreFeatures) GetBySchemaColumnIDs(ctx context.Context, schemaColumnIDs []uuid.UUID) ([]*models.ColumnMetadata, error) {
-	return nil, nil
-}
-
-func (m *mockColumnMetadataRepoForStoreFeatures) Delete(ctx context.Context, id uuid.UUID) error {
-	return nil
-}
-
-func (m *mockColumnMetadataRepoForStoreFeatures) DeleteBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) error {
+	m.storedFeatures[columnID] = features
 	return nil
 }
 

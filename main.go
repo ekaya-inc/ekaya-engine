@@ -133,8 +133,6 @@ func main() {
 	ontologyChatRepo := repositories.NewOntologyChatRepository()
 	knowledgeRepo := repositories.NewKnowledgeRepository()
 	ontologyQuestionRepo := repositories.NewOntologyQuestionRepository()
-	ontologyEntityRepo := repositories.NewOntologyEntityRepository()
-	entityRelationshipRepo := repositories.NewEntityRelationshipRepository()
 	ontologyDAGRepo := repositories.NewOntologyDAGRepository()
 	pendingChangeRepo := repositories.NewPendingChangeRepository()
 	columnMetadataRepo := repositories.NewColumnMetadataRepository()
@@ -163,7 +161,7 @@ func main() {
 	projectService := services.NewProjectService(db, projectRepo, userRepo, ontologyRepo, mcpConfigRepo, agentAPIKeyService, centralClient, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, ontologyRepo, credentialEncryptor, adapterFactory, projectService, logger)
-	schemaService := services.NewSchemaService(schemaRepo, ontologyEntityRepo, ontologyRepo, entityRelationshipRepo, datasourceService, adapterFactory, logger)
+	schemaService := services.NewSchemaService(schemaRepo, ontologyRepo, datasourceService, adapterFactory, logger)
 	schemaChangeDetectionService := services.NewSchemaChangeDetectionService(pendingChangeRepo, logger)
 	dataChangeDetectionService := services.NewDataChangeDetectionService(schemaRepo, columnMetadataRepo, ontologyRepo, pendingChangeRepo, datasourceService, projectService, adapterFactory, logger)
 	discoveryService := services.NewRelationshipDiscoveryService(schemaRepo, datasourceService, adapterFactory, logger)
@@ -191,45 +189,32 @@ func main() {
 	ontologyChatService := services.NewOntologyChatService(
 		ontologyChatRepo, ontologyRepo, knowledgeRepo,
 		schemaRepo, ontologyDAGRepo,
-		ontologyEntityRepo, entityRelationshipRepo,
 		llmFactory, datasourceService, adapterFactory, logger)
 	deterministicRelationshipService := services.NewDeterministicRelationshipService(
-		datasourceService, projectService, adapterFactory, ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, columnMetadataRepo, logger)
+		datasourceService, projectService, adapterFactory, ontologyRepo, schemaRepo, columnMetadataRepo, logger)
 	ontologyFinalizationService := services.NewOntologyFinalizationService(
-		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, columnMetadataRepo, convRepo, llmFactory, getTenantCtx, logger)
-	entityService := services.NewEntityService(ontologyEntityRepo, entityRelationshipRepo, ontologyRepo, logger)
+		ontologyRepo, schemaRepo, columnMetadataRepo, convRepo, llmFactory, getTenantCtx, logger)
 	ontologyContextService := services.NewOntologyContextService(
-		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, tableMetadataRepo, columnMetadataRepo, projectService, logger)
+		ontologyRepo, schemaRepo, tableMetadataRepo, projectService, logger)
 
 	// Create worker pool for parallel LLM calls
 	workerPoolConfig := llm.DefaultWorkerPoolConfig()
 	llmWorkerPool := llm.NewWorkerPool(workerPoolConfig, logger)
-
-	// Entity merge service handles collisions when LLM suggests renaming an entity
-	// to a name that already exists (e.g., MCP-created entity)
-	entityMergeService := services.NewEntityMergeService(
-		ontologyEntityRepo, entityRelationshipRepo, columnMetadataRepo, logger)
-
-	entityDiscoveryService := services.NewEntityDiscoveryService(
-		ontologyEntityRepo, schemaRepo, ontologyRepo, convRepo, ontologyQuestionService,
-		entityMergeService, llmFactory, llmWorkerPool, getTenantCtx, logger)
 
 	// Create circuit breaker for LLM resilience
 	circuitBreakerConfig := llm.DefaultCircuitBreakerConfig()
 	llmCircuitBreaker := llm.NewCircuitBreaker(circuitBreakerConfig)
 
 	columnEnrichmentService := services.NewColumnEnrichmentService(
-		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, columnMetadataRepo, convRepo, projectRepo, ontologyQuestionService,
+		ontologyRepo, schemaRepo, columnMetadataRepo, convRepo, projectRepo, ontologyQuestionService,
 		datasourceService, adapterFactory, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
-	relationshipEnrichmentService := services.NewRelationshipEnrichmentService(
-		entityRelationshipRepo, ontologyEntityRepo, knowledgeRepo, convRepo, ontologyQuestionService, ontologyRepo, schemaRepo, columnMetadataRepo, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
 	glossaryRepo := repositories.NewGlossaryRepository()
-	glossaryService := services.NewGlossaryService(glossaryRepo, ontologyRepo, ontologyEntityRepo, knowledgeRepo, schemaRepo, datasourceService, adapterFactory, llmFactory, getTenantCtx, logger, cfg.Env)
+	glossaryService := services.NewGlossaryService(glossaryRepo, ontologyRepo, knowledgeRepo, schemaRepo, datasourceService, adapterFactory, llmFactory, getTenantCtx, logger, cfg.Env)
 
 	// Ontology DAG service for orchestrated workflow execution
 	ontologyDAGService := services.NewOntologyDAGService(
-		ontologyDAGRepo, ontologyRepo, ontologyEntityRepo, schemaRepo,
-		entityRelationshipRepo, ontologyQuestionRepo, ontologyChatRepo, knowledgeRepo,
+		ontologyDAGRepo, ontologyRepo, schemaRepo,
+		ontologyQuestionRepo, ontologyChatRepo, knowledgeRepo,
 		glossaryRepo, getTenantCtx, logger)
 
 	// Wire DAG adapters using setter pattern (avoids import cycles)
@@ -239,8 +224,6 @@ func main() {
 		schemaRepo, columnMetadataRepo, datasourceService, adapterFactory, llmFactory, llmWorkerPool, getTenantCtx,
 		ontologyQuestionService, ontologyRepo, logger)
 	ontologyDAGService.SetColumnFeatureExtractionMethods(columnFeatureExtractionService)
-	ontologyDAGService.SetEntityDiscoveryMethods(services.NewEntityDiscoveryAdapter(entityDiscoveryService))
-	ontologyDAGService.SetEntityEnrichmentMethods(services.NewEntityEnrichmentAdapter(entityDiscoveryService, schemaRepo, getTenantCtx))
 	ontologyDAGService.SetFKDiscoveryMethods(services.NewFKDiscoveryAdapter(deterministicRelationshipService))
 	ontologyDAGService.SetPKMatchDiscoveryMethods(services.NewPKMatchDiscoveryAdapter(deterministicRelationshipService))
 	// LLM-validated relationship discovery (replaces threshold-based PKMatch when configured)
@@ -252,10 +235,6 @@ func main() {
 		relationshipCandidateCollector, relationshipValidator, datasourceService, adapterFactory,
 		schemaRepo, columnMetadataRepo, logger)
 	ontologyDAGService.SetLLMRelationshipDiscoveryMethods(services.NewLLMRelationshipDiscoveryAdapter(llmRelationshipDiscoveryService))
-	ontologyDAGService.SetRelationshipEnrichmentMethods(services.NewRelationshipEnrichmentAdapter(relationshipEnrichmentService))
-	entityPromotionService := services.NewEntityPromotionService(
-		ontologyEntityRepo, entityRelationshipRepo, schemaRepo, ontologyRepo, logger)
-	ontologyDAGService.SetEntityPromotionMethods(services.NewEntityPromotionAdapter(entityPromotionService))
 	ontologyDAGService.SetFinalizationMethods(services.NewOntologyFinalizationAdapter(ontologyFinalizationService))
 	ontologyDAGService.SetColumnEnrichmentMethods(services.NewColumnEnrichmentAdapter(columnEnrichmentService))
 	ontologyDAGService.SetGlossaryDiscoveryMethods(services.NewGlossaryDiscoveryAdapter(glossaryService))
@@ -265,8 +244,6 @@ func main() {
 	// Created first without ChangeReviewService due to circular dependency
 	incrementalDAGService := services.NewIncrementalDAGService(&services.IncrementalDAGServiceDeps{
 		OntologyRepo:       ontologyRepo,
-		EntityRepo:         ontologyEntityRepo,
-		RelationshipRepo:   entityRelationshipRepo,
 		ColumnMetadataRepo: columnMetadataRepo,
 		SchemaRepo:         schemaRepo,
 		ConversationRepo:   convRepo,
@@ -280,8 +257,6 @@ func main() {
 	// Change review service for approving/rejecting pending ontology changes
 	changeReviewService := services.NewChangeReviewService(&services.ChangeReviewServiceDeps{
 		PendingChangeRepo:  pendingChangeRepo,
-		EntityRepo:         ontologyEntityRepo,
-		RelationshipRepo:   entityRelationshipRepo,
 		ColumnMetadataRepo: columnMetadataRepo,
 		OntologyRepo:       ontologyRepo,
 		IncrementalDAG:     incrementalDAGService,
@@ -380,7 +355,6 @@ func main() {
 		ProjectService:         projectService,
 		OntologyContextService: ontologyContextService,
 		OntologyRepo:           ontologyRepo,
-		EntityRepo:             ontologyEntityRepo,
 		SchemaRepo:             schemaRepo,
 		Logger:                 logger,
 	}
@@ -439,16 +413,6 @@ func main() {
 	ontologyChatHandler := handlers.NewOntologyChatHandler(ontologyChatService, knowledgeService, logger)
 	ontologyChatHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
-	// Register entity handler (protected)
-	entityHandler := handlers.NewEntityHandler(entityService, logger)
-	entityHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
-
-	// Register entity relationship handler (protected)
-	// List reads from engine_schema_relationships, Discover writes to it
-	entityRelationshipHandler := handlers.NewEntityRelationshipHandler(
-		deterministicRelationshipService, schemaService, projectService, logger)
-	entityRelationshipHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
-
 	// Register ontology DAG handler (protected) - unified workflow execution
 	ontologyDAGHandler := handlers.NewOntologyDAGHandler(ontologyDAGService, projectService, logger)
 	ontologyDAGHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
@@ -506,28 +470,6 @@ func main() {
 	}
 	mcptools.RegisterContextTools(mcpServer.MCP(), contextToolDeps)
 
-	// Register entity probe tools (for exploring entity details)
-	entityToolDeps := &mcptools.EntityToolDeps{
-		DB:                     db,
-		MCPConfigService:       mcpConfigService,
-		OntologyRepo:           ontologyRepo,
-		OntologyEntityRepo:     ontologyEntityRepo,
-		EntityRelationshipRepo: entityRelationshipRepo,
-		Logger:                 logger,
-	}
-	mcptools.RegisterEntityTools(mcpServer.MCP(), entityToolDeps)
-
-	// Register relationship tools (for creating/updating/deleting entity relationships)
-	relationshipToolDeps := &mcptools.RelationshipToolDeps{
-		DB:                     db,
-		MCPConfigService:       mcpConfigService,
-		OntologyRepo:           ontologyRepo,
-		OntologyEntityRepo:     ontologyEntityRepo,
-		EntityRelationshipRepo: entityRelationshipRepo,
-		Logger:                 logger,
-	}
-	mcptools.RegisterRelationshipTools(mcpServer.MCP(), relationshipToolDeps)
-
 	// Register column metadata tools (for updating column semantic information)
 	columnToolDeps := &mcptools.ColumnToolDeps{
 		DB:                 db,
@@ -558,8 +500,6 @@ func main() {
 		MCPConfigService:   mcpConfigService,
 		SchemaRepo:         schemaRepo,
 		OntologyRepo:       ontologyRepo,
-		EntityRepo:         ontologyEntityRepo,
-		RelationshipRepo:   entityRelationshipRepo,
 		ColumnMetadataRepo: columnMetadataRepo,
 		ProjectService:     projectService,
 		Logger:             logger,
@@ -571,8 +511,6 @@ func main() {
 		DB:               db,
 		MCPConfigService: mcpConfigService,
 		SchemaRepo:       schemaRepo,
-		OntologyRepo:     ontologyRepo,
-		EntityRepo:       ontologyEntityRepo,
 		Logger:           logger,
 	}
 	mcptools.RegisterSearchTools(mcpServer.MCP(), searchToolDeps)

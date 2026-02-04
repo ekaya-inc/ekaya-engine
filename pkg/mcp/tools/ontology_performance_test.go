@@ -95,7 +95,6 @@ func TestGetOntology_Performance_DomainDepth(t *testing.T) {
 
 		// Verify response has expected fields
 		assert.Contains(t, ontologyResponse, "domain", "iteration %d: response should have domain field", i)
-		assert.Contains(t, ontologyResponse, "entities", "iteration %d: response should have entities field", i)
 	}
 
 	// Calculate average time
@@ -146,11 +145,6 @@ func TestGetOntology_Performance_AllDepths(t *testing.T) {
 			name:     "domain",
 			depth:    "domain",
 			expected: 100 * time.Millisecond,
-		},
-		{
-			name:     "entities",
-			depth:    "entities",
-			expected: 200 * time.Millisecond,
 		},
 		{
 			name:     "tables_filtered",
@@ -223,8 +217,6 @@ func setupOntologyPerformanceTest(t *testing.T) *ontologyPerformanceTestContext 
 
 	// Create repositories
 	ontologyRepo := repositories.NewOntologyRepository()
-	entityRepo := repositories.NewOntologyEntityRepository()
-	relationshipRepo := repositories.NewEntityRelationshipRepository()
 	schemaRepo := repositories.NewSchemaRepository()
 	columnMetadataRepo := repositories.NewColumnMetadataRepository()
 
@@ -234,8 +226,6 @@ func setupOntologyPerformanceTest(t *testing.T) *ontologyPerformanceTestContext 
 	// Create services
 	ontologyContextService := services.NewOntologyContextService(
 		ontologyRepo,
-		entityRepo,
-		relationshipRepo,
 		schemaRepo,
 		nil, // tableMetadataRepo
 		columnMetadataRepo,
@@ -255,7 +245,6 @@ func setupOntologyPerformanceTest(t *testing.T) *ontologyPerformanceTestContext 
 		MCPConfigService:       mcpConfigService,
 		OntologyContextService: ontologyContextService,
 		OntologyRepo:           ontologyRepo,
-		EntityRepo:             entityRepo,
 		SchemaRepo:             schemaRepo,
 		Logger:                 logger,
 	}
@@ -344,40 +333,6 @@ func (tc *ontologyPerformanceTestContext) createTestOntology() {
 		},
 	}
 
-	entitySummaries := map[string]*models.EntitySummary{
-		"users": {
-			TableName:    "users",
-			BusinessName: "Users",
-			Description:  "Platform users including customers and internal staff",
-			Domain:       "customer",
-			Synonyms:     []string{"accounts", "members"},
-			KeyColumns: []models.KeyColumn{
-				{Name: "id", Synonyms: []string{"user_id"}},
-				{Name: "email", Synonyms: []string{"email_address"}},
-			},
-			ColumnCount: 5,
-		},
-		"orders": {
-			TableName:    "orders",
-			BusinessName: "Orders",
-			Description:  "Customer purchase orders",
-			Domain:       "sales",
-			Synonyms:     []string{"purchases"},
-			KeyColumns: []models.KeyColumn{
-				{Name: "id", Synonyms: []string{"order_id"}},
-				{Name: "status", Synonyms: []string{"order_status"}},
-			},
-			ColumnCount: 8,
-		},
-		"products": {
-			TableName:    "products",
-			BusinessName: "Products",
-			Description:  "Product catalog",
-			Domain:       "product",
-			ColumnCount:  6,
-		},
-	}
-
 	columnDetails := map[string][]models.ColumnDetail{
 		"users": {
 			{Name: "id", Role: "identifier", IsPrimaryKey: true},
@@ -406,62 +361,17 @@ func (tc *ontologyPerformanceTestContext) createTestOntology() {
 	}
 
 	ontology := &models.TieredOntology{
-		ID:              ontologyID,
-		ProjectID:       tc.projectID,
-		Version:         1,
-		IsActive:        true,
-		DomainSummary:   domainSummary,
-		EntitySummaries: entitySummaries,
-		ColumnDetails:   columnDetails,
+		ID:            ontologyID,
+		ProjectID:     tc.projectID,
+		Version:       1,
+		IsActive:      true,
+		DomainSummary: domainSummary,
+		ColumnDetails: columnDetails,
 	}
 
 	err = tc.deps.OntologyRepo.Create(ctx, ontology)
 	if err != nil {
 		tc.t.Fatalf("Failed to create test ontology: %v", err)
-	}
-
-	// Add provenance context for entity creation (using nil UUID since we don't create a test user)
-	ctx = models.WithInferredProvenance(ctx, uuid.Nil)
-
-	// Create entities
-	entities := []*models.OntologyEntity{
-		{
-			ID:            uuid.New(),
-			ProjectID:     tc.projectID,
-			OntologyID:    ontologyID,
-			Name:          "user",
-			Description:   "Platform users including customers and internal staff",
-			PrimarySchema: "public",
-			PrimaryTable:  "users",
-			PrimaryColumn: "id",
-		},
-		{
-			ID:            uuid.New(),
-			ProjectID:     tc.projectID,
-			OntologyID:    ontologyID,
-			Name:          "order",
-			Description:   "Customer purchase orders",
-			PrimarySchema: "public",
-			PrimaryTable:  "orders",
-			PrimaryColumn: "id",
-		},
-		{
-			ID:            uuid.New(),
-			ProjectID:     tc.projectID,
-			OntologyID:    ontologyID,
-			Name:          "product",
-			Description:   "Product catalog items",
-			PrimarySchema: "public",
-			PrimaryTable:  "products",
-			PrimaryColumn: "id",
-		},
-	}
-
-	for _, entity := range entities {
-		err = tc.deps.EntityRepo.Create(ctx, entity)
-		if err != nil {
-			tc.t.Fatalf("Failed to create test entity %s: %v", entity.Name, err)
-		}
 	}
 }
 
@@ -477,9 +387,6 @@ func (tc *ontologyPerformanceTestContext) cleanup() {
 	}
 	defer scope.Close()
 
-	// Delete test data in reverse dependency order
-	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontology_entity_occurrences WHERE entity_id IN (SELECT id FROM engine_ontology_entities WHERE project_id = $1)`, tc.projectID)
-	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontology_entity_aliases WHERE project_id = $1`, tc.projectID)
-	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontology_entities WHERE project_id = $1`, tc.projectID)
+	// Delete test data
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontologies WHERE project_id = $1`, tc.projectID)
 }

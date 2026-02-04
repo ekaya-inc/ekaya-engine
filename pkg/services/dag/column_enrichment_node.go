@@ -59,7 +59,7 @@ func (n *ColumnEnrichmentNode) Execute(ctx context.Context, dag *models.Ontology
 		}
 	}
 
-	// Call the underlying service method (nil means enrich all entity tables)
+	// Call the underlying service method (nil means enrich all tables)
 	result, err := n.columnEnrichmentSvc.EnrichProject(ctx, dag.ProjectID, nil, progressCallback)
 	if err != nil {
 		return fmt.Errorf("enrich columns: %w", err)

@@ -23,22 +23,6 @@ func ParseDatasourceID(w http.ResponseWriter, r *http.Request, logger *zap.Logge
 	return parseUUID(w, r, "dsid", "invalid_datasource_id", "Invalid datasource ID format", logger)
 }
 
-// ParseEntityID extracts and validates the entity ID from the request path.
-// Returns the parsed UUID and true on success, or uuid.Nil and false on error
-// (after writing an error response).
-// Expects path parameter: eid
-func ParseEntityID(w http.ResponseWriter, r *http.Request, logger *zap.Logger) (uuid.UUID, bool) {
-	return parseUUID(w, r, "eid", "invalid_entity_id", "Invalid entity ID format", logger)
-}
-
-// ParseAliasID extracts and validates the alias ID from the request path.
-// Returns the parsed UUID and true on success, or uuid.Nil and false on error
-// (after writing an error response).
-// Expects path parameter: aid
-func ParseAliasID(w http.ResponseWriter, r *http.Request, logger *zap.Logger) (uuid.UUID, bool) {
-	return parseUUID(w, r, "aid", "invalid_alias_id", "Invalid alias ID format", logger)
-}
-
 // ParseQuestionID extracts and validates the question ID from the request path.
 // Returns the parsed UUID and true on success, or uuid.Nil and false on error
 // (after writing an error response).

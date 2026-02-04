@@ -20,7 +20,6 @@ import type {
   DeleteDatasourceResponse,
   DeleteQueryResponse,
   DiscoveryResults,
-  EntitiesListResponse,
   ExecuteQueryRequest,
   ExecuteQueryResponse,
   GetDatasourceResponse,
@@ -542,18 +541,6 @@ class EngineApiService {
       console.error(`Engine API Error (health check):`, error);
       return null;
     }
-  }
-
-  // --- Entity Management Methods ---
-
-  /**
-   * List all entities for a project
-   * GET /api/projects/{projectId}/entities
-   */
-  async listEntities(
-    projectId: string
-  ): Promise<ApiResponse<EntitiesListResponse>> {
-    return this.makeRequest<EntitiesListResponse>(`/${projectId}/entities`);
   }
 
   // --- Glossary Methods ---

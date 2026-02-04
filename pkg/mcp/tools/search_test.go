@@ -12,14 +12,12 @@ func TestSearchResult_Structure(t *testing.T) {
 		Query:      "user",
 		Tables:     []tableMatch{},
 		Columns:    []columnMatch{},
-		Entities:   []entityMatch{},
 		TotalCount: 0,
 	}
 
 	assert.Equal(t, "user", result.Query)
 	assert.NotNil(t, result.Tables)
 	assert.NotNil(t, result.Columns)
-	assert.NotNil(t, result.Entities)
 	assert.Equal(t, 0, result.TotalCount)
 }
 
@@ -50,49 +48,28 @@ func TestTableMatch_Structure(t *testing.T) {
 
 func TestColumnMatch_Structure(t *testing.T) {
 	// Test that columnMatch has expected fields
-	// Note: business_name and description were removed from engine_schema_columns
-	// (those semantic fields are now in engine_ontology_column_metadata)
+	businessName := "User ID"
+	description := "Primary key for users"
+
 	match := columnMatch{
-		SchemaName: "public",
-		TableName:  "users",
-		ColumnName: "user_id",
-		DataType:   "uuid",
-		MatchType:  "column_name",
-		Relevance:  0.9,
+		SchemaName:   "public",
+		TableName:    "users",
+		ColumnName:   "user_id",
+		DataType:     "uuid",
+		BusinessName: &businessName,
+		Description:  &description,
+		MatchType:    "column_name",
+		Relevance:    0.9,
 	}
 
 	assert.Equal(t, "public", match.SchemaName)
 	assert.Equal(t, "users", match.TableName)
 	assert.Equal(t, "user_id", match.ColumnName)
 	assert.Equal(t, "uuid", match.DataType)
+	assert.Equal(t, "User ID", *match.BusinessName)
+	assert.Equal(t, "Primary key for users", *match.Description)
 	assert.Equal(t, "column_name", match.MatchType)
 	assert.Equal(t, 0.9, match.Relevance)
-}
-
-func TestEntityMatch_Structure(t *testing.T) {
-	// Test that entityMatch has expected fields
-	description := "Platform user"
-	domain := "user_management"
-
-	match := entityMatch{
-		Name:         "User",
-		Description:  &description,
-		PrimaryTable: "users",
-		Domain:       &domain,
-		Aliases:      []string{"creator", "host"},
-		MatchType:    "name",
-		Relevance:    1.0,
-	}
-
-	assert.Equal(t, "User", match.Name)
-	assert.Equal(t, "Platform user", *match.Description)
-	assert.Equal(t, "users", match.PrimaryTable)
-	assert.Equal(t, "user_management", *match.Domain)
-	assert.Len(t, match.Aliases, 2)
-	assert.Contains(t, match.Aliases, "creator")
-	assert.Contains(t, match.Aliases, "host")
-	assert.Equal(t, "name", match.MatchType)
-	assert.Equal(t, 1.0, match.Relevance)
 }
 
 func TestSearchResult_TotalCount(t *testing.T) {
@@ -106,34 +83,23 @@ func TestSearchResult_TotalCount(t *testing.T) {
 			{ColumnName: "transaction_id"},
 			{ColumnName: "transaction_state"},
 		},
-		Entities: []entityMatch{
-			{Name: "Transaction"},
-		},
-		TotalCount: 4,
+		TotalCount: 3,
 	}
 
 	assert.Equal(t, 1, len(result.Tables))
 	assert.Equal(t, 2, len(result.Columns))
-	assert.Equal(t, 1, len(result.Entities))
-	assert.Equal(t, 4, result.TotalCount)
+	assert.Equal(t, 3, result.TotalCount)
 }
 
 func TestMatchTypes(t *testing.T) {
 	// Test that all match types are string constants
-	// Tables: still support business_name and description (on engine_schema_tables)
 	validTableMatchTypes := []string{"table_name", "business_name", "description"}
-	// Columns: only support column_name (business_name/description moved to engine_ontology_column_metadata)
-	validColumnMatchTypes := []string{"column_name"}
-	// Entities: support name, alias, and description
-	validEntityMatchTypes := []string{"name", "alias", "description"}
+	validColumnMatchTypes := []string{"column_name", "business_name", "description"}
 
 	for _, mt := range validTableMatchTypes {
 		assert.NotEmpty(t, mt)
 	}
 	for _, mt := range validColumnMatchTypes {
-		assert.NotEmpty(t, mt)
-	}
-	for _, mt := range validEntityMatchTypes {
 		assert.NotEmpty(t, mt)
 	}
 }

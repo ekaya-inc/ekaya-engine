@@ -90,7 +90,7 @@ func TestOntologyDAGHandler_StartExtraction_Success(t *testing.T) {
 	dagID := uuid.New()
 	ontologyID := uuid.New()
 	now := time.Now()
-	currentNode := "EntityDiscovery"
+	currentNode := "KnowledgeSeeding"
 
 	mockService := &mockOntologyDAGService{
 		startFunc: func(ctx context.Context, pID, dsID uuid.UUID, overview string) (*models.OntologyDAG, error) {
@@ -111,12 +111,11 @@ func TestOntologyDAGHandler_StartExtraction_Success(t *testing.T) {
 				CreatedAt:    now,
 				UpdatedAt:    now,
 				Nodes: []models.DAGNode{
-					{ID: uuid.New(), NodeName: "EntityDiscovery", NodeOrder: 1, Status: models.DAGNodeStatusRunning},
-					{ID: uuid.New(), NodeName: "EntityEnrichment", NodeOrder: 2, Status: models.DAGNodeStatusPending},
+					{ID: uuid.New(), NodeName: "KnowledgeSeeding", NodeOrder: 1, Status: models.DAGNodeStatusRunning},
+					{ID: uuid.New(), NodeName: "ColumnFeatureExtraction", NodeOrder: 2, Status: models.DAGNodeStatusPending},
 					{ID: uuid.New(), NodeName: "FKDiscovery", NodeOrder: 3, Status: models.DAGNodeStatusPending},
-					{ID: uuid.New(), NodeName: "RelationshipEnrichment", NodeOrder: 4, Status: models.DAGNodeStatusPending},
-					{ID: uuid.New(), NodeName: "OntologyFinalization", NodeOrder: 5, Status: models.DAGNodeStatusPending},
-					{ID: uuid.New(), NodeName: "ColumnEnrichment", NodeOrder: 6, Status: models.DAGNodeStatusPending},
+					{ID: uuid.New(), NodeName: "TableFeatureExtraction", NodeOrder: 4, Status: models.DAGNodeStatusPending},
+					{ID: uuid.New(), NodeName: "PKMatchDiscovery", NodeOrder: 5, Status: models.DAGNodeStatusPending},
 				},
 			}, nil
 		},
@@ -157,8 +156,8 @@ func TestOntologyDAGHandler_StartExtraction_Success(t *testing.T) {
 	}
 
 	nodes := dataMap["nodes"].([]any)
-	if len(nodes) != 6 {
-		t.Errorf("expected 6 nodes, got %d", len(nodes))
+	if len(nodes) != 5 {
+		t.Errorf("expected 5 nodes, got %d", len(nodes))
 	}
 }
 
@@ -333,7 +332,7 @@ func TestOntologyDAGHandler_GetStatus_Success(t *testing.T) {
 	datasourceID := uuid.New()
 	dagID := uuid.New()
 	now := time.Now()
-	currentNode := "EntityEnrichment"
+	currentNode := "ColumnFeatureExtraction"
 
 	mockService := &mockOntologyDAGService{
 		getStatusFunc: func(ctx context.Context, dsID uuid.UUID) (*models.OntologyDAG, error) {
@@ -350,12 +349,11 @@ func TestOntologyDAGHandler_GetStatus_Success(t *testing.T) {
 				CreatedAt:    now,
 				UpdatedAt:    now,
 				Nodes: []models.DAGNode{
-					{ID: uuid.New(), NodeName: "EntityDiscovery", NodeOrder: 1, Status: models.DAGNodeStatusCompleted},
-					{ID: uuid.New(), NodeName: "EntityEnrichment", NodeOrder: 2, Status: models.DAGNodeStatusRunning, Progress: &models.DAGNodeProgress{Current: 5, Total: 15, Message: "Processing table users"}},
+					{ID: uuid.New(), NodeName: "KnowledgeSeeding", NodeOrder: 1, Status: models.DAGNodeStatusCompleted},
+					{ID: uuid.New(), NodeName: "ColumnFeatureExtraction", NodeOrder: 2, Status: models.DAGNodeStatusRunning, Progress: &models.DAGNodeProgress{Current: 5, Total: 15, Message: "Processing table users"}},
 					{ID: uuid.New(), NodeName: "FKDiscovery", NodeOrder: 3, Status: models.DAGNodeStatusPending},
-					{ID: uuid.New(), NodeName: "RelationshipEnrichment", NodeOrder: 4, Status: models.DAGNodeStatusPending},
-					{ID: uuid.New(), NodeName: "OntologyFinalization", NodeOrder: 5, Status: models.DAGNodeStatusPending},
-					{ID: uuid.New(), NodeName: "ColumnEnrichment", NodeOrder: 6, Status: models.DAGNodeStatusPending},
+					{ID: uuid.New(), NodeName: "TableFeatureExtraction", NodeOrder: 4, Status: models.DAGNodeStatusPending},
+					{ID: uuid.New(), NodeName: "PKMatchDiscovery", NodeOrder: 5, Status: models.DAGNodeStatusPending},
 				},
 			}, nil
 		},
@@ -393,22 +391,22 @@ func TestOntologyDAGHandler_GetStatus_Success(t *testing.T) {
 	}
 
 	nodes := dataMap["nodes"].([]any)
-	if len(nodes) != 6 {
-		t.Errorf("expected 6 nodes, got %d", len(nodes))
+	if len(nodes) != 5 {
+		t.Errorf("expected 5 nodes, got %d", len(nodes))
 	}
 
-	// Check that EntityDiscovery is completed and EntityEnrichment is running
+	// Check that KnowledgeSeeding is completed and ColumnFeatureExtraction is running
 	firstNode := nodes[0].(map[string]any)
-	if firstNode["name"] != "EntityDiscovery" {
-		t.Errorf("expected first node name 'EntityDiscovery', got '%s'", firstNode["name"])
+	if firstNode["name"] != "KnowledgeSeeding" {
+		t.Errorf("expected first node name 'KnowledgeSeeding', got '%s'", firstNode["name"])
 	}
 	if firstNode["status"] != "completed" {
 		t.Errorf("expected first node status 'completed', got '%s'", firstNode["status"])
 	}
 
 	secondNode := nodes[1].(map[string]any)
-	if secondNode["name"] != "EntityEnrichment" {
-		t.Errorf("expected second node name 'EntityEnrichment', got '%s'", secondNode["name"])
+	if secondNode["name"] != "ColumnFeatureExtraction" {
+		t.Errorf("expected second node name 'ColumnFeatureExtraction', got '%s'", secondNode["name"])
 	}
 	if secondNode["status"] != "running" {
 		t.Errorf("expected second node status 'running', got '%s'", secondNode["status"])
@@ -660,12 +658,11 @@ func TestOntologyDAGHandler_CompletedDAG(t *testing.T) {
 				CreatedAt:    now,
 				UpdatedAt:    completedAt,
 				Nodes: []models.DAGNode{
-					{ID: uuid.New(), NodeName: "EntityDiscovery", NodeOrder: 1, Status: models.DAGNodeStatusCompleted},
-					{ID: uuid.New(), NodeName: "EntityEnrichment", NodeOrder: 2, Status: models.DAGNodeStatusCompleted},
+					{ID: uuid.New(), NodeName: "KnowledgeSeeding", NodeOrder: 1, Status: models.DAGNodeStatusCompleted},
+					{ID: uuid.New(), NodeName: "ColumnFeatureExtraction", NodeOrder: 2, Status: models.DAGNodeStatusCompleted},
 					{ID: uuid.New(), NodeName: "FKDiscovery", NodeOrder: 3, Status: models.DAGNodeStatusCompleted},
-					{ID: uuid.New(), NodeName: "RelationshipEnrichment", NodeOrder: 4, Status: models.DAGNodeStatusCompleted},
-					{ID: uuid.New(), NodeName: "OntologyFinalization", NodeOrder: 5, Status: models.DAGNodeStatusCompleted},
-					{ID: uuid.New(), NodeName: "ColumnEnrichment", NodeOrder: 6, Status: models.DAGNodeStatusCompleted},
+					{ID: uuid.New(), NodeName: "TableFeatureExtraction", NodeOrder: 4, Status: models.DAGNodeStatusCompleted},
+					{ID: uuid.New(), NodeName: "PKMatchDiscovery", NodeOrder: 5, Status: models.DAGNodeStatusCompleted},
 				},
 			}, nil
 		},
@@ -728,12 +725,11 @@ func TestOntologyDAGHandler_FailedDAG(t *testing.T) {
 				CreatedAt:    now,
 				UpdatedAt:    now,
 				Nodes: []models.DAGNode{
-					{ID: uuid.New(), NodeName: "EntityDiscovery", NodeOrder: 1, Status: models.DAGNodeStatusCompleted},
-					{ID: uuid.New(), NodeName: "EntityEnrichment", NodeOrder: 2, Status: models.DAGNodeStatusFailed, ErrorMessage: &errMsg},
+					{ID: uuid.New(), NodeName: "KnowledgeSeeding", NodeOrder: 1, Status: models.DAGNodeStatusCompleted},
+					{ID: uuid.New(), NodeName: "ColumnFeatureExtraction", NodeOrder: 2, Status: models.DAGNodeStatusFailed, ErrorMessage: &errMsg},
 					{ID: uuid.New(), NodeName: "FKDiscovery", NodeOrder: 3, Status: models.DAGNodeStatusPending},
-					{ID: uuid.New(), NodeName: "RelationshipEnrichment", NodeOrder: 4, Status: models.DAGNodeStatusPending},
-					{ID: uuid.New(), NodeName: "OntologyFinalization", NodeOrder: 5, Status: models.DAGNodeStatusPending},
-					{ID: uuid.New(), NodeName: "ColumnEnrichment", NodeOrder: 6, Status: models.DAGNodeStatusPending},
+					{ID: uuid.New(), NodeName: "TableFeatureExtraction", NodeOrder: 4, Status: models.DAGNodeStatusPending},
+					{ID: uuid.New(), NodeName: "PKMatchDiscovery", NodeOrder: 5, Status: models.DAGNodeStatusPending},
 				},
 			}, nil
 		},
@@ -763,7 +759,7 @@ func TestOntologyDAGHandler_FailedDAG(t *testing.T) {
 		t.Errorf("expected status 'failed', got '%s'", dataMap["status"])
 	}
 
-	// Check that EntityEnrichment node has error message
+	// Check that ColumnFeatureExtraction node has error message
 	nodes := dataMap["nodes"].([]any)
 	secondNode := nodes[1].(map[string]any)
 	if secondNode["status"] != "failed" {

@@ -799,7 +799,7 @@ export const OntologyDAG = ({
           <DialogHeader>
             <DialogTitle>Delete Ontology?</DialogTitle>
             <DialogDescription>
-              This will permanently delete all ontology data, including entities, relationships,
+              This will permanently delete all ontology data, including table metadata, relationships,
               questions, and chat history. This action cannot be undone.
             </DialogDescription>
           </DialogHeader>

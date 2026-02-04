@@ -39,17 +39,15 @@ type OntologyChatService interface {
 }
 
 type ontologyChatService struct {
-	chatRepo           repositories.OntologyChatRepository
-	ontologyRepo       repositories.OntologyRepository
-	knowledgeRepo      repositories.KnowledgeRepository
-	schemaRepo         repositories.SchemaRepository
-	dagRepo            repositories.OntologyDAGRepository
-	ontologyEntityRepo repositories.OntologyEntityRepository
-	entityRelRepo      repositories.EntityRelationshipRepository
-	llmFactory         llm.LLMClientFactory
-	datasourceService  DatasourceService
-	adapterFactory     datasource.DatasourceAdapterFactory
-	logger             *zap.Logger
+	chatRepo          repositories.OntologyChatRepository
+	ontologyRepo      repositories.OntologyRepository
+	knowledgeRepo     repositories.KnowledgeRepository
+	schemaRepo        repositories.SchemaRepository
+	dagRepo           repositories.OntologyDAGRepository
+	llmFactory        llm.LLMClientFactory
+	datasourceService DatasourceService
+	adapterFactory    datasource.DatasourceAdapterFactory
+	logger            *zap.Logger
 }
 
 // NewOntologyChatService creates a new ontology chat service.
@@ -59,25 +57,21 @@ func NewOntologyChatService(
 	knowledgeRepo repositories.KnowledgeRepository,
 	schemaRepo repositories.SchemaRepository,
 	dagRepo repositories.OntologyDAGRepository,
-	ontologyEntityRepo repositories.OntologyEntityRepository,
-	entityRelRepo repositories.EntityRelationshipRepository,
 	llmFactory llm.LLMClientFactory,
 	datasourceService DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	logger *zap.Logger,
 ) OntologyChatService {
 	return &ontologyChatService{
-		chatRepo:           chatRepo,
-		ontologyRepo:       ontologyRepo,
-		knowledgeRepo:      knowledgeRepo,
-		schemaRepo:         schemaRepo,
-		dagRepo:            dagRepo,
-		ontologyEntityRepo: ontologyEntityRepo,
-		entityRelRepo:      entityRelRepo,
-		llmFactory:         llmFactory,
-		datasourceService:  datasourceService,
-		adapterFactory:     adapterFactory,
-		logger:             logger.Named("ontology-chat"),
+		chatRepo:          chatRepo,
+		ontologyRepo:      ontologyRepo,
+		knowledgeRepo:     knowledgeRepo,
+		schemaRepo:        schemaRepo,
+		dagRepo:           dagRepo,
+		llmFactory:        llmFactory,
+		datasourceService: datasourceService,
+		adapterFactory:    adapterFactory,
+		logger:            logger.Named("ontology-chat"),
 	}
 }
 
@@ -221,8 +215,6 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 		OntologyRepo:       s.ontologyRepo,
 		KnowledgeRepo:      s.knowledgeRepo,
 		SchemaRepo:         s.schemaRepo,
-		OntologyEntityRepo: s.ontologyEntityRepo,
-		EntityRelRepo:      s.entityRelRepo,
 		QueryExecutor:      queryExecutor,
 		Logger:             s.logger,
 	})
@@ -465,11 +457,9 @@ func (s *ontologyChatService) buildChatSystemPrompt(ontology *models.TieredOntol
 Available tools:
 - query_column_values: Query sample values from database columns
 - query_schema_metadata: Get metadata about tables and columns
-- update_entity: Update descriptions or synonyms for tables
+- update_table: Update descriptions for tables
 - update_column: Update descriptions or semantic types for columns
 - store_knowledge: Store business facts and domain knowledge
-- create_domain_entity: Create a new domain entity (e.g., 'campaign', 'subscription')
-- create_entity_relationship: Create a relationship between domain entities
 
 Guidelines:
 - Be helpful and conversational while staying focused on data understanding
@@ -488,22 +478,17 @@ Guidelines:
 			sb.WriteString(fmt.Sprintf("**Description:** %s\n\n", ontology.DomainSummary.Description))
 		}
 
-		if len(ontology.EntitySummaries) > 0 {
+		if len(ontology.ColumnDetails) > 0 {
 			sb.WriteString("## Available Tables\n\n")
 			// RESEARCH: Consider ordering by relevance (row count, relationship degree,
 			// query frequency) rather than alphabetically to signal importance to the LLM.
-			tableNames := make([]string, 0, len(ontology.EntitySummaries))
-			for name := range ontology.EntitySummaries {
+			tableNames := make([]string, 0, len(ontology.ColumnDetails))
+			for name := range ontology.ColumnDetails {
 				tableNames = append(tableNames, name)
 			}
 			sort.Strings(tableNames)
 			for _, tableName := range tableNames {
-				entity := ontology.EntitySummaries[tableName]
-				if entity.Description != "" {
-					sb.WriteString(fmt.Sprintf("- **%s**: %s\n", tableName, entity.Description))
-				} else {
-					sb.WriteString(fmt.Sprintf("- **%s**\n", tableName))
-				}
+				sb.WriteString(fmt.Sprintf("- **%s**\n", tableName))
 			}
 			sb.WriteString("\n")
 		}

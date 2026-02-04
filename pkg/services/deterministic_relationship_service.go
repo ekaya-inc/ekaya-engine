@@ -41,21 +41,16 @@ type PKMatchDiscoveryResult struct {
 // Parameters: current (items processed), total (total items), message (human-readable status).
 type RelationshipProgressCallback func(current, total int, message string)
 
-// DeterministicRelationshipService discovers entity relationships from FK constraints
+// DeterministicRelationshipService discovers schema relationships from FK constraints
 // and PK-match inference.
 type DeterministicRelationshipService interface {
 	// DiscoverFKRelationships discovers relationships from database FK constraints.
-	// Requires entities to exist before calling.
 	// The progressCallback is called to report progress (can be nil).
 	DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback RelationshipProgressCallback) (*FKDiscoveryResult, error)
 
 	// DiscoverPKMatchRelationships discovers relationships via pairwise SQL join testing.
-	// Requires entities and column enrichment to exist before calling.
 	// The progressCallback is called to report progress (can be nil).
 	DiscoverPKMatchRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback RelationshipProgressCallback) (*PKMatchDiscoveryResult, error)
-
-	// GetByProject returns all entity relationships for a project.
-	GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error)
 }
 
 type deterministicRelationshipService struct {
@@ -63,8 +58,6 @@ type deterministicRelationshipService struct {
 	projectService     ProjectService
 	adapterFactory     datasource.DatasourceAdapterFactory
 	ontologyRepo       repositories.OntologyRepository
-	entityRepo         repositories.OntologyEntityRepository
-	relationshipRepo   repositories.EntityRelationshipRepository
 	schemaRepo         repositories.SchemaRepository
 	columnMetadataRepo repositories.ColumnMetadataRepository
 	logger             *zap.Logger
@@ -76,8 +69,6 @@ func NewDeterministicRelationshipService(
 	projectService ProjectService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	ontologyRepo repositories.OntologyRepository,
-	entityRepo repositories.OntologyEntityRepository,
-	relationshipRepo repositories.EntityRelationshipRepository,
 	schemaRepo repositories.SchemaRepository,
 	columnMetadataRepo repositories.ColumnMetadataRepository,
 	logger *zap.Logger,
@@ -87,49 +78,10 @@ func NewDeterministicRelationshipService(
 		projectService:     projectService,
 		adapterFactory:     adapterFactory,
 		ontologyRepo:       ontologyRepo,
-		entityRepo:         entityRepo,
-		relationshipRepo:   relationshipRepo,
 		schemaRepo:         schemaRepo,
 		columnMetadataRepo: columnMetadataRepo,
 		logger:             logger.Named("relationship-discovery"),
 	}
-}
-
-// createBidirectionalRelationship creates both forward and reverse relationship rows.
-// The forward relationship is the FK direction (source → target).
-// The reverse relationship swaps source and target to enable bidirectional navigation.
-func (s *deterministicRelationshipService) createBidirectionalRelationship(ctx context.Context, rel *models.EntityRelationship) error {
-	// Create forward relationship
-	if err := s.relationshipRepo.Create(ctx, rel); err != nil {
-		return fmt.Errorf("create forward relationship: %w", err)
-	}
-
-	// Create reverse relationship by swapping source and target
-	reverse := &models.EntityRelationship{
-		OntologyID:         rel.OntologyID,
-		SourceEntityID:     rel.TargetEntityID,     // swap
-		TargetEntityID:     rel.SourceEntityID,     // swap
-		SourceColumnSchema: rel.TargetColumnSchema, // swap
-		SourceColumnTable:  rel.TargetColumnTable,  // swap
-		SourceColumnName:   rel.TargetColumnName,   // swap
-		SourceColumnID:     rel.TargetColumnID,     // swap
-		TargetColumnSchema: rel.SourceColumnSchema, // swap
-		TargetColumnTable:  rel.SourceColumnTable,  // swap
-		TargetColumnName:   rel.SourceColumnName,   // swap
-		TargetColumnID:     rel.SourceColumnID,     // swap
-		DetectionMethod:    rel.DetectionMethod,
-		Confidence:         rel.Confidence,
-		Status:             rel.Status,
-		Cardinality:        ReverseCardinality(rel.Cardinality), // swap: N:1 ↔ 1:N
-		Description:        nil,                                 // reverse direction gets its own description during enrichment
-	}
-
-	// Create reverse relationship
-	if err := s.relationshipRepo.Create(ctx, reverse); err != nil {
-		return fmt.Errorf("create reverse relationship: %w", err)
-	}
-
-	return nil
 }
 
 func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback RelationshipProgressCallback) (*FKDiscoveryResult, error) {
@@ -1033,10 +985,6 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 	return &PKMatchDiscoveryResult{
 		InferredRelationships: inferredCount,
 	}, nil
-}
-
-func (s *deterministicRelationshipService) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error) {
-	return s.relationshipRepo.GetByProject(ctx, projectID)
 }
 
 // pkMatchCandidate bundles a column with its table location info for PK-match discovery.

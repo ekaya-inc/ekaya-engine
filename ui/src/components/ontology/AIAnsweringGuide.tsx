@@ -74,8 +74,7 @@ export const AIAnsweringGuide = ({ questionCount }: AIAnsweringGuideProps) => {
               Research each question using your codebase, documentation, or domain knowledge
             </li>
             <li>
-              Update the ontology using tools like <code className="bg-surface-tertiary px-1.5 py-0.5 rounded text-xs font-mono">update_column</code>,{' '}
-              <code className="bg-surface-tertiary px-1.5 py-0.5 rounded text-xs font-mono">update_entity</code>, or{' '}
+              Update the ontology using tools like <code className="bg-surface-tertiary px-1.5 py-0.5 rounded text-xs font-mono">update_column</code> or{' '}
               <code className="bg-surface-tertiary px-1.5 py-0.5 rounded text-xs font-mono">update_project_knowledge</code>
             </li>
             <li>

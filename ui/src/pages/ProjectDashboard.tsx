@@ -1,7 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   BookOpen,
-  Boxes,
   Brain,
   BrainCircuit,
   Check,
@@ -435,13 +434,6 @@ const ProjectDashboard = () => {
       path: `/projects/${pid}/enrichment`,
       disabled: !isConnected || !hasSelectedTables, // Disabled if no datasource or no tables
       color: 'orange',
-    },
-    {
-      title: 'Entities',
-      icon: Boxes,
-      path: `/projects/${pid}/entities`,
-      disabled: !isConnected || !hasSelectedTables, // Disabled if no datasource or no tables (entities are database-derived, not AI-derived)
-      color: 'green',
     },
     {
       title: 'Relationships',

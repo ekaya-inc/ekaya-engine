@@ -202,20 +202,16 @@ func handleContextWithOntology(
 	}
 
 	// Route to appropriate handler based on depth
-	// Domain/Entities: Ontology-driven (conceptual business entities)
+	// Domain: Ontology-driven (domain summary)
 	// Tables/Columns: Schema-driven (physical structure with column features)
+	// Note: "entities" depth has been removed for v1.0 entity simplification
 	switch depth {
 	case "domain":
 		domainCtx, err := deps.OntologyContextService.GetDomainContext(ctx, projectID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get domain context: %w", err)
 		}
-		if !includeRelationships {
-			domainCtx.Relationships = nil
-		}
 		response["domain"] = domainCtx.Domain
-		response["entities"] = domainCtx.Entities
-		response["relationships"] = domainCtx.Relationships
 
 		// Include project knowledge at domain level
 		if deps.KnowledgeRepo != nil {
@@ -231,15 +227,14 @@ func handleContextWithOntology(
 		}
 
 	case "entities":
-		entitiesCtx, err := deps.OntologyContextService.GetEntitiesContext(ctx, projectID)
+		// Entity-level depth has been removed for v1.0 entity simplification.
+		// Fall back to domain-level response.
+		domainCtx, err := deps.OntologyContextService.GetDomainContext(ctx, projectID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get entities context: %w", err)
+			return nil, fmt.Errorf("failed to get domain context: %w", err)
 		}
-		if !includeRelationships {
-			entitiesCtx.Relationships = nil
-		}
-		response["entities"] = entitiesCtx.Entities
-		response["relationships"] = entitiesCtx.Relationships
+		response["domain"] = domainCtx.Domain
+		response["note"] = "Entity-level depth is deprecated. Use 'domain' or 'tables' instead."
 
 	case "tables", "columns":
 		// Tables and columns always come from schema (engine_schema_columns)

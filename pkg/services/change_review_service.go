@@ -42,8 +42,6 @@ type ApproveAllResult struct {
 
 type changeReviewService struct {
 	pendingChangeRepo  repositories.PendingChangeRepository
-	entityRepo         repositories.OntologyEntityRepository
-	relationshipRepo   repositories.EntityRelationshipRepository
 	columnMetadataRepo repositories.ColumnMetadataRepository
 	ontologyRepo       repositories.OntologyRepository
 	precedenceChecker  PrecedenceChecker     // Precedence validation service
@@ -54,8 +52,6 @@ type changeReviewService struct {
 // ChangeReviewServiceDeps contains dependencies for ChangeReviewService.
 type ChangeReviewServiceDeps struct {
 	PendingChangeRepo  repositories.PendingChangeRepository
-	EntityRepo         repositories.OntologyEntityRepository
-	RelationshipRepo   repositories.EntityRelationshipRepository
 	ColumnMetadataRepo repositories.ColumnMetadataRepository
 	OntologyRepo       repositories.OntologyRepository
 	PrecedenceChecker  PrecedenceChecker     // Optional: defaults to NewPrecedenceChecker() if nil
@@ -71,8 +67,6 @@ func NewChangeReviewService(deps *ChangeReviewServiceDeps) ChangeReviewService {
 	}
 	return &changeReviewService{
 		pendingChangeRepo:  deps.PendingChangeRepo,
-		entityRepo:         deps.EntityRepo,
-		relationshipRepo:   deps.RelationshipRepo,
 		columnMetadataRepo: deps.ColumnMetadataRepo,
 		ontologyRepo:       deps.OntologyRepo,
 		precedenceChecker:  precedenceChecker,
@@ -223,44 +217,11 @@ func (s *changeReviewService) applyChange(ctx context.Context, change *models.Pe
 }
 
 func (s *changeReviewService) applyCreateEntity(ctx context.Context, change *models.PendingChange, reviewerSource string) error {
-	payload := change.SuggestedPayload
-	if payload == nil {
-		return fmt.Errorf("missing suggested_payload for create_entity")
-	}
-
-	// Get the active ontology
-	ontology, err := s.ontologyRepo.GetActive(ctx, change.ProjectID)
-	if err != nil {
-		return fmt.Errorf("failed to get active ontology: %w", err)
-	}
-	if ontology == nil {
-		return fmt.Errorf("no active ontology found")
-	}
-
-	// Extract entity details from payload
-	name, _ := payload["name"].(string)
-	if name == "" {
-		name = change.TableName // Fall back to table name
-	}
-
-	// Note: Source and CreatedBy are set by the repository from provenance context
-	entity := &models.OntologyEntity{
-		ProjectID:     change.ProjectID,
-		OntologyID:    ontology.ID,
-		Name:          name,
-		PrimaryTable:  change.TableName,
-		PrimarySchema: "public",
-		PrimaryColumn: "id", // Default, can be overridden by payload
-	}
-
-	if desc, ok := payload["description"].(string); ok {
-		entity.Description = desc
-	}
-	if primaryColumn, ok := payload["primary_column"].(string); ok {
-		entity.PrimaryColumn = primaryColumn
-	}
-
-	return s.entityRepo.Create(ctx, entity)
+	// Entity creation has been removed for v1.0 simplification.
+	// This method is a no-op but returns success so the change can be marked as applied.
+	s.logger.Debug("Skipping applyCreateEntity - entity functionality removed for v1.0",
+		zap.String("table_name", change.TableName))
+	return nil
 }
 
 func (s *changeReviewService) applyReviewEntity(ctx context.Context, change *models.PendingChange, reviewerSource string) error {
@@ -290,105 +251,18 @@ func (s *changeReviewService) applyUpdateColumnMetadata(_ context.Context, chang
 }
 
 func (s *changeReviewService) applyCreateRelationship(ctx context.Context, change *models.PendingChange, reviewerSource string) error {
-	payload := change.SuggestedPayload
-	if payload == nil {
-		return fmt.Errorf("missing suggested_payload for create_relationship")
-	}
-
-	// Get the active ontology
-	ontology, err := s.ontologyRepo.GetActive(ctx, change.ProjectID)
-	if err != nil {
-		return fmt.Errorf("failed to get active ontology: %w", err)
-	}
-	if ontology == nil {
-		return fmt.Errorf("no active ontology found")
-	}
-
-	// Extract relationship details from payload
-	sourceEntityID, _ := payload["source_entity_id"].(string)
-	targetEntityID, _ := payload["target_entity_id"].(string)
-
-	if sourceEntityID == "" || targetEntityID == "" {
-		return fmt.Errorf("missing source_entity_id or target_entity_id in payload")
-	}
-
-	sourceUUID, err := uuid.Parse(sourceEntityID)
-	if err != nil {
-		return fmt.Errorf("invalid source_entity_id: %w", err)
-	}
-	targetUUID, err := uuid.Parse(targetEntityID)
-	if err != nil {
-		return fmt.Errorf("invalid target_entity_id: %w", err)
-	}
-
-	// Note: Source and CreatedBy are set by the repository from provenance context
-	rel := &models.EntityRelationship{
-		OntologyID:        ontology.ID,
-		SourceEntityID:    sourceUUID,
-		TargetEntityID:    targetUUID,
-		SourceColumnTable: change.TableName,
-		SourceColumnName:  change.ColumnName,
-		DetectionMethod:   "pending_change",
-		Confidence:        0.8,
-		Status:            "confirmed",
-		Cardinality:       "unknown",
-	}
-
-	if desc, ok := payload["description"].(string); ok {
-		rel.Description = &desc
-	}
-	if assoc, ok := payload["association"].(string); ok {
-		rel.Association = &assoc
-	}
-	if card, ok := payload["cardinality"].(string); ok {
-		rel.Cardinality = card
-	}
-
-	return s.relationshipRepo.Create(ctx, rel)
+	// Entity relationship creation has been removed for v1.0 simplification.
+	// Relationships are now stored at the schema level (SchemaRelationship).
+	// This method is a no-op but returns success so the change can be marked as applied.
+	s.logger.Debug("Skipping applyCreateRelationship - entity relationship functionality removed for v1.0",
+		zap.String("change_id", change.ID.String()))
+	return nil
 }
 
 func (s *changeReviewService) applyUpdateRelationship(ctx context.Context, change *models.PendingChange, reviewerSource string) error {
-	payload := change.SuggestedPayload
-	if payload == nil {
-		return fmt.Errorf("missing suggested_payload for update_relationship")
-	}
-
-	relIDStr, ok := payload["relationship_id"].(string)
-	if !ok || relIDStr == "" {
-		return fmt.Errorf("missing relationship_id in payload")
-	}
-
-	relID, err := uuid.Parse(relIDStr)
-	if err != nil {
-		return fmt.Errorf("invalid relationship_id: %w", err)
-	}
-
-	// Get existing relationship to check precedence
-	existing, err := s.relationshipRepo.GetByID(ctx, relID)
-	if err != nil {
-		return fmt.Errorf("failed to get existing relationship: %w", err)
-	}
-	if existing == nil {
-		return fmt.Errorf("relationship not found")
-	}
-
-	// Check precedence using Source and LastEditSource (the method strings)
-	if !s.CanModify(existing.Source, existing.LastEditSource, reviewerSource) {
-		return fmt.Errorf("cannot modify relationship: precedence blocked (existing: %s, reviewer: %s)",
-			s.precedenceChecker.GetEffectiveSource(existing.Source, existing.LastEditSource), reviewerSource)
-	}
-
-	// Apply updates
-	// Note: UpdatedBy and LastEditSource are set by the repository from provenance context
-	if desc, ok := payload["description"].(string); ok {
-		existing.Description = &desc
-	}
-	if assoc, ok := payload["association"].(string); ok {
-		existing.Association = &assoc
-	}
-	if card, ok := payload["cardinality"].(string); ok {
-		existing.Cardinality = card
-	}
-
-	return s.relationshipRepo.Update(ctx, existing)
+	// Entity relationship update has been removed for v1.0 simplification.
+	// This method is a no-op but returns success so the change can be marked as applied.
+	s.logger.Debug("Skipping applyUpdateRelationship - entity relationship functionality removed for v1.0",
+		zap.String("change_id", change.ID.String()))
+	return nil
 }

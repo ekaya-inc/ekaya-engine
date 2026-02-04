@@ -3,7 +3,6 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
@@ -18,30 +17,11 @@ import (
 
 // EnrichmentResponse represents the enrichment data for UI display.
 type EnrichmentResponse struct {
-	EntitySummaries []EntitySummaryResponse `json:"entity_summaries"`
-	ColumnDetails   []EntityColumnsResponse `json:"column_details"`
+	ColumnDetails []TableColumnsResponse `json:"column_details"`
 }
 
-// EntitySummaryResponse represents a table-level summary.
-type EntitySummaryResponse struct {
-	TableName     string              `json:"table_name"`
-	BusinessName  string              `json:"business_name"`
-	Description   string              `json:"description"`
-	Domain        string              `json:"domain"`
-	Synonyms      []string            `json:"synonyms,omitempty"`
-	KeyColumns    []KeyColumnResponse `json:"key_columns,omitempty"`
-	ColumnCount   int                 `json:"column_count"`
-	Relationships []string            `json:"relationships,omitempty"`
-}
-
-// KeyColumnResponse represents a key column in an entity summary.
-type KeyColumnResponse struct {
-	Name     string   `json:"name"`
-	Synonyms []string `json:"synonyms,omitempty"`
-}
-
-// EntityColumnsResponse represents column details for a table.
-type EntityColumnsResponse struct {
+// TableColumnsResponse represents column details for a table.
+type TableColumnsResponse struct {
 	TableName string                 `json:"table_name"`
 	Columns   []ColumnDetailResponse `json:"columns"`
 }
@@ -145,113 +125,30 @@ func NewOntologyEnrichmentHandler(
 
 // RegisterRoutes registers the ontology enrichment handler's routes.
 func (h *OntologyEnrichmentHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.Middleware, tenantMiddleware TenantMiddleware) {
-	// Get enrichment data (entity summaries + column details)
+	// Get enrichment data (column details with features)
 	mux.HandleFunc("GET /api/projects/{pid}/ontology/enrichment",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetEnrichment)))
 }
 
 // GetEnrichment handles GET /api/projects/{pid}/ontology/enrichment
-// Returns column enrichment data (features extracted from schema) for the Enrichment UI page.
-// Works with or without a full ontology - column features come from engine_ontology_column_metadata.
+// Returns column enrichment data for the Enrichment UI page.
+// TODO: This handler needs to be updated to properly join schema columns with column metadata.
+// The new schema uses SchemaColumnID (FK) instead of TableName/ColumnName.
+// See PLAN-column-schema-refactor.md for details.
 func (h *OntologyEnrichmentHandler) GetEnrichment(w http.ResponseWriter, r *http.Request) {
 	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
 
-	// Get default datasource to fetch schema columns
-	datasourceID, err := h.projectService.GetDefaultDatasourceID(r.Context(), projectID)
-	if err != nil {
-		h.logger.Error("Failed to get default datasource",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		if err := ErrorResponse(w, http.StatusInternalServerError, "get_datasource_failed", err.Error()); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
+	h.logger.Warn("GetEnrichment handler needs updating for new column metadata schema",
+		zap.String("project_id", projectID.String()))
 
-	// Get all tables for this datasource
-	tables, err := h.schemaRepo.ListTablesByDatasource(r.Context(), projectID, datasourceID, false)
-	if err != nil {
-		h.logger.Error("Failed to list tables",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		if err := ErrorResponse(w, http.StatusInternalServerError, "get_tables_failed", err.Error()); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	// Extract table names for batch column fetch
-	tableNames := make([]string, len(tables))
-	for i, t := range tables {
-		tableNames[i] = t.TableName
-	}
-
-	// Get all columns for these tables
-	schemaColumnsByTable, err := h.schemaRepo.GetColumnsByTables(r.Context(), projectID, tableNames, false)
-	if err != nil {
-		h.logger.Error("Failed to get schema columns",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		if err := ErrorResponse(w, http.StatusInternalServerError, "get_columns_failed", err.Error()); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	// Get column metadata for all columns (features are now in engine_ontology_column_metadata)
-	var allColumnIDs []uuid.UUID
-	for _, columns := range schemaColumnsByTable {
-		for _, col := range columns {
-			allColumnIDs = append(allColumnIDs, col.ID)
-		}
-	}
-	columnMetadataMap := make(map[uuid.UUID]*models.ColumnMetadata)
-	if len(allColumnIDs) > 0 && h.columnMetadataRepo != nil {
-		metadataByID, err := h.columnMetadataRepo.GetBySchemaColumnIDs(r.Context(), allColumnIDs)
-		if err != nil {
-			h.logger.Warn("Failed to get column metadata",
-				zap.String("project_id", projectID.String()),
-				zap.Error(err))
-			// Continue without metadata - graceful degradation
-		} else {
-			// Build lookup map by schema column ID
-			for _, meta := range metadataByID {
-				columnMetadataMap[meta.SchemaColumnID] = meta
-			}
-		}
-	}
-
-	// Try to get ontology for entity summaries (optional)
-	var entitySummaries []EntitySummaryResponse
-	ontology, err := h.ontologyRepo.GetActive(r.Context(), projectID)
-	if err != nil {
-		h.logger.Warn("Failed to get active ontology",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		// Continue without entity summaries
-	}
-	if ontology != nil {
-		for _, summary := range ontology.EntitySummaries {
-			if summary != nil {
-				entitySummaries = append(entitySummaries, h.toEntitySummaryResponse(summary))
-			}
-		}
-	}
-	if entitySummaries == nil {
-		entitySummaries = []EntitySummaryResponse{}
-	}
-
-	// Build column details response from schema columns
-	columnDetails := h.buildColumnDetailsFromSchema(schemaColumnsByTable, columnMetadataMap)
-
+	// Return empty response for now - handler needs rewrite to join schema columns with metadata
 	response := ApiResponse{
 		Success: true,
 		Data: EnrichmentResponse{
-			EntitySummaries: entitySummaries,
-			ColumnDetails:   columnDetails,
+			ColumnDetails: []TableColumnsResponse{},
 		},
 	}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
@@ -259,145 +156,61 @@ func (h *OntologyEnrichmentHandler) GetEnrichment(w http.ResponseWriter, r *http
 	}
 }
 
-// buildColumnDetailsFromSchema builds column detail responses directly from schema columns.
-// Column features are now stored in engine_ontology_column_metadata.features JSONB.
-func (h *OntologyEnrichmentHandler) buildColumnDetailsFromSchema(schemaColumnsByTable map[string][]*models.SchemaColumn, columnMetadataMap map[uuid.UUID]*models.ColumnMetadata) []EntityColumnsResponse {
-	result := make([]EntityColumnsResponse, 0, len(schemaColumnsByTable))
-
-	for tableName, columns := range schemaColumnsByTable {
-		columnResponses := make([]ColumnDetailResponse, 0, len(columns))
-
-		for _, col := range columns {
-			resp := ColumnDetailResponse{
-				Name:         col.ColumnName,
-				IsPrimaryKey: col.IsPrimaryKey,
-			}
-
-			// Get features from column metadata (now in separate table)
-			if meta, ok := columnMetadataMap[col.ID]; ok && meta != nil {
-				if meta.Description != nil {
-					resp.Description = *meta.Description
-				}
-				if meta.Role != nil {
-					resp.Role = *meta.Role
-				}
-				resp.Features = h.toColumnMetadataFeaturesResponse(meta)
-
-				// Set IsForeignKey based on identifier features
-				if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil {
-					if idFeatures.IdentifierType == "foreign_key" {
-						resp.IsForeignKey = true
-						if idFeatures.FKTargetTable != "" {
-							resp.ForeignTable = idFeatures.FKTargetTable
-						}
-					}
-				}
-			}
-
-			columnResponses = append(columnResponses, resp)
-		}
-
-		result = append(result, EntityColumnsResponse{
-			TableName: tableName,
-			Columns:   columnResponses,
-		})
-	}
-
-	return result
-}
-
 // ============================================================================
 // Helper Methods
 // ============================================================================
 
-func (h *OntologyEnrichmentHandler) toEntitySummaryResponse(summary *models.EntitySummary) EntitySummaryResponse {
-	keyColumns := make([]KeyColumnResponse, 0, len(summary.KeyColumns))
-	for _, kc := range summary.KeyColumns {
-		keyColumns = append(keyColumns, KeyColumnResponse{
-			Name:     kc.Name,
-			Synonyms: kc.Synonyms,
-		})
-	}
+// TODO: buildColumnDetailsFromSchema and toColumnFeaturesResponseFromMetadata need to be implemented
+// for the new column metadata schema. Currently the handler returns empty data.
 
-	return EntitySummaryResponse{
-		TableName:     summary.TableName,
-		BusinessName:  summary.BusinessName,
-		Description:   summary.Description,
-		Domain:        summary.Domain,
-		Synonyms:      summary.Synonyms,
-		KeyColumns:    keyColumns,
-		ColumnCount:   summary.ColumnCount,
-		Relationships: summary.Relationships,
-	}
-}
-
-// toColumnMetadataFeaturesResponse converts ColumnMetadata to the API response format.
-// Column features are now stored in engine_ontology_column_metadata.features JSONB.
-func (h *OntologyEnrichmentHandler) toColumnMetadataFeaturesResponse(meta *models.ColumnMetadata) *ColumnFeaturesResponse {
-	if meta == nil {
+// toColumnFeaturesResponse converts ColumnFeatures to the API response format.
+func (h *OntologyEnrichmentHandler) toColumnFeaturesResponse(features *models.ColumnFeatures) *ColumnFeaturesResponse {
+	if features == nil {
 		return nil
 	}
 
-	resp := &ColumnFeaturesResponse{}
-
-	// Set basic fields from ColumnMetadata
-	if meta.Purpose != nil {
-		resp.Purpose = *meta.Purpose
-	}
-	if meta.Role != nil {
-		resp.Role = *meta.Role
-	}
-	if meta.Description != nil {
-		resp.Description = *meta.Description
-	}
-	if meta.ClassificationPath != nil {
-		resp.ClassificationPath = *meta.ClassificationPath
+	resp := &ColumnFeaturesResponse{
+		Purpose:            features.Purpose,
+		SemanticType:       features.SemanticType,
+		Role:               features.Role,
+		Description:        features.Description,
+		ClassificationPath: string(features.ClassificationPath),
+		Confidence:         features.Confidence,
 	}
 
-	// Add timestamp features if present
-	if tsFeatures := meta.GetTimestampFeatures(); tsFeatures != nil {
+	if features.TimestampFeatures != nil {
 		resp.TimestampFeatures = &TimestampFeaturesResponse{
-			TimestampPurpose: tsFeatures.TimestampPurpose,
-			IsSoftDelete:     tsFeatures.IsSoftDelete,
-			IsAuditField:     tsFeatures.IsAuditField,
+			TimestampPurpose: features.TimestampFeatures.TimestampPurpose,
+			IsSoftDelete:     features.TimestampFeatures.IsSoftDelete,
+			IsAuditField:     features.TimestampFeatures.IsAuditField,
 		}
 	}
 
-	// Add boolean features if present
-	if boolFeatures := meta.GetBooleanFeatures(); boolFeatures != nil {
+	if features.BooleanFeatures != nil {
 		resp.BooleanFeatures = &BooleanFeaturesResponse{
-			TrueMeaning:  boolFeatures.TrueMeaning,
-			FalseMeaning: boolFeatures.FalseMeaning,
-			BooleanType:  boolFeatures.BooleanType,
+			TrueMeaning:  features.BooleanFeatures.TrueMeaning,
+			FalseMeaning: features.BooleanFeatures.FalseMeaning,
+			BooleanType:  features.BooleanFeatures.BooleanType,
 		}
 	}
 
-	// Add identifier features if present
-	if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil {
+	if features.IdentifierFeatures != nil {
 		resp.IdentifierFeatures = &IdentifierFeaturesResponse{
-			IdentifierType:   idFeatures.IdentifierType,
-			ExternalService:  idFeatures.ExternalService,
-			FKTargetTable:    idFeatures.FKTargetTable,
-			FKTargetColumn:   idFeatures.FKTargetColumn,
-			FKConfidence:     idFeatures.FKConfidence,
-			EntityReferenced: idFeatures.EntityReferenced,
+			IdentifierType:   features.IdentifierFeatures.IdentifierType,
+			ExternalService:  features.IdentifierFeatures.ExternalService,
+			FKTargetTable:    features.IdentifierFeatures.FKTargetTable,
+			FKTargetColumn:   features.IdentifierFeatures.FKTargetColumn,
+			FKConfidence:     features.IdentifierFeatures.FKConfidence,
+			EntityReferenced: features.IdentifierFeatures.EntityReferenced,
 		}
 	}
 
-	// Add monetary features if present
-	if monFeatures := meta.GetMonetaryFeatures(); monFeatures != nil {
+	if features.MonetaryFeatures != nil {
 		resp.MonetaryFeatures = &MonetaryFeaturesResponse{
-			IsMonetary:           monFeatures.IsMonetary,
-			CurrencyUnit:         monFeatures.CurrencyUnit,
-			PairedCurrencyColumn: monFeatures.PairedCurrencyColumn,
+			IsMonetary:           features.MonetaryFeatures.IsMonetary,
+			CurrencyUnit:         features.MonetaryFeatures.CurrencyUnit,
+			PairedCurrencyColumn: features.MonetaryFeatures.PairedCurrencyColumn,
 		}
-	}
-
-	// Check if we actually have any non-empty fields
-	if resp.Purpose == "" && resp.Role == "" && resp.Description == "" && resp.ClassificationPath == "" &&
-		resp.TimestampFeatures == nil && resp.BooleanFeatures == nil &&
-		resp.IdentifierFeatures == nil && resp.MonetaryFeatures == nil {
-		return nil
 	}
 
 	return resp

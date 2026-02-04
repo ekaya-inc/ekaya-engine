@@ -55,239 +55,12 @@ func (r *testColEnrichmentOntologyRepo) UpdateDomainSummary(ctx context.Context,
 	return nil
 }
 
-func (r *testColEnrichmentOntologyRepo) UpdateEntitySummary(ctx context.Context, projectID uuid.UUID, tableName string, summary *models.EntitySummary) error {
-	return nil
-}
-
-func (r *testColEnrichmentOntologyRepo) UpdateEntitySummaries(ctx context.Context, projectID uuid.UUID, summaries map[string]*models.EntitySummary) error {
-	return nil
-}
-
 func (r *testColEnrichmentOntologyRepo) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
 	return nil
 }
 
 func (r *testColEnrichmentOntologyRepo) GetNextVersion(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 1, nil
-}
-
-type testColEnrichmentEntityRepo struct {
-	entities []*models.OntologyEntity
-}
-
-func (r *testColEnrichmentEntityRepo) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
-	return r.entities, nil
-}
-
-func (r *testColEnrichmentEntityRepo) GetPromotedByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
-	var promoted []*models.OntologyEntity
-	for _, e := range r.entities {
-		if e.IsPromoted {
-			promoted = append(promoted, e)
-		}
-	}
-	return promoted, nil
-}
-
-func (r *testColEnrichmentEntityRepo) Create(ctx context.Context, entity *models.OntologyEntity) error {
-	return nil
-}
-
-func (r *testColEnrichmentEntityRepo) GetByID(ctx context.Context, entityID uuid.UUID) (*models.OntologyEntity, error) {
-	for _, e := range r.entities {
-		if e.ID == entityID {
-			return e, nil
-		}
-	}
-	return nil, fmt.Errorf("entity not found")
-}
-
-func (r *testColEnrichmentEntityRepo) GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
-	return r.entities, nil
-}
-
-func (r *testColEnrichmentEntityRepo) Update(ctx context.Context, entity *models.OntologyEntity) error {
-	return nil
-}
-
-func (r *testColEnrichmentEntityRepo) Delete(ctx context.Context, entityID uuid.UUID) error {
-	return nil
-}
-
-func (r *testColEnrichmentEntityRepo) CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error {
-	return nil
-}
-
-func (r *testColEnrichmentEntityRepo) GetAliasesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityAlias, error) {
-	return nil, nil
-}
-
-func (r *testColEnrichmentEntityRepo) GetKeyColumnsByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityKeyColumn, error) {
-	return nil, nil
-}
-
-func (r *testColEnrichmentEntityRepo) CreateKeyColumn(ctx context.Context, keyColumn *models.OntologyEntityKeyColumn) error {
-	return nil
-}
-
-func (r *testColEnrichmentEntityRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
-	return nil
-}
-
-func (r *testColEnrichmentEntityRepo) DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error {
-	return nil
-}
-
-func (r *testColEnrichmentEntityRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
-	return nil
-}
-
-func (r *testColEnrichmentEntityRepo) DeleteAlias(ctx context.Context, aliasID uuid.UUID) error {
-	return nil
-}
-
-func (r *testColEnrichmentEntityRepo) DeleteKeyColumn(ctx context.Context, keyColumnID uuid.UUID) error {
-	return nil
-}
-
-func (r *testColEnrichmentEntityRepo) GetAllAliasesByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityAlias, error) {
-	return nil, nil
-}
-
-func (r *testColEnrichmentEntityRepo) GetAllKeyColumnsByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityKeyColumn, error) {
-	return nil, nil
-}
-
-func (r *testColEnrichmentEntityRepo) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error) {
-	return nil, nil
-}
-
-func (r *testColEnrichmentEntityRepo) GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error) {
-	for _, e := range r.entities {
-		if e.ProjectID == projectID && e.Name == name {
-			return e, nil
-		}
-	}
-	return nil, nil
-}
-
-func (r *testColEnrichmentEntityRepo) SoftDelete(ctx context.Context, entityID uuid.UUID, reason string) error {
-	return nil
-}
-
-func (r *testColEnrichmentEntityRepo) Restore(ctx context.Context, entityID uuid.UUID) error {
-	return nil
-}
-
-func (r *testColEnrichmentEntityRepo) CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error) {
-	return 0, nil
-}
-
-func (r *testColEnrichmentEntityRepo) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
-	return nil, nil
-}
-
-func (r *testColEnrichmentEntityRepo) MarkInferenceEntitiesStale(ctx context.Context, ontologyID uuid.UUID) error {
-	return nil
-}
-
-func (r *testColEnrichmentEntityRepo) ClearStaleFlag(ctx context.Context, entityID uuid.UUID) error {
-	return nil
-}
-
-func (r *testColEnrichmentEntityRepo) GetStaleEntities(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
-	return nil, nil
-}
-
-func (r *testColEnrichmentEntityRepo) TransferAliasesToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
-	return 0, nil
-}
-
-func (r *testColEnrichmentEntityRepo) TransferKeyColumnsToEntity(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
-	return 0, nil
-}
-
-type testColEnrichmentRelRepo struct{}
-
-func (r *testColEnrichmentRelRepo) GetByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) ([]*models.EntityRelationship, error) {
-	// Return empty relationships for now
-	return []*models.EntityRelationship{}, nil
-}
-
-func (r *testColEnrichmentRelRepo) Create(ctx context.Context, rel *models.EntityRelationship) error {
-	return nil
-}
-
-func (r *testColEnrichmentRelRepo) GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
-	return nil, nil
-}
-
-func (r *testColEnrichmentRelRepo) GetByOntologyGroupedByTarget(ctx context.Context, ontologyID uuid.UUID) (map[uuid.UUID][]*models.EntityRelationship, error) {
-	return make(map[uuid.UUID][]*models.EntityRelationship), nil
-}
-
-func (r *testColEnrichmentRelRepo) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error) {
-	return nil, nil
-}
-
-func (r *testColEnrichmentRelRepo) UpdateDescription(ctx context.Context, id uuid.UUID, description string) error {
-	return nil
-}
-
-func (r *testColEnrichmentRelRepo) UpdateDescriptionAndAssociation(ctx context.Context, id uuid.UUID, description string, association string) error {
-	return nil
-}
-
-func (r *testColEnrichmentRelRepo) GetByTargetEntity(ctx context.Context, entityID uuid.UUID) ([]*models.EntityRelationship, error) {
-	return nil, nil
-}
-
-func (r *testColEnrichmentRelRepo) GetByEntityPair(ctx context.Context, ontologyID uuid.UUID, fromEntityID uuid.UUID, toEntityID uuid.UUID) (*models.EntityRelationship, error) {
-	return nil, nil
-}
-
-func (r *testColEnrichmentRelRepo) Upsert(ctx context.Context, rel *models.EntityRelationship) error {
-	return nil
-}
-
-func (r *testColEnrichmentRelRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	return nil
-}
-
-func (r *testColEnrichmentRelRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
-	return nil
-}
-
-func (r *testColEnrichmentRelRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.EntityRelationship, error) {
-	return nil, nil
-}
-
-func (r *testColEnrichmentRelRepo) Update(ctx context.Context, rel *models.EntityRelationship) error {
-	return nil
-}
-
-func (r *testColEnrichmentRelRepo) MarkInferenceRelationshipsStale(ctx context.Context, ontologyID uuid.UUID) error {
-	return nil
-}
-
-func (r *testColEnrichmentRelRepo) ClearStaleFlag(ctx context.Context, relationshipID uuid.UUID) error {
-	return nil
-}
-
-func (r *testColEnrichmentRelRepo) GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
-	return nil, nil
-}
-
-func (r *testColEnrichmentRelRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
-	return nil
-}
-
-func (r *testColEnrichmentRelRepo) UpdateSourceEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
-	return 0, nil
-}
-
-func (r *testColEnrichmentRelRepo) UpdateTargetEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
-	return 0, nil
 }
 
 type testColEnrichmentSchemaRepo struct {
@@ -305,6 +78,15 @@ func (r *testColEnrichmentSchemaRepo) GetColumnsByTables(ctx context.Context, pr
 }
 
 func (r *testColEnrichmentSchemaRepo) FindTableByName(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+	// Return a SchemaTable for any table that has columns in the mock
+	if _, ok := r.columnsByTable[tableName]; ok {
+		return &models.SchemaTable{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			DatasourceID: datasourceID,
+			TableName:    tableName,
+		}, nil
+	}
 	return nil, nil
 }
 
@@ -452,7 +234,9 @@ func (r *testColEnrichmentSchemaRepo) DeleteInferredRelationshipsByProject(ctx c
 }
 
 // Mock datasource service for testing
-type testColEnrichmentDatasourceService struct{}
+type testColEnrichmentDatasourceService struct {
+	datasourceID uuid.UUID
+}
 
 func (s *testColEnrichmentDatasourceService) Create(ctx context.Context, projectID uuid.UUID, name, dsType, provider string, config map[string]any) (*models.Datasource, error) {
 	return nil, nil
@@ -467,8 +251,20 @@ func (s *testColEnrichmentDatasourceService) GetByName(ctx context.Context, proj
 }
 
 func (s *testColEnrichmentDatasourceService) List(ctx context.Context, projectID uuid.UUID) ([]*models.DatasourceWithStatus, error) {
-	// Return empty list - enum sampling will be skipped
-	return []*models.DatasourceWithStatus{}, nil
+	// Return a mock datasource for tests
+	dsID := s.datasourceID
+	if dsID == uuid.Nil {
+		dsID = uuid.New()
+	}
+	return []*models.DatasourceWithStatus{
+		{
+			Datasource: &models.Datasource{
+				ID:        dsID,
+				ProjectID: projectID,
+				Name:      "test-datasource",
+			},
+		},
+	}, nil
 }
 
 func (s *testColEnrichmentDatasourceService) Update(ctx context.Context, id uuid.UUID, name, dsType, provider string, config map[string]any) error {
@@ -552,16 +348,6 @@ func (c *testColEnrichmentLLMClient) Close() error {
 func TestColumnEnrichmentService_EnrichProject_Success(t *testing.T) {
 	projectID := uuid.New()
 
-	// Setup: One entity with two columns
-	entities := []*models.OntologyEntity{
-		{
-			ID:           uuid.New(),
-			Name:         "User",
-			Description:  "A user account",
-			PrimaryTable: "users",
-		},
-	}
-
 	columns := []*models.SchemaColumn{
 		{ColumnName: "id", DataType: "bigint", IsPrimaryKey: true},
 		{ColumnName: "email", DataType: "varchar"},
@@ -589,8 +375,6 @@ func TestColumnEnrichmentService_EnrichProject_Success(t *testing.T) {
 
 	// Setup service
 	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
-	entityRepo := &testColEnrichmentEntityRepo{entities: entities}
-	relRepo := &testColEnrichmentRelRepo{}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"users": columns,
@@ -603,15 +387,13 @@ func TestColumnEnrichmentService_EnrichProject_Success(t *testing.T) {
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relRepo,
-		schemaRepo:       schemaRepo,
-		dsSvc:            &testColEnrichmentDatasourceService{},
-		llmFactory:       llmFactory,
-		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:           zap.NewNop(),
+		ontologyRepo:   ontologyRepo,
+		schemaRepo:     schemaRepo,
+		dsSvc:          &testColEnrichmentDatasourceService{},
+		llmFactory:     llmFactory,
+		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:         zap.NewNop(),
 	}
 
 	// Execute
@@ -639,14 +421,6 @@ func TestColumnEnrichmentService_EnrichProject_Success(t *testing.T) {
 func TestColumnEnrichmentService_EnrichProject_WithRetryOnTransientError(t *testing.T) {
 	projectID := uuid.New()
 
-	entities := []*models.OntologyEntity{
-		{
-			ID:           uuid.New(),
-			Name:         "User",
-			PrimaryTable: "users",
-		},
-	}
-
 	columns := []*models.SchemaColumn{
 		{ColumnName: "id", DataType: "bigint", IsPrimaryKey: true},
 	}
@@ -665,8 +439,6 @@ func TestColumnEnrichmentService_EnrichProject_WithRetryOnTransientError(t *test
 
 	// Setup service with LLM that fails twice then succeeds
 	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
-	entityRepo := &testColEnrichmentEntityRepo{entities: entities}
-	relRepo := &testColEnrichmentRelRepo{}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"users": columns,
@@ -682,15 +454,13 @@ func TestColumnEnrichmentService_EnrichProject_WithRetryOnTransientError(t *test
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relRepo,
-		schemaRepo:       schemaRepo,
-		dsSvc:            &testColEnrichmentDatasourceService{},
-		llmFactory:       llmFactory,
-		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:           zap.NewNop(),
+		ontologyRepo:   ontologyRepo,
+		schemaRepo:     schemaRepo,
+		dsSvc:          &testColEnrichmentDatasourceService{},
+		llmFactory:     llmFactory,
+		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:         zap.NewNop(),
 	}
 
 	// Execute
@@ -709,22 +479,12 @@ func TestColumnEnrichmentService_EnrichProject_WithRetryOnTransientError(t *test
 func TestColumnEnrichmentService_EnrichProject_NonRetryableError(t *testing.T) {
 	projectID := uuid.New()
 
-	entities := []*models.OntologyEntity{
-		{
-			ID:           uuid.New(),
-			Name:         "User",
-			PrimaryTable: "users",
-		},
-	}
-
 	columns := []*models.SchemaColumn{
 		{ColumnName: "id", DataType: "bigint"},
 	}
 
 	// Setup service with non-retryable error
 	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
-	entityRepo := &testColEnrichmentEntityRepo{entities: entities}
-	relRepo := &testColEnrichmentRelRepo{}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"users": columns,
@@ -741,15 +501,13 @@ func TestColumnEnrichmentService_EnrichProject_NonRetryableError(t *testing.T) {
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relRepo,
-		schemaRepo:       schemaRepo,
-		dsSvc:            &testColEnrichmentDatasourceService{},
-		llmFactory:       llmFactory,
-		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:           zap.NewNop(),
+		ontologyRepo:   ontologyRepo,
+		schemaRepo:     schemaRepo,
+		dsSvc:          &testColEnrichmentDatasourceService{},
+		llmFactory:     llmFactory,
+		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:         zap.NewNop(),
 	}
 
 	// Execute
@@ -769,14 +527,6 @@ func TestColumnEnrichmentService_EnrichProject_NonRetryableError(t *testing.T) {
 
 func TestColumnEnrichmentService_EnrichProject_LargeTable(t *testing.T) {
 	projectID := uuid.New()
-
-	entities := []*models.OntologyEntity{
-		{
-			ID:           uuid.New(),
-			Name:         "LargeTable",
-			PrimaryTable: "large_table",
-		},
-	}
 
 	// Create 60 columns (exceeds maxColumnsPerChunk of 50)
 	columns := make([]*models.SchemaColumn, 60)
@@ -802,8 +552,6 @@ func TestColumnEnrichmentService_EnrichProject_LargeTable(t *testing.T) {
 
 	// Setup service
 	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
-	entityRepo := &testColEnrichmentEntityRepo{entities: entities}
-	relRepo := &testColEnrichmentRelRepo{}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"large_table": columns,
@@ -816,15 +564,13 @@ func TestColumnEnrichmentService_EnrichProject_LargeTable(t *testing.T) {
 	llmFactory := &testColEnrichmentLLMFactory{client: client}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relRepo,
-		schemaRepo:       schemaRepo,
-		dsSvc:            &testColEnrichmentDatasourceService{},
-		llmFactory:       llmFactory,
-		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:           zap.NewNop(),
+		ontologyRepo:   ontologyRepo,
+		schemaRepo:     schemaRepo,
+		dsSvc:          &testColEnrichmentDatasourceService{},
+		llmFactory:     llmFactory,
+		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:         zap.NewNop(),
 	}
 
 	// Execute
@@ -846,11 +592,6 @@ func TestColumnEnrichmentService_EnrichProject_LargeTable(t *testing.T) {
 func TestColumnEnrichmentService_EnrichProject_ProgressCallback(t *testing.T) {
 	projectID := uuid.New()
 
-	entities := []*models.OntologyEntity{
-		{ID: uuid.New(), Name: "Table1", PrimaryTable: "table1"},
-		{ID: uuid.New(), Name: "Table2", PrimaryTable: "table2"},
-	}
-
 	columns := []*models.SchemaColumn{
 		{ColumnName: "id", DataType: "bigint"},
 	}
@@ -862,8 +603,6 @@ func TestColumnEnrichmentService_EnrichProject_ProgressCallback(t *testing.T) {
 	}`
 
 	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
-	entityRepo := &testColEnrichmentEntityRepo{entities: entities}
-	relRepo := &testColEnrichmentRelRepo{}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"table1": columns,
@@ -875,15 +614,13 @@ func TestColumnEnrichmentService_EnrichProject_ProgressCallback(t *testing.T) {
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relRepo,
-		schemaRepo:       schemaRepo,
-		dsSvc:            &testColEnrichmentDatasourceService{},
-		llmFactory:       llmFactory,
-		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:           zap.NewNop(),
+		ontologyRepo:   ontologyRepo,
+		schemaRepo:     schemaRepo,
+		dsSvc:          &testColEnrichmentDatasourceService{},
+		llmFactory:     llmFactory,
+		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:         zap.NewNop(),
 	}
 
 	// Track progress callbacks
@@ -917,23 +654,19 @@ func TestColumnEnrichmentService_EnrichProject_EmptyProject(t *testing.T) {
 	projectID := uuid.New()
 
 	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
-	entityRepo := &testColEnrichmentEntityRepo{entities: []*models.OntologyEntity{}}
-	relRepo := &testColEnrichmentRelRepo{}
 	schemaRepo := &testColEnrichmentSchemaRepo{columnsByTable: make(map[string][]*models.SchemaColumn)}
 	llmFactory := &testColEnrichmentLLMFactory{
 		client: &testColEnrichmentLLMClient{},
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relRepo,
-		schemaRepo:       schemaRepo,
-		dsSvc:            &testColEnrichmentDatasourceService{},
-		llmFactory:       llmFactory,
-		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:           zap.NewNop(),
+		ontologyRepo:   ontologyRepo,
+		schemaRepo:     schemaRepo,
+		dsSvc:          &testColEnrichmentDatasourceService{},
+		llmFactory:     llmFactory,
+		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:         zap.NewNop(),
 	}
 
 	// Execute
@@ -952,12 +685,6 @@ func TestColumnEnrichmentService_EnrichProject_EmptyProject(t *testing.T) {
 func TestColumnEnrichmentService_EnrichProject_PartialFailure(t *testing.T) {
 	projectID := uuid.New()
 
-	entities := []*models.OntologyEntity{
-		{ID: uuid.New(), Name: "Table1", PrimaryTable: "table1"},
-		{ID: uuid.New(), Name: "Table2", PrimaryTable: "table2"},
-		{ID: uuid.New(), Name: "Table3", PrimaryTable: "table3"},
-	}
-
 	columns := []*models.SchemaColumn{
 		{ColumnName: "id", DataType: "bigint"},
 	}
@@ -969,8 +696,6 @@ func TestColumnEnrichmentService_EnrichProject_PartialFailure(t *testing.T) {
 	}`
 
 	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
-	entityRepo := &testColEnrichmentEntityRepo{entities: entities}
-	relRepo := &testColEnrichmentRelRepo{}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"table1": columns,
@@ -988,15 +713,13 @@ func TestColumnEnrichmentService_EnrichProject_PartialFailure(t *testing.T) {
 	llmFactory := &testColEnrichmentLLMFactory{client: client}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relRepo,
-		schemaRepo:       schemaRepo,
-		dsSvc:            &testColEnrichmentDatasourceService{},
-		llmFactory:       llmFactory,
-		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:           zap.NewNop(),
+		ontologyRepo:   ontologyRepo,
+		schemaRepo:     schemaRepo,
+		dsSvc:          &testColEnrichmentDatasourceService{},
+		llmFactory:     llmFactory,
+		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:         zap.NewNop(),
 	}
 
 	// Execute
@@ -1052,12 +775,6 @@ func (c *testColEnrichmentPartialFailureClient) Close() error {
 func TestColumnEnrichmentService_EnrichTable_WithForeignKeys(t *testing.T) {
 	projectID := uuid.New()
 
-	entity := &models.OntologyEntity{
-		ID:           uuid.New(),
-		Name:         "Order",
-		PrimaryTable: "orders",
-	}
-
 	columns := []*models.SchemaColumn{
 		{ColumnName: "id", DataType: "bigint", IsPrimaryKey: true},
 		{ColumnName: "user_id", DataType: "bigint"},
@@ -1083,8 +800,6 @@ func TestColumnEnrichmentService_EnrichTable_WithForeignKeys(t *testing.T) {
 	}`
 
 	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
-	entityRepo := &testColEnrichmentEntityRepo{entities: []*models.OntologyEntity{entity}}
-	relRepo := &testColEnrichmentRelRepo{}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"orders": columns,
@@ -1095,15 +810,13 @@ func TestColumnEnrichmentService_EnrichTable_WithForeignKeys(t *testing.T) {
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relRepo,
-		schemaRepo:       schemaRepo,
-		dsSvc:            &testColEnrichmentDatasourceService{},
-		llmFactory:       llmFactory,
-		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:           zap.NewNop(),
+		ontologyRepo:   ontologyRepo,
+		schemaRepo:     schemaRepo,
+		dsSvc:          &testColEnrichmentDatasourceService{},
+		llmFactory:     llmFactory,
+		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:         zap.NewNop(),
 	}
 
 	// Execute
@@ -1122,12 +835,6 @@ func TestColumnEnrichmentService_EnrichTable_WithForeignKeys(t *testing.T) {
 
 func TestColumnEnrichmentService_EnrichTable_WithEnumValues(t *testing.T) {
 	projectID := uuid.New()
-
-	entity := &models.OntologyEntity{
-		ID:           uuid.New(),
-		Name:         "Order",
-		PrimaryTable: "orders",
-	}
 
 	columns := []*models.SchemaColumn{
 		{ColumnName: "id", DataType: "bigint", IsPrimaryKey: true},
@@ -1160,8 +867,6 @@ func TestColumnEnrichmentService_EnrichTable_WithEnumValues(t *testing.T) {
 	}`
 
 	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
-	entityRepo := &testColEnrichmentEntityRepo{entities: []*models.OntologyEntity{entity}}
-	relRepo := &testColEnrichmentRelRepo{}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"orders": columns,
@@ -1172,15 +877,13 @@ func TestColumnEnrichmentService_EnrichTable_WithEnumValues(t *testing.T) {
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relRepo,
-		schemaRepo:       schemaRepo,
-		dsSvc:            &testColEnrichmentDatasourceService{},
-		llmFactory:       llmFactory,
-		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:           zap.NewNop(),
+		ontologyRepo:   ontologyRepo,
+		schemaRepo:     schemaRepo,
+		dsSvc:          &testColEnrichmentDatasourceService{},
+		llmFactory:     llmFactory,
+		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:         zap.NewNop(),
 	}
 
 	// Execute
@@ -1235,49 +938,38 @@ func TestColumnEnrichmentService_identifyEnumCandidates(t *testing.T) {
 	assert.False(t, candidateNames["id"], "Should not identify 'id' as enum")
 }
 
-func TestColumnEnrichmentService_EnrichTable_NoEntity(t *testing.T) {
+// TestColumnEnrichmentService_EnrichTable_NoTable tests that enrichment fails when table is not found
+func TestColumnEnrichmentService_EnrichTable_NoTable(t *testing.T) {
 	projectID := uuid.New()
 
 	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
-	entityRepo := &testColEnrichmentEntityRepo{entities: []*models.OntologyEntity{}} // Empty
-	relRepo := &testColEnrichmentRelRepo{}
 	schemaRepo := &testColEnrichmentSchemaRepo{columnsByTable: make(map[string][]*models.SchemaColumn)}
 	llmFactory := &testColEnrichmentLLMFactory{
 		client: &testColEnrichmentLLMClient{},
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relRepo,
-		schemaRepo:       schemaRepo,
-		dsSvc:            &testColEnrichmentDatasourceService{},
-		llmFactory:       llmFactory,
-		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:           zap.NewNop(),
+		ontologyRepo:   ontologyRepo,
+		schemaRepo:     schemaRepo,
+		dsSvc:          &testColEnrichmentDatasourceService{},
+		llmFactory:     llmFactory,
+		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:         zap.NewNop(),
 	}
 
 	// Execute
 	err := service.EnrichTable(context.Background(), projectID, "nonexistent_table")
 
-	// Verify
+	// Verify - should fail when table is not found
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no entity found")
+	assert.Contains(t, err.Error(), "table not found")
 }
 
 func TestColumnEnrichmentService_EnrichTable_NoColumns(t *testing.T) {
 	projectID := uuid.New()
 
-	entity := &models.OntologyEntity{
-		ID:           uuid.New(),
-		Name:         "EmptyTable",
-		PrimaryTable: "empty_table",
-	}
-
 	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
-	entityRepo := &testColEnrichmentEntityRepo{entities: []*models.OntologyEntity{entity}}
-	relRepo := &testColEnrichmentRelRepo{}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"empty_table": {}, // No columns
@@ -1288,15 +980,13 @@ func TestColumnEnrichmentService_EnrichTable_NoColumns(t *testing.T) {
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relRepo,
-		schemaRepo:       schemaRepo,
-		dsSvc:            &testColEnrichmentDatasourceService{},
-		llmFactory:       llmFactory,
-		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:           zap.NewNop(),
+		ontologyRepo:   ontologyRepo,
+		schemaRepo:     schemaRepo,
+		dsSvc:          &testColEnrichmentDatasourceService{},
+		llmFactory:     llmFactory,
+		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:         zap.NewNop(),
 	}
 
 	// Execute
@@ -1313,12 +1003,6 @@ func TestColumnEnrichmentService_EnrichTable_NoColumns(t *testing.T) {
 func TestColumnEnrichmentService_EnrichProject_ContinuesOnFailure(t *testing.T) {
 	projectID := uuid.New()
 
-	entities := []*models.OntologyEntity{
-		{ID: uuid.New(), Name: "Table1", PrimaryTable: "table1"},
-		{ID: uuid.New(), Name: "Table2", PrimaryTable: "table2"},
-		{ID: uuid.New(), Name: "Table3", PrimaryTable: "table3"},
-	}
-
 	columns := []*models.SchemaColumn{
 		{ColumnName: "id", DataType: "bigint"},
 	}
@@ -1330,8 +1014,6 @@ func TestColumnEnrichmentService_EnrichProject_ContinuesOnFailure(t *testing.T) 
 	}`
 
 	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
-	entityRepo := &testColEnrichmentEntityRepo{entities: entities}
-	relRepo := &testColEnrichmentRelRepo{}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"table1": columns,
@@ -1356,15 +1038,13 @@ func TestColumnEnrichmentService_EnrichProject_ContinuesOnFailure(t *testing.T) 
 	})
 
 	service := &columnEnrichmentService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relRepo,
-		schemaRepo:       schemaRepo,
-		dsSvc:            &testColEnrichmentDatasourceService{},
-		llmFactory:       llmFactory,
-		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker:   highThresholdCircuit,
-		logger:           zap.NewNop(),
+		ontologyRepo:   ontologyRepo,
+		schemaRepo:     schemaRepo,
+		dsSvc:          &testColEnrichmentDatasourceService{},
+		llmFactory:     llmFactory,
+		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker: highThresholdCircuit,
+		logger:         zap.NewNop(),
 	}
 
 	// Execute
@@ -1422,10 +1102,8 @@ func (c *testColEnrichmentRetryableFailureClient) Close() error {
 func TestColumnEnrichmentService_EnrichColumnsInChunks_ParallelProcessing(t *testing.T) {
 	projectID := uuid.New()
 
-	entity := &models.OntologyEntity{
-		ID:           uuid.New(),
-		Name:         "LargeTable",
-		PrimaryTable: "large_table",
+	tableCtx := &TableContext{
+		TableName: "large_table",
 	}
 
 	// Create 120 columns (will be split into 3 chunks of 50, 50, 20)
@@ -1505,7 +1183,7 @@ func TestColumnEnrichmentService_EnrichColumnsInChunks_ParallelProcessing(t *tes
 		ctx,
 		projectID,
 		llmClient,
-		entity,
+		tableCtx,
 		columns,
 		make(map[string]string),
 		make(map[string][]string),
@@ -1544,10 +1222,8 @@ func TestColumnEnrichmentService_EnrichColumnsInChunks_ParallelProcessing(t *tes
 func TestColumnEnrichmentService_EnrichColumnsInChunks_ChunkFailure(t *testing.T) {
 	projectID := uuid.New()
 
-	entity := &models.OntologyEntity{
-		ID:           uuid.New(),
-		Name:         "LargeTable",
-		PrimaryTable: "large_table",
+	tableCtx := &TableContext{
+		TableName: "large_table",
 	}
 
 	// Create 100 columns (will be split into 2 chunks of 50)
@@ -1612,7 +1288,7 @@ func TestColumnEnrichmentService_EnrichColumnsInChunks_ChunkFailure(t *testing.T
 		ctx,
 		projectID,
 		llmClient,
-		entity,
+		tableCtx,
 		columns,
 		make(map[string]string),
 		make(map[string][]string),
@@ -1648,216 +1324,10 @@ func joinStrings(strs []string, sep string) string {
 	return result
 }
 
-// TestColumnEnrichmentService_EnrichTable_SelfReferentialFK tests that self-referential
-// foreign keys (e.g., employees.manager_id -> employees.id) are properly handled
-// with appropriate fk_association values like "manager" or "reports_to".
-func TestColumnEnrichmentService_EnrichTable_SelfReferentialFK(t *testing.T) {
-	projectID := uuid.New()
-	entityID := uuid.New()
-
-	entity := &models.OntologyEntity{
-		ID:           entityID,
-		Name:         "Employee",
-		Description:  "An employee in the organization",
-		PrimaryTable: "employees",
-	}
-
-	columns := []*models.SchemaColumn{
-		{ColumnName: "id", DataType: "bigint", IsPrimaryKey: true},
-		{ColumnName: "name", DataType: "varchar"},
-		{ColumnName: "manager_id", DataType: "bigint"}, // Self-referential FK
-	}
-
-	// LLM response with proper self-referential FK association
-	llmResponse := `{
-		"columns": [
-			{
-				"name": "id",
-				"description": "Unique identifier for the employee",
-				"semantic_type": "identifier",
-				"role": "identifier",
-				"fk_association": null
-			},
-			{
-				"name": "name",
-				"description": "Full name of the employee",
-				"semantic_type": "text",
-				"role": "attribute",
-				"fk_association": null
-			},
-			{
-				"name": "manager_id",
-				"description": "Reference to the employee's manager in the organizational hierarchy",
-				"semantic_type": "identifier",
-				"role": "dimension",
-				"fk_association": "manager"
-			}
-		]
-	}`
-
-	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
-	entityRepo := &testColEnrichmentEntityRepo{entities: []*models.OntologyEntity{entity}}
-
-	// Create a relationship repo that returns self-referential FK
-	relRepo := &testSelfRefRelRepo{
-		relationships: []*models.EntityRelationship{
-			{
-				ID:                uuid.New(),
-				SourceEntityID:    entityID,
-				TargetEntityID:    entityID, // Same entity - self-referential
-				SourceColumnTable: "employees",
-				SourceColumnName:  "manager_id",
-				TargetColumnTable: "employees",
-				TargetColumnName:  "id",
-			},
-		},
-	}
-
-	schemaRepo := &testColEnrichmentSchemaRepo{
-		columnsByTable: map[string][]*models.SchemaColumn{
-			"employees": columns,
-		},
-	}
-
-	llmFactory := &testColEnrichmentLLMFactory{
-		client: &testColEnrichmentLLMClient{response: llmResponse},
-	}
-
-	service := &columnEnrichmentService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relRepo,
-		schemaRepo:       schemaRepo,
-		dsSvc:            &testColEnrichmentDatasourceService{},
-		llmFactory:       llmFactory,
-		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:           zap.NewNop(),
-	}
-
-	// Execute
-	err := service.EnrichTable(context.Background(), projectID, "employees")
-
-	// Verify
-	require.NoError(t, err)
-	details := ontologyRepo.columnDetails["employees"]
-	require.Equal(t, 3, len(details))
-
-	// Find the manager_id column and verify self-referential FK association
-	managerCol := findColumnDetail(details, "manager_id")
-	require.NotNil(t, managerCol, "Should find manager_id column")
-	assert.Equal(t, "manager_id", managerCol.Name)
-	assert.Equal(t, "manager", managerCol.FKAssociation, "Self-referential FK should have 'manager' association")
-	assert.True(t, managerCol.IsForeignKey, "manager_id should be marked as FK")
-	assert.Equal(t, "employees", managerCol.ForeignTable, "FK should point to same table (employees)")
-}
-
-// testSelfRefRelRepo is a mock relationship repo that returns self-referential relationships
-type testSelfRefRelRepo struct {
-	relationships []*models.EntityRelationship
-}
-
-func (r *testSelfRefRelRepo) GetByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) ([]*models.EntityRelationship, error) {
-	// Filter relationships to those involving the requested tables
-	var result []*models.EntityRelationship
-	for _, rel := range r.relationships {
-		for _, tableName := range tableNames {
-			if rel.SourceColumnTable == tableName {
-				result = append(result, rel)
-				break
-			}
-		}
-	}
-	return result, nil
-}
-
-func (r *testSelfRefRelRepo) Create(ctx context.Context, rel *models.EntityRelationship) error {
-	return nil
-}
-
-func (r *testSelfRefRelRepo) GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
-	return r.relationships, nil
-}
-
-func (r *testSelfRefRelRepo) GetByOntologyGroupedByTarget(ctx context.Context, ontologyID uuid.UUID) (map[uuid.UUID][]*models.EntityRelationship, error) {
-	return make(map[uuid.UUID][]*models.EntityRelationship), nil
-}
-
-func (r *testSelfRefRelRepo) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error) {
-	return r.relationships, nil
-}
-
-func (r *testSelfRefRelRepo) UpdateDescription(ctx context.Context, id uuid.UUID, description string) error {
-	return nil
-}
-
-func (r *testSelfRefRelRepo) UpdateDescriptionAndAssociation(ctx context.Context, id uuid.UUID, description string, association string) error {
-	return nil
-}
-
-func (r *testSelfRefRelRepo) GetByTargetEntity(ctx context.Context, entityID uuid.UUID) ([]*models.EntityRelationship, error) {
-	return nil, nil
-}
-
-func (r *testSelfRefRelRepo) GetByEntityPair(ctx context.Context, ontologyID uuid.UUID, fromEntityID uuid.UUID, toEntityID uuid.UUID) (*models.EntityRelationship, error) {
-	return nil, nil
-}
-
-func (r *testSelfRefRelRepo) Upsert(ctx context.Context, rel *models.EntityRelationship) error {
-	return nil
-}
-
-func (r *testSelfRefRelRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	return nil
-}
-
-func (r *testSelfRefRelRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
-	return nil
-}
-
-func (r *testSelfRefRelRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.EntityRelationship, error) {
-	return nil, nil
-}
-
-func (r *testSelfRefRelRepo) Update(ctx context.Context, rel *models.EntityRelationship) error {
-	return nil
-}
-
-func (r *testSelfRefRelRepo) MarkInferenceRelationshipsStale(ctx context.Context, ontologyID uuid.UUID) error {
-	return nil
-}
-
-func (r *testSelfRefRelRepo) ClearStaleFlag(ctx context.Context, relationshipID uuid.UUID) error {
-	return nil
-}
-
-func (r *testSelfRefRelRepo) GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
-	return nil, nil
-}
-
-func (r *testSelfRefRelRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
-	return nil
-}
-
-func (r *testSelfRefRelRepo) UpdateSourceEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
-	return 0, nil
-}
-
-func (r *testSelfRefRelRepo) UpdateTargetEntityID(ctx context.Context, fromEntityID, toEntityID uuid.UUID) (int, error) {
-	return 0, nil
-}
-
 // TestColumnEnrichmentService_EnrichTable_IntegerEnumInference tests that integer enum
 // columns like transaction_state get meaningful labels inferred from column context.
 func TestColumnEnrichmentService_EnrichTable_IntegerEnumInference(t *testing.T) {
 	projectID := uuid.New()
-
-	entity := &models.OntologyEntity{
-		ID:           uuid.New(),
-		Name:         "BillingTransaction",
-		Description:  "A billing transaction recording payment activity",
-		PrimaryTable: "billing_transactions",
-	}
 
 	columns := []*models.SchemaColumn{
 		{ColumnName: "id", DataType: "bigint", IsPrimaryKey: true},
@@ -1891,8 +1361,6 @@ func TestColumnEnrichmentService_EnrichTable_IntegerEnumInference(t *testing.T) 
 	}`
 
 	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
-	entityRepo := &testColEnrichmentEntityRepo{entities: []*models.OntologyEntity{entity}}
-	relRepo := &testColEnrichmentRelRepo{}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"billing_transactions": columns,
@@ -1910,15 +1378,13 @@ func TestColumnEnrichmentService_EnrichTable_IntegerEnumInference(t *testing.T) 
 	llmFactory := &testColEnrichmentLLMFactory{client: llmClient}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relRepo,
-		schemaRepo:       schemaRepo,
-		dsSvc:            &testColEnrichmentDatasourceService{},
-		llmFactory:       llmFactory,
-		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:           zap.NewNop(),
+		ontologyRepo:   ontologyRepo,
+		schemaRepo:     schemaRepo,
+		dsSvc:          &testColEnrichmentDatasourceService{},
+		llmFactory:     llmFactory,
+		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:         zap.NewNop(),
 	}
 
 	// Execute
@@ -1963,10 +1429,8 @@ func TestColumnEnrichmentService_buildColumnEnrichmentPrompt_EnumInstructions(t 
 		logger:         zap.NewNop(),
 	}
 
-	entity := &models.OntologyEntity{
-		ID:           uuid.New(),
-		Name:         "TestEntity",
-		PrimaryTable: "test_table",
+	tableCtx := &TableContext{
+		TableName: "test_table",
 	}
 
 	columns := []*models.SchemaColumn{
@@ -1977,7 +1441,7 @@ func TestColumnEnrichmentService_buildColumnEnrichmentPrompt_EnumInstructions(t 
 		"status": {"1", "2", "3"},
 	}
 
-	prompt := service.buildColumnEnrichmentPrompt(entity, columns, nil, enumSamples)
+	prompt := service.buildColumnEnrichmentPrompt(tableCtx, columns, nil, enumSamples)
 
 	// Verify enhanced enum instructions are present
 	assert.Contains(t, prompt, "enum_values")
@@ -3016,14 +2480,6 @@ func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
 func TestEnrichProject_SkipsLLMForHighConfidenceColumns(t *testing.T) {
 	projectID := uuid.New()
 
-	entities := []*models.OntologyEntity{
-		{
-			ID:           uuid.New(),
-			Name:         "User",
-			PrimaryTable: "users",
-		},
-	}
-
 	// Two columns: one with high-confidence features, one without
 	columns := []*models.SchemaColumn{
 		{
@@ -3061,8 +2517,6 @@ func TestEnrichProject_SkipsLLMForHighConfidenceColumns(t *testing.T) {
 
 	// Setup service
 	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
-	entityRepo := &testColEnrichmentEntityRepo{entities: entities}
-	relRepo := &testColEnrichmentRelRepo{}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"users": columns,
@@ -3075,15 +2529,13 @@ func TestEnrichProject_SkipsLLMForHighConfidenceColumns(t *testing.T) {
 	llmFactory := &testColEnrichmentLLMFactory{client: llmClient}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relRepo,
-		schemaRepo:       schemaRepo,
-		dsSvc:            &testColEnrichmentDatasourceService{},
-		llmFactory:       llmFactory,
-		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:           zap.NewNop(),
+		ontologyRepo:   ontologyRepo,
+		schemaRepo:     schemaRepo,
+		dsSvc:          &testColEnrichmentDatasourceService{},
+		llmFactory:     llmFactory,
+		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:         zap.NewNop(),
 	}
 
 	// Execute
@@ -3130,14 +2582,6 @@ func TestEnrichProject_SkipsLLMForHighConfidenceColumns(t *testing.T) {
 func TestEnrichProject_AllColumnsHighConfidence(t *testing.T) {
 	projectID := uuid.New()
 
-	entities := []*models.OntologyEntity{
-		{
-			ID:           uuid.New(),
-			Name:         "User",
-			PrimaryTable: "users",
-		},
-	}
-
 	// All columns have high-confidence features
 	columns := []*models.SchemaColumn{
 		{
@@ -3169,8 +2613,6 @@ func TestEnrichProject_AllColumnsHighConfidence(t *testing.T) {
 
 	// Setup service
 	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
-	entityRepo := &testColEnrichmentEntityRepo{entities: entities}
-	relRepo := &testColEnrichmentRelRepo{}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"users": columns,
@@ -3183,15 +2625,13 @@ func TestEnrichProject_AllColumnsHighConfidence(t *testing.T) {
 	llmFactory := &testColEnrichmentLLMFactory{client: llmClient}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relRepo,
-		schemaRepo:       schemaRepo,
-		dsSvc:            &testColEnrichmentDatasourceService{},
-		llmFactory:       llmFactory,
-		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:           zap.NewNop(),
+		ontologyRepo:   ontologyRepo,
+		schemaRepo:     schemaRepo,
+		dsSvc:          &testColEnrichmentDatasourceService{},
+		llmFactory:     llmFactory,
+		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:         zap.NewNop(),
 	}
 
 	// Execute

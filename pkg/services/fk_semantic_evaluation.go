@@ -451,13 +451,13 @@ func (s *fkSemanticEvaluationService) buildPrompt(candidates []FKCandidate, know
 // FKCandidateFromAnalysis creates an FKCandidate from column and join analysis data.
 // This is a helper for integrating with the existing pk_match discovery flow.
 // Table metadata is optional but recommended for semantic context in LLM evaluation.
+// Note: targetEntity parameter has been removed for v1.0 entity simplification.
 func FKCandidateFromAnalysis(
 	sourceCol *models.SchemaColumn,
 	sourceTable *models.SchemaTable,
 	targetCol *models.SchemaColumn,
 	targetTable *models.SchemaTable,
 	joinResult *datasource.JoinAnalysis,
-	targetEntity *models.OntologyEntity,
 	sourceTableMeta *models.TableMetadata,
 	targetTableMeta *models.TableMetadata,
 ) FKCandidate {
@@ -494,13 +494,8 @@ func FKCandidateFromAnalysis(
 		candidate.TargetTableDescription = *targetTableMeta.Description
 	}
 
-	// Add entity context if available
-	if targetEntity != nil {
-		candidate.TargetEntityName = targetEntity.Name
-		if targetEntity.Description != "" {
-			candidate.TargetEntityDescription = targetEntity.Description
-		}
-	}
+	// Note: Entity context has been removed for v1.0 entity simplification.
+	// TargetEntityName and TargetEntityDescription are no longer populated.
 
 	return candidate
 }
@@ -511,4 +506,15 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// truncateString truncates a string to a maximum length, adding "..." if truncated.
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
 }

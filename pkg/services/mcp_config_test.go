@@ -953,7 +953,7 @@ func TestMCPConfigService_Update_DeveloperToolsReflectNewState(t *testing.T) {
 	assert.Contains(t, toolNames, "execute", "should include execute in developer tools")
 	assert.Contains(t, toolNames, "get_schema", "should include get_schema with AddQueryTools")
 	assert.Contains(t, toolNames, "sample", "should include sample with AddQueryTools")
-	assert.NotContains(t, toolNames, "update_entity", "should NOT include update_entity with AddQueryTools (requires AddOntologyMaintenance)")
+	assert.NotContains(t, toolNames, "update_table", "should NOT include update_table with AddQueryTools (requires AddOntologyMaintenance)")
 }
 
 func TestMCPConfigService_Update_AllowOntologyMaintenance(t *testing.T) {
@@ -1010,7 +1010,7 @@ func TestMCPConfigService_Update_AllowOntologyMaintenance(t *testing.T) {
 	}
 
 	// Should have Query tools + Ontology Maintenance tools for users
-	assert.Contains(t, toolNames, "update_entity", "should include update_entity with AllowOntologyMaintenance")
+	assert.Contains(t, toolNames, "update_table", "should include update_table with AllowOntologyMaintenance")
 	assert.Contains(t, toolNames, "update_column", "should include update_column with AllowOntologyMaintenance")
 }
 
@@ -1097,7 +1097,7 @@ func TestMCPConfigService_Get_FiltersDataLiaisonTools_WhenNotInstalled(t *testin
 
 	// Should have developer tools but NOT data liaison tools
 	assert.Contains(t, toolNames, "get_schema", "should include regular developer tools")
-	assert.Contains(t, toolNames, "update_entity", "should include ontology maintenance tools")
+	assert.Contains(t, toolNames, "update_table", "should include ontology maintenance tools")
 
 	// Data liaison tools should be filtered out
 	assert.NotContains(t, toolNames, "suggest_approved_query", "should NOT include suggest_approved_query")
@@ -1285,7 +1285,7 @@ func TestMCPConfigService_Get_UserToolsContainsQueryTools(t *testing.T) {
 	assert.Contains(t, userToolNames, "list_approved_queries", "UserTools should include list_approved_queries")
 
 	// With AllowOntologyMaintenance, should include ontology tools
-	assert.Contains(t, userToolNames, "update_entity", "UserTools should include update_entity with AllowOntologyMaintenance")
+	assert.Contains(t, userToolNames, "update_table", "UserTools should include update_table with AllowOntologyMaintenance")
 
 	// UserTools should NOT include developer-specific tools
 	assert.NotContains(t, userToolNames, "echo", "UserTools should NOT include echo (developer only)")
@@ -1331,7 +1331,7 @@ func TestMCPConfigService_Get_UserToolsWithoutOntologyMaintenance(t *testing.T) 
 	assert.Contains(t, userToolNames, "query", "UserTools should include query")
 
 	// Without AllowOntologyMaintenance, should NOT include ontology maintenance tools
-	assert.NotContains(t, userToolNames, "update_entity", "UserTools should NOT include update_entity without AllowOntologyMaintenance")
+	assert.NotContains(t, userToolNames, "update_table", "UserTools should NOT include update_table without AllowOntologyMaintenance")
 }
 
 func TestMCPConfigService_Get_DeveloperToolsContainsDevCore(t *testing.T) {
@@ -1379,7 +1379,7 @@ func TestMCPConfigService_Get_DeveloperToolsContainsDevCore(t *testing.T) {
 	assert.Contains(t, devToolNames, "get_schema", "DeveloperTools should include get_schema with AddQueryTools")
 
 	// With AddOntologyMaintenance, should include ontology tools
-	assert.Contains(t, devToolNames, "update_entity", "DeveloperTools should include update_entity with AddOntologyMaintenance")
+	assert.Contains(t, devToolNames, "update_table", "DeveloperTools should include update_table with AddOntologyMaintenance")
 }
 
 func TestMCPConfigService_Get_DeveloperToolsWithoutSubOptions(t *testing.T) {
@@ -1426,7 +1426,7 @@ func TestMCPConfigService_Get_DeveloperToolsWithoutSubOptions(t *testing.T) {
 	assert.NotContains(t, devToolNames, "query", "DeveloperTools should NOT include query without AddQueryTools")
 
 	// Without AddOntologyMaintenance, should NOT include ontology tools
-	assert.NotContains(t, devToolNames, "update_entity", "DeveloperTools should NOT include update_entity without AddOntologyMaintenance")
+	assert.NotContains(t, devToolNames, "update_table", "DeveloperTools should NOT include update_table without AddOntologyMaintenance")
 }
 
 func TestMCPConfigService_Get_AgentToolsIsLimited(t *testing.T) {
@@ -1479,7 +1479,7 @@ func TestMCPConfigService_Get_AgentToolsIsLimited(t *testing.T) {
 	assert.NotContains(t, agentToolNames, "query", "AgentTools should NOT include query")
 	assert.NotContains(t, agentToolNames, "echo", "AgentTools should NOT include echo")
 	assert.NotContains(t, agentToolNames, "execute", "AgentTools should NOT include execute")
-	assert.NotContains(t, agentToolNames, "update_entity", "AgentTools should NOT include update_entity")
+	assert.NotContains(t, agentToolNames, "update_table", "AgentTools should NOT include update_table")
 }
 
 func TestMCPConfigService_Get_PerRoleToolsFilterDataLiaison(t *testing.T) {

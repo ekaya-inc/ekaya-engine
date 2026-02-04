@@ -70,8 +70,6 @@ func setupProbeColumnIntegrationTest(t *testing.T) *probeColumnTestContext {
 	columnMetadataRepo := repositories.NewColumnMetadataRepository()
 	schemaRepo := repositories.NewSchemaRepository()
 	pendingChangeRepo := repositories.NewPendingChangeRepository()
-	entityRepo := repositories.NewOntologyEntityRepository()
-	relationshipRepo := repositories.NewEntityRelationshipRepository()
 
 	// Configure mock to enable developer tools
 	mockMCPConfig := &mockMCPConfigService{
@@ -88,8 +86,6 @@ func setupProbeColumnIntegrationTest(t *testing.T) *probeColumnTestContext {
 		MCPConfigService:   mockMCPConfig,
 		SchemaRepo:         schemaRepo,
 		OntologyRepo:       ontologyRepo,
-		EntityRepo:         entityRepo,
-		RelationshipRepo:   relationshipRepo,
 		ColumnMetadataRepo: columnMetadataRepo,
 		ProjectService:     &mockProjectService{defaultDatasourceID: datasourceID},
 		Logger:             zap.NewNop(),
@@ -99,8 +95,6 @@ func setupProbeColumnIntegrationTest(t *testing.T) *probeColumnTestContext {
 	// Create change review service
 	changeReviewSvc := services.NewChangeReviewService(&services.ChangeReviewServiceDeps{
 		PendingChangeRepo:  pendingChangeRepo,
-		EntityRepo:         entityRepo,
-		RelationshipRepo:   relationshipRepo,
 		ColumnMetadataRepo: columnMetadataRepo,
 		OntologyRepo:       ontologyRepo,
 		Logger:             zap.NewNop(),
@@ -253,12 +247,11 @@ func (tc *probeColumnTestContext) createActiveOntology(ctx context.Context) *mod
 	tc.t.Helper()
 
 	ontology := &models.TieredOntology{
-		ProjectID:       tc.projectID,
-		Version:         1,
-		IsActive:        true,
-		EntitySummaries: make(map[string]*models.EntitySummary),
-		ColumnDetails:   make(map[string][]models.ColumnDetail),
-		Metadata:        make(map[string]any),
+		ProjectID:     tc.projectID,
+		Version:       1,
+		IsActive:      true,
+		ColumnDetails: make(map[string][]models.ColumnDetail),
+		Metadata:      make(map[string]any),
 	}
 	err := tc.ontologyRepo.Create(ctx, ontology)
 	require.NoError(tc.t, err)
@@ -294,25 +287,6 @@ func (tc *probeColumnTestContext) createPendingChange(ctx context.Context, table
 	return change.ID
 }
 
-// createColumnMetadata creates column metadata for testing using SchemaColumnID.
-func (tc *probeColumnTestContext) createColumnMetadata(ctx context.Context, schemaColumnID uuid.UUID, opts ...func(*models.ColumnMetadata)) {
-	tc.t.Helper()
-
-	meta := &models.ColumnMetadata{
-		ProjectID:      tc.projectID,
-		SchemaColumnID: schemaColumnID,
-		Source:         models.ProvenanceMCP,
-	}
-
-	// Apply options
-	for _, opt := range opts {
-		opt(meta)
-	}
-
-	err := tc.columnMetadataRepo.Upsert(ctx, meta)
-	require.NoError(tc.t, err)
-}
-
 // ============================================================================
 // Integration Tests: probe_column with column_metadata fallback
 // ============================================================================
@@ -323,11 +297,6 @@ func (tc *probeColumnTestContext) createColumnMetadata(ctx context.Context, sche
 // 3. Approve the change (writes to column_metadata)
 // 4. Probe the column and verify enum_labels appear
 func TestProbeColumn_Integration_ApproveChangeThenProbe(t *testing.T) {
-	// TODO: Re-enable when applyCreateColumnMetadata is implemented for the new schema.
-	// The change approval flow needs to write to engine_ontology_column_metadata.
-	// See PLAN-column-schema-refactor.md for details.
-	t.Skip("applyCreateColumnMetadata not yet implemented for new schema - see PLAN-column-schema-refactor.md")
-
 	tc := setupProbeColumnIntegrationTest(t)
 	tc.cleanup()
 	defer tc.cleanup()
@@ -373,9 +342,8 @@ func TestProbeColumn_Integration_ApproveChangeThenProbe(t *testing.T) {
 	assert.Equal(t, "FEATURE", probeResponse.Semantic.EnumLabels["FEATURE"])
 }
 
-// TestProbeColumn_Integration_MetadataBothLocations verifies column_metadata takes precedence
+// TestProbeColumn_Integration_MetadataBothLocations verifies ontology takes precedence
 // when metadata exists in BOTH ontology.column_details AND column_metadata.
-// (After schema refactor: column_metadata is the authoritative source)
 func TestProbeColumn_Integration_MetadataBothLocations(t *testing.T) {
 	tc := setupProbeColumnIntegrationTest(t)
 	tc.cleanup()
@@ -386,9 +354,9 @@ func TestProbeColumn_Integration_MetadataBothLocations(t *testing.T) {
 
 	// Step 1: Create schema table and column
 	tableID := tc.createSchemaTable(ctx, "users")
-	columnID := tc.createSchemaColumn(ctx, tableID, "status", "varchar", 3, 500)
+	tc.createSchemaColumn(ctx, tableID, "status", "varchar", 3, 500)
 
-	// Step 2: Create an active ontology WITH column details (fallback data)
+	// Step 2: Create an active ontology WITH column details
 	tc.createActiveOntology(ctx)
 	columnDetails := []models.ColumnDetail{
 		{
@@ -404,31 +372,19 @@ func TestProbeColumn_Integration_MetadataBothLocations(t *testing.T) {
 	}
 	err := tc.ontologyRepo.UpdateColumnDetails(ctx, tc.projectID, "users", columnDetails)
 	require.NoError(t, err)
-	err = tc.ontologyRepo.UpdateEntitySummary(ctx, tc.projectID, "users", &models.EntitySummary{
-		TableName:    "users",
-		BusinessName: "User",
-		Description:  "Platform users",
-	})
+
+	// Step 3: Also create column_metadata (simulating approved change)
+	columnMeta := &models.ColumnMetadata{
+		ProjectID:  tc.projectID,
+		TableName:  "users",
+		ColumnName: "status",
+		EnumValues: []string{"ACTIVE", "INACTIVE"}, // Different values
+		Source:     models.ProvenanceMCP,
+	}
+	err = tc.columnMetadataRepo.Upsert(ctx, columnMeta)
 	require.NoError(t, err)
 
-	// Step 3: Also create column_metadata (primary source - takes precedence)
-	desc := "User account status from column_metadata"
-	role := "attribute"
-	tc.createColumnMetadata(ctx, columnID, func(m *models.ColumnMetadata) {
-		m.Description = &desc
-		m.Role = &role
-		m.Features.EnumFeatures = &models.EnumFeatures{
-			Values: []models.ColumnEnumValue{
-				{Value: "ACTIVE", Label: "Active from metadata"},
-				{Value: "INACTIVE", Label: "Inactive from metadata"},
-			},
-		}
-		m.Features.IdentifierFeatures = &models.IdentifierFeatures{
-			EntityReferenced: "UserAccount",
-		}
-	})
-
-	// Step 4: Probe the column - column_metadata should take precedence
+	// Step 4: Probe the column - ontology should take precedence
 	result, err := tc.callTool(ctx, "probe_column", map[string]any{
 		"table":  "users",
 		"column": "status",
@@ -441,14 +397,12 @@ func TestProbeColumn_Integration_MetadataBothLocations(t *testing.T) {
 	err = json.Unmarshal([]byte(result.Content[0].(mcp.TextContent).Text), &probeResponse)
 	require.NoError(t, err)
 
-	// Column_metadata values should be present (takes precedence)
+	// Ontology values should be present (with labels, not raw values)
 	assert.NotNil(t, probeResponse.Semantic)
-	assert.Len(t, probeResponse.Semantic.EnumLabels, 2, "should have 2 values from column_metadata")
-	assert.Equal(t, "Active from metadata", probeResponse.Semantic.EnumLabels["ACTIVE"])
-	assert.Equal(t, "Inactive from metadata", probeResponse.Semantic.EnumLabels["INACTIVE"])
-	assert.Equal(t, "UserAccount", probeResponse.Semantic.Entity)
-	assert.Equal(t, "attribute", probeResponse.Semantic.Role)
-	assert.Equal(t, "User account status from column_metadata", probeResponse.Semantic.Description)
+	assert.Len(t, probeResponse.Semantic.EnumLabels, 3, "should have 3 values from ontology")
+	assert.Equal(t, "Active user account", probeResponse.Semantic.EnumLabels["ACTIVE"])
+	assert.Equal(t, "Temporarily suspended", probeResponse.Semantic.EnumLabels["SUSPENDED"])
+	assert.Equal(t, "dimension", probeResponse.Semantic.Role)
 }
 
 // TestProbeColumn_Integration_MetadataOnlyColumnMetadata verifies probe_column uses
@@ -463,29 +417,27 @@ func TestProbeColumn_Integration_MetadataOnlyColumnMetadata(t *testing.T) {
 
 	// Step 1: Create schema table and column
 	tableID := tc.createSchemaTable(ctx, "orders")
-	columnID := tc.createSchemaColumn(ctx, tableID, "order_status", "varchar", 4, 1000)
+	tc.createSchemaColumn(ctx, tableID, "order_status", "varchar", 4, 1000)
 
 	// Step 2: Create an active ontology WITHOUT column details for this column
 	tc.createActiveOntology(ctx)
 
-	// Step 3: Create column_metadata with enum values (using SchemaColumnID)
+	// Step 3: Create column_metadata with enum values
 	desc := "Current state of the order"
+	entity := "Order"
 	role := "attribute"
-	tc.createColumnMetadata(ctx, columnID, func(m *models.ColumnMetadata) {
-		m.Description = &desc
-		m.Role = &role
-		m.Features.EnumFeatures = &models.EnumFeatures{
-			Values: []models.ColumnEnumValue{
-				{Value: "PENDING", Label: "PENDING"},
-				{Value: "PROCESSING", Label: "PROCESSING"},
-				{Value: "SHIPPED", Label: "SHIPPED"},
-				{Value: "DELIVERED", Label: "DELIVERED"},
-			},
-		}
-		m.Features.IdentifierFeatures = &models.IdentifierFeatures{
-			EntityReferenced: "Order",
-		}
-	})
+	columnMeta := &models.ColumnMetadata{
+		ProjectID:   tc.projectID,
+		TableName:   "orders",
+		ColumnName:  "order_status",
+		Description: &desc,
+		Entity:      &entity,
+		Role:        &role,
+		EnumValues:  []string{"PENDING", "PROCESSING", "SHIPPED", "DELIVERED"},
+		Source:      models.ProvenanceMCP,
+	}
+	err := tc.columnMetadataRepo.Upsert(ctx, columnMeta)
+	require.NoError(t, err)
 
 	// Step 4: Probe the column
 	result, err := tc.callTool(ctx, "probe_column", map[string]any{
@@ -540,11 +492,6 @@ func TestProbeColumn_Integration_MetadataOnlyOntology(t *testing.T) {
 	}
 	err := tc.ontologyRepo.UpdateColumnDetails(ctx, tc.projectID, "products", columnDetails)
 	require.NoError(t, err)
-	err = tc.ontologyRepo.UpdateEntitySummary(ctx, tc.projectID, "products", &models.EntitySummary{
-		TableName:    "products",
-		BusinessName: "Product",
-	})
-	require.NoError(t, err)
 
 	// NO column_metadata entry
 
@@ -565,7 +512,6 @@ func TestProbeColumn_Integration_MetadataOnlyOntology(t *testing.T) {
 	assert.NotNil(t, probeResponse.Semantic)
 	assert.Len(t, probeResponse.Semantic.EnumLabels, 3, "should have 3 values from ontology")
 	assert.Equal(t, "Electronic devices", probeResponse.Semantic.EnumLabels["ELECTRONICS"])
-	assert.Equal(t, "Product", probeResponse.Semantic.Entity)
 }
 
 // TestProbeColumn_Integration_NoMetadataAnywhere verifies probe_column works
@@ -613,11 +559,6 @@ func TestProbeColumn_Integration_NoMetadataAnywhere(t *testing.T) {
 // TestProbeColumn_Integration_EnumLabelsPersistAcrossSessions verifies that
 // enum labels from an approved change persist and are visible in new sessions.
 func TestProbeColumn_Integration_EnumLabelsPersistAcrossSessions(t *testing.T) {
-	// TODO: Re-enable when applyCreateColumnMetadata is implemented for the new schema.
-	// The change approval flow needs to write to engine_ontology_column_metadata.
-	// See PLAN-column-schema-refactor.md for details.
-	t.Skip("applyCreateColumnMetadata not yet implemented for new schema - see PLAN-column-schema-refactor.md")
-
 	tc := setupProbeColumnIntegrationTest(t)
 	tc.cleanup()
 	defer tc.cleanup()
@@ -663,9 +604,8 @@ func TestProbeColumn_Integration_EnumLabelsPersistAcrossSessions(t *testing.T) {
 	assert.Equal(t, "CRYPTO", probeResponse.Semantic.EnumLabels["CRYPTO"])
 }
 
-// TestProbeColumn_Integration_PartialMerge verifies that column_metadata is the
-// authoritative source and ontology is only used as fallback when no column_metadata exists.
-// (After schema refactor: no merging between sources)
+// TestProbeColumn_Integration_PartialMerge verifies that partial metadata from
+// different sources is properly merged.
 func TestProbeColumn_Integration_PartialMerge(t *testing.T) {
 	tc := setupProbeColumnIntegrationTest(t)
 	tc.cleanup()
@@ -676,9 +616,9 @@ func TestProbeColumn_Integration_PartialMerge(t *testing.T) {
 
 	// Step 1: Create schema table and column
 	tableID := tc.createSchemaTable(ctx, "invoices")
-	columnID := tc.createSchemaColumn(ctx, tableID, "invoice_state", "varchar", 4, 3000)
+	tc.createSchemaColumn(ctx, tableID, "invoice_state", "varchar", 4, 3000)
 
-	// Step 2: Create an active ontology with description (fallback data - will NOT be used)
+	// Step 2: Create an active ontology with description but NO enum values
 	tc.createActiveOntology(ctx)
 	columnDetails := []models.ColumnDetail{
 		{
@@ -690,24 +630,17 @@ func TestProbeColumn_Integration_PartialMerge(t *testing.T) {
 	}
 	err := tc.ontologyRepo.UpdateColumnDetails(ctx, tc.projectID, "invoices", columnDetails)
 	require.NoError(t, err)
-	err = tc.ontologyRepo.UpdateEntitySummary(ctx, tc.projectID, "invoices", &models.EntitySummary{
-		TableName:    "invoices",
-		BusinessName: "Invoice",
-	})
-	require.NoError(t, err)
 
-	// Step 3: Create column_metadata WITH enum values (primary source)
-	// Column_metadata is authoritative - even without description, ontology is NOT used
-	tc.createColumnMetadata(ctx, columnID, func(m *models.ColumnMetadata) {
-		m.Features.EnumFeatures = &models.EnumFeatures{
-			Values: []models.ColumnEnumValue{
-				{Value: "DRAFT", Label: "DRAFT"},
-				{Value: "SENT", Label: "SENT"},
-				{Value: "PAID", Label: "PAID"},
-				{Value: "OVERDUE", Label: "OVERDUE"},
-			},
-		}
-	})
+	// Step 3: Create column_metadata WITH enum values but no description
+	columnMeta := &models.ColumnMetadata{
+		ProjectID:  tc.projectID,
+		TableName:  "invoices",
+		ColumnName: "invoice_state",
+		EnumValues: []string{"DRAFT", "SENT", "PAID", "OVERDUE"},
+		Source:     models.ProvenanceMCP,
+	}
+	err = tc.columnMetadataRepo.Upsert(ctx, columnMeta)
+	require.NoError(t, err)
 
 	// Step 4: Probe the column
 	result, err := tc.callTool(ctx, "probe_column", map[string]any{
@@ -722,14 +655,12 @@ func TestProbeColumn_Integration_PartialMerge(t *testing.T) {
 	err = json.Unmarshal([]byte(result.Content[0].(mcp.TextContent).Text), &probeResponse)
 	require.NoError(t, err)
 
-	// Column_metadata is the authoritative source - no merging with ontology
+	// Should have description from ontology and enum values from column_metadata
 	assert.NotNil(t, probeResponse.Semantic)
-	// Description is NOT from ontology (column_metadata is authoritative)
-	assert.Empty(t, probeResponse.Semantic.Description, "description not in column_metadata, ontology NOT used")
-	assert.Empty(t, probeResponse.Semantic.Role, "role not in column_metadata")
-	assert.Empty(t, probeResponse.Semantic.Entity, "entity not in column_metadata")
+	assert.Equal(t, "Current processing state of the invoice", probeResponse.Semantic.Description, "description from ontology")
+	assert.Equal(t, "attribute", probeResponse.Semantic.Role, "role from ontology")
 
-	// Enum labels come from column_metadata
+	// Enum labels should come from column_metadata since ontology has none
 	assert.Len(t, probeResponse.Semantic.EnumLabels, 4, "enum values from column_metadata")
 	assert.Equal(t, "DRAFT", probeResponse.Semantic.EnumLabels["DRAFT"])
 	assert.Equal(t, "OVERDUE", probeResponse.Semantic.EnumLabels["OVERDUE"])
@@ -773,12 +704,6 @@ func TestProbeColumn_Integration_EnumWithDescriptions(t *testing.T) {
 	}
 	err := tc.ontologyRepo.UpdateColumnDetails(ctx, tc.projectID, "billing_transactions", columnDetails)
 	require.NoError(t, err)
-	err = tc.ontologyRepo.UpdateEntitySummary(ctx, tc.projectID, "billing_transactions", &models.EntitySummary{
-		TableName:    "billing_transactions",
-		BusinessName: "Billing Transaction",
-		Description:  "Financial transactions for billing",
-	})
-	require.NoError(t, err)
 
 	// Step 3: Probe the column
 	result, err := tc.callTool(ctx, "probe_column", map[string]any{
@@ -795,7 +720,6 @@ func TestProbeColumn_Integration_EnumWithDescriptions(t *testing.T) {
 
 	// Key assertions: enum_labels should have meaningful labels (not just "1", "2", "3")
 	assert.NotNil(t, probeResponse.Semantic, "should have semantic section")
-	assert.Equal(t, "Billing Transaction", probeResponse.Semantic.Entity)
 	assert.Equal(t, "dimension", probeResponse.Semantic.Role)
 	assert.Equal(t, "State of the billing transaction", probeResponse.Semantic.Description)
 
@@ -847,11 +771,6 @@ func TestProbeColumn_Integration_EnumDescriptionFallback(t *testing.T) {
 		},
 	}
 	err := tc.ontologyRepo.UpdateColumnDetails(ctx, tc.projectID, "activity_logs", columnDetails)
-	require.NoError(t, err)
-	err = tc.ontologyRepo.UpdateEntitySummary(ctx, tc.projectID, "activity_logs", &models.EntitySummary{
-		TableName:    "activity_logs",
-		BusinessName: "Activity Log",
-	})
 	require.NoError(t, err)
 
 	// Step 3: Probe the column
