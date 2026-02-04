@@ -95,7 +95,6 @@ func TestGetOntology_Performance_DomainDepth(t *testing.T) {
 
 		// Verify response has expected fields
 		assert.Contains(t, ontologyResponse, "domain", "iteration %d: response should have domain field", i)
-		assert.Contains(t, ontologyResponse, "entities", "iteration %d: response should have entities field", i)
 	}
 
 	// Calculate average time
@@ -146,11 +145,6 @@ func TestGetOntology_Performance_AllDepths(t *testing.T) {
 			name:     "domain",
 			depth:    "domain",
 			expected: 100 * time.Millisecond,
-		},
-		{
-			name:     "entities",
-			depth:    "entities",
-			expected: 200 * time.Millisecond,
 		},
 		{
 			name:     "tables_filtered",
@@ -391,9 +385,6 @@ func (tc *ontologyPerformanceTestContext) cleanup() {
 	}
 	defer scope.Close()
 
-	// Delete test data in reverse dependency order
-	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontology_entity_occurrences WHERE entity_id IN (SELECT id FROM engine_ontology_entities WHERE project_id = $1)`, tc.projectID)
-	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontology_entity_aliases WHERE project_id = $1`, tc.projectID)
-	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontology_entities WHERE project_id = $1`, tc.projectID)
+	// Delete test data
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontologies WHERE project_id = $1`, tc.projectID)
 }

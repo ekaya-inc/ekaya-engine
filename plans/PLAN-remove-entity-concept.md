@@ -318,20 +318,20 @@ Remove entity wiring from `main.go`:
 
 ### 10.1 Delete MCP test prompts
 
-- [ ] `tests/claude-mcp/prompts/200-entity-create.md`
-- [ ] `tests/claude-mcp/prompts/201-entity-update.md`
-- [ ] `tests/claude-mcp/prompts/300-entity-delete.md`
-- [ ] `tests/claude-mcp/prompts/111-ontology-entities.md`
+- [x] `tests/claude-mcp/prompts/200-entity-create.md`
+- [x] `tests/claude-mcp/prompts/201-entity-update.md`
+- [x] `tests/claude-mcp/prompts/300-entity-delete.md`
+- [x] `tests/claude-mcp/prompts/111-ontology-entities.md`
 
 ### 10.2 Update remaining tests
 
 Review and update tests that reference entities in:
-- [ ] `pkg/mcp/tools/mcp_tools_scenario_test.go`
-- [ ] `pkg/mcp/tools/mcp_tools_integration_test.go`
-- [ ] `pkg/mcp/tools/ontology_performance_test.go`
-- [ ] `pkg/handlers/datasources_integration_test.go`
-- [ ] `pkg/handlers/glossary_integration_test.go`
-- [ ] `pkg/handlers/ontology_dag_handler_test.go`
+- [x] `pkg/mcp/tools/mcp_tools_scenario_test.go`
+- [x] `pkg/mcp/tools/mcp_tools_integration_test.go`
+- [x] `pkg/mcp/tools/ontology_performance_test.go`
+- [x] `pkg/handlers/datasources_integration_test.go`
+- [x] `pkg/handlers/glossary_integration_test.go`
+- [x] `pkg/handlers/ontology_dag_handler_test.go`
 
 ---
 

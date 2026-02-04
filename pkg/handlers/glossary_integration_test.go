@@ -37,7 +37,6 @@ type glossaryTestContext struct {
 	datasourceSvc  services.DatasourceService
 	glossaryRepo   repositories.GlossaryRepository
 	ontologyRepo   repositories.OntologyRepository
-	entityRepo     repositories.OntologyEntityRepository
 	projectID      uuid.UUID
 	ontologyID     uuid.UUID
 	datasourceID   uuid.UUID
@@ -64,17 +63,16 @@ func setupGlossaryTest(t *testing.T) *glossaryTestContext {
 	// Create repositories
 	glossaryRepo := repositories.NewGlossaryRepository()
 	ontologyRepo := repositories.NewOntologyRepository()
-	entityRepo := repositories.NewOntologyEntityRepository()
 	dsRepo := repositories.NewDatasourceRepository()
 
 	// Create datasource service
 	datasourceSvc := services.NewDatasourceService(dsRepo, ontologyRepo, encryptor, adapterFactory, nil, zap.NewNop())
 
-	// Create a mock LLM factory that returns nil (SuggestTerms needs ontology/entities first)
+	// Create a mock LLM factory that returns nil (SuggestTerms needs ontology first)
 	mockLLMFactory := &mockLLMClientFactory{}
 
 	// Create service with real dependencies
-	service := services.NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, nil, datasourceSvc, adapterFactory, mockLLMFactory, nil, zap.NewNop(), "test")
+	service := services.NewGlossaryService(glossaryRepo, ontologyRepo, nil, nil, datasourceSvc, adapterFactory, mockLLMFactory, nil, zap.NewNop(), "test")
 
 	// Create handler
 	handler := NewGlossaryHandler(service, zap.NewNop())
@@ -91,7 +89,6 @@ func setupGlossaryTest(t *testing.T) *glossaryTestContext {
 		datasourceSvc:  datasourceSvc,
 		glossaryRepo:   glossaryRepo,
 		ontologyRepo:   ontologyRepo,
-		entityRepo:     entityRepo,
 		projectID:      projectID,
 		adapterFactory: adapterFactory,
 	}
@@ -312,45 +309,16 @@ func (tc *glossaryTestContext) createTestOntology() {
 
 	tc.ontologyID = uuid.New()
 	ontology := &models.TieredOntology{
-		ID:              tc.ontologyID,
-		ProjectID:       tc.projectID,
-		Version:         1,
-		IsActive:        true,
-		EntitySummaries: make(map[string]*models.EntitySummary),
-		ColumnDetails:   make(map[string][]models.ColumnDetail),
-		Metadata:        make(map[string]any),
+		ID:            tc.ontologyID,
+		ProjectID:     tc.projectID,
+		Version:       1,
+		IsActive:      true,
+		ColumnDetails: make(map[string][]models.ColumnDetail),
+		Metadata:      make(map[string]any),
 	}
 
 	if err := tc.ontologyRepo.Create(ctx, ontology); err != nil {
 		tc.t.Fatalf("Failed to create ontology: %v", err)
-	}
-}
-
-// createTestEntity creates an entity for SuggestTerms testing.
-func (tc *glossaryTestContext) createTestEntity() {
-	tc.t.Helper()
-
-	ctx := context.Background()
-	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
-	if err != nil {
-		tc.t.Fatalf("Failed to create tenant scope: %v", err)
-	}
-	defer scope.Close()
-	ctx = database.SetTenantScope(ctx, scope)
-	ctx = models.WithInferredProvenance(ctx, uuid.Nil)
-
-	entity := &models.OntologyEntity{
-		ProjectID:     tc.projectID,
-		OntologyID:    tc.ontologyID,
-		Name:          "order",
-		Description:   "A customer order",
-		PrimarySchema: "public",
-		PrimaryTable:  "users",
-		PrimaryColumn: "id",
-	}
-
-	if err := tc.entityRepo.Create(ctx, entity); err != nil {
-		tc.t.Fatalf("Failed to create entity: %v", err)
 	}
 }
 
@@ -368,8 +336,6 @@ func (tc *glossaryTestContext) cleanup() {
 	// Delete in order respecting foreign keys
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_glossary_aliases WHERE glossary_id IN (SELECT id FROM engine_business_glossary WHERE project_id = $1)", tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_business_glossary WHERE project_id = $1", tc.projectID)
-	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontology_entity_aliases WHERE entity_id IN (SELECT id FROM engine_ontology_entities WHERE project_id = $1)", tc.projectID)
-	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontology_entities WHERE project_id = $1", tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontologies WHERE project_id = $1", tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_datasources WHERE project_id = $1", tc.projectID)
 }
@@ -850,7 +816,6 @@ func TestGlossaryIntegration_Suggest(t *testing.T) {
 	tc := setupGlossaryTest(t)
 	tc.cleanup()
 	tc.createTestOntology()
-	tc.createTestEntity()
 	tc.ensureTestDatasource() // Need datasource for SQL validation
 
 	suggestRec := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary/suggest",
