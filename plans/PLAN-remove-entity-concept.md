@@ -134,18 +134,18 @@ Remove from `pkg/models/ontology_dag.go`:
 ### 4.1 Delete entity service files
 
 Delete all entity-related service files from `pkg/services/`:
-- [ ] `pkg/services/entity_service.go`
-- [ ] `pkg/services/entity_service_test.go`
-- [ ] `pkg/services/entity_discovery_service.go`
-- [ ] `pkg/services/entity_discovery_service_test.go`
-- [ ] `pkg/services/entity_discovery_task.go`
-- [ ] `pkg/services/entity_discovery_task_test.go`
-- [ ] `pkg/services/entity_merge_service.go`
-- [ ] `pkg/services/entity_promotion.go`
-- [ ] `pkg/services/entity_promotion_test.go`
-- [ ] `pkg/services/entity_promotion_service.go`
-- [ ] `pkg/services/entity_promotion_service_test.go`
-- [ ] `pkg/services/entity_promotion_integration_test.go`
+- [x] `pkg/services/entity_service.go`
+- [x] `pkg/services/entity_service_test.go`
+- [x] `pkg/services/entity_discovery_service.go`
+- [x] `pkg/services/entity_discovery_service_test.go`
+- [x] `pkg/services/entity_discovery_task.go`
+- [x] `pkg/services/entity_discovery_task_test.go`
+- [x] `pkg/services/entity_merge_service.go`
+- [x] `pkg/services/entity_promotion.go`
+- [x] `pkg/services/entity_promotion_test.go`
+- [x] `pkg/services/entity_promotion_service.go`
+- [x] `pkg/services/entity_promotion_service_test.go`
+- [x] `pkg/services/entity_promotion_integration_test.go`
 
 These files contain the entity discovery, promotion, and merge logic that is being removed for v1.0. Simply delete these files - they have no remaining dependencies after the earlier phases removed the entity models and repositories.
 
