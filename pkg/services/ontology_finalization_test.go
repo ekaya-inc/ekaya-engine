@@ -358,9 +358,6 @@ func (m *mockSchemaRepoForFinalization) UpdateColumnStats(ctx context.Context, c
 func (m *mockSchemaRepoForFinalization) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
 	return nil
 }
-func (m *mockSchemaRepoForFinalization) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
-	return nil
-}
 func (m *mockSchemaRepoForFinalization) ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
 	return nil, nil
 }
@@ -409,10 +406,6 @@ func (m *mockSchemaRepoForFinalization) GetNonPKColumnsByExactType(ctx context.C
 func (m *mockSchemaRepoForFinalization) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
-func (m *mockSchemaRepoForFinalization) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
-	return nil
-}
-
 func (m *mockSchemaRepoForFinalization) GetRelationshipsByMethod(ctx context.Context, projectID, datasourceID uuid.UUID, method string) ([]*models.SchemaRelationship, error) {
 	return nil, nil
 }

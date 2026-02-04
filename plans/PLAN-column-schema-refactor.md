@@ -329,7 +329,7 @@ CREATE TABLE engine_ontology_column_metadata (
 
 ### Phase 7: Cleanup
 
-- [ ] 7.1 Delete dead code:
+- [x] 7.1 Delete dead code: ✓
   - `SchemaColumn.GetColumnFeatures()`
   - `SchemaRepository.UpdateColumnFeatures()`
   - `SchemaRepository.ClearColumnFeaturesByProject()`

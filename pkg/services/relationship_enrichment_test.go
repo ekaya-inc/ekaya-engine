@@ -895,9 +895,6 @@ func (m *mockSchemaRepoForRelEnrichment) UpdateColumnStats(ctx context.Context, 
 func (m *mockSchemaRepoForRelEnrichment) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
 	return nil
 }
-func (m *mockSchemaRepoForRelEnrichment) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
-	return nil
-}
 func (m *mockSchemaRepoForRelEnrichment) ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
 	return nil, nil
 }
@@ -946,10 +943,6 @@ func (m *mockSchemaRepoForRelEnrichment) GetNonPKColumnsByExactType(ctx context.
 func (m *mockSchemaRepoForRelEnrichment) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
-func (m *mockSchemaRepoForRelEnrichment) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
-	return nil
-}
-
 func (m *mockSchemaRepoForRelEnrichment) GetRelationshipsByMethod(ctx context.Context, projectID, datasourceID uuid.UUID, method string) ([]*models.SchemaRelationship, error) {
 	return nil, nil
 }

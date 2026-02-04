@@ -255,10 +255,6 @@ func (m *mockSchemaRepository) UpdateColumnMetadata(ctx context.Context, project
 	return nil
 }
 
-func (m *mockSchemaRepository) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
-	return nil
-}
-
 func (m *mockSchemaRepository) ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
 	if m.listRelationshipsErr != nil {
 		return nil, m.listRelationshipsErr
@@ -372,10 +368,6 @@ func (m *mockSchemaRepository) GetColumnCountByProject(ctx context.Context, proj
 }
 
 func (m *mockSchemaRepository) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
-	return nil
-}
-
-func (m *mockSchemaRepository) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
 	return nil
 }
 

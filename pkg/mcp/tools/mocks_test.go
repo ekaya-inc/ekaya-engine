@@ -458,12 +458,6 @@ func (m *mockSchemaRepository) SelectAllTablesAndColumns(ctx context.Context, pr
 func (m *mockSchemaRepository) GetColumnsWithFeaturesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) (map[string][]*models.SchemaColumn, error) {
 	return nil, nil
 }
-func (m *mockSchemaRepository) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
-	return nil
-}
-func (m *mockSchemaRepository) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
-	return nil
-}
 func (m *mockSchemaRepository) DeleteInferredRelationshipsByProject(ctx context.Context, projectID uuid.UUID) (int64, error) {
 	return 0, nil
 }

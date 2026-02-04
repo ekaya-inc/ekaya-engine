@@ -1254,9 +1254,6 @@ func (m *mockSchemaRepoForGrouping) UpdateColumnStats(ctx context.Context, colum
 func (m *mockSchemaRepoForGrouping) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
 	return nil
 }
-func (m *mockSchemaRepoForGrouping) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
-	return nil
-}
 func (m *mockSchemaRepoForGrouping) ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
 	return nil, nil
 }
@@ -1305,10 +1302,6 @@ func (m *mockSchemaRepoForGrouping) GetNonPKColumnsByExactType(ctx context.Conte
 func (m *mockSchemaRepoForGrouping) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
-func (m *mockSchemaRepoForGrouping) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
-	return nil
-}
-
 func (m *mockSchemaRepoForGrouping) GetRelationshipsByMethod(ctx context.Context, projectID, datasourceID uuid.UUID, method string) ([]*models.SchemaRelationship, error) {
 	return nil, nil
 }

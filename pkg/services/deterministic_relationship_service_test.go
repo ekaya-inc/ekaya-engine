@@ -1677,10 +1677,6 @@ func (m *mockTestSchemaRepo) UpdateColumnMetadata(ctx context.Context, projectID
 	return nil
 }
 
-func (m *mockTestSchemaRepo) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
-	return nil
-}
-
 func (m *mockTestSchemaRepo) UpsertTable(ctx context.Context, table *models.SchemaTable) error {
 	return nil
 }
@@ -1696,10 +1692,6 @@ func (m *mockTestSchemaRepo) SoftDeleteRemovedColumns(ctx context.Context, table
 func (m *mockTestSchemaRepo) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
-func (m *mockTestSchemaRepo) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
-	return nil
-}
-
 func (m *mockTestSchemaRepo) GetRelationshipsByMethod(ctx context.Context, projectID, datasourceID uuid.UUID, method string) ([]*models.SchemaRelationship, error) {
 	return nil, nil
 }

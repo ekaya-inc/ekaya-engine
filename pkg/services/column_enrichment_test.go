@@ -368,10 +368,6 @@ func (r *testColEnrichmentSchemaRepo) UpdateColumnMetadata(ctx context.Context, 
 	return nil
 }
 
-func (r *testColEnrichmentSchemaRepo) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
-	return nil
-}
-
 func (r *testColEnrichmentSchemaRepo) GetColumnByName(ctx context.Context, projectID uuid.UUID, columnName string) (*models.SchemaColumn, error) {
 	return nil, nil
 }
@@ -445,10 +441,6 @@ func (r *testColEnrichmentSchemaRepo) UpdateColumnStats(ctx context.Context, col
 }
 
 func (r *testColEnrichmentSchemaRepo) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
-	return nil
-}
-
-func (r *testColEnrichmentSchemaRepo) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
 	return nil
 }
 
