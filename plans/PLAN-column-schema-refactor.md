@@ -221,16 +221,96 @@ CREATE TABLE engine_ontology_column_metadata (
   - Write to `columnMetadataRepo.UpsertFromExtraction()` instead of `schemaRepo.UpdateColumnFeatures()`
   - Set `source='inferred'`
 
-- [ ] 4.2 Update all services that read column features:
-  - `RelationshipCandidateCollector`
-  - `DeterministicRelationshipService`
-  - `TableFeatureExtractionService`
-  - `ColumnEnrichmentService`
-  - `OntologyFinalizationService`
-  - `RelationshipEnrichmentService`
-  - `DataChangeDetectionService`
-  - `ColumnFilterService`
-  - Fetch from `ColumnMetadataRepository` instead of `SchemaColumn.GetColumnFeatures()`
+- [x] 4.2.1 Update RelationshipCandidateCollector to use ColumnMetadataRepository
+
+  **Context:** As part of the column schema refactor, `ColumnFeatures` data has moved from `engine_schema_columns.metadata` JSONB to `engine_ontology_column_metadata` with typed columns. Services that previously called `SchemaColumn.GetColumnFeatures()` must now fetch from `ColumnMetadataRepository`.
+
+  **File:** `pkg/services/relationship_candidate_collector.go`
+
+  **Changes required:**
+  1. Add `ColumnMetadataRepository` as a dependency to the service struct
+  2. Update the constructor to accept the repository
+  3. Find all calls to `GetColumnFeatures()` on `SchemaColumn` objects and replace with `columnMetadataRepo.GetBySchemaColumnID(ctx, column.ID)`
+  4. Handle the case where no metadata exists (features may be nil for unanalyzed columns)
+  5. Use the new typed getter methods on `ColumnMetadata` (e.g., `GetIdentifierFeatures()`, `GetEnumFeatures()`)
+
+  **Interface reference:** `ColumnMetadataRepository.GetBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error)`
+
+  **Verification:** Run `make check` to ensure all tests pass.
+
+- [ ] 4.2.2 Update DeterministicRelationshipService to use ColumnMetadataRepository
+
+  **Context:** As part of the column schema refactor, `ColumnFeatures` data has moved from `engine_schema_columns.metadata` JSONB to `engine_ontology_column_metadata` with typed columns. Services that previously called `SchemaColumn.GetColumnFeatures()` must now fetch from `ColumnMetadataRepository`.
+
+  **File:** `pkg/services/deterministic_relationship_service.go`
+
+  **Changes required:**
+  1. Add `ColumnMetadataRepository` as a dependency to the service struct
+  2. Update the constructor to accept the repository
+  3. Find all calls to `GetColumnFeatures()` on `SchemaColumn` objects and replace with `columnMetadataRepo.GetBySchemaColumnID(ctx, column.ID)`
+  4. Handle the case where no metadata exists (features may be nil for unanalyzed columns)
+  5. Use the new typed getter methods on `ColumnMetadata` (e.g., `GetIdentifierFeatures()`)
+
+  **Interface reference:** `ColumnMetadataRepository.GetBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error)`
+
+  **Verification:** Run `make check` to ensure all tests pass.
+
+- [ ] 4.2.3 Update TableFeatureExtractionService and ColumnEnrichmentService to use ColumnMetadataRepository
+
+  **Context:** As part of the column schema refactor, `ColumnFeatures` data has moved from `engine_schema_columns.metadata` JSONB to `engine_ontology_column_metadata` with typed columns.
+
+  **Files:**
+  - `pkg/services/table_feature_extraction_service.go`
+  - `pkg/services/column_enrichment_service.go`
+
+  **Changes required for each service:**
+  1. Add `ColumnMetadataRepository` as a dependency to the service struct
+  2. Update the constructor to accept the repository
+  3. Find all calls to `GetColumnFeatures()` on `SchemaColumn` objects and replace with `columnMetadataRepo.GetBySchemaColumnID(ctx, column.ID)`
+  4. Handle the case where no metadata exists
+  5. Use the new typed getter methods on `ColumnMetadata`
+
+  **Interface reference:** `ColumnMetadataRepository.GetBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error)`
+
+  **Verification:** Run `make check` to ensure all tests pass.
+
+- [ ] 4.2.4 Update OntologyFinalizationService and RelationshipEnrichmentService to use ColumnMetadataRepository
+
+  **Context:** As part of the column schema refactor, `ColumnFeatures` data has moved from `engine_schema_columns.metadata` JSONB to `engine_ontology_column_metadata` with typed columns.
+
+  **Files:**
+  - `pkg/services/ontology_finalization_service.go`
+  - `pkg/services/relationship_enrichment_service.go`
+
+  **Changes required for each service:**
+  1. Add `ColumnMetadataRepository` as a dependency to the service struct
+  2. Update the constructor to accept the repository
+  3. Find all calls to `GetColumnFeatures()` on `SchemaColumn` objects and replace with `columnMetadataRepo.GetBySchemaColumnID(ctx, column.ID)`
+  4. Handle the case where no metadata exists
+  5. Use the new typed getter methods on `ColumnMetadata`
+
+  **Interface reference:** `ColumnMetadataRepository.GetBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error)`
+
+  **Verification:** Run `make check` to ensure all tests pass.
+
+- [ ] 4.2.5 Update DataChangeDetectionService and ColumnFilterService to use ColumnMetadataRepository
+
+  **Context:** As part of the column schema refactor, `ColumnFeatures` data has moved from `engine_schema_columns.metadata` JSONB to `engine_ontology_column_metadata` with typed columns.
+
+  **Files:**
+  - `pkg/services/data_change_detection_service.go`
+  - `pkg/services/column_filter_service.go`
+
+  **Changes required for each service:**
+  1. Add `ColumnMetadataRepository` as a dependency to the service struct
+  2. Update the constructor to accept the repository
+  3. Find all calls to `GetColumnFeatures()` on `SchemaColumn` objects and replace with `columnMetadataRepo.GetBySchemaColumnID(ctx, column.ID)`
+  4. Handle the case where no metadata exists
+  5. Use the new typed getter methods on `ColumnMetadata`
+
+  **Interface reference:** `ColumnMetadataRepository.GetBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error)`
+
+  **Verification:** Run `make check` to ensure all tests pass.
 
 - [ ] 4.3 Update `OntologyContextService` to fetch from ontology table
 

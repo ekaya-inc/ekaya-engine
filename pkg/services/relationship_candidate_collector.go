@@ -24,40 +24,43 @@ type RelationshipCandidateCollector interface {
 }
 
 type relationshipCandidateCollector struct {
-	schemaRepo     repositories.SchemaRepository
-	adapterFactory datasource.DatasourceAdapterFactory
-	dsSvc          DatasourceService
-	logger         *zap.Logger
+	schemaRepo         repositories.SchemaRepository
+	columnMetadataRepo repositories.ColumnMetadataRepository
+	adapterFactory     datasource.DatasourceAdapterFactory
+	dsSvc              DatasourceService
+	logger             *zap.Logger
 }
 
 // NewRelationshipCandidateCollector creates a new RelationshipCandidateCollector.
 func NewRelationshipCandidateCollector(
 	schemaRepo repositories.SchemaRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	dsSvc DatasourceService,
 	logger *zap.Logger,
 ) RelationshipCandidateCollector {
 	return &relationshipCandidateCollector{
-		schemaRepo:     schemaRepo,
-		adapterFactory: adapterFactory,
-		dsSvc:          dsSvc,
-		logger:         logger.Named("relationship-candidate-collector"),
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		adapterFactory:     adapterFactory,
+		dsSvc:              dsSvc,
+		logger:             logger.Named("relationship-candidate-collector"),
 	}
 }
 
 // FKSourceColumn represents a column identified as a potential FK source.
-// It includes both schema metadata and ColumnFeatures data.
+// It includes both schema metadata and ColumnMetadata from the ontology table.
 type FKSourceColumn struct {
 	Column   *models.SchemaColumn
-	Features *models.ColumnFeatures
+	Metadata *models.ColumnMetadata
 	// TableName is cached for convenience
 	TableName string
 }
 
-// identifyFKSources returns columns that are potential FK sources based on ColumnFeatures data.
+// identifyFKSources returns columns that are potential FK sources based on ColumnMetadata data.
 // A column qualifies as an FK source if:
-//   - ColumnFeatures role = 'foreign_key', OR
-//   - ColumnFeatures purpose = 'identifier' (identifiers often reference other tables), OR
+//   - ColumnMetadata role = 'foreign_key', OR
+//   - ColumnMetadata purpose = 'identifier' (identifiers often reference other tables), OR
 //   - is_joinable = true in column statistics
 //
 // Columns are EXCLUDED if:
@@ -67,94 +70,74 @@ type FKSourceColumn struct {
 //   - They are JSON columns (classification_path = 'json')
 //
 // Per CLAUDE.md rule #5: We do NOT filter by column name patterns (e.g., _id suffix).
-// All classification is based on ColumnFeatures data and explicit schema metadata.
+// All classification is based on ColumnMetadata data and explicit schema metadata.
+//
+// Returns the FK source columns and a map of all column metadata (keyed by column ID)
+// for use in subsequent processing.
 func (c *relationshipCandidateCollector) identifyFKSources(
 	ctx context.Context,
 	projectID, datasourceID uuid.UUID,
-) ([]*FKSourceColumn, error) {
-	// Get all columns with their features
-	columnsByTable, err := c.schemaRepo.GetColumnsWithFeaturesByDatasource(ctx, projectID, datasourceID)
-	if err != nil {
-		return nil, fmt.Errorf("get columns with features: %w", err)
-	}
-
-	// Also get all columns to catch joinable columns without features
+) ([]*FKSourceColumn, map[uuid.UUID]*models.ColumnMetadata, error) {
+	// Get all columns for this datasource
 	allColumns, err := c.schemaRepo.ListColumnsByDatasource(ctx, projectID, datasourceID)
 	if err != nil {
-		return nil, fmt.Errorf("list all columns: %w", err)
+		return nil, nil, fmt.Errorf("list all columns: %w", err)
 	}
 
-	// Build a map of column IDs to table names for all columns
+	// Build list of column IDs and table mappings
+	columnIDs := make([]uuid.UUID, 0, len(allColumns))
 	columnTableMap := make(map[uuid.UUID]string)
 	tableIDToName := make(map[uuid.UUID]string)
 
 	// Get tables to resolve table names
 	tables, err := c.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
 	if err != nil {
-		return nil, fmt.Errorf("list tables: %w", err)
+		return nil, nil, fmt.Errorf("list tables: %w", err)
 	}
 	for _, t := range tables {
 		tableIDToName[t.ID] = t.TableName
 	}
 	for _, col := range allColumns {
+		columnIDs = append(columnIDs, col.ID)
 		if tableName, ok := tableIDToName[col.SchemaTableID]; ok {
 			columnTableMap[col.ID] = tableName
 		}
 	}
 
+	// Batch fetch all column metadata
+	metadataList, err := c.columnMetadataRepo.GetBySchemaColumnIDs(ctx, columnIDs)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get column metadata: %w", err)
+	}
+
+	// Build metadata lookup map by column ID
+	metadataByColumnID := make(map[uuid.UUID]*models.ColumnMetadata)
+	for _, meta := range metadataList {
+		metadataByColumnID[meta.SchemaColumnID] = meta
+	}
+
 	var sources []*FKSourceColumn
 
-	// Process columns with ColumnFeatures
-	for tableName, columns := range columnsByTable {
-		for _, col := range columns {
-			if c.shouldExcludeFromFKSources(col) {
-				continue
-			}
-
-			features := col.GetColumnFeatures()
-			if features == nil {
-				continue
-			}
-
-			// Check if this column qualifies as an FK source based on features
-			if c.isQualifiedFKSource(col, features) {
-				sources = append(sources, &FKSourceColumn{
-					Column:    col,
-					Features:  features,
-					TableName: tableName,
-				})
-			}
-		}
-	}
-
-	// Also check columns marked as joinable but without features (fallback)
-	// This catches columns that were marked joinable during earlier analysis
-	seenColumns := make(map[uuid.UUID]bool)
-	for _, src := range sources {
-		seenColumns[src.Column.ID] = true
-	}
-
+	// Process all columns
 	for _, col := range allColumns {
-		// Skip if already added
-		if seenColumns[col.ID] {
+		// Skip columns that should be excluded based on schema
+		if c.shouldExcludeFromFKSources(col, metadataByColumnID[col.ID]) {
 			continue
 		}
 
-		// Skip columns that should be excluded
-		if c.shouldExcludeFromFKSources(col) {
+		tableName := columnTableMap[col.ID]
+		if tableName == "" {
+			// Skip columns where table name cannot be resolved
 			continue
 		}
 
-		// Include if marked as joinable
-		if col.IsJoinable != nil && *col.IsJoinable {
-			tableName, ok := columnTableMap[col.ID]
-			if !ok || tableName == "" {
-				// Skip columns where table name cannot be resolved
-				continue
-			}
+		metadata := metadataByColumnID[col.ID]
+
+		// Check if this column qualifies as an FK source
+		if c.isQualifiedFKSource(col, metadata) {
 			sources = append(sources, &FKSourceColumn{
 				Column:    col,
-				Features:  col.GetColumnFeatures(), // May be nil
+				Metadata:  metadata,
 				TableName: tableName,
 			})
 		}
@@ -166,7 +149,7 @@ func (c *relationshipCandidateCollector) identifyFKSources(
 		zap.String("datasource_id", datasourceID.String()),
 	)
 
-	return sources, nil
+	return sources, metadataByColumnID, nil
 }
 
 // shouldExcludeFromFKSources returns true if a column should be excluded from FK source consideration.
@@ -175,7 +158,7 @@ func (c *relationshipCandidateCollector) identifyFKSources(
 //   - Timestamp columns
 //   - Boolean columns
 //   - JSON columns
-func (c *relationshipCandidateCollector) shouldExcludeFromFKSources(col *models.SchemaColumn) bool {
+func (c *relationshipCandidateCollector) shouldExcludeFromFKSources(col *models.SchemaColumn, metadata *models.ColumnMetadata) bool {
 	// Exclude primary keys - they are FK targets, not sources
 	if col.IsPrimaryKey {
 		return true
@@ -202,10 +185,9 @@ func (c *relationshipCandidateCollector) shouldExcludeFromFKSources(col *models.
 		return true
 	}
 
-	// Also check ColumnFeatures classification path for more precise exclusion
-	features := col.GetColumnFeatures()
-	if features != nil {
-		switch features.ClassificationPath {
+	// Also check ColumnMetadata classification path for more precise exclusion
+	if metadata != nil && metadata.ClassificationPath != nil {
+		switch models.ClassificationPath(*metadata.ClassificationPath) {
 		case models.ClassificationPathTimestamp,
 			models.ClassificationPathBoolean,
 			models.ClassificationPathJSON:
@@ -216,32 +198,45 @@ func (c *relationshipCandidateCollector) shouldExcludeFromFKSources(col *models.
 	return false
 }
 
-// isQualifiedFKSource returns true if a column qualifies as an FK source based on its features.
+// isQualifiedFKSource returns true if a column qualifies as an FK source based on its metadata.
 // Qualification criteria (any of these):
-//   - ColumnFeatures role = 'foreign_key'
-//   - ColumnFeatures purpose = 'identifier' (identifiers often reference other tables)
+//   - ColumnMetadata role = 'foreign_key'
+//   - ColumnMetadata purpose = 'identifier' (identifiers often reference other tables)
 //   - ClassificationPath = 'uuid' (UUIDs are high-priority FK candidates per design doc)
-func (c *relationshipCandidateCollector) isQualifiedFKSource(_ *models.SchemaColumn, features *models.ColumnFeatures) bool {
-	// Role explicitly marked as foreign_key
-	if features.Role == models.RoleForeignKey {
-		return true
+//   - is_joinable = true in column statistics (fallback when no metadata)
+func (c *relationshipCandidateCollector) isQualifiedFKSource(col *models.SchemaColumn, metadata *models.ColumnMetadata) bool {
+	// Check metadata-based criteria if metadata exists
+	if metadata != nil {
+		// Role explicitly marked as foreign_key
+		if metadata.Role != nil && *metadata.Role == models.RoleForeignKey {
+			return true
+		}
+
+		// Purpose is identifier (identifiers reference other tables)
+		if metadata.Purpose != nil && *metadata.Purpose == models.PurposeIdentifier {
+			return true
+		}
+
+		// Check classification path for UUID or external ID
+		if metadata.ClassificationPath != nil {
+			classPath := models.ClassificationPath(*metadata.ClassificationPath)
+			// UUID columns are high-priority FK candidates per design doc
+			// UUIDs are almost always identifiers that reference something
+			if classPath == models.ClassificationPathUUID {
+				return true
+			}
+
+			// External ID columns might reference external systems, not internal tables
+			// However, they should still be considered as potential FK sources
+			// since some external IDs do map to internal tables
+			if classPath == models.ClassificationPathExternalID {
+				return true
+			}
+		}
 	}
 
-	// Purpose is identifier (identifiers reference other tables)
-	if features.Purpose == models.PurposeIdentifier {
-		return true
-	}
-
-	// UUID columns are high-priority FK candidates per design doc
-	// UUIDs are almost always identifiers that reference something
-	if features.ClassificationPath == models.ClassificationPathUUID {
-		return true
-	}
-
-	// External ID columns might reference external systems, not internal tables
-	// However, they should still be considered as potential FK sources
-	// since some external IDs do map to internal tables
-	if features.ClassificationPath == models.ClassificationPathExternalID {
+	// Fallback: include if marked as joinable (catches columns without metadata)
+	if col.IsJoinable != nil && *col.IsJoinable {
 		return true
 	}
 
@@ -425,14 +420,15 @@ func categorizeDataType(dataType string) string {
 //   - They are not the same column (no self-references)
 //   - Their data types are compatible (uuid→uuid, int→int, etc.)
 //
-// The method populates ColumnFeatures-derived fields (SourcePurpose, SourceRole, etc.)
-// from the source's ColumnFeatures data.
+// The method populates ColumnMetadata-derived fields (SourcePurpose, SourceRole, etc.)
+// from the source's and target's ColumnMetadata data.
 //
 // No threshold-based filtering is applied - all type-compatible pairs become candidates
 // for LLM validation in the next phase.
 func (c *relationshipCandidateCollector) generateCandidatePairs(
 	sources []*FKSourceColumn,
 	targets []*FKTargetColumn,
+	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata,
 ) []*RelationshipCandidate {
 	var candidates []*RelationshipCandidate
 
@@ -464,17 +460,24 @@ func (c *relationshipCandidateCollector) generateCandidatePairs(
 				TargetColumnID: target.Column.ID,
 			}
 
-			// Populate ColumnFeatures-derived fields for source
-			if source.Features != nil {
-				candidate.SourcePurpose = source.Features.Purpose
-				candidate.SourceRole = source.Features.Role
+			// Populate ColumnMetadata-derived fields for source
+			if source.Metadata != nil {
+				if source.Metadata.Purpose != nil {
+					candidate.SourcePurpose = *source.Metadata.Purpose
+				}
+				if source.Metadata.Role != nil {
+					candidate.SourceRole = *source.Metadata.Role
+				}
 			}
 
-			// Populate ColumnFeatures-derived fields for target
-			targetFeatures := target.Column.GetColumnFeatures()
-			if targetFeatures != nil {
-				candidate.TargetPurpose = targetFeatures.Purpose
-				candidate.TargetRole = targetFeatures.Role
+			// Populate ColumnMetadata-derived fields for target
+			if targetMeta, ok := metadataByColumnID[target.Column.ID]; ok && targetMeta != nil {
+				if targetMeta.Purpose != nil {
+					candidate.TargetPurpose = *targetMeta.Purpose
+				}
+				if targetMeta.Role != nil {
+					candidate.TargetRole = *targetMeta.Role
+				}
 			}
 
 			candidates = append(candidates, candidate)
@@ -648,8 +651,8 @@ func (c *relationshipCandidateCollector) CollectCandidates(
 	}
 	defer adapter.Close()
 
-	// Step 2: Identify FK sources
-	sources, err := c.identifyFKSources(ctx, projectID, datasourceID)
+	// Step 2: Identify FK sources (also returns metadata map for all columns)
+	sources, metadataByColumnID, err := c.identifyFKSources(ctx, projectID, datasourceID)
 	if err != nil {
 		return nil, fmt.Errorf("identify FK sources: %w", err)
 	}
@@ -669,7 +672,7 @@ func (c *relationshipCandidateCollector) CollectCandidates(
 	}
 
 	// Step 4: Generate candidate pairs with type compatibility
-	candidates := c.generateCandidatePairs(sources, targets)
+	candidates := c.generateCandidatePairs(sources, targets, metadataByColumnID)
 
 	if progressCallback != nil {
 		progressCallback(3, 5, fmt.Sprintf("Generated %d candidate pairs", len(candidates)))
