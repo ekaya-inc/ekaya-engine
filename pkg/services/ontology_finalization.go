@@ -21,14 +21,15 @@ type OntologyFinalizationService interface {
 }
 
 type ontologyFinalizationService struct {
-	ontologyRepo     repositories.OntologyRepository
-	entityRepo       repositories.OntologyEntityRepository
-	relationshipRepo repositories.EntityRelationshipRepository
-	schemaRepo       repositories.SchemaRepository
-	conversationRepo repositories.ConversationRepository
-	llmFactory       llm.LLMClientFactory
-	getTenantCtx     TenantContextFunc
-	logger           *zap.Logger
+	ontologyRepo       repositories.OntologyRepository
+	entityRepo         repositories.OntologyEntityRepository
+	relationshipRepo   repositories.EntityRelationshipRepository
+	schemaRepo         repositories.SchemaRepository
+	columnMetadataRepo repositories.ColumnMetadataRepository
+	conversationRepo   repositories.ConversationRepository
+	llmFactory         llm.LLMClientFactory
+	getTenantCtx       TenantContextFunc
+	logger             *zap.Logger
 }
 
 // NewOntologyFinalizationService creates a new ontology finalization service.
@@ -37,20 +38,22 @@ func NewOntologyFinalizationService(
 	entityRepo repositories.OntologyEntityRepository,
 	relationshipRepo repositories.EntityRelationshipRepository,
 	schemaRepo repositories.SchemaRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
 	conversationRepo repositories.ConversationRepository,
 	llmFactory llm.LLMClientFactory,
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) OntologyFinalizationService {
 	return &ontologyFinalizationService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relationshipRepo,
-		schemaRepo:       schemaRepo,
-		conversationRepo: conversationRepo,
-		llmFactory:       llmFactory,
-		getTenantCtx:     getTenantCtx,
-		logger:           logger.Named("ontology-finalization"),
+		ontologyRepo:       ontologyRepo,
+		entityRepo:         entityRepo,
+		relationshipRepo:   relationshipRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		conversationRepo:   conversationRepo,
+		llmFactory:         llmFactory,
+		getTenantCtx:       getTenantCtx,
+		logger:             logger.Named("ontology-finalization"),
 	}
 }
 
@@ -88,8 +91,30 @@ func (s *ontologyFinalizationService) Finalize(ctx context.Context, projectID uu
 		return fmt.Errorf("get columns by tables: %w", err)
 	}
 
-	// Extract insights from ColumnFeatures
-	insights := s.extractColumnFeatureInsights(columnsByTable)
+	// Collect all column IDs for metadata lookup
+	var allColumnIDs []uuid.UUID
+	for _, columns := range columnsByTable {
+		for _, col := range columns {
+			allColumnIDs = append(allColumnIDs, col.ID)
+		}
+	}
+
+	// Fetch column metadata for all columns
+	metadataByColumnID := make(map[uuid.UUID]*models.ColumnMetadata)
+	if len(allColumnIDs) > 0 {
+		metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, allColumnIDs)
+		if err != nil {
+			s.logger.Warn("Failed to fetch column metadata for finalization, continuing without",
+				zap.Error(err))
+		} else {
+			for _, meta := range metadataList {
+				metadataByColumnID[meta.SchemaColumnID] = meta
+			}
+		}
+	}
+
+	// Extract insights from ColumnFeatures (now in ColumnMetadata)
+	insights := s.extractColumnFeatureInsights(columnsByTable, metadataByColumnID)
 
 	s.logger.Debug("Extracted column feature insights",
 		zap.Int("soft_delete_tables", len(insights.softDeleteTables)),
@@ -547,9 +572,10 @@ func (s *ontologyFinalizationService) discoverConventionsWithInsights(
 	return conventions, nil
 }
 
-// extractColumnFeatureInsights aggregates insights from ColumnFeatures across all columns.
+// extractColumnFeatureInsights aggregates insights from ColumnMetadataFeatures across all columns.
 func (s *ontologyFinalizationService) extractColumnFeatureInsights(
 	columnsByTable map[string][]*models.SchemaColumn,
+	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata,
 ) *columnFeatureInsights {
 	insights := &columnFeatureInsights{
 		externalServices: make(map[string]int),
@@ -559,19 +585,20 @@ func (s *ontologyFinalizationService) extractColumnFeatureInsights(
 
 	for tableName, columns := range columnsByTable {
 		for _, col := range columns {
-			features := col.GetColumnFeatures()
-			if features == nil {
+			// Get column metadata (features are now stored in ColumnMetadata.Features)
+			meta := metadataByColumnID[col.ID]
+			if meta == nil {
 				continue
 			}
 
-			// Check for soft-delete pattern
-			if features.TimestampFeatures != nil && features.TimestampFeatures.IsSoftDelete {
+			// Check for soft-delete pattern using TimestampFeatures
+			if tsFeatures := meta.GetTimestampFeatures(); tsFeatures != nil && tsFeatures.IsSoftDelete {
 				softDeleteByColumn[col.ColumnName] = append(softDeleteByColumn[col.ColumnName], tableName)
 			}
 
-			// Check for audit columns
-			if features.TimestampFeatures != nil && features.TimestampFeatures.IsAuditField {
-				switch features.TimestampFeatures.TimestampPurpose {
+			// Check for audit columns using TimestampFeatures
+			if tsFeatures := meta.GetTimestampFeatures(); tsFeatures != nil && tsFeatures.IsAuditField {
+				switch tsFeatures.TimestampPurpose {
 				case models.TimestampPurposeAuditCreated:
 					insights.auditCreatedTables = append(insights.auditCreatedTables, tableName)
 				case models.TimestampPurposeAuditUpdated:
@@ -579,17 +606,17 @@ func (s *ontologyFinalizationService) extractColumnFeatureInsights(
 				}
 			}
 
-			// Check for monetary columns
-			if features.MonetaryFeatures != nil && features.MonetaryFeatures.IsMonetary {
+			// Check for monetary columns using MonetaryFeatures
+			if monFeatures := meta.GetMonetaryFeatures(); monFeatures != nil && monFeatures.IsMonetary {
 				insights.monetaryTotal++
-				if features.MonetaryFeatures.PairedCurrencyColumn != "" {
+				if monFeatures.PairedCurrencyColumn != "" {
 					insights.monetaryWithCurrency++
 				}
 			}
 
-			// Check for external service identifiers
-			if features.IdentifierFeatures != nil && features.IdentifierFeatures.ExternalService != "" {
-				insights.externalServices[features.IdentifierFeatures.ExternalService]++
+			// Check for external service identifiers using IdentifierFeatures
+			if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil && idFeatures.ExternalService != "" {
+				insights.externalServices[idFeatures.ExternalService]++
 			}
 		}
 	}

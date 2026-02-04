@@ -273,97 +273,20 @@ func (s *changeReviewService) applyReviewEntity(ctx context.Context, change *mod
 	return nil
 }
 
-func (s *changeReviewService) applyCreateColumnMetadata(ctx context.Context, change *models.PendingChange, reviewerSource string) error {
-	payload := change.SuggestedPayload
-	if payload == nil {
-		return fmt.Errorf("missing suggested_payload for create_column_metadata")
-	}
-
-	meta := &models.ColumnMetadata{
-		ProjectID:  change.ProjectID,
-		TableName:  change.TableName,
-		ColumnName: change.ColumnName,
-		Source:     reviewerSource,
-	}
-
-	if desc, ok := payload["description"].(string); ok {
-		meta.Description = &desc
-	}
-	if entity, ok := payload["entity"].(string); ok {
-		meta.Entity = &entity
-	}
-	if role, ok := payload["role"].(string); ok {
-		meta.Role = &role
-	}
-	if enumVals, ok := payload["enum_values"].([]any); ok {
-		var vals []string
-		for _, v := range enumVals {
-			if s, ok := v.(string); ok {
-				vals = append(vals, s)
-			}
-		}
-		meta.EnumValues = vals
-	}
-
-	return s.columnMetadataRepo.Upsert(ctx, meta)
+func (s *changeReviewService) applyCreateColumnMetadata(_ context.Context, change *models.PendingChange, _ string) error {
+	// TODO: This function needs to be updated for the new ColumnMetadata schema.
+	// The new schema uses SchemaColumnID (FK) instead of TableName/ColumnName,
+	// and Entity/EnumValues are stored in Features JSONB, not as direct fields.
+	// See PLAN-column-schema-refactor.md for details.
+	return fmt.Errorf("applyCreateColumnMetadata not yet implemented for new schema (change_id: %s)", change.ID)
 }
 
-func (s *changeReviewService) applyUpdateColumnMetadata(ctx context.Context, change *models.PendingChange, reviewerSource string) error {
-	// Get existing metadata to check precedence
-	existing, err := s.columnMetadataRepo.GetByTableColumn(ctx, change.ProjectID, change.TableName, change.ColumnName)
-	if err != nil {
-		return fmt.Errorf("failed to get existing column metadata: %w", err)
-	}
-
-	if existing != nil {
-		// Check precedence
-		if !s.CanModify(existing.Source, existing.LastEditSource, reviewerSource) {
-			return fmt.Errorf("cannot modify column metadata: precedence blocked (existing: %s, reviewer: %s)",
-				s.precedenceChecker.GetEffectiveSource(existing.Source, existing.LastEditSource), reviewerSource)
-		}
-	}
-
-	// Apply the update
-	payload := change.SuggestedPayload
-	if payload == nil {
-		return fmt.Errorf("missing suggested_payload for update_column_metadata")
-	}
-
-	meta := &models.ColumnMetadata{
-		ProjectID:      change.ProjectID,
-		TableName:      change.TableName,
-		ColumnName:     change.ColumnName,
-		Source:         reviewerSource,
-		LastEditSource: &reviewerSource,
-	}
-
-	if existing != nil {
-		meta.ID = existing.ID
-		meta.Source = existing.Source
-		meta.CreatedBy = existing.CreatedBy
-		meta.CreatedAt = existing.CreatedAt
-	}
-
-	if desc, ok := payload["description"].(string); ok {
-		meta.Description = &desc
-	}
-	if entity, ok := payload["entity"].(string); ok {
-		meta.Entity = &entity
-	}
-	if role, ok := payload["role"].(string); ok {
-		meta.Role = &role
-	}
-	if enumVals, ok := payload["enum_values"].([]any); ok {
-		var vals []string
-		for _, v := range enumVals {
-			if s, ok := v.(string); ok {
-				vals = append(vals, s)
-			}
-		}
-		meta.EnumValues = vals
-	}
-
-	return s.columnMetadataRepo.Upsert(ctx, meta)
+func (s *changeReviewService) applyUpdateColumnMetadata(_ context.Context, change *models.PendingChange, _ string) error {
+	// TODO: This function needs to be updated for the new ColumnMetadata schema.
+	// The new schema uses SchemaColumnID (FK) instead of TableName/ColumnName,
+	// and Entity/EnumValues are stored in Features JSONB, not as direct fields.
+	// See PLAN-column-schema-refactor.md for details.
+	return fmt.Errorf("applyUpdateColumnMetadata not yet implemented for new schema (change_id: %s)", change.ID)
 }
 
 func (s *changeReviewService) applyCreateRelationship(ctx context.Context, change *models.PendingChange, reviewerSource string) error {

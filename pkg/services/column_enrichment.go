@@ -38,20 +38,21 @@ type EnrichColumnsResult struct {
 }
 
 type columnEnrichmentService struct {
-	ontologyRepo     repositories.OntologyRepository
-	entityRepo       repositories.OntologyEntityRepository
-	relationshipRepo repositories.EntityRelationshipRepository
-	schemaRepo       repositories.SchemaRepository
-	conversationRepo repositories.ConversationRepository
-	projectRepo      repositories.ProjectRepository
-	questionService  OntologyQuestionService
-	dsSvc            DatasourceService
-	adapterFactory   datasource.DatasourceAdapterFactory
-	llmFactory       llm.LLMClientFactory
-	workerPool       *llm.WorkerPool
-	circuitBreaker   *llm.CircuitBreaker
-	getTenantCtx     TenantContextFunc
-	logger           *zap.Logger
+	ontologyRepo       repositories.OntologyRepository
+	entityRepo         repositories.OntologyEntityRepository
+	relationshipRepo   repositories.EntityRelationshipRepository
+	schemaRepo         repositories.SchemaRepository
+	columnMetadataRepo repositories.ColumnMetadataRepository
+	conversationRepo   repositories.ConversationRepository
+	projectRepo        repositories.ProjectRepository
+	questionService    OntologyQuestionService
+	dsSvc              DatasourceService
+	adapterFactory     datasource.DatasourceAdapterFactory
+	llmFactory         llm.LLMClientFactory
+	workerPool         *llm.WorkerPool
+	circuitBreaker     *llm.CircuitBreaker
+	getTenantCtx       TenantContextFunc
+	logger             *zap.Logger
 }
 
 // NewColumnEnrichmentService creates a new column enrichment service.
@@ -60,6 +61,7 @@ func NewColumnEnrichmentService(
 	entityRepo repositories.OntologyEntityRepository,
 	relationshipRepo repositories.EntityRelationshipRepository,
 	schemaRepo repositories.SchemaRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
 	conversationRepo repositories.ConversationRepository,
 	projectRepo repositories.ProjectRepository,
 	questionService OntologyQuestionService,
@@ -72,12 +74,13 @@ func NewColumnEnrichmentService(
 	logger *zap.Logger,
 ) ColumnEnrichmentService {
 	return &columnEnrichmentService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relationshipRepo,
-		schemaRepo:       schemaRepo,
-		conversationRepo: conversationRepo,
-		projectRepo:      projectRepo,
+		ontologyRepo:       ontologyRepo,
+		entityRepo:         entityRepo,
+		relationshipRepo:   relationshipRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		conversationRepo:   conversationRepo,
+		projectRepo:        projectRepo,
 		questionService:  questionService,
 		dsSvc:            dsSvc,
 		adapterFactory:   adapterFactory,
@@ -193,6 +196,23 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 		return nil
 	}
 
+	// Fetch column metadata for all columns in this table
+	columnIDs := make([]uuid.UUID, len(columns))
+	for i, col := range columns {
+		columnIDs[i] = col.ID
+	}
+	metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, columnIDs)
+	if err != nil {
+		s.logger.Warn("Failed to fetch column metadata, continuing without",
+			zap.String("table", tableName),
+			zap.Error(err))
+	}
+	// Build map for quick lookup
+	metadataByColumnID := make(map[uuid.UUID]*models.ColumnMetadata)
+	for _, meta := range metadataList {
+		metadataByColumnID[meta.SchemaColumnID] = meta
+	}
+
 	// Get FK info for this table (simple map for LLM context)
 	fkInfo, err := s.getForeignKeyInfo(ctx, projectID, tableName)
 	if err != nil {
@@ -228,7 +248,7 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 
 	// Separate columns into those needing LLM enrichment and those already complete
 	// from ColumnFeatureExtraction (high confidence threshold: 0.9)
-	columnsNeedingLLM, syntheticEnrichments := s.filterColumnsForLLM(columns)
+	columnsNeedingLLM, syntheticEnrichments := s.filterColumnsForLLM(columns, metadataByColumnID)
 
 	s.logger.Debug("Filtered columns for LLM enrichment",
 		zap.String("table", tableName),
@@ -264,7 +284,7 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 	enrichments = append(enrichments, syntheticEnrichments...)
 
 	// Convert enrichments to ColumnDetail and save, merging enum definitions, distributions, and FK info
-	columnDetails := s.convertToColumnDetails(tableName, enrichments, columns, fkInfo, enumSamples, enumDefs, enumDistributions)
+	columnDetails := s.convertToColumnDetails(tableName, enrichments, columns, fkInfo, enumSamples, enumDefs, enumDistributions, metadataByColumnID)
 	if err := s.ontologyRepo.UpdateColumnDetails(ctx, projectID, tableName, columnDetails); err != nil {
 		return fmt.Errorf("save column details: %w", err)
 	}
@@ -376,25 +396,10 @@ func (s *columnEnrichmentService) sampleEnumValues(
 	return result, nil
 }
 
-// persistSampleValues persists sample values for columns with low cardinality (≤50 distinct values)
-// to enable MCP tools to return sample_values without on-demand database queries.
-func (s *columnEnrichmentService) persistSampleValues(ctx context.Context, columns []*models.SchemaColumn, enumSamples map[string][]string) error {
-	for _, col := range columns {
-		if samples, ok := enumSamples[col.ColumnName]; ok && len(samples) > 0 {
-			// Update column stats with sample values
-			// Pass nil for other stats to preserve existing values
-			if err := s.schemaRepo.UpdateColumnStats(ctx, col.ID, nil, nil, nil, nil, samples); err != nil {
-				s.logger.Warn("Failed to persist sample values for column",
-					zap.String("column", col.ColumnName),
-					zap.Error(err))
-				// Continue with other columns even if one fails
-				continue
-			}
-			s.logger.Debug("Persisted sample values",
-				zap.String("column", col.ColumnName),
-				zap.Int("sample_count", len(samples)))
-		}
-	}
+// persistSampleValues is a no-op. Sample values are no longer persisted to avoid storing
+// target datasource data in the engine database. The function signature is preserved for
+// backward compatibility but does nothing.
+func (s *columnEnrichmentService) persistSampleValues(_ context.Context, _ []*models.SchemaColumn, _ map[string][]string) error {
 	return nil
 }
 
@@ -404,43 +409,47 @@ func (s *columnEnrichmentService) persistSampleValues(ctx context.Context, colum
 const highConfidenceThreshold = 0.9
 
 // filterColumnsForLLM separates columns into those needing LLM enrichment and those
-// that already have high-confidence ColumnFeatures from the feature extraction pipeline.
+// that already have high-confidence ColumnMetadata from the feature extraction pipeline.
 // Returns:
 //   - columnsNeedingLLM: columns that should be sent to the LLM for enrichment
 //   - syntheticEnrichments: pre-built enrichments for high-confidence columns
-func (s *columnEnrichmentService) filterColumnsForLLM(columns []*models.SchemaColumn) ([]*models.SchemaColumn, []columnEnrichment) {
+func (s *columnEnrichmentService) filterColumnsForLLM(columns []*models.SchemaColumn, metadataByColumnID map[uuid.UUID]*models.ColumnMetadata) ([]*models.SchemaColumn, []columnEnrichment) {
 	var columnsNeedingLLM []*models.SchemaColumn
 	var syntheticEnrichments []columnEnrichment
 
 	for _, col := range columns {
-		features := col.GetColumnFeatures()
+		meta := metadataByColumnID[col.ID]
 
 		// Column needs LLM enrichment if:
-		// - No ColumnFeatures available
+		// - No ColumnMetadata available
 		// - Confidence below threshold
 		// - Missing description (even if other fields are populated)
-		if features == nil || features.Confidence < highConfidenceThreshold || features.Description == "" {
+		if meta == nil || meta.Confidence == nil || *meta.Confidence < highConfidenceThreshold || meta.Description == nil || *meta.Description == "" {
 			columnsNeedingLLM = append(columnsNeedingLLM, col)
 			continue
 		}
 
-		// Create synthetic enrichment from ColumnFeatures
+		// Create synthetic enrichment from ColumnMetadata
 		enrichment := columnEnrichment{
-			Name:         col.ColumnName,
-			Description:  features.Description,
-			SemanticType: features.SemanticType,
-			Role:         features.Role,
+			Name:        col.ColumnName,
+			Description: *meta.Description,
+		}
+		if meta.SemanticType != nil {
+			enrichment.SemanticType = *meta.SemanticType
+		}
+		if meta.Role != nil {
+			enrichment.Role = *meta.Role
 		}
 
 		// Copy FK association from IdentifierFeatures
-		if features.IdentifierFeatures != nil && features.IdentifierFeatures.EntityReferenced != "" {
-			assoc := features.IdentifierFeatures.EntityReferenced
+		if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil && idFeatures.EntityReferenced != "" {
+			assoc := idFeatures.EntityReferenced
 			enrichment.FKAssociation = &assoc
 		}
 
 		// Copy enum values from EnumFeatures
-		if features.EnumFeatures != nil && len(features.EnumFeatures.Values) > 0 {
-			for _, cev := range features.EnumFeatures.Values {
+		if enumFeatures := meta.GetEnumFeatures(); enumFeatures != nil && len(enumFeatures.Values) > 0 {
+			for _, cev := range enumFeatures.Values {
 				ev := models.EnumValue{
 					Value: cev.Value,
 					Label: cev.Label,
@@ -1152,6 +1161,7 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 	enumSamples map[string][]string,
 	enumDefs []models.EnumDefinition,
 	enumDistributions map[string]*datasource.EnumDistributionResult,
+	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata,
 ) []models.ColumnDetail {
 	// Build a map for quick lookup
 	enrichmentByName := make(map[string]columnEnrichment)
@@ -1185,29 +1195,29 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 			}
 		}
 
-		// Apply stored column features from the feature extraction pipeline (Phase 2+)
+		// Apply stored column metadata from the feature extraction pipeline (Phase 2+)
 		// These features are populated by the column_feature_extraction service
-		// and stored in the column's metadata field. ColumnFeatures take precedence
+		// and stored in the ontology column metadata table. Metadata takes precedence
 		// over LLM-generated values as they are data-driven and more reliable.
-		if features := col.GetColumnFeatures(); features != nil {
-			// Use description from features if available and LLM didn't provide one
-			if features.Description != "" && detail.Description == "" {
-				detail.Description = features.Description
+		if meta := metadataByColumnID[col.ID]; meta != nil {
+			// Use description from metadata if available and LLM didn't provide one
+			if meta.Description != nil && *meta.Description != "" && detail.Description == "" {
+				detail.Description = *meta.Description
 			}
-			// Semantic type from features takes precedence as it's data-driven
-			if features.SemanticType != "" {
-				detail.SemanticType = features.SemanticType
+			// Semantic type from metadata takes precedence as it's data-driven
+			if meta.SemanticType != nil && *meta.SemanticType != "" {
+				detail.SemanticType = *meta.SemanticType
 			}
-			// Role from features takes precedence
-			if features.Role != "" {
-				detail.Role = features.Role
+			// Role from metadata takes precedence
+			if meta.Role != nil && *meta.Role != "" {
+				detail.Role = *meta.Role
 			}
 
 			// Copy EnumFeatures.Values to ColumnDetail.EnumValues if available
 			// EnumFeatures from Phase 3 include LLM-generated labels and state categories
-			if features.EnumFeatures != nil && len(features.EnumFeatures.Values) > 0 {
-				enumValues := make([]models.EnumValue, 0, len(features.EnumFeatures.Values))
-				for _, cev := range features.EnumFeatures.Values {
+			if enumFeatures := meta.GetEnumFeatures(); enumFeatures != nil && len(enumFeatures.Values) > 0 {
+				enumValues := make([]models.EnumValue, 0, len(enumFeatures.Values))
+				for _, cev := range enumFeatures.Values {
 					ev := models.EnumValue{
 						Value: cev.Value,
 						Label: cev.Label,
@@ -1240,28 +1250,28 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 
 			// Copy IdentifierFeatures.EntityReferenced to FKAssociation
 			// This provides semantic role information (e.g., "host", "visitor", "payer")
-			if features.IdentifierFeatures != nil && features.IdentifierFeatures.EntityReferenced != "" {
+			if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil && idFeatures.EntityReferenced != "" {
 				// Only set if not already set by LLM
 				if detail.FKAssociation == "" {
-					detail.FKAssociation = features.IdentifierFeatures.EntityReferenced
+					detail.FKAssociation = idFeatures.EntityReferenced
 				}
 			}
 
 			// Copy FK target info from IdentifierFeatures if available
-			if features.IdentifierFeatures != nil && features.IdentifierFeatures.FKTargetTable != "" {
+			if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil && idFeatures.FKTargetTable != "" {
 				detail.IsForeignKey = true
-				detail.ForeignTable = features.IdentifierFeatures.FKTargetTable
+				detail.ForeignTable = idFeatures.FKTargetTable
 			}
 
 			// Copy BooleanFeatures to description if not already set
 			// BooleanFeatures from Phase 2 include true/false meaning
-			if features.BooleanFeatures != nil && detail.Description == "" {
+			if boolFeatures := meta.GetBooleanFeatures(); boolFeatures != nil && detail.Description == "" {
 				var descParts []string
-				if features.BooleanFeatures.TrueMeaning != "" {
-					descParts = append(descParts, fmt.Sprintf("True: %s", features.BooleanFeatures.TrueMeaning))
+				if boolFeatures.TrueMeaning != "" {
+					descParts = append(descParts, fmt.Sprintf("True: %s", boolFeatures.TrueMeaning))
 				}
-				if features.BooleanFeatures.FalseMeaning != "" {
-					descParts = append(descParts, fmt.Sprintf("False: %s", features.BooleanFeatures.FalseMeaning))
+				if boolFeatures.FalseMeaning != "" {
+					descParts = append(descParts, fmt.Sprintf("False: %s", boolFeatures.FalseMeaning))
 				}
 				if len(descParts) > 0 {
 					detail.Description = strings.Join(descParts, ". ")
@@ -1269,11 +1279,11 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 			}
 
 			// Copy TimestampFeatures to semantic type if applicable
-			if features.TimestampFeatures != nil {
-				if features.TimestampFeatures.IsSoftDelete {
+			if tsFeatures := meta.GetTimestampFeatures(); tsFeatures != nil {
+				if tsFeatures.IsSoftDelete {
 					detail.SemanticType = "soft_delete"
-				} else if features.TimestampFeatures.IsAuditField {
-					switch features.TimestampFeatures.TimestampPurpose {
+				} else if tsFeatures.IsAuditField {
+					switch tsFeatures.TimestampPurpose {
 					case "audit_created":
 						detail.SemanticType = "audit_created"
 					case "audit_updated":

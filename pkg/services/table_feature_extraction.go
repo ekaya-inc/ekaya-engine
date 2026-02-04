@@ -35,17 +35,19 @@ type TableFeatureExtractionService interface {
 }
 
 type tableFeatureExtractionService struct {
-	schemaRepo        repositories.SchemaRepository
-	tableMetadataRepo repositories.TableMetadataRepository
-	llmFactory        llm.LLMClientFactory
-	workerPool        *llm.WorkerPool
-	getTenantCtx      TenantContextFunc
-	logger            *zap.Logger
+	schemaRepo         repositories.SchemaRepository
+	columnMetadataRepo repositories.ColumnMetadataRepository
+	tableMetadataRepo  repositories.TableMetadataRepository
+	llmFactory         llm.LLMClientFactory
+	workerPool         *llm.WorkerPool
+	getTenantCtx       TenantContextFunc
+	logger             *zap.Logger
 }
 
 // NewTableFeatureExtractionService creates a table feature extraction service with LLM support.
 func NewTableFeatureExtractionService(
 	schemaRepo repositories.SchemaRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
 	tableMetadataRepo repositories.TableMetadataRepository,
 	llmFactory llm.LLMClientFactory,
 	workerPool *llm.WorkerPool,
@@ -53,20 +55,22 @@ func NewTableFeatureExtractionService(
 	logger *zap.Logger,
 ) TableFeatureExtractionService {
 	return &tableFeatureExtractionService{
-		schemaRepo:        schemaRepo,
-		tableMetadataRepo: tableMetadataRepo,
-		llmFactory:        llmFactory,
-		workerPool:        workerPool,
-		getTenantCtx:      getTenantCtx,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		tableMetadataRepo:  tableMetadataRepo,
+		llmFactory:         llmFactory,
+		workerPool:         workerPool,
+		getTenantCtx:       getTenantCtx,
 		logger:            logger.Named("table-feature-extraction"),
 	}
 }
 
 // tableContext holds all the data needed to analyze a single table.
 type tableContext struct {
-	Table         *models.SchemaTable
-	Columns       []*models.SchemaColumn
-	Relationships []*models.RelationshipDetail
+	Table              *models.SchemaTable
+	Columns            []*models.SchemaColumn
+	Relationships      []*models.RelationshipDetail
+	MetadataByColumnID map[uuid.UUID]*models.ColumnMetadata
 }
 
 // ExtractTableFeatures generates descriptions for all selected tables in the datasource.
@@ -98,10 +102,41 @@ func (s *tableFeatureExtractionService) ExtractTableFeatures(
 		return 0, nil
 	}
 
-	// Get columns with features grouped by table
-	columnsByTable, err := s.schemaRepo.GetColumnsWithFeaturesByDatasource(ctx, projectID, datasourceID)
+	// Get all columns for the datasource
+	columns, err := s.schemaRepo.ListColumnsByDatasource(ctx, projectID, datasourceID)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get columns with features: %w", err)
+		return 0, fmt.Errorf("failed to list columns: %w", err)
+	}
+
+	// Build table ID -> table mapping for grouping columns
+	tableByID := make(map[uuid.UUID]*models.SchemaTable)
+	for _, t := range tables {
+		tableByID[t.ID] = t
+	}
+
+	// Group columns by table name
+	columnsByTable := make(map[string][]*models.SchemaColumn)
+	var allColumnIDs []uuid.UUID
+	for _, col := range columns {
+		table := tableByID[col.SchemaTableID]
+		if table != nil {
+			columnsByTable[table.TableName] = append(columnsByTable[table.TableName], col)
+		}
+		allColumnIDs = append(allColumnIDs, col.ID)
+	}
+
+	// Fetch column metadata for all columns
+	metadataByColumnID := make(map[uuid.UUID]*models.ColumnMetadata)
+	if len(allColumnIDs) > 0 {
+		metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, allColumnIDs)
+		if err != nil {
+			s.logger.Warn("Failed to fetch column metadata, continuing without features",
+				zap.Error(err))
+		} else {
+			for _, meta := range metadataList {
+				metadataByColumnID[meta.SchemaColumnID] = meta
+			}
+		}
 	}
 
 	// Get relationships for context (using RelationshipDetails for names)
@@ -111,7 +146,7 @@ func (s *tableFeatureExtractionService) ExtractTableFeatures(
 	}
 
 	// Build table contexts
-	tableContexts := s.buildTableContexts(tables, columnsByTable, relationships)
+	tableContexts := s.buildTableContexts(tables, columnsByTable, relationships, metadataByColumnID)
 
 	if len(tableContexts) == 0 {
 		s.logger.Info("No tables with column features found")
@@ -193,6 +228,7 @@ func (s *tableFeatureExtractionService) buildTableContexts(
 	tables []*models.SchemaTable,
 	columnsByTable map[string][]*models.SchemaColumn,
 	relationships []*models.RelationshipDetail,
+	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata,
 ) []*tableContext {
 	// Build a lookup of relationships by source table name
 	relsByTable := make(map[string][]*models.RelationshipDetail)
@@ -200,18 +236,19 @@ func (s *tableFeatureExtractionService) buildTableContexts(
 		relsByTable[rel.SourceTableName] = append(relsByTable[rel.SourceTableName], rel)
 	}
 
-	// Build table contexts for tables with column features
+	// Build table contexts for tables with columns
 	contexts := make([]*tableContext, 0)
 	for _, table := range tables {
-		columns, hasFeatures := columnsByTable[table.TableName]
-		if !hasFeatures || len(columns) == 0 {
+		columns, hasColumns := columnsByTable[table.TableName]
+		if !hasColumns || len(columns) == 0 {
 			continue
 		}
 
 		contexts = append(contexts, &tableContext{
-			Table:         table,
-			Columns:       columns,
-			Relationships: relsByTable[table.TableName],
+			Table:              table,
+			Columns:            columns,
+			Relationships:      relsByTable[table.TableName],
+			MetadataByColumnID: metadataByColumnID,
 		})
 	}
 
@@ -292,16 +329,26 @@ func (s *tableFeatureExtractionService) buildPrompt(tc *tableContext) string {
 	// Summarize column features
 	sb.WriteString("\n## Column Features Summary\n\n")
 
-	// Group columns by role/purpose
+	// Group columns by role/purpose using metadata from ColumnMetadata
 	var pks, fks, timestamps, enums, measures, identifiers, others []*models.SchemaColumn
 	for _, col := range tc.Columns {
-		features := col.GetColumnFeatures()
-		if features == nil {
+		meta := tc.MetadataByColumnID[col.ID]
+		if meta == nil {
 			others = append(others, col)
 			continue
 		}
 
-		switch features.Role {
+		// Check role (stored as pointer in ColumnMetadata)
+		role := ""
+		if meta.Role != nil {
+			role = *meta.Role
+		}
+		purpose := ""
+		if meta.Purpose != nil {
+			purpose = *meta.Purpose
+		}
+
+		switch role {
 		case models.RolePrimaryKey:
 			pks = append(pks, col)
 		case models.RoleForeignKey:
@@ -309,7 +356,7 @@ func (s *tableFeatureExtractionService) buildPrompt(tc *tableContext) string {
 		case models.RoleMeasure:
 			measures = append(measures, col)
 		default:
-			switch features.Purpose {
+			switch purpose {
 			case models.PurposeTimestamp:
 				timestamps = append(timestamps, col)
 			case models.PurposeEnum:
@@ -326,49 +373,49 @@ func (s *tableFeatureExtractionService) buildPrompt(tc *tableContext) string {
 	if len(pks) > 0 {
 		sb.WriteString("**Primary Keys:**\n")
 		for _, col := range pks {
-			s.writeColumnSummary(&sb, col)
+			s.writeColumnSummary(&sb, col, tc.MetadataByColumnID[col.ID])
 		}
 	}
 
 	if len(fks) > 0 {
 		sb.WriteString("\n**Foreign Keys:**\n")
 		for _, col := range fks {
-			s.writeColumnSummary(&sb, col)
+			s.writeColumnSummary(&sb, col, tc.MetadataByColumnID[col.ID])
 		}
 	}
 
 	if len(timestamps) > 0 {
 		sb.WriteString("\n**Timestamps:**\n")
 		for _, col := range timestamps {
-			s.writeColumnSummary(&sb, col)
+			s.writeColumnSummary(&sb, col, tc.MetadataByColumnID[col.ID])
 		}
 	}
 
 	if len(enums) > 0 {
 		sb.WriteString("\n**Enums/Status:**\n")
 		for _, col := range enums {
-			s.writeColumnSummary(&sb, col)
+			s.writeColumnSummary(&sb, col, tc.MetadataByColumnID[col.ID])
 		}
 	}
 
 	if len(measures) > 0 {
 		sb.WriteString("\n**Measures:**\n")
 		for _, col := range measures {
-			s.writeColumnSummary(&sb, col)
+			s.writeColumnSummary(&sb, col, tc.MetadataByColumnID[col.ID])
 		}
 	}
 
 	if len(identifiers) > 0 {
 		sb.WriteString("\n**Identifiers:**\n")
 		for _, col := range identifiers {
-			s.writeColumnSummary(&sb, col)
+			s.writeColumnSummary(&sb, col, tc.MetadataByColumnID[col.ID])
 		}
 	}
 
 	if len(others) > 0 {
 		sb.WriteString("\n**Other Columns:**\n")
 		for _, col := range others {
-			s.writeColumnSummary(&sb, col)
+			s.writeColumnSummary(&sb, col, tc.MetadataByColumnID[col.ID])
 		}
 	}
 
@@ -410,10 +457,9 @@ func (s *tableFeatureExtractionService) buildPrompt(tc *tableContext) string {
 	return sb.String()
 }
 
-// writeColumnSummary writes a concise summary of a column and its features.
-func (s *tableFeatureExtractionService) writeColumnSummary(sb *strings.Builder, col *models.SchemaColumn) {
-	features := col.GetColumnFeatures()
-	if features == nil {
+// writeColumnSummary writes a concise summary of a column and its metadata.
+func (s *tableFeatureExtractionService) writeColumnSummary(sb *strings.Builder, col *models.SchemaColumn, meta *models.ColumnMetadata) {
+	if meta == nil {
 		fmt.Fprintf(sb, "- `%s` (%s)\n", col.ColumnName, col.DataType)
 		return
 	}
@@ -422,18 +468,26 @@ func (s *tableFeatureExtractionService) writeColumnSummary(sb *strings.Builder, 
 	fmt.Fprintf(sb, "- `%s` (%s)", col.ColumnName, col.DataType)
 
 	// Add semantic type if different from purpose
-	if features.SemanticType != "" && features.SemanticType != features.Purpose {
-		fmt.Fprintf(sb, " [%s]", features.SemanticType)
+	semanticType := ""
+	if meta.SemanticType != nil {
+		semanticType = *meta.SemanticType
+	}
+	purpose := ""
+	if meta.Purpose != nil {
+		purpose = *meta.Purpose
+	}
+	if semanticType != "" && semanticType != purpose {
+		fmt.Fprintf(sb, " [%s]", semanticType)
 	}
 
 	// Add description if available
-	if features.Description != "" {
-		fmt.Fprintf(sb, ": %s", features.Description)
+	if meta.Description != nil && *meta.Description != "" {
+		fmt.Fprintf(sb, ": %s", *meta.Description)
 	}
 
 	// Add FK target if available
-	if features.IdentifierFeatures != nil && features.IdentifierFeatures.FKTargetTable != "" {
-		fmt.Fprintf(sb, " → %s", features.IdentifierFeatures.FKTargetTable)
+	if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil && idFeatures.FKTargetTable != "" {
+		fmt.Fprintf(sb, " → %s", idFeatures.FKTargetTable)
 	}
 
 	sb.WriteString("\n")

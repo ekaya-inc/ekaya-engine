@@ -1296,19 +1296,9 @@ func (s *glossaryService) buildEnrichTermPrompt(
 				if col.IsPrimaryKey {
 					colInfo += " [PK]"
 				}
-				if col.Description != nil && *col.Description != "" {
-					colInfo += fmt.Sprintf(" - %s", *col.Description)
-				}
+				// NOTE: Description is now in ColumnMetadata, not SchemaColumn
 				sb.WriteString(colInfo + "\n")
-
-				// Include sample values for low-cardinality columns (helps LLM use correct values)
-				if len(col.SampleValues) > 0 && len(col.SampleValues) <= 10 {
-					quotedValues := make([]string, len(col.SampleValues))
-					for i, v := range col.SampleValues {
-						quotedValues[i] = fmt.Sprintf("'%s'", v)
-					}
-					sb.WriteString(fmt.Sprintf("  Sample values: %s\n", strings.Join(quotedValues, ", ")))
-				}
+				// NOTE: Sample values are no longer persisted to avoid storing target datasource data.
 			}
 			sb.WriteString("\n")
 		}
@@ -1460,19 +1450,9 @@ func (s *glossaryService) buildEnhancedEnrichTermPrompt(
 				if col.IsPrimaryKey {
 					colInfo += " [PK]"
 				}
-				if col.Description != nil && *col.Description != "" {
-					colInfo += fmt.Sprintf(" - %s", *col.Description)
-				}
+				// NOTE: Description is now in ColumnMetadata, not SchemaColumn
 				sb.WriteString(colInfo + "\n")
-
-				// Include sample values for low-cardinality columns
-				if len(col.SampleValues) > 0 && len(col.SampleValues) <= 10 {
-					quotedValues := make([]string, len(col.SampleValues))
-					for i, v := range col.SampleValues {
-						quotedValues[i] = fmt.Sprintf("'%s'", v)
-					}
-					sb.WriteString(fmt.Sprintf("  Sample values: %s\n", strings.Join(quotedValues, ", ")))
-				}
+				// NOTE: Sample values are no longer persisted to avoid storing target datasource data.
 			}
 			sb.WriteString("\n")
 		}

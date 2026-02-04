@@ -444,15 +444,9 @@ func (s *ontologyDAGService) Delete(ctx context.Context, projectID uuid.UUID) er
 	}
 	s.logger.Debug("Deleted inferred glossary terms", zap.String("project_id", projectID.String()))
 
-	// Clear column features from schema columns
-	// Column features are stored in engine_schema_columns.metadata['column_features'] and are
-	// populated during ontology extraction. Although not FK-linked to the ontology, they should
-	// be cleared when the ontology is deleted so the Enrichment UI reflects a clean slate.
-	if err := s.schemaRepo.ClearColumnFeaturesByProject(ctx, projectID); err != nil {
-		s.logger.Error("Failed to clear column features", zap.String("project_id", projectID.String()), zap.Error(err))
-		return fmt.Errorf("clear column features: %w", err)
-	}
-	s.logger.Debug("Cleared column features", zap.String("project_id", projectID.String()))
+	// NOTE: Column features are now stored in engine_ontology_column_metadata table.
+	// They are automatically cleared when the ontology is deleted due to CASCADE on the FK.
+	// No separate clear call is needed.
 
 	// Delete inferred schema relationships only.
 	// Preserves FK (from DB schema) and manual (user-created) relationships.

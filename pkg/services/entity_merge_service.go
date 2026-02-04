@@ -157,18 +157,10 @@ func (s *entityMergeService) MergeEntities(ctx context.Context, source, target *
 		s.logger.Debug("Updated target relationships", zap.Int("count", tgtUpdated))
 	}
 
-	// 5. Update column_metadata entity names
-	if s.columnMetaRepo != nil {
-		metaUpdated, err := s.columnMetaRepo.UpdateEntityName(ctx, source.ProjectID, source.Name, target.Name)
-		if err != nil {
-			return nil, fmt.Errorf("failed to update column metadata entity names: %w", err)
-		}
-		if metaUpdated > 0 {
-			s.logger.Debug("Updated column metadata entity names", zap.Int("count", metaUpdated))
-		}
-	}
+	// NOTE: Column metadata no longer has entity names as direct fields.
+	// Entity associations are tracked via engine_ontology_entity_occurrences.
 
-	// 6. Soft-delete the source entity
+	// 5. Soft-delete the source entity
 	deletionReason := fmt.Sprintf("Merged into entity %s (ID: %s)", target.Name, target.ID.String())
 	if err := s.entityRepo.SoftDelete(ctx, source.ID, deletionReason); err != nil {
 		return nil, fmt.Errorf("failed to soft-delete source entity: %w", err)

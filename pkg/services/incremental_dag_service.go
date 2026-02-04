@@ -394,94 +394,14 @@ func (s *incrementalDAGService) processNewTable(ctx context.Context, change *mod
 }
 
 // processNewColumn enriches a new column with LLM-generated metadata.
-func (s *incrementalDAGService) processNewColumn(ctx context.Context, change *models.PendingChange) error {
-	// Check existing metadata and precedence
-	existing, err := s.columnMetadataRepo.GetByTableColumn(ctx, change.ProjectID, change.TableName, change.ColumnName)
-	if err != nil {
-		return fmt.Errorf("check existing column metadata: %w", err)
-	}
-
-	if existing != nil {
-		if !s.changeReviewSvc.CanModify(existing.Source, existing.LastEditSource, models.ProvenanceInferred) {
-			s.logger.Info("Skipping column enrichment due to precedence",
-				zap.String("table", change.TableName),
-				zap.String("column", change.ColumnName),
-				zap.String("source", existing.Source))
-			return nil
-		}
-	}
-
-	// Get entity context for LLM
-	entity, err := s.getEntityByTable(ctx, change.ProjectID, change.TableName)
-	if err != nil {
-		s.logger.Debug("No entity found for table",
-			zap.String("table_name", change.TableName),
-			zap.Error(err))
-		entity = nil
-	}
-
-	// Get column schema info
-	columnInfo, err := s.getColumnInfo(ctx, change.ProjectID, change.TableName, change.ColumnName)
-	if err != nil {
-		s.logger.Warn("Could not get column info",
-			zap.String("column", change.ColumnName),
-			zap.Error(err))
-	}
-
-	// Create LLM client
-	llmClient, err := s.llmFactory.CreateForProject(ctx, change.ProjectID)
-	if err != nil {
-		return fmt.Errorf("create LLM client: %w", err)
-	}
-
-	// Run LLM column enrichment
-	enrichment, err := s.enrichColumnWithLLM(ctx, llmClient, entity, columnInfo)
-	if err != nil {
-		s.logger.Warn("LLM column enrichment failed",
-			zap.String("column", change.ColumnName),
-			zap.Error(err))
-		return nil // Don't fail - column works without enrichment
-	}
-
-	// Create or update column metadata
-	metadata := &models.ColumnMetadata{
-		ProjectID:   change.ProjectID,
-		TableName:   change.TableName,
-		ColumnName:  change.ColumnName,
-		Description: &enrichment.Description,
-		Role:        &enrichment.Role,
-		Source:      models.ProvenanceInferred,
-	}
-
-	if existing != nil {
-		metadata.ID = existing.ID
-		metadata.Source = existing.Source
-		metadata.CreatedBy = existing.CreatedBy
-		metadata.CreatedAt = existing.CreatedAt
-		metadata.LastEditSource = ptrStr(models.ProvenanceInferred)
-	}
-
-	if len(enrichment.EnumValues) > 0 {
-		var enumStrings []string
-		for _, ev := range enrichment.EnumValues {
-			if ev.Description != "" {
-				enumStrings = append(enumStrings, fmt.Sprintf("%s - %s", ev.Value, ev.Description))
-			} else {
-				enumStrings = append(enumStrings, ev.Value)
-			}
-		}
-		metadata.EnumValues = enumStrings
-	}
-
-	if err := s.columnMetadataRepo.Upsert(ctx, metadata); err != nil {
-		return fmt.Errorf("save column metadata: %w", err)
-	}
-
-	s.logger.Info("Enriched column with LLM",
+// TODO: This function needs to be updated for the new ColumnMetadata schema.
+// The new schema uses SchemaColumnID (FK) instead of TableName/ColumnName,
+// and EnumValues are stored in Features JSONB, not as a direct field.
+// See PLAN-column-schema-refactor.md for details.
+func (s *incrementalDAGService) processNewColumn(_ context.Context, change *models.PendingChange) error {
+	s.logger.Warn("processNewColumn not yet implemented for new schema",
 		zap.String("table", change.TableName),
-		zap.String("column", change.ColumnName),
-		zap.String("role", enrichment.Role))
-
+		zap.String("column", change.ColumnName))
 	return nil
 }
 
@@ -614,83 +534,14 @@ func (s *incrementalDAGService) processNewRelationship(ctx context.Context, chan
 }
 
 // processEnumUpdate merges new enum values into existing column metadata.
-// This does not require LLM - just merges the new values.
-func (s *incrementalDAGService) processEnumUpdate(ctx context.Context, change *models.PendingChange) error {
-	if change.NewValue == nil {
-		return nil
-	}
-
-	// Extract new enum values from the change
-	newValues, ok := change.NewValue["new_values"].([]any)
-	if !ok || len(newValues) == 0 {
-		return nil
-	}
-
-	// Get existing column metadata
-	existing, err := s.columnMetadataRepo.GetByTableColumn(ctx, change.ProjectID, change.TableName, change.ColumnName)
-	if err != nil {
-		return fmt.Errorf("get existing column metadata: %w", err)
-	}
-
-	// Check precedence if metadata exists
-	if existing != nil {
-		if !s.changeReviewSvc.CanModify(existing.Source, existing.LastEditSource, models.ProvenanceInferred) {
-			s.logger.Info("Skipping enum update due to precedence",
-				zap.String("table", change.TableName),
-				zap.String("column", change.ColumnName))
-			return nil
-		}
-	}
-
-	// Build set of existing values
-	existingSet := make(map[string]bool)
-	var mergedValues []string
-	if existing != nil {
-		for _, v := range existing.EnumValues {
-			existingSet[v] = true
-			mergedValues = append(mergedValues, v)
-		}
-	}
-
-	// Add new values that don't already exist
-	for _, v := range newValues {
-		if strVal, ok := v.(string); ok {
-			if !existingSet[strVal] {
-				mergedValues = append(mergedValues, strVal)
-				existingSet[strVal] = true
-			}
-		}
-	}
-
-	// Create or update column metadata with merged values
-	metadata := &models.ColumnMetadata{
-		ProjectID:  change.ProjectID,
-		TableName:  change.TableName,
-		ColumnName: change.ColumnName,
-		EnumValues: mergedValues,
-		Source:     models.ProvenanceInferred,
-	}
-
-	if existing != nil {
-		metadata.ID = existing.ID
-		metadata.Source = existing.Source
-		metadata.CreatedBy = existing.CreatedBy
-		metadata.CreatedAt = existing.CreatedAt
-		metadata.Description = existing.Description
-		metadata.Entity = existing.Entity
-		metadata.Role = existing.Role
-		metadata.LastEditSource = ptrStr(models.ProvenanceInferred)
-	}
-
-	if err := s.columnMetadataRepo.Upsert(ctx, metadata); err != nil {
-		return fmt.Errorf("save column metadata: %w", err)
-	}
-
-	s.logger.Info("Merged new enum values",
+// TODO: This function needs to be updated for the new ColumnMetadata schema.
+// The new schema uses SchemaColumnID (FK) instead of TableName/ColumnName,
+// and EnumValues are stored in Features.EnumFeatures, not as a direct field.
+// See PLAN-column-schema-refactor.md for details.
+func (s *incrementalDAGService) processEnumUpdate(_ context.Context, change *models.PendingChange) error {
+	s.logger.Warn("processEnumUpdate not yet implemented for new schema",
 		zap.String("table", change.TableName),
-		zap.String("column", change.ColumnName),
-		zap.Int("total_values", len(mergedValues)))
-
+		zap.String("column", change.ColumnName))
 	return nil
 }
 

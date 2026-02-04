@@ -25,23 +25,23 @@ type SchemaTable struct {
 
 // SchemaColumn represents a table column with statistics.
 type SchemaColumn struct {
-	ID              uuid.UUID      `json:"id"`
-	ProjectID       uuid.UUID      `json:"project_id"`
-	SchemaTableID   uuid.UUID      `json:"schema_table_id"`
-	ColumnName      string         `json:"column_name"`
-	DataType        string         `json:"data_type"`
-	IsNullable      bool           `json:"is_nullable"`
-	IsPrimaryKey    bool           `json:"is_primary_key"`
-	IsUnique        bool           `json:"is_unique"`
-	IsSelected      bool           `json:"is_selected"`
-	OrdinalPosition int            `json:"ordinal_position"`
-	DefaultValue    *string        `json:"default_value,omitempty"`
-	DistinctCount   *int64         `json:"distinct_count,omitempty"`
-	NullCount       *int64         `json:"null_count,omitempty"`
-	MinLength *int64    `json:"min_length,omitempty"` // For text columns: min string length
-	MaxLength *int64    `json:"max_length,omitempty"` // For text columns: max string length
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID              uuid.UUID `json:"id"`
+	ProjectID       uuid.UUID `json:"project_id"`
+	SchemaTableID   uuid.UUID `json:"schema_table_id"`
+	ColumnName      string    `json:"column_name"`
+	DataType        string    `json:"data_type"`
+	IsNullable      bool      `json:"is_nullable"`
+	IsPrimaryKey    bool      `json:"is_primary_key"`
+	IsUnique        bool      `json:"is_unique"`
+	IsSelected      bool      `json:"is_selected"`
+	OrdinalPosition int       `json:"ordinal_position"`
+	DefaultValue    *string   `json:"default_value,omitempty"`
+	DistinctCount   *int64    `json:"distinct_count,omitempty"`
+	NullCount       *int64    `json:"null_count,omitempty"`
+	MinLength       *int64    `json:"min_length,omitempty"` // For text columns: min string length
+	MaxLength       *int64    `json:"max_length,omitempty"` // For text columns: max string length
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 	// Discovery-related fields (populated by discovery process)
 	RowCount          *int64     `json:"row_count,omitempty"`          // Denormalized table row count
 	NonNullCount      *int64     `json:"non_null_count,omitempty"`     // Non-null values in column

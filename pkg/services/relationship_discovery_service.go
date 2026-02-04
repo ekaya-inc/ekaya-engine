@@ -44,6 +44,7 @@ type llmRelationshipDiscoveryService struct {
 	datasourceService  DatasourceService
 	adapterFactory     datasource.DatasourceAdapterFactory
 	schemaRepo         repositories.SchemaRepository
+	columnMetadataRepo repositories.ColumnMetadataRepository
 	logger             *zap.Logger
 }
 
@@ -54,6 +55,7 @@ func NewLLMRelationshipDiscoveryService(
 	datasourceService DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	schemaRepo repositories.SchemaRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
 	logger *zap.Logger,
 ) LLMRelationshipDiscoveryService {
 	return &llmRelationshipDiscoveryService{
@@ -62,6 +64,7 @@ func NewLLMRelationshipDiscoveryService(
 		datasourceService:  datasourceService,
 		adapterFactory:     adapterFactory,
 		schemaRepo:         schemaRepo,
+		columnMetadataRepo: columnMetadataRepo,
 		logger:             logger.Named("llm-relationship-discovery"),
 	}
 }
@@ -97,8 +100,24 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 		return nil, fmt.Errorf("list columns: %w", err)
 	}
 	columnByID := make(map[uuid.UUID]*models.SchemaColumn)
+	var allColumnIDs []uuid.UUID
 	for _, c := range columns {
 		columnByID[c.ID] = c
+		allColumnIDs = append(allColumnIDs, c.ID)
+	}
+
+	// Fetch column metadata for feature analysis
+	metadataByColumnID := make(map[uuid.UUID]*models.ColumnMetadata)
+	if len(allColumnIDs) > 0 {
+		metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, allColumnIDs)
+		if err != nil {
+			s.logger.Warn("Failed to fetch column metadata, continuing without ColumnFeatures FKs",
+				zap.Error(err))
+		} else {
+			for _, meta := range metadataList {
+				metadataByColumnID[meta.SchemaColumnID] = meta
+			}
+		}
 	}
 
 	// Get schema discoverer for join analysis
@@ -134,7 +153,7 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 		progressCallback(0, 1, "Processing ColumnFeatures FKs")
 	}
 
-	preservedColumnFKs, err := s.preserveColumnFeaturesFKs(ctx, projectID, columns, tableByID, tableByName, columnByID, discoverer)
+	preservedColumnFKs, err := s.preserveColumnFeaturesFKs(ctx, projectID, columns, tableByID, tableByName, columnByID, metadataByColumnID, discoverer)
 	if err != nil {
 		return nil, fmt.Errorf("preserve ColumnFeatures FKs: %w", err)
 	}
@@ -281,26 +300,35 @@ func (s *llmRelationshipDiscoveryService) preserveColumnFeaturesFKs(
 	tableByID map[uuid.UUID]*models.SchemaTable,
 	tableByName map[string]*models.SchemaTable,
 	_ map[uuid.UUID]*models.SchemaColumn, // columnByID - unused, columns searched via iteration
+	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata,
 	discoverer datasource.SchemaDiscoverer,
 ) (int, error) {
-	// Find columns with pre-resolved FK targets from ColumnFeatureExtraction
-	var fkColumns []*models.SchemaColumn
+	// Find columns with pre-resolved FK targets from ColumnFeatureExtraction (now in ColumnMetadata)
+	type fkColumn struct {
+		col        *models.SchemaColumn
+		idFeatures *models.IdentifierFeatures
+	}
+	var fkColumns []fkColumn
 	for _, col := range columns {
-		features := col.GetColumnFeatures()
-		if features == nil || features.IdentifierFeatures == nil {
+		meta := metadataByColumnID[col.ID]
+		if meta == nil {
+			continue
+		}
+		idFeatures := meta.GetIdentifierFeatures()
+		if idFeatures == nil {
 			continue
 		}
 		// Only use high-confidence FK resolutions (>= 0.8)
-		if features.IdentifierFeatures.FKTargetTable == "" || features.IdentifierFeatures.FKConfidence < 0.8 {
+		if idFeatures.FKTargetTable == "" || idFeatures.FKConfidence < 0.8 {
 			continue
 		}
-		fkColumns = append(fkColumns, col)
+		fkColumns = append(fkColumns, fkColumn{col: col, idFeatures: idFeatures})
 	}
 
 	var createdCount int
-	for _, col := range fkColumns {
-		features := col.GetColumnFeatures()
-		idFeatures := features.IdentifierFeatures
+	for _, fk := range fkColumns {
+		col := fk.col
+		idFeatures := fk.idFeatures
 
 		// Get source table
 		sourceTable := tableByID[col.SchemaTableID]

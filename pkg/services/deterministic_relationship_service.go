@@ -59,14 +59,15 @@ type DeterministicRelationshipService interface {
 }
 
 type deterministicRelationshipService struct {
-	datasourceService DatasourceService
-	projectService    ProjectService
-	adapterFactory    datasource.DatasourceAdapterFactory
-	ontologyRepo      repositories.OntologyRepository
-	entityRepo        repositories.OntologyEntityRepository
-	relationshipRepo  repositories.EntityRelationshipRepository
-	schemaRepo        repositories.SchemaRepository
-	logger            *zap.Logger
+	datasourceService  DatasourceService
+	projectService     ProjectService
+	adapterFactory     datasource.DatasourceAdapterFactory
+	ontologyRepo       repositories.OntologyRepository
+	entityRepo         repositories.OntologyEntityRepository
+	relationshipRepo   repositories.EntityRelationshipRepository
+	schemaRepo         repositories.SchemaRepository
+	columnMetadataRepo repositories.ColumnMetadataRepository
+	logger             *zap.Logger
 }
 
 // NewDeterministicRelationshipService creates a new DeterministicRelationshipService.
@@ -78,17 +79,19 @@ func NewDeterministicRelationshipService(
 	entityRepo repositories.OntologyEntityRepository,
 	relationshipRepo repositories.EntityRelationshipRepository,
 	schemaRepo repositories.SchemaRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
 	logger *zap.Logger,
 ) DeterministicRelationshipService {
 	return &deterministicRelationshipService{
-		datasourceService: datasourceService,
-		projectService:    projectService,
-		adapterFactory:    adapterFactory,
-		ontologyRepo:      ontologyRepo,
-		entityRepo:        entityRepo,
-		relationshipRepo:  relationshipRepo,
-		schemaRepo:        schemaRepo,
-		logger:            logger.Named("relationship-discovery"),
+		datasourceService:  datasourceService,
+		projectService:     projectService,
+		adapterFactory:     adapterFactory,
+		ontologyRepo:       ontologyRepo,
+		entityRepo:         entityRepo,
+		relationshipRepo:   relationshipRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		logger:             logger.Named("relationship-discovery"),
 	}
 }
 
@@ -151,6 +154,21 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 		columnByID[c.ID] = c
 	}
 
+	// Fetch column metadata for all columns
+	columnIDs := make([]uuid.UUID, len(columns))
+	for i, col := range columns {
+		columnIDs[i] = col.ID
+	}
+	metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, columnIDs)
+	if err != nil {
+		s.logger.Warn("Failed to fetch column metadata, continuing without",
+			zap.Error(err))
+	}
+	metadataByColumnID := make(map[uuid.UUID]*models.ColumnMetadata)
+	for _, meta := range metadataList {
+		metadataByColumnID[meta.SchemaColumnID] = meta
+	}
+
 	// Get datasource to create schema discoverer for cardinality analysis
 	ds, err := s.datasourceService.Get(ctx, projectID, datasourceID)
 	if err != nil {
@@ -163,10 +181,10 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 	}
 	defer discoverer.Close()
 
-	// Phase 1: Create SchemaRelationship records from ColumnFeatures (pre-resolved FKs from Phase 4)
+	// Phase 1: Create SchemaRelationship records from ColumnMetadata (pre-resolved FKs from Phase 4)
 	// These are data-driven FK discoveries from ColumnFeatureExtraction
 	columnFeaturesCount, err := s.discoverSchemaRelationshipsFromColumnFeatures(
-		ctx, projectID, columns, tableByID, tableByName, discoverer, progressCallback,
+		ctx, projectID, columns, tableByID, tableByName, metadataByColumnID, discoverer, progressCallback,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("discover FK relationships from column features: %w", err)
@@ -282,33 +300,39 @@ func (s *deterministicRelationshipService) discoverSchemaRelationshipsFromColumn
 	columns []*models.SchemaColumn,
 	tableByID map[uuid.UUID]*models.SchemaTable,
 	tableByName map[string]*models.SchemaTable,
+	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata,
 	discoverer datasource.SchemaDiscoverer,
 	progressCallback RelationshipProgressCallback,
 ) (int, error) {
-	// Find columns with pre-resolved FK targets from ColumnFeatureExtraction
-	var fkColumns []*models.SchemaColumn
+	// Find columns with pre-resolved FK targets from ColumnMetadata
+	type fkColumn struct {
+		column     *models.SchemaColumn
+		idFeatures *models.IdentifierFeatures
+	}
+	var fkColumns []fkColumn
 	for _, col := range columns {
-		features := col.GetColumnFeatures()
-		if features == nil || features.IdentifierFeatures == nil {
+		meta := metadataByColumnID[col.ID]
+		if meta == nil {
 			continue
 		}
-		if features.IdentifierFeatures.FKTargetTable == "" {
+		idFeatures := meta.GetIdentifierFeatures()
+		if idFeatures == nil || idFeatures.FKTargetTable == "" {
 			continue
 		}
-		fkColumns = append(fkColumns, col)
+		fkColumns = append(fkColumns, fkColumn{column: col, idFeatures: idFeatures})
 	}
 
 	if len(fkColumns) == 0 {
 		return 0, nil
 	}
 
-	s.logger.Info("Processing pre-resolved FKs from ColumnFeatures",
+	s.logger.Info("Processing pre-resolved FKs from ColumnMetadata",
 		zap.Int("count", len(fkColumns)))
 
 	var createdCount int
-	for i, col := range fkColumns {
-		features := col.GetColumnFeatures()
-		idFeatures := features.IdentifierFeatures
+	for i, fkCol := range fkColumns {
+		col := fkCol.column
+		idFeatures := fkCol.idFeatures
 
 		// Get source table
 		sourceTable := tableByID[col.SchemaTableID]
@@ -649,6 +673,21 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 		return nil, fmt.Errorf("list columns: %w", err)
 	}
 
+	// Fetch column metadata for all columns
+	columnIDs := make([]uuid.UUID, len(columns))
+	for i, col := range columns {
+		columnIDs[i] = col.ID
+	}
+	metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, columnIDs)
+	if err != nil {
+		s.logger.Warn("Failed to fetch column metadata, continuing without",
+			zap.Error(err))
+	}
+	metadataByColumnID := make(map[uuid.UUID]*models.ColumnMetadata)
+	for _, meta := range metadataList {
+		metadataByColumnID[meta.SchemaColumnID] = meta
+	}
+
 	// Build a map of column IDs that already have SchemaRelationships (from FKDiscovery).
 	// This avoids running redundant SQL join analysis for columns we've already processed.
 	existingSchemaRels, err := s.schemaRepo.ListRelationshipsByDatasource(ctx, projectID, datasourceID)
@@ -698,8 +737,8 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 			continue
 		}
 
-		// Get column features for exclusion checks
-		features := col.GetColumnFeatures()
+		// Get column metadata for exclusion checks
+		meta := metadataByColumnID[col.ID]
 
 		// Exclude types unlikely to be join keys
 		if isPKMatchExcludedType(col) {
@@ -707,8 +746,8 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 		}
 
 		// Exclude columns based on stored purpose (timestamp, flag, measure, etc.)
-		if features != nil {
-			switch features.Purpose {
+		if meta != nil && meta.Purpose != nil {
+			switch *meta.Purpose {
 			case models.PurposeTimestamp, models.PurposeFlag, models.PurposeMeasure, models.PurposeEnum:
 				continue
 			}
@@ -721,7 +760,7 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 	}
 
 	// Build list of FK candidate columns (columns that could reference target columns)
-	// Priority: Role=foreign_key or Purpose=identifier from ColumnFeatures
+	// Priority: Role=foreign_key or Purpose=identifier from ColumnMetadata
 	var priorityCandidates []*pkMatchCandidate
 	var regularCandidates []*pkMatchCandidate
 	var skippedHighConfidence int
@@ -738,21 +777,23 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 			continue
 		}
 
-		// Get column features for purpose-based filtering
-		features := col.GetColumnFeatures()
+		// Get column metadata for purpose-based filtering
+		meta := metadataByColumnID[col.ID]
 
 		// Skip columns with high FK confidence (>0.8) from Phase 4 - they already have
 		// resolved FK targets and relationships were created in FKDiscovery.
 		// This avoids redundant SQL join analysis.
-		if features != nil && features.IdentifierFeatures != nil {
-			if features.IdentifierFeatures.FKConfidence > 0.8 && features.IdentifierFeatures.FKTargetTable != "" {
-				s.logger.Debug("Skipping column with high FK confidence from Phase 4",
-					zap.String("table", table.TableName),
-					zap.String("column", col.ColumnName),
-					zap.Float64("fk_confidence", features.IdentifierFeatures.FKConfidence),
-					zap.String("fk_target", features.IdentifierFeatures.FKTargetTable))
-				skippedHighConfidence++
-				continue
+		if meta != nil {
+			if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil {
+				if idFeatures.FKConfidence > 0.8 && idFeatures.FKTargetTable != "" {
+					s.logger.Debug("Skipping column with high FK confidence from Phase 4",
+						zap.String("table", table.TableName),
+						zap.String("column", col.ColumnName),
+						zap.Float64("fk_confidence", idFeatures.FKConfidence),
+						zap.String("fk_target", idFeatures.FKTargetTable))
+					skippedHighConfidence++
+					continue
+				}
 			}
 		}
 
@@ -766,29 +807,29 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 		}
 
 		// Exclude columns based on stored purpose (timestamp, flag, measure, etc.)
-		if features != nil {
-			switch features.Purpose {
+		if meta != nil && meta.Purpose != nil {
+			switch *meta.Purpose {
 			case models.PurposeTimestamp, models.PurposeFlag, models.PurposeMeasure, models.PurposeEnum:
 				continue
 			}
 		}
 
-		// Determine if this column is a FK candidate based on ColumnFeatures
+		// Determine if this column is a FK candidate based on ColumnMetadata
 		isFKCandidate := false
 		isPriorityCandidate := false
 
 		// Priority: Role=foreign_key indicates a likely FK
-		if features != nil && features.Role == models.RoleForeignKey {
+		if meta != nil && meta.Role != nil && *meta.Role == models.RoleForeignKey {
 			isFKCandidate = true
 			isPriorityCandidate = true
 		}
 
 		// Also include Purpose=identifier columns (likely FKs even without explicit Role)
-		if features != nil && features.Purpose == models.PurposeIdentifier {
+		if meta != nil && meta.Purpose != nil && *meta.Purpose == models.PurposeIdentifier {
 			isFKCandidate = true
 		}
 
-		// For columns without ColumnFeatures or without explicit Role/Purpose,
+		// For columns without ColumnMetadata or without explicit Role/Purpose,
 		// fall back to joinability check
 		if !isFKCandidate {
 			if col.IsJoinable == nil || !*col.IsJoinable {
@@ -800,7 +841,7 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 		// Apply cardinality filters only if stats exist
 		// Identifier columns skip cardinality checks since they are often valid FKs
 		// even with low cardinality (e.g., user_id with only a few users)
-		skipCardinalityCheck := features != nil && (features.Purpose == models.PurposeIdentifier || features.Role == models.RoleForeignKey)
+		skipCardinalityCheck := meta != nil && ((meta.Purpose != nil && *meta.Purpose == models.PurposeIdentifier) || (meta.Role != nil && *meta.Role == models.RoleForeignKey))
 		if col.DistinctCount != nil && !skipCardinalityCheck {
 			// Check cardinality threshold
 			if *col.DistinctCount < 20 {

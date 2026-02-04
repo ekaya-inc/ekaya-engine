@@ -39,18 +39,19 @@ type batchResult struct {
 }
 
 type relationshipEnrichmentService struct {
-	relationshipRepo repositories.EntityRelationshipRepository
-	entityRepo       repositories.OntologyEntityRepository
-	knowledgeRepo    repositories.KnowledgeRepository
-	conversationRepo repositories.ConversationRepository
-	questionService  OntologyQuestionService
-	ontologyRepo     repositories.OntologyRepository
-	schemaRepo       repositories.SchemaRepository
-	llmFactory       llm.LLMClientFactory
-	workerPool       *llm.WorkerPool
-	circuitBreaker   *llm.CircuitBreaker
-	getTenantCtx     TenantContextFunc
-	logger           *zap.Logger
+	relationshipRepo   repositories.EntityRelationshipRepository
+	entityRepo         repositories.OntologyEntityRepository
+	knowledgeRepo      repositories.KnowledgeRepository
+	conversationRepo   repositories.ConversationRepository
+	questionService    OntologyQuestionService
+	ontologyRepo       repositories.OntologyRepository
+	schemaRepo         repositories.SchemaRepository
+	columnMetadataRepo repositories.ColumnMetadataRepository
+	llmFactory         llm.LLMClientFactory
+	workerPool         *llm.WorkerPool
+	circuitBreaker     *llm.CircuitBreaker
+	getTenantCtx       TenantContextFunc
+	logger             *zap.Logger
 }
 
 // NewRelationshipEnrichmentService creates a new relationship enrichment service.
@@ -62,6 +63,7 @@ func NewRelationshipEnrichmentService(
 	questionService OntologyQuestionService,
 	ontologyRepo repositories.OntologyRepository,
 	schemaRepo repositories.SchemaRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
 	llmFactory llm.LLMClientFactory,
 	workerPool *llm.WorkerPool,
 	circuitBreaker *llm.CircuitBreaker,
@@ -69,18 +71,19 @@ func NewRelationshipEnrichmentService(
 	logger *zap.Logger,
 ) RelationshipEnrichmentService {
 	return &relationshipEnrichmentService{
-		relationshipRepo: relationshipRepo,
-		entityRepo:       entityRepo,
-		knowledgeRepo:    knowledgeRepo,
-		conversationRepo: conversationRepo,
-		questionService:  questionService,
-		ontologyRepo:     ontologyRepo,
-		schemaRepo:       schemaRepo,
-		llmFactory:       llmFactory,
-		workerPool:       workerPool,
-		circuitBreaker:   circuitBreaker,
-		getTenantCtx:     getTenantCtx,
-		logger:           logger.Named("relationship-enrichment"),
+		relationshipRepo:   relationshipRepo,
+		entityRepo:         entityRepo,
+		knowledgeRepo:      knowledgeRepo,
+		conversationRepo:   conversationRepo,
+		questionService:    questionService,
+		ontologyRepo:       ontologyRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		llmFactory:         llmFactory,
+		workerPool:         workerPool,
+		circuitBreaker:     circuitBreaker,
+		getTenantCtx:       getTenantCtx,
+		logger:             logger.Named("relationship-enrichment"),
 	}
 }
 
@@ -142,31 +145,47 @@ func (s *relationshipEnrichmentService) EnrichProject(ctx context.Context, proje
 		return result, nil
 	}
 
-	// Collect unique table names from relationships for column features lookup
+	// Collect unique table names from relationships for column metadata lookup
 	tableNames := s.collectTableNames(validRelationships)
 
-	// Fetch columns with features for all involved tables
-	columnFeaturesByKey := make(map[string]*models.ColumnFeatures)
+	// Fetch columns with metadata for all involved tables
+	columnMetadataByKey := make(map[string]*models.ColumnMetadata)
 	if s.schemaRepo != nil && len(tableNames) > 0 {
 		columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames, false)
 		if err != nil {
-			s.logger.Error("Failed to fetch columns for relationship enrichment, continuing without column features",
+			s.logger.Error("Failed to fetch columns for relationship enrichment, continuing without column metadata",
 				zap.String("project_id", projectID.String()),
 				zap.Error(err))
-			// Continue without column features - don't fail the entire operation
+			// Continue without column metadata - don't fail the entire operation
 		} else {
-			// Build lookup by "table.column" key
+			// Collect all column IDs for metadata lookup
+			var allColumnIDs []uuid.UUID
+			columnIDToKey := make(map[uuid.UUID]string)
 			for tableName, columns := range columnsByTable {
 				for _, col := range columns {
-					if features := col.GetColumnFeatures(); features != nil {
-						key := tableName + "." + col.ColumnName
-						columnFeaturesByKey[key] = features
+					allColumnIDs = append(allColumnIDs, col.ID)
+					columnIDToKey[col.ID] = tableName + "." + col.ColumnName
+				}
+			}
+
+			// Fetch metadata for all columns
+			if len(allColumnIDs) > 0 && s.columnMetadataRepo != nil {
+				metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, allColumnIDs)
+				if err != nil {
+					s.logger.Warn("Failed to fetch column metadata, continuing without",
+						zap.Error(err))
+				} else {
+					for _, meta := range metadataList {
+						if key, ok := columnIDToKey[meta.SchemaColumnID]; ok {
+							columnMetadataByKey[key] = meta
+						}
 					}
 				}
 			}
-			s.logger.Debug("Loaded column features for relationship enrichment",
+
+			s.logger.Debug("Loaded column metadata for relationship enrichment",
 				zap.Int("table_count", len(tableNames)),
-				zap.Int("features_count", len(columnFeaturesByKey)))
+				zap.Int("metadata_count", len(columnMetadataByKey)))
 		}
 	}
 
@@ -186,7 +205,7 @@ func (s *relationshipEnrichmentService) EnrichProject(ctx context.Context, proje
 		workItems = append(workItems, llm.WorkItem[*batchResult]{
 			ID: batchID,
 			Execute: func(ctx context.Context) (*batchResult, error) {
-				return s.enrichBatchInternal(ctx, projectID, batchCopy, entityByID, knowledgeFacts, columnFeaturesByKey)
+				return s.enrichBatchInternal(ctx, projectID, batchCopy, entityByID, knowledgeFacts, columnMetadataByKey)
 			},
 		})
 	}
@@ -244,7 +263,7 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 	relationships []*models.EntityRelationship,
 	entityByID map[uuid.UUID]*models.OntologyEntity,
 	knowledgeFacts []*models.KnowledgeFact,
-	columnFeaturesByKey map[string]*models.ColumnFeatures,
+	columnMetadataByKey map[string]*models.ColumnMetadata,
 ) (*batchResult, error) {
 	result := &batchResult{
 		BatchSize: len(relationships),
@@ -299,7 +318,7 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 	}
 
 	systemMsg := s.relationshipEnrichmentSystemMessage()
-	prompt := s.buildRelationshipEnrichmentPrompt(relationships, entityByID, knowledgeFacts, columnFeaturesByKey)
+	prompt := s.buildRelationshipEnrichmentPrompt(relationships, entityByID, knowledgeFacts, columnMetadataByKey)
 
 	// Retry LLM call with exponential backoff
 	retryConfig := &retry.Config{
@@ -504,7 +523,7 @@ func (s *relationshipEnrichmentService) buildRelationshipEnrichmentPrompt(
 	relationships []*models.EntityRelationship,
 	entityByID map[uuid.UUID]*models.OntologyEntity,
 	knowledgeFacts []*models.KnowledgeFact,
-	columnFeaturesByKey map[string]*models.ColumnFeatures,
+	columnMetadataByKey map[string]*models.ColumnMetadata,
 ) string {
 	var sb strings.Builder
 
@@ -561,7 +580,7 @@ func (s *relationshipEnrichmentService) buildRelationshipEnrichmentPrompt(
 	}
 
 	// Column context from ColumnFeatures - provides role semantics and descriptions
-	columnContextItems := s.buildColumnContext(relationships, columnFeaturesByKey)
+	columnContextItems := s.buildColumnContext(relationships, columnMetadataByKey)
 	if len(columnContextItems) > 0 {
 		sb.WriteString("\n## Column Context\n")
 		sb.WriteString("Additional context about the source columns in these relationships:\n\n")
@@ -721,9 +740,9 @@ type columnContextItem struct {
 // This provides semantic information like "host", "visitor", "payer" roles to the LLM.
 func (s *relationshipEnrichmentService) buildColumnContext(
 	relationships []*models.EntityRelationship,
-	columnFeaturesByKey map[string]*models.ColumnFeatures,
+	columnMetadataByKey map[string]*models.ColumnMetadata,
 ) []columnContextItem {
-	if len(columnFeaturesByKey) == 0 {
+	if len(columnMetadataByKey) == 0 {
 		return nil
 	}
 
@@ -736,7 +755,7 @@ func (s *relationshipEnrichmentService) buildColumnContext(
 		sourceKey := rel.SourceColumnTable + "." + rel.SourceColumnName
 		if _, exists := seen[sourceKey]; !exists {
 			seen[sourceKey] = struct{}{}
-			if features, ok := columnFeaturesByKey[sourceKey]; ok {
+			if features, ok := columnMetadataByKey[sourceKey]; ok {
 				context := s.buildSingleColumnContext(features)
 				if context != "" {
 					items = append(items, columnContextItem{
@@ -751,18 +770,18 @@ func (s *relationshipEnrichmentService) buildColumnContext(
 	return items
 }
 
-// buildSingleColumnContext builds a context string from a single column's features.
-func (s *relationshipEnrichmentService) buildSingleColumnContext(features *models.ColumnFeatures) string {
+// buildSingleColumnContext builds a context string from a single column's metadata.
+func (s *relationshipEnrichmentService) buildSingleColumnContext(meta *models.ColumnMetadata) string {
 	var parts []string
 
 	// Include entity role if available (e.g., "host", "visitor", "payer")
-	if features.IdentifierFeatures != nil && features.IdentifierFeatures.EntityReferenced != "" {
-		parts = append(parts, fmt.Sprintf("Role: %s", features.IdentifierFeatures.EntityReferenced))
+	if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil && idFeatures.EntityReferenced != "" {
+		parts = append(parts, fmt.Sprintf("Role: %s", idFeatures.EntityReferenced))
 	}
 
 	// Include description if available
-	if features.Description != "" {
-		parts = append(parts, features.Description)
+	if meta.Description != nil && *meta.Description != "" {
+		parts = append(parts, *meta.Description)
 	}
 
 	if len(parts) == 0 {

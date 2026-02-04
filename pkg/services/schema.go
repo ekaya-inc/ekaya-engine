@@ -532,12 +532,7 @@ func (s *schemaService) GetDatasourceSchema(ctx context.Context, projectID, data
 				DefaultValue:    c.DefaultValue,
 				DistinctCount:   c.DistinctCount,
 				NullCount:       c.NullCount,
-			}
-			if c.BusinessName != nil {
-				dc.BusinessName = *c.BusinessName
-			}
-			if c.Description != nil {
-				dc.Description = *c.Description
+				// Note: BusinessName and Description now live in ColumnMetadata, not SchemaColumn
 			}
 			dt.Columns[j] = dc
 		}
@@ -625,12 +620,7 @@ func (s *schemaService) GetDatasourceTable(ctx context.Context, projectID, datas
 			DefaultValue:    c.DefaultValue,
 			DistinctCount:   c.DistinctCount,
 			NullCount:       c.NullCount,
-		}
-		if c.BusinessName != nil {
-			dc.BusinessName = *c.BusinessName
-		}
-		if c.Description != nil {
-			dc.Description = *c.Description
+			// Note: BusinessName and Description now live in ColumnMetadata, not SchemaColumn
 		}
 		dt.Columns[i] = dc
 	}
@@ -896,16 +886,18 @@ func (s *schemaService) UpdateTableMetadata(ctx context.Context, projectID, tabl
 
 // UpdateColumnMetadata updates business_name and/or description for a column.
 func (s *schemaService) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
-	if err := s.schemaRepo.UpdateColumnMetadata(ctx, projectID, columnID, businessName, description); err != nil {
-		return fmt.Errorf("failed to update column metadata: %w", err)
-	}
-
-	s.logger.Info("Updated column metadata",
+	// TODO: This function needs to be updated for the new ColumnMetadata schema.
+	// Column BusinessName and Description now live in ColumnMetadata (engine_ontology_column_metadata)
+	// rather than SchemaColumn (engine_schema_columns).
+	// The implementation should:
+	// 1. Add columnMetadataRepo to schemaService
+	// 2. Call columnMetadataRepo.Upsert() with a ColumnMetadata object
+	// See PLAN-column-schema-refactor.md for details.
+	s.logger.Warn("UpdateColumnMetadata not yet implemented for new schema",
 		zap.String("project_id", projectID.String()),
 		zap.String("column_id", columnID.String()),
 	)
-
-	return nil
+	return fmt.Errorf("UpdateColumnMetadata not yet implemented for new schema (column_id: %s)", columnID)
 }
 
 // SaveSelections updates is_selected flags for tables and columns using their UUIDs.

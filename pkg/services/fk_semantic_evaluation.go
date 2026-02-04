@@ -482,10 +482,8 @@ func FKCandidateFromAnalysis(
 		MaxSourceValue: joinResult.MaxSourceValue,
 	}
 
-	// Add sample values if available
-	if len(sourceCol.SampleValues) > 0 {
-		candidate.SourceSamples = sourceCol.SampleValues
-	}
+	// NOTE: Sample values are no longer persisted to avoid storing target datasource data.
+	// SourceSamples will be empty.
 
 	// Add table descriptions from TableFeatureExtraction
 	// These help LLM understand if relationship makes semantic sense
