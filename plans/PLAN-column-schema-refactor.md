@@ -238,7 +238,7 @@ CREATE TABLE engine_ontology_column_metadata (
 
   **Verification:** Run `make check` to ensure all tests pass.
 
-- [ ] 4.2.2 Update DeterministicRelationshipService to use ColumnMetadataRepository
+- [x] 4.2.2 Update DeterministicRelationshipService to use ColumnMetadataRepository
 
   **Context:** As part of the column schema refactor, `ColumnFeatures` data has moved from `engine_schema_columns.metadata` JSONB to `engine_ontology_column_metadata` with typed columns. Services that previously called `SchemaColumn.GetColumnFeatures()` must now fetch from `ColumnMetadataRepository`.
 
