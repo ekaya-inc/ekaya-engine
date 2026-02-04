@@ -19,6 +19,17 @@ The project has full operational infrastructure but a minimal Go backend:
 - **Shell only:** `main.go` with just `/health`, `/ping`, and static file serving
 - **Empty scaffold:** `pkg/` directories ready for implementation
 
+## Greenfield Project: No Backward Compatibility
+
+**This is a pre-launch project with no users and no external developers.** Assume:
+
+- **No backward compatibility required** - APIs, schemas, and interfaces can change freely
+- **No data migrations needed** - The database can be dropped and recreated at will
+- **No legacy code concerns** - Delete and rewrite code without preserving old behavior
+- **No deprecation periods** - Remove features immediately without warnings or shims
+
+When making changes, prefer clean solutions over compatibility hacks. If a refactor requires dropping the database, that's acceptable.
+
 ## Critical: Server Management
 
 **NEVER kill or start the dev server from Claude Code.** The user runs `make dev-server` and `make dev-ui` in separate terminals. Do not use `pkill`, `nohup`, or any command that would start/stop/restart these servers. If changes require a server restart, inform the user to restart it manually.

@@ -123,7 +123,7 @@ CREATE TABLE engine_ontology_column_metadata (
 
 - [x] 1.1 Create migration that drops and recreates `engine_schema_columns` with new schema
 - [x] 1.2 Create migration that drops and recreates `engine_ontology_column_metadata` with new schema
-- [ ] 1.3 Add indexes and RLS policies
+- [x] 1.3 Add indexes and RLS policies (included in 1.1 and 1.2 migrations)
 
 ### Phase 2: Model Updates
 
