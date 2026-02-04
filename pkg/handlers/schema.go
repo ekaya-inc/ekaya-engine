@@ -51,6 +51,7 @@ type TableResponse struct {
 }
 
 // ColumnResponse represents a column within a table.
+// Note: business_name and description are now in engine_ontology_column_metadata, not engine_schema_columns.
 type ColumnResponse struct {
 	ID              string `json:"id"`
 	ColumnName      string `json:"column_name"`
@@ -59,8 +60,6 @@ type ColumnResponse struct {
 	IsPrimaryKey    bool   `json:"is_primary_key"`
 	IsSelected      bool   `json:"is_selected"`
 	OrdinalPosition int    `json:"ordinal_position"`
-	BusinessName    string `json:"business_name,omitempty"`
-	Description     string `json:"description,omitempty"`
 	DistinctCount   *int64 `json:"distinct_count,omitempty"`
 	NullCount       *int64 `json:"null_count,omitempty"`
 }
@@ -179,9 +178,8 @@ func (h *SchemaHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.
 	mux.HandleFunc("PUT /api/projects/{pid}/datasources/{dsid}/schema/tables/{tableId}/metadata",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.UpdateTableMetadata)))
 
-	// Column operations
-	mux.HandleFunc("PUT /api/projects/{pid}/datasources/{dsid}/schema/columns/{columnId}/metadata",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.UpdateColumnMetadata)))
+	// Column metadata is now managed through MCP tools (update_column) and stored in engine_ontology_column_metadata.
+	// The PUT /schema/columns/{columnId}/metadata endpoint has been removed.
 
 	// Selection operations
 	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/schema/selections",
@@ -401,53 +399,6 @@ func (h *SchemaHandler) UpdateTableMetadata(w http.ResponseWriter, r *http.Reque
 			zap.String("table_id", tableID.String()),
 			zap.Error(err))
 		if err := ErrorResponse(w, http.StatusInternalServerError, "update_metadata_failed", "Failed to update table metadata"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	response := ApiResponse{Success: true}
-	if err := WriteJSON(w, http.StatusOK, response); err != nil {
-		h.logger.Error("Failed to write response", zap.Error(err))
-	}
-}
-
-// UpdateColumnMetadata handles PUT /api/projects/{pid}/datasources/{dsid}/schema/columns/{columnId}/metadata
-// Updates the business_name and/or description for a column.
-func (h *SchemaHandler) UpdateColumnMetadata(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := ParseProjectID(w, r, h.logger)
-	if !ok {
-		return
-	}
-
-	columnID, err := uuid.Parse(r.PathValue("columnId"))
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_column_id", "Invalid column ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	var req UpdateMetadataRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_request", "Invalid request body"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	if err := h.schemaService.UpdateColumnMetadata(r.Context(), projectID, columnID, req.BusinessName, req.Description); err != nil {
-		if errors.Is(err, apperrors.ErrNotFound) {
-			if err := ErrorResponse(w, http.StatusNotFound, "column_not_found", "Column not found"); err != nil {
-				h.logger.Error("Failed to write error response", zap.Error(err))
-			}
-			return
-		}
-		h.logger.Error("Failed to update column metadata",
-			zap.String("project_id", projectID.String()),
-			zap.String("column_id", columnID.String()),
-			zap.Error(err))
-		if err := ErrorResponse(w, http.StatusInternalServerError, "update_metadata_failed", "Failed to update column metadata"); err != nil {
 			h.logger.Error("Failed to write error response", zap.Error(err))
 		}
 		return
@@ -718,8 +669,6 @@ func (h *SchemaHandler) toColumnResponse(col *models.DatasourceColumn) ColumnRes
 		IsPrimaryKey:    col.IsPrimaryKey,
 		IsSelected:      col.IsSelected,
 		OrdinalPosition: col.OrdinalPosition,
-		BusinessName:    col.BusinessName,
-		Description:     col.Description,
 		DistinctCount:   col.DistinctCount,
 		NullCount:       col.NullCount,
 	}

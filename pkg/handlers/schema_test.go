@@ -352,27 +352,10 @@ func TestSchemaHandler_UpdateTableMetadata_NotFound(t *testing.T) {
 	}
 }
 
-func TestSchemaHandler_UpdateColumnMetadata_Success(t *testing.T) {
-	service := &mockSchemaService{}
-	handler := NewSchemaHandler(service, zap.NewNop())
-
-	projectID := uuid.New()
-	datasourceID := uuid.New()
-	columnID := uuid.New()
-
-	body := `{"business_name": "Email Address"}`
-	req := httptest.NewRequest(http.MethodPut, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/columns/"+columnID.String()+"/metadata", bytes.NewBufferString(body))
-	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsid", datasourceID.String())
-	req.SetPathValue("columnId", columnID.String())
-
-	rec := httptest.NewRecorder()
-	handler.UpdateColumnMetadata(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", rec.Code)
-	}
-}
+// Note: TestSchemaHandler_UpdateColumnMetadata_Success removed because
+// column metadata is now managed through MCP tools (update_column) and stored
+// in engine_ontology_column_metadata. The PUT /schema/columns/{columnId}/metadata
+// endpoint has been removed.
 
 func TestSchemaHandler_SaveSelections_Success(t *testing.T) {
 	service := &mockSchemaService{}
