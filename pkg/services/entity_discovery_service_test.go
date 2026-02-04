@@ -1248,7 +1248,7 @@ func (m *mockSchemaRepoForGrouping) SoftDeleteRemovedColumns(ctx context.Context
 func (m *mockSchemaRepoForGrouping) UpdateColumnSelection(ctx context.Context, projectID, columnID uuid.UUID, isSelected bool) error {
 	return nil
 }
-func (m *mockSchemaRepoForGrouping) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64, sampleValues []string) error {
+func (m *mockSchemaRepoForGrouping) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64) error {
 	return nil
 }
 func (m *mockSchemaRepoForGrouping) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {

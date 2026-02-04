@@ -149,7 +149,7 @@ func TestFilterEntityCandidates_Basic(t *testing.T) {
 	}
 
 	// Test filtering based on types and statistics (no legacy pattern matching)
-	candidates, excluded := FilterEntityCandidates(columns, tableByID, statsMap, logger)
+	candidates, excluded := FilterEntityCandidates(columns, tableByID, statsMap, nil, logger)
 
 	// Verify candidates
 	if len(candidates) != 3 {
@@ -285,7 +285,7 @@ func TestFilterEntityCandidates_DataBasedMode(t *testing.T) {
 	}
 
 	// Test with data-based mode (name patterns not used)
-	candidates, excluded := FilterEntityCandidates(columns, tableByID, statsMap, logger)
+	candidates, excluded := FilterEntityCandidates(columns, tableByID, statsMap, nil, logger)
 
 	// Expected results:
 	// - "id" is a candidate (PK)
@@ -464,7 +464,7 @@ func TestFilterEntityCandidates(t *testing.T) {
 		},
 	}
 
-	candidates, excluded := FilterEntityCandidates(columns, tableByID, statsMap, logger)
+	candidates, excluded := FilterEntityCandidates(columns, tableByID, statsMap, nil, logger)
 
 	// Verify candidates
 	if len(candidates) != 3 {

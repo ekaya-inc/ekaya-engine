@@ -469,44 +469,60 @@ func (m *mockSchemaRepository) DeleteInferredRelationshipsByProject(ctx context.
 }
 
 // mockColumnMetadataRepository implements repositories.ColumnMetadataRepository for testing.
+// Column metadata is now keyed by schema_column_id (FK to engine_schema_columns).
 type mockColumnMetadataRepository struct {
-	metadata map[string]*models.ColumnMetadata // key is "table.column"
+	metadata map[uuid.UUID]*models.ColumnMetadata // key is schema_column_id
 }
 
 func newMockColumnMetadataRepository() *mockColumnMetadataRepository {
 	return &mockColumnMetadataRepository{
-		metadata: make(map[string]*models.ColumnMetadata),
+		metadata: make(map[uuid.UUID]*models.ColumnMetadata),
 	}
 }
 
 func (m *mockColumnMetadataRepository) Upsert(ctx context.Context, meta *models.ColumnMetadata) error {
-	key := meta.TableName + "." + meta.ColumnName
-	m.metadata[key] = meta
+	m.metadata[meta.SchemaColumnID] = meta
 	return nil
 }
 
-func (m *mockColumnMetadataRepository) GetByTableColumn(ctx context.Context, projectID uuid.UUID, tableName, columnName string) (*models.ColumnMetadata, error) {
-	key := tableName + "." + columnName
-	if meta, ok := m.metadata[key]; ok {
+func (m *mockColumnMetadataRepository) UpsertFromExtraction(ctx context.Context, meta *models.ColumnMetadata) error {
+	m.metadata[meta.SchemaColumnID] = meta
+	return nil
+}
+
+func (m *mockColumnMetadataRepository) GetBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
+	if meta, ok := m.metadata[schemaColumnID]; ok {
 		return meta, nil
 	}
 	return nil, nil
 }
 
-func (m *mockColumnMetadataRepository) GetByTable(ctx context.Context, projectID uuid.UUID, tableName string) ([]*models.ColumnMetadata, error) {
-	return nil, nil
+func (m *mockColumnMetadataRepository) GetBySchemaColumnIDs(ctx context.Context, schemaColumnIDs []uuid.UUID) ([]*models.ColumnMetadata, error) {
+	var result []*models.ColumnMetadata
+	for _, id := range schemaColumnIDs {
+		if meta, ok := m.metadata[id]; ok {
+			result = append(result, meta)
+		}
+	}
+	return result, nil
 }
 
 func (m *mockColumnMetadataRepository) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.ColumnMetadata, error) {
-	return nil, nil
+	var result []*models.ColumnMetadata
+	for _, meta := range m.metadata {
+		if meta.ProjectID == projectID {
+			result = append(result, meta)
+		}
+	}
+	return result, nil
 }
 
 func (m *mockColumnMetadataRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	delete(m.metadata, id)
 	return nil
 }
 
-func (m *mockColumnMetadataRepository) DeleteByTableColumn(ctx context.Context, projectID uuid.UUID, tableName, columnName string) error {
-	key := tableName + "." + columnName
-	delete(m.metadata, key)
+func (m *mockColumnMetadataRepository) DeleteBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) error {
+	delete(m.metadata, schemaColumnID)
 	return nil
 }

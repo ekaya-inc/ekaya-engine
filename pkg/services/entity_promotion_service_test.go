@@ -300,7 +300,7 @@ func (m *mockPromotionSchemaRepo) SoftDeleteRemovedColumns(ctx context.Context, 
 func (m *mockPromotionSchemaRepo) UpdateColumnSelection(ctx context.Context, projectID, columnID uuid.UUID, isSelected bool) error {
 	return nil
 }
-func (m *mockPromotionSchemaRepo) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64, sampleValues []string) error {
+func (m *mockPromotionSchemaRepo) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64) error {
 	return nil
 }
 func (m *mockPromotionSchemaRepo) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {

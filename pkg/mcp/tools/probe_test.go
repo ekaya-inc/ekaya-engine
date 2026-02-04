@@ -668,14 +668,22 @@ func TestProbeRelationshipDataQuality_OrphanCalculation(t *testing.T) {
 func TestProbeColumn_ColumnMetadataFallback_EnumValues(t *testing.T) {
 	// Test that enum values from column_metadata are used when ontology has none
 	projectID := uuid.New()
+	schemaColumnID := uuid.New()
 
-	// Create a mock column metadata repo with enum values
+	// Create a mock column metadata repo with enum values (now in Features.EnumFeatures)
 	mockColMetaRepo := newMockColumnMetadataRepository()
-	mockColMetaRepo.metadata["users.status"] = &models.ColumnMetadata{
-		ProjectID:  projectID,
-		TableName:  "users",
-		ColumnName: "status",
-		EnumValues: []string{"ACTIVE", "SUSPENDED", "BANNED"},
+	mockColMetaRepo.metadata[schemaColumnID] = &models.ColumnMetadata{
+		ProjectID:      projectID,
+		SchemaColumnID: schemaColumnID,
+		Features: models.ColumnMetadataFeatures{
+			EnumFeatures: &models.EnumFeatures{
+				Values: []models.ColumnEnumValue{
+					{Value: "ACTIVE"},
+					{Value: "SUSPENDED"},
+					{Value: "BANNED"},
+				},
+			},
+		},
 	}
 
 	// Create an ontology with column details but NO enum values
@@ -705,28 +713,30 @@ func TestProbeColumn_ColumnMetadataFallback_EnumValues(t *testing.T) {
 	assert.Len(t, columnDetails, 1)
 	assert.Nil(t, columnDetails[0].EnumValues)
 
-	// Verify mock repo has enum values
-	meta, err := mockColMetaRepo.GetByTableColumn(nil, projectID, "users", "status")
+	// Verify mock repo has enum values (via Features.EnumFeatures)
+	meta, err := mockColMetaRepo.GetBySchemaColumnID(nil, schemaColumnID)
 	assert.NoError(t, err)
 	assert.NotNil(t, meta)
-	assert.Len(t, meta.EnumValues, 3)
+	enumFeatures := meta.GetEnumFeatures()
+	assert.NotNil(t, enumFeatures)
+	assert.Len(t, enumFeatures.Values, 3)
 }
 
 func TestProbeColumn_ColumnMetadataFallback_Description(t *testing.T) {
 	// Test that description from column_metadata is used when ontology has none
 	projectID := uuid.New()
+	schemaColumnID := uuid.New()
 
 	mockColMetaRepo := newMockColumnMetadataRepository()
 	desc := "User current state"
-	mockColMetaRepo.metadata["users.state"] = &models.ColumnMetadata{
-		ProjectID:   projectID,
-		TableName:   "users",
-		ColumnName:  "state",
-		Description: &desc,
+	mockColMetaRepo.metadata[schemaColumnID] = &models.ColumnMetadata{
+		ProjectID:      projectID,
+		SchemaColumnID: schemaColumnID,
+		Description:    &desc,
 	}
 
-	// Verify mock has description
-	meta, err := mockColMetaRepo.GetByTableColumn(nil, projectID, "users", "state")
+	// Verify mock has description (keyed by SchemaColumnID now)
+	meta, err := mockColMetaRepo.GetBySchemaColumnID(nil, schemaColumnID)
 	assert.NoError(t, err)
 	assert.NotNil(t, meta)
 	assert.NotNil(t, meta.Description)
@@ -734,27 +744,32 @@ func TestProbeColumn_ColumnMetadataFallback_Description(t *testing.T) {
 }
 
 func TestProbeColumn_ColumnMetadataFallback_EntityAndRole(t *testing.T) {
-	// Test that entity and role from column_metadata are used when ontology has none
+	// Test that entity (via IdentifierFeatures.EntityReferenced) and role from column_metadata are used
 	projectID := uuid.New()
+	schemaColumnID := uuid.New()
 
 	mockColMetaRepo := newMockColumnMetadataRepository()
-	entity := "Account"
 	role := "dimension"
-	mockColMetaRepo.metadata["accounts.type"] = &models.ColumnMetadata{
-		ProjectID:  projectID,
-		TableName:  "accounts",
-		ColumnName: "type",
-		Entity:     &entity,
-		Role:       &role,
+	mockColMetaRepo.metadata[schemaColumnID] = &models.ColumnMetadata{
+		ProjectID:      projectID,
+		SchemaColumnID: schemaColumnID,
+		Role:           &role,
+		Features: models.ColumnMetadataFeatures{
+			IdentifierFeatures: &models.IdentifierFeatures{
+				EntityReferenced: "Account",
+			},
+		},
 	}
 
-	meta, err := mockColMetaRepo.GetByTableColumn(nil, projectID, "accounts", "type")
+	meta, err := mockColMetaRepo.GetBySchemaColumnID(nil, schemaColumnID)
 	assert.NoError(t, err)
 	assert.NotNil(t, meta)
-	assert.NotNil(t, meta.Entity)
 	assert.NotNil(t, meta.Role)
-	assert.Equal(t, "Account", *meta.Entity)
 	assert.Equal(t, "dimension", *meta.Role)
+	// Entity is now in Features.IdentifierFeatures.EntityReferenced
+	idFeatures := meta.GetIdentifierFeatures()
+	assert.NotNil(t, idFeatures)
+	assert.Equal(t, "Account", idFeatures.EntityReferenced)
 }
 
 func TestProbeColumn_ColumnMetadataFallback_OntologyTakesPrecedence(t *testing.T) {
@@ -787,8 +802,8 @@ func TestProbeColumn_ColumnMetadataFallback_NoMetadataAnywhere(t *testing.T) {
 	// Test that probe works when neither ontology nor column_metadata have data
 	mockColMetaRepo := newMockColumnMetadataRepository()
 
-	// Verify empty repo returns nil
-	meta, err := mockColMetaRepo.GetByTableColumn(nil, uuid.New(), "unknown", "column")
+	// Verify empty repo returns nil (now keyed by SchemaColumnID)
+	meta, err := mockColMetaRepo.GetBySchemaColumnID(nil, uuid.New())
 	assert.NoError(t, err)
 	assert.Nil(t, meta)
 }
