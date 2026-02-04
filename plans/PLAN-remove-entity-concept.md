@@ -1,5 +1,11 @@
 # PLAN: Remove Entity Concept from v1.0
 
+> **⚠️ IMPORTANT: BREAKING MIGRATION ON SEPARATE BRANCH ⚠️**
+>
+> This work is being done on a separate branch (`dvx/remove-entity`). Migration 021 will **break the existing schema** and is incompatible with other branches.
+>
+> **Do not worry about testing.** Make rough changes and the user will test when merging back to the main development branch.
+
 ## Context
 
 The Entity concept (domain entities like "User", "Account", "Order" discovered from schema analysis) is being deferred to post-v1.0. This includes:
@@ -65,39 +71,39 @@ Delete these files (no longer needed):
 
 ### 2.1 Delete model files
 
-- [ ] `pkg/models/ontology_entity.go` - Contains `OntologyEntity`, `EntityAlias`, `EntityKeyColumn`, `EntityOccurrence`
-- [ ] `pkg/models/entity_relationship.go` - Contains `EntityRelationship` struct
+- [x] `pkg/models/ontology_entity.go` - Contains `OntologyEntity`, `EntityAlias`, `EntityKeyColumn`, `EntityOccurrence`
+- [x] `pkg/models/entity_relationship.go` - Contains `EntityRelationship` struct
 
 ### 2.2 Update ontology.go
 
 Remove from `pkg/models/ontology.go`:
-- [ ] `EntitySummary` struct (lines ~69-79)
-- [ ] `EntitySummaries` field from `Ontology` struct
-- [ ] `RelationshipEdge` struct (only if not used elsewhere - check first)
+- [x] `EntitySummary` struct (lines ~69-79)
+- [x] `EntitySummaries` field from `Ontology` struct
+- [x] `RelationshipEdge` struct (only if not used elsewhere - check first) - KEPT: Used for table-to-table FK relationships
 
 ### 2.3 Update ontology_context.go
 
 Remove from `pkg/models/ontology_context.go`:
-- [ ] `EntityBrief` struct
-- [ ] `EntityDetail` struct
-- [ ] `EntityOccurrence` struct
-- [ ] `KeyColumnInfo` struct
-- [ ] `OntologyEntityRelationship` struct
-- [ ] `OntologyEntitiesContext` struct
-- [ ] `OntologyDomainContext.Entities` field
-- [ ] `OntologyDomainContext.Relationships` field (if only used for entity relationships)
-- [ ] `ColumnOverview.Entity` field
-- [ ] `ColumnOverview.EntityAssociation` field
+- [x] `EntityBrief` struct
+- [x] `EntityDetail` struct
+- [x] `EntityOccurrence` struct
+- [x] `KeyColumnInfo` struct
+- [x] `OntologyEntityRelationship` struct
+- [x] `OntologyEntitiesContext` struct
+- [x] `OntologyDomainContext.Entities` field
+- [x] `OntologyDomainContext.Relationships` field (if only used for entity relationships)
+- [x] `ColumnOverview.Entity` field
+- [x] `ColumnOverview.EntityAssociation` field
 
 ### 2.4 Update ontology_dag.go
 
 Remove from `pkg/models/ontology_dag.go`:
-- [ ] `DAGNodeEntityDiscovery` constant
-- [ ] `DAGNodeEntityEnrichment` constant
-- [ ] `DAGNodeEntityPromotion` constant
-- [ ] `DAGNodeRelationshipEnrichment` constant (if only for entity relationships)
-- [ ] Remove these from `DAGNodeOrder` map
-- [ ] Remove these from `AllDAGNodes()` function
+- [x] `DAGNodeEntityDiscovery` constant
+- [x] `DAGNodeEntityEnrichment` constant
+- [x] `DAGNodeEntityPromotion` constant
+- [x] `DAGNodeRelationshipEnrichment` constant (if only for entity relationships)
+- [x] Remove these from `DAGNodeOrder` map
+- [x] Remove these from `AllDAGNodes()` function
 
 ---
 

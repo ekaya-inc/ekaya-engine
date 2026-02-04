@@ -99,21 +99,16 @@ type DAGNodeName string
 const (
 	DAGNodeKnowledgeSeeding        DAGNodeName = "KnowledgeSeeding"
 	DAGNodeColumnFeatureExtraction DAGNodeName = "ColumnFeatureExtraction"
-	DAGNodeEntityDiscovery         DAGNodeName = "EntityDiscovery"
-	DAGNodeEntityEnrichment        DAGNodeName = "EntityEnrichment"
 	DAGNodeFKDiscovery             DAGNodeName = "FKDiscovery"
 	DAGNodeTableFeatureExtraction  DAGNodeName = "TableFeatureExtraction"
 	DAGNodeColumnEnrichment        DAGNodeName = "ColumnEnrichment"
 	DAGNodePKMatchDiscovery        DAGNodeName = "PKMatchDiscovery"
-	DAGNodeRelationshipEnrichment  DAGNodeName = "RelationshipEnrichment"
-	DAGNodeEntityPromotion         DAGNodeName = "EntityPromotion"
 	DAGNodeOntologyFinalization    DAGNodeName = "OntologyFinalization"
 	DAGNodeGlossaryDiscovery       DAGNodeName = "GlossaryDiscovery"
 	DAGNodeGlossaryEnrichment      DAGNodeName = "GlossaryEnrichment"
 )
 
 // DAGNodeOrder defines the execution order for each node.
-// NOTE: Reordered to do relationship discovery BEFORE entity discovery.
 // Steps after PKMatchDiscovery are commented out for manual testing.
 var DAGNodeOrder = map[DAGNodeName]int{
 	DAGNodeKnowledgeSeeding:        1,
@@ -122,18 +117,13 @@ var DAGNodeOrder = map[DAGNodeName]int{
 	DAGNodeTableFeatureExtraction:  4,
 	DAGNodePKMatchDiscovery:        5,
 	// TEMPORARILY DISABLED - uncomment after relationship discovery is validated
-	// DAGNodeEntityDiscovery:         6,
-	// DAGNodeEntityEnrichment:        7,
-	// DAGNodeColumnEnrichment:        8,
-	// DAGNodeRelationshipEnrichment:  9,
-	// DAGNodeEntityPromotion:         10,
-	// DAGNodeOntologyFinalization:    11,
-	// DAGNodeGlossaryDiscovery:       12,
-	// DAGNodeGlossaryEnrichment:      13,
+	// DAGNodeColumnEnrichment:        6,
+	// DAGNodeOntologyFinalization:    7,
+	// DAGNodeGlossaryDiscovery:       8,
+	// DAGNodeGlossaryEnrichment:      9,
 }
 
 // AllDAGNodes returns all DAG node names in execution order.
-// NOTE: Reordered to do relationship discovery BEFORE entity discovery.
 // Steps after PKMatchDiscovery are commented out for manual testing.
 func AllDAGNodes() []DAGNodeName {
 	return []DAGNodeName{
@@ -143,11 +133,7 @@ func AllDAGNodes() []DAGNodeName {
 		DAGNodeTableFeatureExtraction,
 		DAGNodePKMatchDiscovery,
 		// TEMPORARILY DISABLED - uncomment after relationship discovery is validated
-		// DAGNodeEntityDiscovery,
-		// DAGNodeEntityEnrichment,
 		// DAGNodeColumnEnrichment,
-		// DAGNodeRelationshipEnrichment,
-		// DAGNodeEntityPromotion,
 		// DAGNodeOntologyFinalization,
 		// DAGNodeGlossaryDiscovery,
 		// DAGNodeGlossaryEnrichment,
