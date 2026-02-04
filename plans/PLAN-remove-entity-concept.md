@@ -35,6 +35,8 @@ Create a migration to drop all entity-related tables and columns.
 
 ### 1.1 Create migration file
 
+- [x] Created as `migrations/022_remove_entity_concept.up.sql` (021 was taken)
+
 Create `migrations/021_remove_entity_concept.up.sql`:
 
 ```sql
