@@ -238,13 +238,6 @@ func TestProbeColumn_SemanticFromOntology(t *testing.T) {
 	ontology := &models.TieredOntology{
 		ID:        uuid.New(),
 		ProjectID: uuid.New(),
-		EntitySummaries: map[string]*models.EntitySummary{
-			"users": {
-				TableName:    "users",
-				BusinessName: "User",
-				Description:  "Platform users",
-			},
-		},
 		ColumnDetails: map[string][]models.ColumnDetail{
 			"users": {
 				{
@@ -259,11 +252,6 @@ func TestProbeColumn_SemanticFromOntology(t *testing.T) {
 			},
 		},
 	}
-
-	// Get entity summary
-	entitySummary := ontology.GetEntitySummary("users")
-	assert.NotNil(t, entitySummary)
-	assert.Equal(t, "User", entitySummary.BusinessName)
 
 	// Get column details
 	columnDetails := ontology.GetColumnDetails("users")
@@ -550,118 +538,6 @@ func TestProbeColumn_ErrorCodeExtraction(t *testing.T) {
 }
 
 // ============================================================================
-// Tests for probe_relationship tool
-// ============================================================================
-
-func TestProbeRelationshipResponse_Structure(t *testing.T) {
-	// Test response structure with all fields populated
-	orphanCount := int64(10)
-	desc := "The user who owns this account"
-	label := "owns"
-
-	response := probeRelationshipResponse{
-		Relationships: []probeRelationshipDetail{
-			{
-				FromEntity:  "Account",
-				ToEntity:    "User",
-				FromColumn:  "accounts.owner_id",
-				ToColumn:    "users.user_id",
-				Cardinality: "N:1",
-				DataQuality: &probeRelationshipDataQuality{
-					MatchRate:      0.98,
-					OrphanCount:    &orphanCount,
-					SourceDistinct: 500,
-					TargetDistinct: 450,
-					MatchedCount:   490,
-				},
-				Description: &desc,
-				Label:       &label,
-			},
-		},
-		RejectedCandidates: []probeRelationshipCandidate{
-			{
-				FromColumn:      "accounts.created_by",
-				ToColumn:        "users.user_id",
-				RejectionReason: "low_match_rate",
-			},
-		},
-	}
-
-	assert.Len(t, response.Relationships, 1)
-	assert.Len(t, response.RejectedCandidates, 1)
-
-	rel := response.Relationships[0]
-	assert.Equal(t, "Account", rel.FromEntity)
-	assert.Equal(t, "User", rel.ToEntity)
-	assert.Equal(t, "N:1", rel.Cardinality)
-	assert.NotNil(t, rel.DataQuality)
-	assert.Equal(t, 0.98, rel.DataQuality.MatchRate)
-	assert.Equal(t, int64(10), *rel.DataQuality.OrphanCount)
-
-	rejected := response.RejectedCandidates[0]
-	assert.Equal(t, "low_match_rate", rejected.RejectionReason)
-}
-
-func TestProbeRelationshipTool_Registration(t *testing.T) {
-	// Verify the tool is registered with correct metadata
-	// This is a structural test - the actual tool function is tested via integration tests
-
-	deps := &ProbeToolDeps{
-		// These would be mocked in a real test
-	}
-
-	assert.NotNil(t, deps, "ProbeToolDeps should be defined")
-}
-
-func TestProbeRelationshipResponse_EmptyState(t *testing.T) {
-	// Test empty response structure
-	response := probeRelationshipResponse{
-		Relationships:      []probeRelationshipDetail{},
-		RejectedCandidates: []probeRelationshipCandidate{},
-	}
-
-	assert.Empty(t, response.Relationships)
-	assert.Empty(t, response.RejectedCandidates)
-}
-
-func TestProbeRelationshipDetail_MinimalFields(t *testing.T) {
-	// Test relationship detail with only required fields
-	detail := probeRelationshipDetail{
-		FromEntity: "Order",
-		ToEntity:   "Customer",
-		FromColumn: "orders.customer_id",
-		ToColumn:   "customers.customer_id",
-	}
-
-	assert.Equal(t, "Order", detail.FromEntity)
-	assert.Equal(t, "Customer", detail.ToEntity)
-	assert.Empty(t, detail.Cardinality)
-	assert.Nil(t, detail.DataQuality)
-	assert.Nil(t, detail.Description)
-	assert.Nil(t, detail.Label)
-}
-
-func TestProbeRelationshipDataQuality_OrphanCalculation(t *testing.T) {
-	// Test orphan count calculation logic
-	sourceDistinct := int64(1000)
-	matchedCount := int64(950)
-	expectedOrphans := sourceDistinct - matchedCount
-
-	orphanCount := expectedOrphans
-	quality := probeRelationshipDataQuality{
-		MatchRate:      0.95,
-		OrphanCount:    &orphanCount,
-		SourceDistinct: sourceDistinct,
-		TargetDistinct: 900,
-		MatchedCount:   matchedCount,
-	}
-
-	assert.Equal(t, int64(50), *quality.OrphanCount)
-	assert.Equal(t, int64(1000), quality.SourceDistinct)
-	assert.Equal(t, int64(950), quality.MatchedCount)
-}
-
-// ============================================================================
 // Tests for probe_column column_metadata fallback
 // ============================================================================
 
@@ -682,12 +558,6 @@ func TestProbeColumn_ColumnMetadataFallback_EnumValues(t *testing.T) {
 	ontology := &models.TieredOntology{
 		ID:        uuid.New(),
 		ProjectID: projectID,
-		EntitySummaries: map[string]*models.EntitySummary{
-			"users": {
-				TableName:    "users",
-				BusinessName: "User",
-			},
-		},
 		ColumnDetails: map[string][]models.ColumnDetail{
 			"users": {
 				{

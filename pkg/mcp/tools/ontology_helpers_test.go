@@ -41,9 +41,7 @@ func TestEnsureOntologyExists_CreatesNewOntology(t *testing.T) {
 	assert.Equal(t, projectID, ontology.ProjectID)
 	assert.Equal(t, 1, ontology.Version)
 	assert.True(t, ontology.IsActive)
-	assert.NotNil(t, ontology.EntitySummaries)
 	assert.NotNil(t, ontology.ColumnDetails)
-	assert.Empty(t, ontology.EntitySummaries, "new ontology should have empty entity summaries")
 	assert.Empty(t, ontology.ColumnDetails, "new ontology should have empty column details")
 }
 

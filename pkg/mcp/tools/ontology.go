@@ -23,7 +23,6 @@ type OntologyToolDeps struct {
 	ProjectService         services.ProjectService
 	OntologyContextService services.OntologyContextService
 	OntologyRepo           repositories.OntologyRepository
-	EntityRepo             repositories.OntologyEntityRepository
 	SchemaRepo             repositories.SchemaRepository
 	Logger                 *zap.Logger
 }

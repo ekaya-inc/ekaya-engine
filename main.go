@@ -221,15 +221,13 @@ func main() {
 	columnEnrichmentService := services.NewColumnEnrichmentService(
 		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, convRepo, projectRepo, ontologyQuestionService,
 		datasourceService, adapterFactory, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
-	relationshipEnrichmentService := services.NewRelationshipEnrichmentService(
-		entityRelationshipRepo, ontologyEntityRepo, knowledgeRepo, convRepo, ontologyQuestionService, ontologyRepo, schemaRepo, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
 	glossaryRepo := repositories.NewGlossaryRepository()
 	glossaryService := services.NewGlossaryService(glossaryRepo, ontologyRepo, ontologyEntityRepo, knowledgeRepo, schemaRepo, datasourceService, adapterFactory, llmFactory, getTenantCtx, logger, cfg.Env)
 
 	// Ontology DAG service for orchestrated workflow execution
 	ontologyDAGService := services.NewOntologyDAGService(
-		ontologyDAGRepo, ontologyRepo, ontologyEntityRepo, schemaRepo,
-		entityRelationshipRepo, ontologyQuestionRepo, ontologyChatRepo, knowledgeRepo,
+		ontologyDAGRepo, ontologyRepo, schemaRepo,
+		ontologyQuestionRepo, ontologyChatRepo, knowledgeRepo,
 		glossaryRepo, getTenantCtx, logger)
 
 	// Wire DAG adapters using setter pattern (avoids import cycles)
@@ -239,8 +237,6 @@ func main() {
 		schemaRepo, datasourceService, adapterFactory, llmFactory, llmWorkerPool, getTenantCtx,
 		ontologyQuestionService, ontologyRepo, logger)
 	ontologyDAGService.SetColumnFeatureExtractionMethods(columnFeatureExtractionService)
-	ontologyDAGService.SetEntityDiscoveryMethods(services.NewEntityDiscoveryAdapter(entityDiscoveryService))
-	ontologyDAGService.SetEntityEnrichmentMethods(services.NewEntityEnrichmentAdapter(entityDiscoveryService, schemaRepo, getTenantCtx))
 	ontologyDAGService.SetFKDiscoveryMethods(services.NewFKDiscoveryAdapter(deterministicRelationshipService))
 	ontologyDAGService.SetPKMatchDiscoveryMethods(services.NewPKMatchDiscoveryAdapter(deterministicRelationshipService))
 	// LLM-validated relationship discovery (replaces threshold-based PKMatch when configured)
@@ -252,10 +248,6 @@ func main() {
 		relationshipCandidateCollector, relationshipValidator, datasourceService, adapterFactory,
 		schemaRepo, logger)
 	ontologyDAGService.SetLLMRelationshipDiscoveryMethods(services.NewLLMRelationshipDiscoveryAdapter(llmRelationshipDiscoveryService))
-	ontologyDAGService.SetRelationshipEnrichmentMethods(services.NewRelationshipEnrichmentAdapter(relationshipEnrichmentService))
-	entityPromotionService := services.NewEntityPromotionService(
-		ontologyEntityRepo, entityRelationshipRepo, schemaRepo, ontologyRepo, logger)
-	ontologyDAGService.SetEntityPromotionMethods(services.NewEntityPromotionAdapter(entityPromotionService))
 	ontologyDAGService.SetFinalizationMethods(services.NewOntologyFinalizationAdapter(ontologyFinalizationService))
 	ontologyDAGService.SetColumnEnrichmentMethods(services.NewColumnEnrichmentAdapter(columnEnrichmentService))
 	ontologyDAGService.SetGlossaryDiscoveryMethods(services.NewGlossaryDiscoveryAdapter(glossaryService))

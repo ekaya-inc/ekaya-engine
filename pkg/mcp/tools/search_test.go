@@ -12,14 +12,12 @@ func TestSearchResult_Structure(t *testing.T) {
 		Query:      "user",
 		Tables:     []tableMatch{},
 		Columns:    []columnMatch{},
-		Entities:   []entityMatch{},
 		TotalCount: 0,
 	}
 
 	assert.Equal(t, "user", result.Query)
 	assert.NotNil(t, result.Tables)
 	assert.NotNil(t, result.Columns)
-	assert.NotNil(t, result.Entities)
 	assert.Equal(t, 0, result.TotalCount)
 }
 
@@ -74,32 +72,6 @@ func TestColumnMatch_Structure(t *testing.T) {
 	assert.Equal(t, 0.9, match.Relevance)
 }
 
-func TestEntityMatch_Structure(t *testing.T) {
-	// Test that entityMatch has expected fields
-	description := "Platform user"
-	domain := "user_management"
-
-	match := entityMatch{
-		Name:         "User",
-		Description:  &description,
-		PrimaryTable: "users",
-		Domain:       &domain,
-		Aliases:      []string{"creator", "host"},
-		MatchType:    "name",
-		Relevance:    1.0,
-	}
-
-	assert.Equal(t, "User", match.Name)
-	assert.Equal(t, "Platform user", *match.Description)
-	assert.Equal(t, "users", match.PrimaryTable)
-	assert.Equal(t, "user_management", *match.Domain)
-	assert.Len(t, match.Aliases, 2)
-	assert.Contains(t, match.Aliases, "creator")
-	assert.Contains(t, match.Aliases, "host")
-	assert.Equal(t, "name", match.MatchType)
-	assert.Equal(t, 1.0, match.Relevance)
-}
-
 func TestSearchResult_TotalCount(t *testing.T) {
 	// Test that total count is the sum of all matches
 	result := searchResult{
@@ -111,31 +83,23 @@ func TestSearchResult_TotalCount(t *testing.T) {
 			{ColumnName: "transaction_id"},
 			{ColumnName: "transaction_state"},
 		},
-		Entities: []entityMatch{
-			{Name: "Transaction"},
-		},
-		TotalCount: 4,
+		TotalCount: 3,
 	}
 
 	assert.Equal(t, 1, len(result.Tables))
 	assert.Equal(t, 2, len(result.Columns))
-	assert.Equal(t, 1, len(result.Entities))
-	assert.Equal(t, 4, result.TotalCount)
+	assert.Equal(t, 3, result.TotalCount)
 }
 
 func TestMatchTypes(t *testing.T) {
 	// Test that all match types are string constants
 	validTableMatchTypes := []string{"table_name", "business_name", "description"}
 	validColumnMatchTypes := []string{"column_name", "business_name", "description"}
-	validEntityMatchTypes := []string{"name", "alias", "description"}
 
 	for _, mt := range validTableMatchTypes {
 		assert.NotEmpty(t, mt)
 	}
 	for _, mt := range validColumnMatchTypes {
-		assert.NotEmpty(t, mt)
-	}
-	for _, mt := range validEntityMatchTypes {
 		assert.NotEmpty(t, mt)
 	}
 }

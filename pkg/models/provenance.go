@@ -11,12 +11,17 @@ import (
 type ProvenanceSource string
 
 // Provenance source constants. These represent HOW an operation was performed.
-// Note: ProvenanceManual, ProvenanceMCP, ProvenanceInferred string constants
-// are defined in ontology_entity.go for backward compatibility.
 const (
 	SourceInferred ProvenanceSource = "inferred" // Engine auto-detected or LLM-generated
 	SourceMCP      ProvenanceSource = "mcp"      // Claude via MCP tools
 	SourceManual   ProvenanceSource = "manual"   // Direct manual edit via UI
+)
+
+// String constants for backward compatibility with existing code that uses string types.
+const (
+	ProvenanceInferred = string(SourceInferred) // Engine auto-detected or LLM-generated
+	ProvenanceMCP      = string(SourceMCP)      // Claude via MCP tools
+	ProvenanceManual   = string(SourceManual)   // Direct manual edit via UI
 )
 
 // String returns the string representation of a ProvenanceSource.
