@@ -81,14 +81,14 @@ func NewColumnEnrichmentService(
 		columnMetadataRepo: columnMetadataRepo,
 		conversationRepo:   conversationRepo,
 		projectRepo:        projectRepo,
-		questionService:  questionService,
-		dsSvc:            dsSvc,
-		adapterFactory:   adapterFactory,
-		llmFactory:       llmFactory,
-		workerPool:       workerPool,
-		circuitBreaker:   circuitBreaker,
-		getTenantCtx:     getTenantCtx,
-		logger:           logger.Named("column-enrichment"),
+		questionService:    questionService,
+		dsSvc:              dsSvc,
+		adapterFactory:     adapterFactory,
+		llmFactory:         llmFactory,
+		workerPool:         workerPool,
+		circuitBreaker:     circuitBreaker,
+		getTenantCtx:       getTenantCtx,
+		logger:             logger.Named("column-enrichment"),
 	}
 }
 

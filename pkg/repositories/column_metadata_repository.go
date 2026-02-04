@@ -128,9 +128,9 @@ func (r *columnMetadataRepository) Upsert(ctx context.Context, meta *models.Colu
 		meta.CreatedBy,
 		now,
 		now,
-		meta.Source,      // last_edit_source on update
-		meta.UpdatedBy,   // updated_by
-		now,              // updated_at
+		meta.Source,    // last_edit_source on update
+		meta.UpdatedBy, // updated_by
+		now,            // updated_at
 	).Scan(&meta.ID, &meta.CreatedAt, &meta.UpdatedAt)
 
 	if err != nil {

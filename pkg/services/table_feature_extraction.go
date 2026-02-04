@@ -61,7 +61,7 @@ func NewTableFeatureExtractionService(
 		llmFactory:         llmFactory,
 		workerPool:         workerPool,
 		getTenantCtx:       getTenantCtx,
-		logger:            logger.Named("table-feature-extraction"),
+		logger:             logger.Named("table-feature-extraction"),
 	}
 }
 
