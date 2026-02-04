@@ -395,7 +395,7 @@ func (m *mockSchemaRepository) SoftDeleteRemovedColumns(ctx context.Context, tab
 func (m *mockSchemaRepository) UpdateColumnSelection(ctx context.Context, projectID, columnID uuid.UUID, isSelected bool) error {
 	return nil
 }
-func (m *mockSchemaRepository) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64, sampleValues []string) error {
+func (m *mockSchemaRepository) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64) error {
 	return nil
 }
 func (m *mockSchemaRepository) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {

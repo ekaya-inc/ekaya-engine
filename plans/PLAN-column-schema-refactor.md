@@ -318,7 +318,7 @@ CREATE TABLE engine_ontology_column_metadata (
 
 - [x] 5.1 Update `update_column` - use `schema_column_id`, write typed columns
 - [x] 5.2 Update `get_column_metadata` - read typed columns
-- [ ] 5.3 Update `probe_column` - fetch from ontology table
+- [x] 5.3 Update `probe_column` - fetch from ontology table
 - [ ] 5.4 Update `get_context` - fetch from ontology table
 - [ ] 5.5 Update `search_schema` - remove dropped column references
 

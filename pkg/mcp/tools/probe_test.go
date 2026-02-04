@@ -772,16 +772,18 @@ func TestProbeColumn_ColumnMetadataFallback_EntityAndRole(t *testing.T) {
 	assert.Equal(t, "Account", idFeatures.EntityReferenced)
 }
 
-func TestProbeColumn_ColumnMetadataFallback_OntologyTakesPrecedence(t *testing.T) {
-	// Test that ontology enum values take precedence over column_metadata
+func TestProbeColumn_ColumnMetadataIsPrimary_OntologyIsFallback(t *testing.T) {
+	// Test that column_metadata is the primary source and ontology is fallback
+	// After schema refactor: column_metadata takes precedence
 	ontologyEnumValues := []models.EnumValue{
 		{Value: "ACTIVE", Label: "Active User"},
 		{Value: "INACTIVE", Label: "Inactive User"},
 	}
 
-	// The semantic section from ontology should be used when it has enum values
+	// When column_metadata has data, it is used (primary source)
+	// Ontology is only used as fallback when column_metadata has no data
 	semantic := probeColumnSemantic{
-		Description: "Ontology description",
+		Description: "From column_metadata",
 		Role:        "attribute",
 		EnumLabels: map[string]string{
 			"ACTIVE":   "Active User",
@@ -789,12 +791,12 @@ func TestProbeColumn_ColumnMetadataFallback_OntologyTakesPrecedence(t *testing.T
 		},
 	}
 
-	// If ontology has enum labels, they should not be overwritten
+	// Column_metadata values are used (primary source)
 	assert.Len(t, semantic.EnumLabels, 2)
 	assert.Equal(t, "Active User", semantic.EnumLabels["ACTIVE"])
 
-	// The fallback logic only runs when len(response.Semantic.EnumLabels) == 0
-	// This test verifies the structure that makes precedence work
+	// Ontology would only be used if column_metadata had no semantic data
+	// This test verifies the structure
 	assert.Len(t, ontologyEnumValues, 2)
 }
 
