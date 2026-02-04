@@ -56,8 +56,8 @@ ALTER TABLE engine_ontologies ADD COLUMN IF NOT EXISTS entity_summaries jsonb;
 ### 1.2 Update 019_entity_promotion migration
 
 Delete these files (no longer needed):
-- [ ] `migrations/019_entity_promotion.up.sql`
-- [ ] `migrations/019_entity_promotion.down.sql`
+- [x] `migrations/019_entity_promotion.up.sql`
+- [x] `migrations/019_entity_promotion.down.sql`
 
 ---
 
