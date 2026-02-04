@@ -254,6 +254,7 @@ type DatasourceTable struct {
 }
 
 // DatasourceColumn represents a column in the customer's datasource.
+// Note: business_name and description are now in engine_ontology_column_metadata, not engine_schema_columns.
 type DatasourceColumn struct {
 	ID              uuid.UUID
 	ColumnName      string
@@ -264,8 +265,6 @@ type DatasourceColumn struct {
 	IsSelected      bool
 	OrdinalPosition int
 	DefaultValue    *string
-	BusinessName    string
-	Description     string
 	DistinctCount   *int64
 	NullCount       *int64
 }
