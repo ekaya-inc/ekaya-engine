@@ -33,7 +33,6 @@ func TestComputeToolsForRole_Agent(t *testing.T) {
 	assert.False(t, toolNames["execute"], "agent should NOT have execute")
 	assert.False(t, toolNames["query"], "agent should NOT have query")
 	assert.False(t, toolNames["get_schema"], "agent should NOT have get_schema")
-	assert.False(t, toolNames["update_entity"], "agent should NOT have update_entity")
 }
 
 func TestComputeToolsForRole_AdminRole(t *testing.T) {
@@ -56,7 +55,6 @@ func TestComputeToolsForRole_AdminRole(t *testing.T) {
 	assert.True(t, toolNames["execute"], "admin should have execute")
 	assert.True(t, toolNames["query"], "admin should have query")
 	assert.True(t, toolNames["get_schema"], "admin should have get_schema")
-	assert.True(t, toolNames["update_entity"], "admin should have update_entity")
 	assert.True(t, toolNames["list_ontology_questions"], "admin should have list_ontology_questions")
 }
 
@@ -81,7 +79,7 @@ func TestComputeToolsForRole_DataRole(t *testing.T) {
 	assert.True(t, toolNames["query"], "data role should have query")
 
 	// Ontology maintenance NOT included without AddOntologyMaintenance
-	assert.False(t, toolNames["update_entity"], "data role should NOT have update_entity without option")
+	assert.False(t, toolNames["refresh_schema"], "data role should NOT have refresh_schema without option")
 }
 
 func TestComputeToolsForRole_DeveloperRole(t *testing.T) {
@@ -103,7 +101,7 @@ func TestComputeToolsForRole_DeveloperRole(t *testing.T) {
 	assert.True(t, toolNames["echo"], "developer role should have echo")
 	assert.True(t, toolNames["execute"], "developer role should have execute")
 	assert.True(t, toolNames["query"], "developer role should have query")
-	assert.True(t, toolNames["update_entity"], "developer role should have update_entity")
+	assert.True(t, toolNames["refresh_schema"], "developer role should have refresh_schema")
 }
 
 func TestComputeToolsForRole_UserRole(t *testing.T) {
@@ -132,7 +130,7 @@ func TestComputeToolsForRole_UserRole(t *testing.T) {
 	assert.False(t, toolNames["execute"], "user should NOT have execute")
 
 	// User should NOT get ontology maintenance without option
-	assert.False(t, toolNames["update_entity"], "user should NOT have update_entity without option")
+	assert.False(t, toolNames["refresh_schema"], "user should NOT have refresh_schema without option")
 }
 
 func TestComputeToolsForRole_UserWithOntologyMaintenance(t *testing.T) {
@@ -152,7 +150,7 @@ func TestComputeToolsForRole_UserWithOntologyMaintenance(t *testing.T) {
 	// User gets User Tools + Ontology Maintenance
 	assert.True(t, toolNames["health"], "user should have health")
 	assert.True(t, toolNames["query"], "user should have query")
-	assert.True(t, toolNames["update_entity"], "user should have update_entity with option")
+	assert.True(t, toolNames["refresh_schema"], "user should have refresh_schema with option")
 	assert.True(t, toolNames["update_column"], "user should have update_column with option")
 
 	// User still should NOT get developer tools
