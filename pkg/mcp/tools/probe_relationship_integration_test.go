@@ -332,8 +332,8 @@ func (tc *fallbackTestContext) createSchemaColumn(ctx context.Context, tableID u
 
 	columnID := uuid.New()
 	_, err := scope.Conn.Exec(ctx, `
-		INSERT INTO engine_schema_columns (id, project_id, schema_table_id, column_name, data_type, is_nullable, ordinal_position, metadata)
-		VALUES ($1, $2, $3, $4, 'uuid', true, 1, '{}')
+		INSERT INTO engine_schema_columns (id, project_id, schema_table_id, column_name, data_type, is_nullable, ordinal_position)
+		VALUES ($1, $2, $3, $4, 'uuid', true, 1)
 	`, columnID, tc.projectID, tableID, columnName)
 	require.NoError(tc.t, err)
 
