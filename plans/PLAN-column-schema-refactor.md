@@ -127,7 +127,7 @@ CREATE TABLE engine_ontology_column_metadata (
 
 ### Phase 2: Model Updates
 
-- [ ] 2.1 Update `models.SchemaColumn`:
+- [x] 2.1 Update `models.SchemaColumn`:
   - Remove `BusinessName`, `Description`, `Metadata`, `IsSensitive`, `SampleValues`
   - Remove `GetColumnFeatures()` method
 
