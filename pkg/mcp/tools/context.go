@@ -523,7 +523,7 @@ func filterDatasourceTables(tables []*models.DatasourceTable, tableNames []strin
 }
 
 // buildColumnDetails builds column detail maps including features, statistics, and sample values.
-// Column features are always included when available (from engine_schema_columns.metadata).
+// Column features are always included when available (from engine_ontology_column_metadata).
 func buildColumnDetails(
 	ctx context.Context,
 	deps *ContextToolDeps,
