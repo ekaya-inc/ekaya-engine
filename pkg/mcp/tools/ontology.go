@@ -181,30 +181,24 @@ func registerGetOntologyTool(s *server.MCPServer, deps *OntologyToolDeps) {
 }
 
 // handleDomainDepth returns high-level domain context.
+// Note: Relationships have been removed for v1.0 entity simplification.
 func handleDomainDepth(ctx context.Context, deps *OntologyToolDeps, projectID uuid.UUID, includeRelationships bool) (any, error) {
 	result, err := deps.OntologyContextService.GetDomainContext(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get domain context: %w", err)
 	}
 
-	// Filter relationships if requested
-	if !includeRelationships {
-		result.Relationships = nil
-	}
-
 	return result, nil
 }
 
 // handleEntitiesDepth returns entity summaries with occurrences.
+// Note: Entity-level depth has been removed for v1.0 entity simplification.
+// This function now returns domain-level context as a fallback.
 func handleEntitiesDepth(ctx context.Context, deps *OntologyToolDeps, projectID uuid.UUID, includeRelationships bool) (any, error) {
-	result, err := deps.OntologyContextService.GetEntitiesContext(ctx, projectID)
+	// Entity functionality removed - fall back to domain context
+	result, err := deps.OntologyContextService.GetDomainContext(ctx, projectID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get entities context: %w", err)
-	}
-
-	// Filter relationships if requested
-	if !includeRelationships {
-		result.Relationships = nil
+		return nil, fmt.Errorf("failed to get domain context: %w", err)
 	}
 
 	return result, nil
