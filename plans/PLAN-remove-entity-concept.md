@@ -235,41 +235,41 @@ Review and remove entity references from:
 
 ### 7.1 Delete MCP tool files
 
-- [ ] `pkg/mcp/tools/entity.go` - Contains `update_entity`, `get_entity`, `delete_entity`
-- [ ] `pkg/mcp/tools/entity_test.go`
-- [ ] `pkg/mcp/tools/entity_integration_test.go`
+- [x] `pkg/mcp/tools/entity.go` - Contains `update_entity`, `get_entity`, `delete_entity`
+- [x] `pkg/mcp/tools/entity_test.go`
+- [x] `pkg/mcp/tools/entity_integration_test.go`
 
 ### 7.2 Update remaining MCP tools
 
 Review and remove entity references from:
-- [ ] `pkg/mcp/tools/context.go` - Remove entity context building
-- [ ] `pkg/mcp/tools/context_test.go`
-- [ ] `pkg/mcp/tools/ontology.go` - Remove entity-related tools
-- [ ] `pkg/mcp/tools/ontology_test.go`
-- [ ] `pkg/mcp/tools/ontology_helpers.go` - Remove entity helpers
-- [ ] `pkg/mcp/tools/ontology_helpers_test.go`
-- [ ] `pkg/mcp/tools/ontology_batch.go` - Remove entity batch operations
-- [ ] `pkg/mcp/tools/ontology_batch_test.go`
-- [ ] `pkg/mcp/tools/probe.go` - Remove entity probing
-- [ ] `pkg/mcp/tools/probe_test.go`
-- [ ] `pkg/mcp/tools/probe_relationship_integration_test.go`
-- [ ] `pkg/mcp/tools/relationship.go` - Remove entity relationship tools
-- [ ] `pkg/mcp/tools/relationship_test.go`
-- [ ] `pkg/mcp/tools/search.go` - Remove entity search
-- [ ] `pkg/mcp/tools/search_test.go`
-- [ ] `pkg/mcp/tools/search_integration_test.go`
-- [ ] `pkg/mcp/tools/column.go` - Remove entity column references
-- [ ] `pkg/mcp/tools/column_test.go`
-- [ ] `pkg/mcp/tools/questions.go` - Remove entity question handling
-- [ ] `pkg/mcp/tools/questions_test.go`
-- [ ] `pkg/mcp/tools/schema.go` - Remove entity schema references
+- [x] `pkg/mcp/tools/context.go` - No entity references found
+- [x] `pkg/mcp/tools/context_test.go` - No entity references found
+- [x] `pkg/mcp/tools/ontology.go` - Removed entity-related tools
+- [x] `pkg/mcp/tools/ontology_test.go` - Updated
+- [x] `pkg/mcp/tools/ontology_helpers.go` - Removed entity helpers
+- [x] `pkg/mcp/tools/ontology_helpers_test.go` - Updated
+- [x] `pkg/mcp/tools/ontology_batch.go` - No entity references found
+- [x] `pkg/mcp/tools/ontology_batch_test.go` - No entity references found
+- [x] `pkg/mcp/tools/probe.go` - Removed entity probing
+- [x] `pkg/mcp/tools/probe_test.go` - Updated
+- [x] `pkg/mcp/tools/probe_relationship_integration_test.go` - Deleted
+- [x] `pkg/mcp/tools/relationship.go` - Deleted
+- [x] `pkg/mcp/tools/relationship_test.go` - Deleted
+- [x] `pkg/mcp/tools/search.go` - Removed entity search
+- [x] `pkg/mcp/tools/search_test.go` - Updated
+- [x] `pkg/mcp/tools/search_integration_test.go` - Updated
+- [x] `pkg/mcp/tools/column.go` - No entity references found
+- [x] `pkg/mcp/tools/column_test.go` - No entity references found
+- [x] `pkg/mcp/tools/questions.go` - No entity references found
+- [x] `pkg/mcp/tools/questions_test.go` - No entity references found
+- [x] `pkg/mcp/tools/schema.go` - No entity references found
 
 ### 7.3 Update MCP tool registry
 
-- [ ] `pkg/services/mcp_tools_registry.go` - Remove entity tool registration
-- [ ] `pkg/services/mcp_tools_registry_test.go`
-- [ ] `pkg/services/mcp_tool_loadouts.go` - Remove entity tool loadouts
-- [ ] `pkg/services/mcp_tool_loadouts_test.go`
+- [x] `pkg/services/mcp_tools_registry.go` - Removed entity tool registration
+- [x] `pkg/services/mcp_tools_registry_test.go` - No changes needed
+- [x] `pkg/services/mcp_tool_loadouts.go` - Removed entity tool loadouts
+- [x] `pkg/services/mcp_tool_loadouts_test.go` - No changes needed
 
 ---
 
