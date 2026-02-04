@@ -334,25 +334,19 @@ func TestProjectService_Provision_CreatesEmptyOntology(t *testing.T) {
 		t.Error("expected an active ontology to be created with the project")
 	}
 
-	// Verify ontology is empty (version 1, no entities)
+	// Verify ontology is empty (version 1)
 	var version int
-	var entitySummariesJSON string
 	err = tenantScope.Conn.QueryRow(ctx, `
-		SELECT version, COALESCE(entity_summaries::text, '{}')
+		SELECT version
 		FROM engine_ontologies
 		WHERE project_id = $1 AND is_active = true
-	`, projectID).Scan(&version, &entitySummariesJSON)
+	`, projectID).Scan(&version)
 	if err != nil {
 		t.Fatalf("Failed to query ontology details: %v", err)
 	}
 
 	if version != 1 {
 		t.Errorf("expected ontology version 1, got %d", version)
-	}
-
-	// Empty ontology should have empty entity summaries
-	if entitySummariesJSON != "{}" && entitySummariesJSON != "null" && entitySummariesJSON != "" {
-		t.Errorf("expected empty entity summaries, got %q", entitySummariesJSON)
 	}
 }
 

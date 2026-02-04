@@ -189,17 +189,8 @@ The OntologyContextService builds context for LLM prompts. After this change, it
 
 ### 4.5 Remove entity references from schema.go and projects.go
 
-Update `pkg/services/schema.go`:
-- [ ] Search for and remove any entity references
-- [ ] This service handles schema discovery and metadata; it should not reference entity types
-
-Update `pkg/services/schema_test.go` accordingly.
-
-Update `pkg/services/projects.go`:
-- [ ] Remove entity deletion in project cleanup logic
-- [ ] When a project is deleted, the code currently deletes associated entities; remove this cleanup since entity tables no longer exist
-
-Update `pkg/services/projects_test.go` accordingly.
+- [x] Removed entity repository dependencies from schema.go and projects.go
+- [x] Updated tests accordingly
 
 ---
 

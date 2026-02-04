@@ -208,12 +208,11 @@ func (s *projectService) Provision(ctx context.Context, projectID uuid.UUID, nam
 // Errors are logged but not propagated since this is best-effort.
 func (s *projectService) createEmptyOntology(ctx context.Context, projectID uuid.UUID) {
 	emptyOntology := &models.TieredOntology{
-		ProjectID:       projectID,
-		Version:         1,
-		IsActive:        true,
-		EntitySummaries: make(map[string]*models.EntitySummary),
-		ColumnDetails:   make(map[string][]models.ColumnDetail),
-		Metadata:        make(map[string]any),
+		ProjectID:     projectID,
+		Version:       1,
+		IsActive:      true,
+		ColumnDetails: make(map[string][]models.ColumnDetail),
+		Metadata:      make(map[string]any),
 	}
 
 	if err := s.ontologyRepo.Create(ctx, emptyOntology); err != nil {
