@@ -152,15 +152,15 @@ These files contain the entity discovery, promotion, and merge logic that is bei
 ### 4.2 Remove entity references from ontology_context.go and its tests
 
 Update `pkg/services/ontology_context.go` to remove all entity-related code:
-- [ ] Remove any imports related to entity types
-- [ ] Remove entity fetching/formatting logic
-- [ ] Remove any methods that build entity context
-- [ ] Remove entity-related fields from service structs
-- [ ] Remove entity repository dependencies
+- [x] Remove any imports related to entity types
+- [x] Remove entity fetching/formatting logic
+- [x] Remove any methods that build entity context
+- [x] Remove entity-related fields from service structs
+- [x] Remove entity repository dependencies
 
 Also update the corresponding test files:
-- [ ] `pkg/services/ontology_context_test.go`
-- [ ] `pkg/services/ontology_context_integration_test.go`
+- [x] `pkg/services/ontology_context_test.go`
+- [x] `pkg/services/ontology_context_integration_test.go`
 
 The OntologyContextService builds context for LLM prompts. After this change, it should only handle table/column metadata without the entity abstraction layer.
 
