@@ -164,7 +164,7 @@ CREATE TABLE engine_ontology_column_metadata (
 
   **Verification:** Run `make check` to ensure all tests pass and no code references the removed methods.
 
-- [ ] 3.2 Update `ColumnMetadataRepository` to use `schema_column_id` FK
+- [x] 3.2 Update `ColumnMetadataRepository` to use `schema_column_id` FK ✓
 
   **Context:** `engine_ontology_column_metadata` has been refactored to use `schema_column_id uuid` as a foreign key to `engine_schema_columns` instead of `table_name`/`column_name` text fields. The table also has new typed columns for features.
 
