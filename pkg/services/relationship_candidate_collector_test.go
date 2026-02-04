@@ -742,8 +742,8 @@ func TestIdentifyFKSources_ErrorHandling(t *testing.T) {
 
 	t.Run("ListColumnsByDatasource error", func(t *testing.T) {
 		repo := &mockSchemaRepoForCandidateCollector{
-			allColumns: map[string][]*models.SchemaColumn{},
-			allColumnsErr:  errors.New("database error"),
+			allColumns:    map[string][]*models.SchemaColumn{},
+			allColumnsErr: errors.New("database error"),
 		}
 
 		collector := newTestCandidateCollector(repo)
@@ -756,8 +756,8 @@ func TestIdentifyFKSources_ErrorHandling(t *testing.T) {
 	t.Run("ListTablesByDatasource error", func(t *testing.T) {
 		repo := &mockSchemaRepoForCandidateCollector{
 			allColumns: map[string][]*models.SchemaColumn{},
-			allColumns:     []*models.SchemaColumn{},
-			tablesErr:      errors.New("database error"),
+			allColumns: []*models.SchemaColumn{},
+			tablesErr:  errors.New("database error"),
 		}
 
 		collector := newTestCandidateCollector(repo)
@@ -774,8 +774,8 @@ func TestIdentifyFKSources_EmptyDataset(t *testing.T) {
 
 	repo := &mockSchemaRepoForCandidateCollector{
 		allColumns: map[string][]*models.SchemaColumn{},
-		allColumns:     []*models.SchemaColumn{},
-		tables:         []*models.SchemaTable{},
+		allColumns: []*models.SchemaColumn{},
+		tables:     []*models.SchemaTable{},
 	}
 
 	collector := newTestCandidateCollector(repo)
@@ -803,8 +803,8 @@ func TestIdentifyFKSources_SkipsColumnsWithoutTableName(t *testing.T) {
 
 	repo := &mockSchemaRepoForCandidateCollector{
 		allColumns: map[string][]*models.SchemaColumn{},
-		allColumns:     []*models.SchemaColumn{col},
-		tables:         []*models.SchemaTable{}, // Empty - no tables to resolve
+		allColumns: []*models.SchemaColumn{col},
+		tables:     []*models.SchemaTable{}, // Empty - no tables to resolve
 	}
 
 	collector := newTestCandidateCollector(repo)
@@ -2385,8 +2385,8 @@ func TestCollectCandidates_DatasourceGetError(t *testing.T) {
 
 	repo := &mockSchemaRepoForCandidateCollector{
 		allColumns: map[string][]*models.SchemaColumn{},
-		allColumns:     []*models.SchemaColumn{},
-		tables:         []*models.SchemaTable{},
+		allColumns: []*models.SchemaColumn{},
+		tables:     []*models.SchemaTable{},
 	}
 
 	dsSvc := &mockDatasourceServiceForCandidateCollector{
@@ -2406,8 +2406,8 @@ func TestCollectCandidates_AdapterCreationError(t *testing.T) {
 
 	repo := &mockSchemaRepoForCandidateCollector{
 		allColumns: map[string][]*models.SchemaColumn{},
-		allColumns:     []*models.SchemaColumn{},
-		tables:         []*models.SchemaTable{},
+		allColumns: []*models.SchemaColumn{},
+		tables:     []*models.SchemaTable{},
 	}
 
 	adapterFactory := &mockAdapterFactoryForCandidateCollector{

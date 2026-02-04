@@ -135,6 +135,7 @@ func TestPKMatchDiscovery_ChannelsOwnerToUsersUserID(t *testing.T) {
 		entityRepo,
 		relationshipRepo,
 		schemaRepo,
+		nil, // columnMetadataRepo not needed for these tests
 		zap.NewNop(),
 	)
 

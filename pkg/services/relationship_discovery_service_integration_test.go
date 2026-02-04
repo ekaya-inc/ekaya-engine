@@ -696,6 +696,7 @@ func TestRelationshipDiscoveryService_DBDeclaredFKPreserved(t *testing.T) {
 		mockDS,
 		adapterFactory,
 		tc.schemaRepo,
+		nil, // columnMetadataRepo not needed for these tests
 		tc.logger,
 	)
 
@@ -826,6 +827,7 @@ func TestRelationshipDiscoveryService_LowOrphanRate_LLMAccepts(t *testing.T) {
 		mockDS,
 		adapterFactory,
 		tc.schemaRepo,
+		nil, // columnMetadataRepo not needed for these tests
 		tc.logger,
 	)
 
@@ -954,6 +956,7 @@ func TestRelationshipDiscoveryService_HighOrphanRate_LLMRejects(t *testing.T) {
 		mockDS,
 		adapterFactory,
 		tc.schemaRepo,
+		nil, // columnMetadataRepo not needed for these tests
 		tc.logger,
 	)
 
@@ -1126,6 +1129,7 @@ func TestRelationshipDiscoveryService_ProgressCallback(t *testing.T) {
 		mockDS,
 		adapterFactory,
 		tc.schemaRepo,
+		nil, // columnMetadataRepo not needed for these tests
 		tc.logger,
 	)
 
@@ -1400,7 +1404,7 @@ func TestRelationshipDiscoveryService_ResultStatistics(t *testing.T) {
 	}
 	require.NoError(t, tc.schemaRepo.UpsertColumn(ctx, paymentsIDCol))
 
-	// payments.order_id (FK via ColumnFeatures - high confidence)
+	// payments.order_id (FK via column metadata - high confidence)
 	paymentsOrderIDCol := &models.SchemaColumn{
 		ProjectID:       tc.projectID,
 		SchemaTableID:   paymentsTable.ID,
@@ -1410,20 +1414,26 @@ func TestRelationshipDiscoveryService_ResultStatistics(t *testing.T) {
 		IsPrimaryKey:    false,
 		OrdinalPosition: 2,
 		IsSelected:      true,
-		Metadata: map[string]any{
-			"column_features": map[string]any{
-				"classification_path": "uuid",
-				"role":                "foreign_key",
-				"purpose":             "identifier",
-				"identifier_features": map[string]any{
-					"fk_target_table":  "stat_test_orders",
-					"fk_target_column": "id",
-					"fk_confidence":    0.95, // High confidence - should be preserved
-				},
-			},
-		},
 	}
 	require.NoError(t, tc.schemaRepo.UpsertColumn(ctx, paymentsOrderIDCol))
+
+	// Create column metadata with FK features for payments.order_id
+	// This enables PreservedColumnFKs behavior in relationship discovery
+	colMetaRepo := repositories.NewColumnMetadataRepository()
+	fkRole := "foreign_key"
+	require.NoError(t, colMetaRepo.Upsert(ctx, &models.ColumnMetadata{
+		ProjectID:      tc.projectID,
+		SchemaColumnID: paymentsOrderIDCol.ID,
+		Role:           &fkRole,
+		Source:         models.ProvenanceInferred,
+		Features: models.ColumnMetadataFeatures{
+			IdentifierFeatures: &models.IdentifierFeatures{
+				FKTargetTable:  "stat_test_orders",
+				FKTargetColumn: "id",
+				FKConfidence:   0.95, // High confidence - should be preserved
+			},
+		},
+	}))
 
 	// reviews.id (PK)
 	reviewsIDCol := &models.SchemaColumn{
@@ -1631,6 +1641,7 @@ func TestRelationshipDiscoveryService_ResultStatistics(t *testing.T) {
 		mockDS,
 		adapterFactory,
 		tc.schemaRepo,
+		colMetaRepo, // Required for ColumnFeatures FK preservation
 		tc.logger,
 	)
 

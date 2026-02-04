@@ -416,6 +416,7 @@ func TestPKMatchDiscovery_Integration(t *testing.T) {
 		repositories.NewOntologyEntityRepository(),
 		repositories.NewEntityRelationshipRepository(),
 		tc.schemaRepo,
+		nil, // columnMetadataRepo not needed for these tests
 		tc.logger,
 	)
 
@@ -535,6 +536,7 @@ func TestPKMatchDiscovery_NoFalsePositives(t *testing.T) {
 		repositories.NewOntologyEntityRepository(),
 		repositories.NewEntityRelationshipRepository(),
 		tc.schemaRepo,
+		nil, // columnMetadataRepo not needed for these tests
 		tc.logger,
 	)
 
@@ -634,6 +636,7 @@ func TestPKMatchDiscovery_LegitimateRelationships(t *testing.T) {
 		repositories.NewOntologyEntityRepository(),
 		repositories.NewEntityRelationshipRepository(),
 		tc.schemaRepo,
+		nil, // columnMetadataRepo not needed for these tests
 		tc.logger,
 	)
 
@@ -785,6 +788,7 @@ func TestPKMatchDiscovery_SchemaRelationshipsNotEntityRelationships(t *testing.T
 		repositories.NewOntologyEntityRepository(),
 		entityRelRepo,
 		tc.schemaRepo,
+		nil, // columnMetadataRepo not needed for these tests
 		tc.logger,
 	)
 
