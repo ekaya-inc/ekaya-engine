@@ -293,7 +293,7 @@ CREATE TABLE engine_ontology_column_metadata (
 
   **Verification:** Run `make check` to ensure all tests pass.
 
-- [ ] 4.2.5 Update DataChangeDetectionService and ColumnFilterService to use ColumnMetadataRepository
+- [x] 4.2.5 Update DataChangeDetectionService and ColumnFilterService to use ColumnMetadataRepository ✓
 
   **Context:** As part of the column schema refactor, `ColumnFeatures` data has moved from `engine_schema_columns.metadata` JSONB to `engine_ontology_column_metadata` with typed columns.
 
