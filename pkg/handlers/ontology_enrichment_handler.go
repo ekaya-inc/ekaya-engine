@@ -17,30 +17,11 @@ import (
 
 // EnrichmentResponse represents the enrichment data for UI display.
 type EnrichmentResponse struct {
-	EntitySummaries []EntitySummaryResponse `json:"entity_summaries"`
-	ColumnDetails   []EntityColumnsResponse `json:"column_details"`
+	ColumnDetails []TableColumnsResponse `json:"column_details"`
 }
 
-// EntitySummaryResponse represents a table-level summary.
-type EntitySummaryResponse struct {
-	TableName     string              `json:"table_name"`
-	BusinessName  string              `json:"business_name"`
-	Description   string              `json:"description"`
-	Domain        string              `json:"domain"`
-	Synonyms      []string            `json:"synonyms,omitempty"`
-	KeyColumns    []KeyColumnResponse `json:"key_columns,omitempty"`
-	ColumnCount   int                 `json:"column_count"`
-	Relationships []string            `json:"relationships,omitempty"`
-}
-
-// KeyColumnResponse represents a key column in an entity summary.
-type KeyColumnResponse struct {
-	Name     string   `json:"name"`
-	Synonyms []string `json:"synonyms,omitempty"`
-}
-
-// EntityColumnsResponse represents column details for a table.
-type EntityColumnsResponse struct {
+// TableColumnsResponse represents column details for a table.
+type TableColumnsResponse struct {
 	TableName string                 `json:"table_name"`
 	Columns   []ColumnDetailResponse `json:"columns"`
 }
@@ -118,7 +99,6 @@ type EnumValueResponse struct {
 
 // OntologyEnrichmentHandler handles ontology enrichment HTTP requests.
 type OntologyEnrichmentHandler struct {
-	ontologyRepo   repositories.OntologyRepository
 	schemaRepo     repositories.SchemaRepository
 	projectService services.ProjectService
 	logger         *zap.Logger
@@ -126,13 +106,11 @@ type OntologyEnrichmentHandler struct {
 
 // NewOntologyEnrichmentHandler creates a new ontology enrichment handler.
 func NewOntologyEnrichmentHandler(
-	ontologyRepo repositories.OntologyRepository,
 	schemaRepo repositories.SchemaRepository,
 	projectService services.ProjectService,
 	logger *zap.Logger,
 ) *OntologyEnrichmentHandler {
 	return &OntologyEnrichmentHandler{
-		ontologyRepo:   ontologyRepo,
 		schemaRepo:     schemaRepo,
 		projectService: projectService,
 		logger:         logger,
@@ -141,14 +119,14 @@ func NewOntologyEnrichmentHandler(
 
 // RegisterRoutes registers the ontology enrichment handler's routes.
 func (h *OntologyEnrichmentHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.Middleware, tenantMiddleware TenantMiddleware) {
-	// Get enrichment data (entity summaries + column details)
+	// Get enrichment data (column details with features)
 	mux.HandleFunc("GET /api/projects/{pid}/ontology/enrichment",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetEnrichment)))
 }
 
 // GetEnrichment handles GET /api/projects/{pid}/ontology/enrichment
 // Returns column enrichment data (features extracted from schema) for the Enrichment UI page.
-// Works with or without a full ontology - column features come from engine_schema_columns.metadata.
+// Column features come from engine_schema_columns.metadata.
 func (h *OntologyEnrichmentHandler) GetEnrichment(w http.ResponseWriter, r *http.Request) {
 	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
@@ -179,34 +157,13 @@ func (h *OntologyEnrichmentHandler) GetEnrichment(w http.ResponseWriter, r *http
 		return
 	}
 
-	// Try to get ontology for entity summaries (optional)
-	var entitySummaries []EntitySummaryResponse
-	ontology, err := h.ontologyRepo.GetActive(r.Context(), projectID)
-	if err != nil {
-		h.logger.Warn("Failed to get active ontology",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		// Continue without entity summaries
-	}
-	if ontology != nil {
-		for _, summary := range ontology.EntitySummaries {
-			if summary != nil {
-				entitySummaries = append(entitySummaries, h.toEntitySummaryResponse(summary))
-			}
-		}
-	}
-	if entitySummaries == nil {
-		entitySummaries = []EntitySummaryResponse{}
-	}
-
 	// Build column details response from schema columns
 	columnDetails := h.buildColumnDetailsFromSchema(schemaColumnsByTable)
 
 	response := ApiResponse{
 		Success: true,
 		Data: EnrichmentResponse{
-			EntitySummaries: entitySummaries,
-			ColumnDetails:   columnDetails,
+			ColumnDetails: columnDetails,
 		},
 	}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
@@ -215,8 +172,8 @@ func (h *OntologyEnrichmentHandler) GetEnrichment(w http.ResponseWriter, r *http
 }
 
 // buildColumnDetailsFromSchema builds column detail responses directly from schema columns.
-func (h *OntologyEnrichmentHandler) buildColumnDetailsFromSchema(schemaColumnsByTable map[string][]*models.SchemaColumn) []EntityColumnsResponse {
-	result := make([]EntityColumnsResponse, 0, len(schemaColumnsByTable))
+func (h *OntologyEnrichmentHandler) buildColumnDetailsFromSchema(schemaColumnsByTable map[string][]*models.SchemaColumn) []TableColumnsResponse {
+	result := make([]TableColumnsResponse, 0, len(schemaColumnsByTable))
 
 	for tableName, columns := range schemaColumnsByTable {
 		columnResponses := make([]ColumnDetailResponse, 0, len(columns))
@@ -246,7 +203,7 @@ func (h *OntologyEnrichmentHandler) buildColumnDetailsFromSchema(schemaColumnsBy
 			columnResponses = append(columnResponses, resp)
 		}
 
-		result = append(result, EntityColumnsResponse{
+		result = append(result, TableColumnsResponse{
 			TableName: tableName,
 			Columns:   columnResponses,
 		})
@@ -258,102 +215,6 @@ func (h *OntologyEnrichmentHandler) buildColumnDetailsFromSchema(schemaColumnsBy
 // ============================================================================
 // Helper Methods
 // ============================================================================
-
-func (h *OntologyEnrichmentHandler) toEnrichmentResponse(ontology *models.TieredOntology, schemaColumnsByTable map[string][]*models.SchemaColumn) EnrichmentResponse {
-	// Convert entity summaries (map to array)
-	entitySummaries := make([]EntitySummaryResponse, 0, len(ontology.EntitySummaries))
-	for _, summary := range ontology.EntitySummaries {
-		if summary == nil {
-			continue
-		}
-		entitySummaries = append(entitySummaries, h.toEntitySummaryResponse(summary))
-	}
-
-	// Build a lookup map for schema columns by table+column name
-	schemaColLookup := make(map[string]*models.SchemaColumn)
-	for tableName, cols := range schemaColumnsByTable {
-		for _, col := range cols {
-			key := tableName + "." + col.ColumnName
-			schemaColLookup[key] = col
-		}
-	}
-
-	// Convert column details (map to array)
-	columnDetails := make([]EntityColumnsResponse, 0, len(ontology.ColumnDetails))
-	for tableName, columns := range ontology.ColumnDetails {
-		columnDetails = append(columnDetails, EntityColumnsResponse{
-			TableName: tableName,
-			Columns:   h.toColumnDetailResponses(tableName, columns, schemaColLookup),
-		})
-	}
-
-	return EnrichmentResponse{
-		EntitySummaries: entitySummaries,
-		ColumnDetails:   columnDetails,
-	}
-}
-
-func (h *OntologyEnrichmentHandler) toEntitySummaryResponse(summary *models.EntitySummary) EntitySummaryResponse {
-	keyColumns := make([]KeyColumnResponse, 0, len(summary.KeyColumns))
-	for _, kc := range summary.KeyColumns {
-		keyColumns = append(keyColumns, KeyColumnResponse{
-			Name:     kc.Name,
-			Synonyms: kc.Synonyms,
-		})
-	}
-
-	return EntitySummaryResponse{
-		TableName:     summary.TableName,
-		BusinessName:  summary.BusinessName,
-		Description:   summary.Description,
-		Domain:        summary.Domain,
-		Synonyms:      summary.Synonyms,
-		KeyColumns:    keyColumns,
-		ColumnCount:   summary.ColumnCount,
-		Relationships: summary.Relationships,
-	}
-}
-
-func (h *OntologyEnrichmentHandler) toColumnDetailResponses(tableName string, columns []models.ColumnDetail, schemaColLookup map[string]*models.SchemaColumn) []ColumnDetailResponse {
-	responses := make([]ColumnDetailResponse, 0, len(columns))
-	for _, col := range columns {
-		enumValues := make([]EnumValueResponse, 0, len(col.EnumValues))
-		for _, ev := range col.EnumValues {
-			// Use Label or Description as "meaning" for UI display
-			meaning := ev.Label
-			if meaning == "" {
-				meaning = ev.Description
-			}
-			enumValues = append(enumValues, EnumValueResponse{
-				Value:   ev.Value,
-				Meaning: meaning,
-			})
-		}
-
-		resp := ColumnDetailResponse{
-			Name:         col.Name,
-			Description:  col.Description,
-			Synonyms:     col.Synonyms,
-			SemanticType: col.SemanticType,
-			Role:         col.Role,
-			EnumValues:   enumValues,
-			IsPrimaryKey: col.IsPrimaryKey,
-			IsForeignKey: col.IsForeignKey,
-			ForeignTable: col.ForeignTable,
-		}
-
-		// Look up schema column to get features
-		key := tableName + "." + col.Name
-		if schemaCol, ok := schemaColLookup[key]; ok {
-			if features := schemaCol.GetColumnFeatures(); features != nil {
-				resp.Features = h.toColumnFeaturesResponse(features)
-			}
-		}
-
-		responses = append(responses, resp)
-	}
-	return responses
-}
 
 // toColumnFeaturesResponse converts ColumnFeatures to the API response format.
 func (h *OntologyEnrichmentHandler) toColumnFeaturesResponse(features *models.ColumnFeatures) *ColumnFeaturesResponse {

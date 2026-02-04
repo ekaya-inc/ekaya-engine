@@ -234,16 +234,16 @@ Review and remove entity references from:
 
 ### 6.1 Delete handler files
 
-- [ ] `pkg/handlers/entity_handler.go`
-- [ ] `pkg/handlers/entity_integration_test.go`
-- [ ] `pkg/handlers/entity_relationship_handler.go`
-- [ ] `pkg/handlers/entity_relationship_handler_test.go`
+- [x] `pkg/handlers/entity_handler.go`
+- [x] `pkg/handlers/entity_integration_test.go`
+- [x] `pkg/handlers/entity_relationship_handler.go`
+- [x] `pkg/handlers/entity_relationship_handler_test.go`
 
 ### 6.2 Update remaining handlers
 
 Review and remove entity references from:
-- [ ] `pkg/handlers/ontology_enrichment_handler.go` - Remove entity-related endpoints/logic
-- [ ] `pkg/handlers/params.go` - Remove entity params if any
+- [x] `pkg/handlers/ontology_enrichment_handler.go` - Remove entity-related endpoints/logic
+- [x] `pkg/handlers/params.go` - Remove entity params if any
 
 ---
 
