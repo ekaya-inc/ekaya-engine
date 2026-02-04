@@ -47,8 +47,8 @@ func registerSearchSchemaTool(s *server.MCPServer, deps *SearchToolDeps) {
 		"search_schema",
 		mcp.WithDescription(
 			"Full-text search across tables, columns, and entities using pattern matching. "+
-				"Returns matching items ranked by relevance. Searches table names, column names, "+
-				"business names, descriptions, and entity names/aliases. "+
+				"Returns matching items ranked by relevance. Searches table names, table descriptions, "+
+				"column names, and entity names/aliases/descriptions. "+
 				"Example: search_schema(query='user') returns all tables, columns, and entities "+
 				"related to users, ordered by relevance.",
 		),
@@ -136,14 +136,12 @@ type tableMatch struct {
 
 // columnMatch represents a matched column.
 type columnMatch struct {
-	SchemaName   string  `json:"schema_name"`
-	TableName    string  `json:"table_name"`
-	ColumnName   string  `json:"column_name"`
-	DataType     string  `json:"data_type"`
-	BusinessName *string `json:"business_name,omitempty"`
-	Description  *string `json:"description,omitempty"`
-	MatchType    string  `json:"match_type"` // "column_name", "business_name", "description"
-	Relevance    float64 `json:"relevance"`
+	SchemaName string  `json:"schema_name"`
+	TableName  string  `json:"table_name"`
+	ColumnName string  `json:"column_name"`
+	DataType   string  `json:"data_type"`
+	MatchType  string  `json:"match_type"` // "column_name"
+	Relevance  float64 `json:"relevance"`
 }
 
 // entityMatch represents a matched entity.
@@ -287,20 +285,17 @@ func searchColumns(ctx context.Context, deps *SearchToolDeps, projectID uuid.UUI
 	}
 
 	// Query to search columns using ILIKE for pattern matching
+	// Note: engine_schema_columns no longer has business_name or description columns
+	// (those semantic fields are now in engine_ontology_column_metadata)
 	q := `
 		SELECT DISTINCT
 			st.schema_name,
 			st.table_name,
 			sc.column_name,
 			sc.data_type,
-			sc.business_name,
-			sc.description,
 			CASE
 				WHEN LOWER(sc.column_name) = $1 THEN 1.0
 				WHEN LOWER(sc.column_name) LIKE $1 || '%' THEN 0.9
-				WHEN LOWER(sc.business_name) = $1 THEN 0.95
-				WHEN LOWER(sc.business_name) LIKE '%' || $1 || '%' THEN 0.8
-				WHEN LOWER(sc.description) LIKE '%' || $1 || '%' THEN 0.6
 				ELSE 0.5
 			END as relevance
 		FROM engine_schema_columns sc
@@ -308,11 +303,7 @@ func searchColumns(ctx context.Context, deps *SearchToolDeps, projectID uuid.UUI
 		WHERE sc.project_id = $2
 			AND sc.deleted_at IS NULL
 			AND st.deleted_at IS NULL
-			AND (
-				LOWER(sc.column_name) LIKE '%' || $1 || '%'
-				OR LOWER(sc.business_name) LIKE '%' || $1 || '%'
-				OR LOWER(sc.description) LIKE '%' || $1 || '%'
-			)
+			AND LOWER(sc.column_name) LIKE '%' || $1 || '%'
 		ORDER BY relevance DESC, st.table_name ASC, sc.column_name ASC
 		LIMIT $3
 	`
@@ -331,21 +322,13 @@ func searchColumns(ctx context.Context, deps *SearchToolDeps, projectID uuid.UUI
 			&m.TableName,
 			&m.ColumnName,
 			&m.DataType,
-			&m.BusinessName,
-			&m.Description,
 			&m.Relevance,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan column match: %w", err)
 		}
 
-		// Determine match type
-		if strings.Contains(strings.ToLower(m.ColumnName), query) {
-			m.MatchType = "column_name"
-		} else if m.BusinessName != nil && strings.Contains(strings.ToLower(*m.BusinessName), query) {
-			m.MatchType = "business_name"
-		} else if m.Description != nil && strings.Contains(strings.ToLower(*m.Description), query) {
-			m.MatchType = "description"
-		}
+		// Only column_name matching is available now
+		m.MatchType = "column_name"
 
 		matches = append(matches, m)
 	}

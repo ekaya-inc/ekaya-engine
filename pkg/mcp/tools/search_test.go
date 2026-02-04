@@ -50,26 +50,21 @@ func TestTableMatch_Structure(t *testing.T) {
 
 func TestColumnMatch_Structure(t *testing.T) {
 	// Test that columnMatch has expected fields
-	businessName := "User ID"
-	description := "Primary key for users"
-
+	// Note: business_name and description were removed from engine_schema_columns
+	// (those semantic fields are now in engine_ontology_column_metadata)
 	match := columnMatch{
-		SchemaName:   "public",
-		TableName:    "users",
-		ColumnName:   "user_id",
-		DataType:     "uuid",
-		BusinessName: &businessName,
-		Description:  &description,
-		MatchType:    "column_name",
-		Relevance:    0.9,
+		SchemaName: "public",
+		TableName:  "users",
+		ColumnName: "user_id",
+		DataType:   "uuid",
+		MatchType:  "column_name",
+		Relevance:  0.9,
 	}
 
 	assert.Equal(t, "public", match.SchemaName)
 	assert.Equal(t, "users", match.TableName)
 	assert.Equal(t, "user_id", match.ColumnName)
 	assert.Equal(t, "uuid", match.DataType)
-	assert.Equal(t, "User ID", *match.BusinessName)
-	assert.Equal(t, "Primary key for users", *match.Description)
 	assert.Equal(t, "column_name", match.MatchType)
 	assert.Equal(t, 0.9, match.Relevance)
 }
@@ -125,8 +120,11 @@ func TestSearchResult_TotalCount(t *testing.T) {
 
 func TestMatchTypes(t *testing.T) {
 	// Test that all match types are string constants
+	// Tables: still support business_name and description (on engine_schema_tables)
 	validTableMatchTypes := []string{"table_name", "business_name", "description"}
-	validColumnMatchTypes := []string{"column_name", "business_name", "description"}
+	// Columns: only support column_name (business_name/description moved to engine_ontology_column_metadata)
+	validColumnMatchTypes := []string{"column_name"}
+	// Entities: support name, alias, and description
 	validEntityMatchTypes := []string{"name", "alias", "description"}
 
 	for _, mt := range validTableMatchTypes {
