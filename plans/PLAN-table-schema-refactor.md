@@ -122,7 +122,7 @@ CREATE TABLE engine_ontology_table_metadata (
   - Update all queries to exclude dropped columns (`business_name`, `description`, `metadata`)
   - Remove `UpdateTableMetadata()` method (no longer needed)
 
-- [ ] 3.2 Update `TableMetadataRepository` in `pkg/repositories/table_metadata_repository.go`:
+- [x] 3.2 Update `TableMetadataRepository` in `pkg/repositories/table_metadata_repository.go`:
   - Change from `datasource_id` + `table_name` key to `schema_table_id` FK
   - Update table name from `engine_table_metadata` to `engine_ontology_table_metadata`
   - Add `GetBySchemaTableID(ctx context.Context, schemaTableID uuid.UUID) (*models.TableMetadata, error)`
