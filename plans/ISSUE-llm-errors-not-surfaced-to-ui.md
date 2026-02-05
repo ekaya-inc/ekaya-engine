@@ -1,5 +1,7 @@
 # ISSUE: LLM Errors Not Surfaced to UI
 
+**Status:** FIXED (2026-02-05)
+
 ## Summary
 
 When the LLM gateway is unavailable (connection refused), the backend logs errors but the UI shows no indication of failure. Users have no way to know that extraction failed or is experiencing problems.
@@ -55,3 +57,54 @@ When the LLM gateway is unavailable (connection refused), the backend logs error
 ## Priority
 
 **High** - Users cannot diagnose extraction failures without this feedback.
+
+## Root Cause Analysis
+
+**Actual Root Cause:** #1 - Error not propagating to DAG
+
+The first DAG node that uses LLM (`KnowledgeSeedingNode`) was configured to swallow ALL errors including connection errors. This "graceful degradation" pattern was overly broad:
+
+```go
+// BEFORE: All errors swallowed
+if err != nil {
+    n.Logger().Warn("Failed to extract knowledge from overview - continuing without seeded knowledge", ...)
+    factsStored = 0
+}
+```
+
+When the LLM gateway is unavailable:
+1. `KnowledgeSeedingNode` swallows the connection error, marks itself "completed"
+2. Subsequent nodes that need LLM will also fail, but the first node already completed successfully
+3. If subsequent nodes have no data to process (e.g., 0 columns), they complete instantly
+4. DAG appears to complete successfully despite LLM being unreachable
+
+## Fix Applied
+
+Modified `pkg/services/dag/knowledge_seeding_node.go` to propagate endpoint and auth errors while still gracefully degrading for other error types:
+
+```go
+// AFTER: Connection/auth errors propagate, others degrade gracefully
+if err != nil {
+    errType := llm.GetErrorType(err)
+    if errType == llm.ErrorTypeEndpoint || errType == llm.ErrorTypeAuth {
+        return fmt.Errorf("LLM configuration error: %w", err)
+    }
+    // Other errors - continue without seeded knowledge
+    n.Logger().Warn("Failed to extract knowledge from overview - continuing without seeded knowledge", ...)
+    factsStored = 0
+}
+```
+
+This ensures:
+- **Connection refused** errors fail the DAG immediately with a clear error message
+- **Auth errors** (invalid API key) fail the DAG immediately
+- **Other errors** (parsing failures, rate limits, etc.) allow graceful degradation since the LLM is working
+
+## Tests Added
+
+- `TestKnowledgeSeedingNode_Execute_EndpointError_Propagates` - Verifies connection errors fail the DAG
+- `TestKnowledgeSeedingNode_Execute_AuthError_Propagates` - Verifies auth errors fail the DAG
+
+## Verification
+
+All tests pass including integration tests (`make check` succeeds).

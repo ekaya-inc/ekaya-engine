@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
@@ -65,7 +66,15 @@ func (n *KnowledgeSeedingNode) Execute(ctx context.Context, dag *models.Ontology
 	// Call the underlying service method to extract knowledge from overview
 	factsStored, err := n.knowledgeSeeding.ExtractKnowledgeFromOverview(ctx, dag.ProjectID, dag.DatasourceID)
 	if err != nil {
-		// Log but don't fail - knowledge seeding enhances but isn't required
+		// Connection/endpoint errors indicate LLM config problems that will affect ALL nodes.
+		// These must propagate to fail the DAG and show the user what's wrong.
+		errType := llm.GetErrorType(err)
+		if errType == llm.ErrorTypeEndpoint || errType == llm.ErrorTypeAuth {
+			return fmt.Errorf("LLM configuration error: %w", err)
+		}
+
+		// Other errors (parsing, rate limits, etc.) - continue without seeded knowledge
+		// Knowledge seeding enhances but isn't required for extraction to succeed.
 		n.Logger().Warn("Failed to extract knowledge from overview - continuing without seeded knowledge",
 			zap.String("project_id", dag.ProjectID.String()),
 			zap.String("degradation_type", "knowledge_seeding"),
