@@ -118,8 +118,9 @@ CREATE TABLE engine_ontology_table_metadata (
 
 ### Phase 3: Repository Updates
 
-- [ ] 3.1 Update `SchemaRepository` in `pkg/repositories/schema_repository.go`:
+- [x] 3.1 Update `SchemaRepository` in `pkg/repositories/schema_repository.go`:
   - Update all queries to exclude dropped columns (`business_name`, `description`, `metadata`)
+  - Remove `UpdateTableMetadata()` method (no longer needed)
 
 - [ ] 3.2 Update `TableMetadataRepository` in `pkg/repositories/table_metadata_repository.go`:
   - Change from `datasource_id` + `table_name` key to `schema_table_id` FK

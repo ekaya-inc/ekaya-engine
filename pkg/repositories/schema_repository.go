@@ -38,7 +38,6 @@ type SchemaRepository interface {
 	UpsertTable(ctx context.Context, table *models.SchemaTable) error
 	SoftDeleteRemovedTables(ctx context.Context, projectID, datasourceID uuid.UUID, activeTableKeys []TableKey) (int64, error)
 	UpdateTableSelection(ctx context.Context, projectID, tableID uuid.UUID, isSelected bool) error
-	UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error
 
 	// Columns
 	// ListColumnsByTable returns columns for a specific table.
@@ -113,8 +112,7 @@ func (r *schemaRepository) ListTablesByDatasource(ctx context.Context, projectID
 
 	query := `
 		SELECT id, project_id, datasource_id, schema_name, table_name,
-		       is_selected, row_count, business_name, description, metadata,
-		       created_at, updated_at
+		       is_selected, row_count, created_at, updated_at
 		FROM engine_schema_tables
 		WHERE project_id = $1 AND datasource_id = $2 AND deleted_at IS NULL`
 	if selectedOnly {
@@ -151,8 +149,7 @@ func (r *schemaRepository) GetTableByID(ctx context.Context, projectID, tableID 
 
 	query := `
 		SELECT id, project_id, datasource_id, schema_name, table_name,
-		       is_selected, row_count, business_name, description, metadata,
-		       created_at, updated_at
+		       is_selected, row_count, created_at, updated_at
 		FROM engine_schema_tables
 		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
 
@@ -176,8 +173,7 @@ func (r *schemaRepository) GetTableByName(ctx context.Context, projectID, dataso
 
 	query := `
 		SELECT id, project_id, datasource_id, schema_name, table_name,
-		       is_selected, row_count, business_name, description, metadata,
-		       created_at, updated_at
+		       is_selected, row_count, created_at, updated_at
 		FROM engine_schema_tables
 		WHERE project_id = $1 AND datasource_id = $2
 		  AND schema_name = $3 AND table_name = $4 AND deleted_at IS NULL`
@@ -202,8 +198,7 @@ func (r *schemaRepository) FindTableByName(ctx context.Context, projectID, datas
 
 	query := `
 		SELECT id, project_id, datasource_id, schema_name, table_name,
-		       is_selected, row_count, business_name, description, metadata,
-		       created_at, updated_at
+		       is_selected, row_count, created_at, updated_at
 		FROM engine_schema_tables
 		WHERE project_id = $1 AND datasource_id = $2
 		  AND table_name = $3 AND deleted_at IS NULL`
@@ -233,44 +228,32 @@ func (r *schemaRepository) UpsertTable(ctx context.Context, table *models.Schema
 		table.CreatedAt = now
 	}
 
-	metadata, err := json.Marshal(table.Metadata)
-	if err != nil {
-		return fmt.Errorf("failed to marshal metadata: %w", err)
-	}
-	if table.Metadata == nil {
-		metadata = []byte("{}")
-	}
-
 	// First, try to reactivate a soft-deleted record
 	reactivateQuery := `
 		UPDATE engine_schema_tables
 		SET deleted_at = NULL,
 		    row_count = $5,
-		    metadata = $6,
-		    updated_at = $7
+		    updated_at = $6
 		WHERE project_id = $1
 		  AND datasource_id = $2
 		  AND schema_name = $3
 		  AND table_name = $4
 		  AND deleted_at IS NOT NULL
-		RETURNING id, created_at, is_selected, business_name, description`
+		RETURNING id, created_at, is_selected`
 
 	var existingID uuid.UUID
 	var existingCreatedAt time.Time
 	var existingIsSelected bool
-	var existingBusinessName, existingDescription *string
-	err = scope.Conn.QueryRow(ctx, reactivateQuery,
+	err := scope.Conn.QueryRow(ctx, reactivateQuery,
 		table.ProjectID, table.DatasourceID, table.SchemaName, table.TableName,
-		table.RowCount, metadata, now,
-	).Scan(&existingID, &existingCreatedAt, &existingIsSelected, &existingBusinessName, &existingDescription)
+		table.RowCount, now,
+	).Scan(&existingID, &existingCreatedAt, &existingIsSelected)
 
 	if err == nil {
-		// Reactivated soft-deleted record - preserve user metadata
+		// Reactivated soft-deleted record
 		table.ID = existingID
 		table.CreatedAt = existingCreatedAt
 		table.IsSelected = existingIsSelected
-		table.BusinessName = existingBusinessName
-		table.Description = existingDescription
 		return nil
 	}
 	if err != pgx.ErrNoRows {
@@ -281,22 +264,19 @@ func (r *schemaRepository) UpsertTable(ctx context.Context, table *models.Schema
 	upsertQuery := `
 		INSERT INTO engine_schema_tables (
 			id, project_id, datasource_id, schema_name, table_name,
-			is_selected, row_count, business_name, description, metadata,
-			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			is_selected, row_count, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (project_id, datasource_id, schema_name, table_name)
 			WHERE deleted_at IS NULL
 		DO UPDATE SET
 			row_count = EXCLUDED.row_count,
-			metadata = EXCLUDED.metadata,
 			updated_at = EXCLUDED.updated_at
-		RETURNING id, created_at, is_selected, business_name, description`
+		RETURNING id, created_at, is_selected`
 
 	err = scope.Conn.QueryRow(ctx, upsertQuery,
 		table.ID, table.ProjectID, table.DatasourceID, table.SchemaName, table.TableName,
-		table.IsSelected, table.RowCount, table.BusinessName, table.Description, metadata,
-		table.CreatedAt, table.UpdatedAt,
-	).Scan(&table.ID, &table.CreatedAt, &table.IsSelected, &table.BusinessName, &table.Description)
+		table.IsSelected, table.RowCount, table.CreatedAt, table.UpdatedAt,
+	).Scan(&table.ID, &table.CreatedAt, &table.IsSelected)
 
 	if err != nil {
 		return fmt.Errorf("failed to upsert table: %w", err)
@@ -369,32 +349,6 @@ func (r *schemaRepository) UpdateTableSelection(ctx context.Context, projectID, 
 	result, err := scope.Conn.Exec(ctx, query, projectID, tableID, isSelected)
 	if err != nil {
 		return fmt.Errorf("failed to update table selection: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return fmt.Errorf("table not found")
-	}
-
-	return nil
-}
-
-func (r *schemaRepository) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
-	scope, ok := database.GetTenantScope(ctx)
-	if !ok {
-		return fmt.Errorf("no tenant scope in context")
-	}
-
-	// Use COALESCE to preserve existing values when nil is passed
-	query := `
-		UPDATE engine_schema_tables
-		SET business_name = COALESCE($3, business_name),
-		    description = COALESCE($4, description),
-		    updated_at = NOW()
-		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
-
-	result, err := scope.Conn.Exec(ctx, query, projectID, tableID, businessName, description)
-	if err != nil {
-		return fmt.Errorf("failed to update table metadata: %w", err)
 	}
 
 	if result.RowsAffected() == 0 {
@@ -1490,34 +1444,24 @@ func (r *schemaRepository) GetNonPKColumnsByExactType(ctx context.Context, proje
 
 func scanSchemaTable(rows pgx.Rows) (*models.SchemaTable, error) {
 	var t models.SchemaTable
-	var metadata []byte
 	err := rows.Scan(
 		&t.ID, &t.ProjectID, &t.DatasourceID, &t.SchemaName, &t.TableName,
-		&t.IsSelected, &t.RowCount, &t.BusinessName, &t.Description, &metadata,
-		&t.CreatedAt, &t.UpdatedAt,
+		&t.IsSelected, &t.RowCount, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan table: %w", err)
-	}
-	if err := json.Unmarshal(metadata, &t.Metadata); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 	}
 	return &t, nil
 }
 
 func scanSchemaTableRow(row pgx.Row) (*models.SchemaTable, error) {
 	var t models.SchemaTable
-	var metadata []byte
 	err := row.Scan(
 		&t.ID, &t.ProjectID, &t.DatasourceID, &t.SchemaName, &t.TableName,
-		&t.IsSelected, &t.RowCount, &t.BusinessName, &t.Description, &metadata,
-		&t.CreatedAt, &t.UpdatedAt,
+		&t.IsSelected, &t.RowCount, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
-	}
-	if err := json.Unmarshal(metadata, &t.Metadata); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 	}
 	return &t, nil
 }
