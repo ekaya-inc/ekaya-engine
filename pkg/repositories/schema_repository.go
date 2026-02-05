@@ -110,17 +110,28 @@ func (r *schemaRepository) ListTablesByDatasource(ctx context.Context, projectID
 		return nil, fmt.Errorf("no tenant scope in context")
 	}
 
+	// Build query - uuid.Nil means "all datasources"
 	query := `
 		SELECT id, project_id, datasource_id, schema_name, table_name,
 		       is_selected, row_count, created_at, updated_at
 		FROM engine_schema_tables
-		WHERE project_id = $1 AND datasource_id = $2 AND deleted_at IS NULL`
+		WHERE project_id = $1 AND deleted_at IS NULL`
+
+	var args []any
+	args = append(args, projectID)
+
+	// Filter by datasource unless uuid.Nil (which means all datasources)
+	if datasourceID != uuid.Nil {
+		query += " AND datasource_id = $2"
+		args = append(args, datasourceID)
+	}
+
 	if selectedOnly {
 		query += " AND is_selected = true"
 	}
 	query += " ORDER BY schema_name, table_name"
 
-	rows, err := scope.Conn.Query(ctx, query, projectID, datasourceID)
+	rows, err := scope.Conn.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tables: %w", err)
 	}
@@ -1047,6 +1058,7 @@ func (r *schemaRepository) GetRelationshipDetails(ctx context.Context, projectID
 		return nil, fmt.Errorf("no tenant scope in context")
 	}
 
+	// Build query - uuid.Nil means "all datasources"
 	query := `
 		SELECT
 			r.id,
@@ -1070,16 +1082,25 @@ func (r *schemaRepository) GetRelationshipDetails(ctx context.Context, projectID
 		JOIN engine_schema_columns tc ON r.target_column_id = tc.id
 		JOIN engine_schema_tables tt ON r.target_table_id = tt.id
 		WHERE r.project_id = $1
-		  AND st.datasource_id = $2
 		  AND r.deleted_at IS NULL
 		  AND sc.deleted_at IS NULL
 		  AND st.deleted_at IS NULL
 		  AND tc.deleted_at IS NULL
 		  AND tt.deleted_at IS NULL
-		  AND r.rejection_reason IS NULL
-		ORDER BY st.schema_name, st.table_name, sc.column_name`
+		  AND r.rejection_reason IS NULL`
 
-	rows, err := scope.Conn.Query(ctx, query, projectID, datasourceID)
+	var args []any
+	args = append(args, projectID)
+
+	// Filter by datasource unless uuid.Nil (which means all datasources)
+	if datasourceID != uuid.Nil {
+		query += " AND st.datasource_id = $2"
+		args = append(args, datasourceID)
+	}
+
+	query += " ORDER BY st.schema_name, st.table_name, sc.column_name"
+
+	rows, err := scope.Conn.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get relationship details: %w", err)
 	}
@@ -1114,16 +1135,26 @@ func (r *schemaRepository) GetEmptyTables(ctx context.Context, projectID, dataso
 		return nil, fmt.Errorf("no tenant scope in context")
 	}
 
+	// Build query - uuid.Nil means "all datasources"
 	query := `
 		SELECT table_name
 		FROM engine_schema_tables
 		WHERE project_id = $1
-		  AND datasource_id = $2
 		  AND deleted_at IS NULL
-		  AND (row_count IS NULL OR row_count = 0)
-		ORDER BY table_name`
+		  AND (row_count IS NULL OR row_count = 0)`
 
-	rows, err := scope.Conn.Query(ctx, query, projectID, datasourceID)
+	var args []any
+	args = append(args, projectID)
+
+	// Filter by datasource unless uuid.Nil (which means all datasources)
+	if datasourceID != uuid.Nil {
+		query += " AND datasource_id = $2"
+		args = append(args, datasourceID)
+	}
+
+	query += " ORDER BY table_name"
+
+	rows, err := scope.Conn.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get empty tables: %w", err)
 	}
@@ -1150,12 +1181,12 @@ func (r *schemaRepository) GetOrphanTables(ctx context.Context, projectID, datas
 		return nil, fmt.Errorf("no tenant scope in context")
 	}
 
+	// Build query - uuid.Nil means "all datasources"
 	// Tables with data (row_count > 0) but no active relationships
 	query := `
 		SELECT t.table_name
 		FROM engine_schema_tables t
 		WHERE t.project_id = $1
-		  AND t.datasource_id = $2
 		  AND t.deleted_at IS NULL
 		  AND t.row_count IS NOT NULL
 		  AND t.row_count > 0
@@ -1164,10 +1195,20 @@ func (r *schemaRepository) GetOrphanTables(ctx context.Context, projectID, datas
 			  WHERE r.deleted_at IS NULL
 			    AND r.rejection_reason IS NULL
 			    AND (r.source_table_id = t.id OR r.target_table_id = t.id)
-		  )
-		ORDER BY t.table_name`
+		  )`
 
-	rows, err := scope.Conn.Query(ctx, query, projectID, datasourceID)
+	var args []any
+	args = append(args, projectID)
+
+	// Filter by datasource unless uuid.Nil (which means all datasources)
+	if datasourceID != uuid.Nil {
+		query += " AND t.datasource_id = $2"
+		args = append(args, datasourceID)
+	}
+
+	query += " ORDER BY t.table_name"
+
+	rows, err := scope.Conn.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get orphan tables: %w", err)
 	}
