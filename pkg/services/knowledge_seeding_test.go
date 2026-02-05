@@ -132,6 +132,18 @@ func (m *mockSchemaServiceForSeeding) SelectAllTables(ctx context.Context, proje
 	return nil
 }
 
+func (m *mockSchemaServiceForSeeding) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+	return nil, nil
+}
+
+func (m *mockSchemaServiceForSeeding) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+
+func (m *mockSchemaServiceForSeeding) GetColumnMetadataByProject(ctx context.Context, projectID uuid.UUID) ([]*models.ColumnMetadata, error) {
+	return nil, nil
+}
+
 // mockLLMFactoryForSeeding implements llm.LLMClientFactory for testing.
 type mockLLMFactoryForSeeding struct {
 	client    llm.LLMClient
