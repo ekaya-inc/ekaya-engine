@@ -63,10 +63,12 @@ func setupSearchToolIntegrationTest(t *testing.T) *searchToolTestContext {
 	}
 
 	deps := &SearchToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: mockMCPConfig,
-		SchemaRepo:       schemaRepo,
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: mockMCPConfig,
+			Logger:           zap.NewNop(),
+		},
+		SchemaRepo: schemaRepo,
 	}
 
 	RegisterSearchTools(mcpServer, deps)

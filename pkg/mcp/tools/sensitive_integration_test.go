@@ -83,25 +83,29 @@ func setupSensitiveIntegrationTest(t *testing.T) *sensitiveTestContext {
 
 	// Register column tools
 	columnDeps := &ColumnToolDeps{
-		DB:                 engineDB.DB,
-		MCPConfigService:   mockMCPConfig,
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: mockMCPConfig,
+			Logger:           zap.NewNop(),
+		},
 		OntologyRepo:       ontologyRepo,
 		SchemaRepo:         schemaRepo,
 		ColumnMetadataRepo: columnMetadataRepo,
 		ProjectService:     mockProjectService,
-		Logger:             zap.NewNop(),
 	}
 	RegisterColumnTools(mcpServer, columnDeps)
 
 	// Create context deps (for get_context)
 	contextDeps := &ContextToolDeps{
-		DB:                 engineDB.DB,
-		MCPConfigService:   mockMCPConfig,
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: mockMCPConfig,
+			Logger:           zap.NewNop(),
+		},
 		ProjectService:     mockProjectService,
 		OntologyRepo:       ontologyRepo,
 		SchemaRepo:         schemaRepo,
 		ColumnMetadataRepo: columnMetadataRepo,
-		Logger:             zap.NewNop(),
 	}
 
 	return &sensitiveTestContext{

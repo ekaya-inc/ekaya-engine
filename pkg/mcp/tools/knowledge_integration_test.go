@@ -63,10 +63,12 @@ func setupKnowledgeToolIntegrationTest(t *testing.T) *knowledgeToolTestContext {
 	}
 
 	deps := &KnowledgeToolDeps{
-		DB:                  engineDB.DB,
-		MCPConfigService:    mockMCPConfig,
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: mockMCPConfig,
+			Logger:           zap.NewNop(),
+		},
 		KnowledgeRepository: knowledgeRepo,
-		Logger:              zap.NewNop(),
 	}
 
 	RegisterKnowledgeTools(mcpServer, deps)

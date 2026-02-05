@@ -74,10 +74,12 @@ func setupGlossaryToolIntegrationTest(t *testing.T) *glossaryToolTestContext {
 	}
 
 	deps := &GlossaryToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: mockMCPConfig,
-		GlossaryService:  mockGlossarySvc,
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: mockMCPConfig,
+			Logger:           zap.NewNop(),
+		},
+		GlossaryService: mockGlossarySvc,
 	}
 
 	RegisterGlossaryTools(mcpServer, deps)

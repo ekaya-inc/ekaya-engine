@@ -74,10 +74,12 @@ func setupQuestionToolIntegrationTest(t *testing.T) *questionToolTestContext {
 	}
 
 	deps := &QuestionToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: mockMCPConfig,
-		QuestionRepo:     questionRepo,
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: mockMCPConfig,
+			Logger:           zap.NewNop(),
+		},
+		QuestionRepo: questionRepo,
 	}
 
 	RegisterQuestionTools(mcpServer, deps)
