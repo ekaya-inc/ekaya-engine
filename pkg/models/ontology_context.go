@@ -39,7 +39,7 @@ type TableSummary struct {
 	Columns       []ColumnOverview    `json:"columns"`
 	Relationships []TableRelationship `json:"relationships,omitempty"`
 
-	// Table metadata (from engine_table_metadata)
+	// Table metadata (from engine_ontology_table_metadata)
 	UsageNotes           string `json:"usage_notes,omitempty"`
 	IsEphemeral          bool   `json:"is_ephemeral,omitempty"`
 	PreferredAlternative string `json:"preferred_alternative,omitempty"`
@@ -75,7 +75,7 @@ type TableDetail struct {
 	Description  string         `json:"description"`
 	Columns      []ColumnDetail `json:"columns"`
 
-	// Table metadata (from engine_table_metadata)
+	// Table metadata (from engine_ontology_table_metadata)
 	UsageNotes           string `json:"usage_notes,omitempty"`
 	IsEphemeral          bool   `json:"is_ephemeral,omitempty"`
 	PreferredAlternative string `json:"preferred_alternative,omitempty"`

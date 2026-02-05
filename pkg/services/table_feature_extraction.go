@@ -24,7 +24,7 @@ import (
 //   - Declared FK relationships from schema introspection
 //   - Row count
 //
-// Outputs per table (stored in engine_table_metadata):
+// Outputs per table (stored in engine_ontology_table_metadata):
 //   - description: What this table represents
 //   - usage_notes: When to use/not use this table
 //   - is_ephemeral: Whether it's transient/temp data

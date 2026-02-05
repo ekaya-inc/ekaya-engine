@@ -240,15 +240,14 @@ type DatasourceSchema struct {
 }
 
 // DatasourceTable represents a table in the customer's datasource.
+// Note: business_name and description are now in engine_ontology_table_metadata, not engine_schema_tables.
 type DatasourceTable struct {
-	ID           uuid.UUID
-	SchemaName   string
-	TableName    string
-	BusinessName string
-	Description  string
-	RowCount     int64
-	IsSelected   bool
-	Columns      []*DatasourceColumn
+	ID         uuid.UUID
+	SchemaName string
+	TableName  string
+	RowCount   int64
+	IsSelected bool
+	Columns    []*DatasourceColumn
 }
 
 // DatasourceColumn represents a column in the customer's datasource.

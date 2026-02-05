@@ -42,9 +42,6 @@ type SchemaService interface {
 	// GetRelationshipsResponse returns enriched relationships with table/column details and empty/orphan tables.
 	GetRelationshipsResponse(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RelationshipsResponse, error)
 
-	// UpdateTableMetadata updates business_name and/or description for a table.
-	UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error
-
 	// UpdateColumnMetadata updates business_name and/or description for a column.
 	UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error
 
@@ -501,12 +498,8 @@ func (s *schemaService) GetDatasourceSchema(ctx context.Context, projectID, data
 			TableName:  t.TableName,
 			IsSelected: t.IsSelected,
 		}
-		if t.BusinessName != nil {
-			dt.BusinessName = *t.BusinessName
-		}
-		if t.Description != nil {
-			dt.Description = *t.Description
-		}
+		// Note: BusinessName and Description now live in TableMetadata
+		// (engine_ontology_table_metadata), not SchemaTable.
 		if t.RowCount != nil {
 			dt.RowCount = *t.RowCount
 		}
@@ -585,17 +578,13 @@ func (s *schemaService) GetDatasourceTable(ctx context.Context, projectID, datas
 	}
 
 	// Convert to service-layer type
+	// Note: BusinessName and Description now live in TableMetadata
+	// (engine_ontology_table_metadata), not SchemaTable.
 	dt := &models.DatasourceTable{
 		ID:         table.ID,
 		SchemaName: table.SchemaName,
 		TableName:  table.TableName,
 		IsSelected: table.IsSelected,
-	}
-	if table.BusinessName != nil {
-		dt.BusinessName = *table.BusinessName
-	}
-	if table.Description != nil {
-		dt.Description = *table.Description
 	}
 	if table.RowCount != nil {
 		dt.RowCount = *table.RowCount
@@ -776,20 +765,6 @@ func (s *schemaService) GetRelationshipsResponse(ctx context.Context, projectID,
 	}, nil
 }
 
-// UpdateTableMetadata updates business_name and/or description for a table.
-func (s *schemaService) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
-	if err := s.schemaRepo.UpdateTableMetadata(ctx, projectID, tableID, businessName, description); err != nil {
-		return fmt.Errorf("failed to update table metadata: %w", err)
-	}
-
-	s.logger.Info("Updated table metadata",
-		zap.String("project_id", projectID.String()),
-		zap.String("table_id", tableID.String()),
-	)
-
-	return nil
-}
-
 // UpdateColumnMetadata updates business_name and/or description for a column.
 func (s *schemaService) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
 	// TODO: This function needs to be updated for the new ColumnMetadata schema.
@@ -922,11 +897,8 @@ func (s *schemaService) GetDatasourceSchemaForPrompt(ctx context.Context, projec
 		sb.WriteString(table.TableName)
 		sb.WriteString("\n")
 
-		if table.Description != "" {
-			sb.WriteString("Description: ")
-			sb.WriteString(table.Description)
-			sb.WriteString("\n")
-		}
+		// Note: Table description is now in engine_ontology_table_metadata.
+		// This prompt generation uses only schema-level information.
 
 		if table.RowCount > 0 {
 			sb.WriteString(fmt.Sprintf("Row count: %d\n", table.RowCount))

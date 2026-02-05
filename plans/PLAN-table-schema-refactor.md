@@ -163,7 +163,7 @@ CREATE TABLE engine_ontology_table_metadata (
 
 ### Phase 7: Cleanup
 
-- [ ] 7.1 Delete dead code referencing old schema
+- [x] 7.1 Delete dead code referencing old schema
 - [ ] 7.2 Update integration tests (table_metadata tests need schema_table_id changes)
 - [ ] 7.3 Update CLAUDE.md (if any table metadata documentation exists)
 

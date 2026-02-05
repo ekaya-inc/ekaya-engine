@@ -325,12 +325,9 @@ func (s *columnEnrichmentService) getTableContext(ctx context.Context, projectID
 				SchemaName:   table.SchemaName,
 				DatasourceID: ds.ID,
 			}
-			if table.BusinessName != nil {
-				tableCtx.BusinessName = *table.BusinessName
-			}
-			if table.Description != nil {
-				tableCtx.Description = *table.Description
-			}
+			// Note: BusinessName and Description now live in TableMetadata
+			// (engine_ontology_table_metadata), not SchemaTable. Future enhancement
+			// could fetch this from TableMetadataRepository if needed for enrichment.
 			return tableCtx, nil
 		}
 	}

@@ -220,12 +220,8 @@ func (s *ontologyFinalizationService) buildDomainDescriptionPrompt(
 
 	sb.WriteString("## Tables\n\n")
 	for _, t := range tables {
-		desc := t.Description
-		if desc == nil || *desc == "" {
-			sb.WriteString(fmt.Sprintf("- **%s**\n", t.TableName))
-		} else {
-			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", t.TableName, *desc))
-		}
+		// Note: Description now lives in TableMetadata (engine_ontology_table_metadata)
+		sb.WriteString(fmt.Sprintf("- **%s**\n", t.TableName))
 	}
 
 	// Include feature-derived insights if available

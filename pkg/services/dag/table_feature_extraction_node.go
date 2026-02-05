@@ -15,7 +15,7 @@ import (
 type TableFeatureExtractionMethods interface {
 	// ExtractTableFeatures generates table-level descriptions based on column features.
 	// Inputs per table: table name/schema, columns with ColumnFeatures, FK relationships, row count.
-	// Outputs per table (stored in engine_table_metadata): description, usage_notes, is_ephemeral.
+	// Outputs per table (stored in engine_ontology_table_metadata): description, usage_notes, is_ephemeral.
 	// Returns the number of tables processed.
 	ExtractTableFeatures(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback ProgressCallback) (int, error)
 }

@@ -633,16 +633,12 @@ func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntolog
 		sb.WriteString("\n")
 	}
 
-	// List tables with their descriptions
+	// List tables
+	// Note: BusinessName and Description now live in TableMetadata
+	// (engine_ontology_table_metadata), not SchemaTable.
 	sb.WriteString("## Tables\n\n")
 	for _, t := range tables {
 		sb.WriteString(fmt.Sprintf("### %s\n", t.TableName))
-		if t.BusinessName != nil && *t.BusinessName != "" {
-			sb.WriteString(fmt.Sprintf("- Business Name: %s\n", *t.BusinessName))
-		}
-		if t.Description != nil && *t.Description != "" {
-			sb.WriteString(fmt.Sprintf("- Description: %s\n", *t.Description))
-		}
 		sb.WriteString("\n")
 	}
 
@@ -1253,15 +1249,11 @@ func (s *glossaryService) buildEnrichTermPrompt(
 	}
 
 	// List tables
+	// Note: BusinessName and Description now live in TableMetadata
+	// (engine_ontology_table_metadata), not SchemaTable.
 	sb.WriteString("## Tables\n\n")
 	for _, t := range tables {
 		sb.WriteString(fmt.Sprintf("### %s\n", t.TableName))
-		if t.BusinessName != nil && *t.BusinessName != "" {
-			sb.WriteString(fmt.Sprintf("- Business Name: %s\n", *t.BusinessName))
-		}
-		if t.Description != nil && *t.Description != "" {
-			sb.WriteString(fmt.Sprintf("- Description: %s\n", *t.Description))
-		}
 		sb.WriteString("\n")
 	}
 
@@ -1405,16 +1397,12 @@ func (s *glossaryService) buildEnhancedEnrichTermPrompt(
 		sb.WriteString("\n")
 	}
 
-	// List tables with descriptions
+	// List tables
+	// Note: BusinessName and Description now live in TableMetadata
+	// (engine_ontology_table_metadata), not SchemaTable.
 	sb.WriteString("## Tables\n\n")
 	for _, t := range tables {
 		sb.WriteString(fmt.Sprintf("### %s\n", t.TableName))
-		if t.BusinessName != nil && *t.BusinessName != "" {
-			sb.WriteString(fmt.Sprintf("- Business Name: %s\n", *t.BusinessName))
-		}
-		if t.Description != nil && *t.Description != "" {
-			sb.WriteString(fmt.Sprintf("- Description: %s\n", *t.Description))
-		}
 		sb.WriteString("\n")
 	}
 
