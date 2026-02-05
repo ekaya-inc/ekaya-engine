@@ -38,8 +38,6 @@ type QueryLoggingDeps interface {
 // GetAuditor implements QueryLoggingDeps.
 func (d *QueryToolDeps) GetAuditor() *audit.SecurityAuditor { return d.Auditor }
 
-const approvedQueriesToolGroup = "approved_queries"
-
 // approvedQueriesToolNames lists all tools in the approved queries group.
 var approvedQueriesToolNames = map[string]bool{
 	"list_approved_queries":  true,
@@ -56,53 +54,6 @@ func RegisterApprovedQueriesTools(s *server.MCPServer, deps *QueryToolDeps) {
 	registerSuggestApprovedQueryTool(s, deps)
 	registerSuggestQueryUpdateTool(s, deps)
 	registerGetQueryHistoryTool(s, deps)
-}
-
-// checkApprovedQueriesEnabled verifies the caller is authorized to use approved queries tools.
-// Uses ToolAccessChecker to ensure consistency with tool list filtering.
-// Returns the project ID and a tenant-scoped context if authorized, or an error if not.
-func checkApprovedQueriesEnabled(ctx context.Context, deps *QueryToolDeps, toolName string) (uuid.UUID, context.Context, func(), error) {
-	// Get claims from context
-	claims, ok := auth.GetClaims(ctx)
-	if !ok {
-		return uuid.Nil, nil, nil, fmt.Errorf("authentication required")
-	}
-
-	projectID, err := uuid.Parse(claims.ProjectID)
-	if err != nil {
-		return uuid.Nil, nil, nil, fmt.Errorf("invalid project ID: %w", err)
-	}
-
-	// Acquire connection with tenant scope
-	scope, err := deps.DB.WithTenant(ctx, projectID)
-	if err != nil {
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to acquire database connection: %w", err)
-	}
-
-	// Set tenant context for the query
-	tenantCtx := database.SetTenantScope(ctx, scope)
-
-	// Check if caller is an agent (API key authentication)
-	isAgent := claims.Subject == "agent"
-
-	// Get tool groups state and check access using the unified checker
-	state, err := deps.MCPConfigService.GetToolGroupsState(tenantCtx, projectID)
-	if err != nil {
-		scope.Close()
-		deps.Logger.Error("Failed to get tool groups state",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool group configuration: %w", err)
-	}
-
-	// Use the unified ToolAccessChecker for consistent access decisions
-	checker := services.NewToolAccessChecker()
-	if checker.IsToolAccessible(toolName, state, isAgent) {
-		return projectID, tenantCtx, func() { scope.Close() }, nil
-	}
-
-	scope.Close()
-	return uuid.Nil, nil, nil, fmt.Errorf("approved queries tools are not enabled for this project")
 }
 
 // listApprovedQueriesResult is the response structure for list_approved_queries.
@@ -158,7 +109,7 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkApprovedQueriesEnabled(ctx, deps, "list_approved_queries")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "list_approved_queries")
 		if err != nil {
 			return nil, err
 		}
@@ -302,7 +253,7 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkApprovedQueriesEnabled(ctx, deps, "execute_approved_query")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "execute_approved_query")
 		if err != nil {
 			return nil, err
 		}
@@ -604,7 +555,7 @@ func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkApprovedQueriesEnabled(ctx, deps, "suggest_approved_query")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "suggest_approved_query")
 		if err != nil {
 			return nil, err
 		}
@@ -787,7 +738,7 @@ func registerSuggestQueryUpdateTool(s *server.MCPServer, deps *QueryToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkApprovedQueriesEnabled(ctx, deps, "suggest_query_update")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "suggest_query_update")
 		if err != nil {
 			return nil, err
 		}
@@ -1251,7 +1202,7 @@ func registerGetQueryHistoryTool(s *server.MCPServer, deps *QueryToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkApprovedQueriesEnabled(ctx, deps, "get_query_history")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "get_query_history")
 		if err != nil {
 			return nil, err
 		}

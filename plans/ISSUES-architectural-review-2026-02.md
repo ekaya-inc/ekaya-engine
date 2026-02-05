@@ -314,7 +314,7 @@ func (d *QueryToolDeps) GetMCPConfigService() services.MCPConfigService { return
 
 | # | Issue | Severity | Principle Violated | Status |
 |---|-------|----------|-------------------|--------|
-| 1 | Tool access control duplication | Medium | DRY | Open |
+| 1 | Tool access control duplication | Medium | DRY | [x] **Resolved** |
 | 2 | Deps structs duplication | Medium | DRY | [x] **Resolved** |
 | 3 | Column name pattern heuristics | High | Rule #5 | [x] **Resolved** (via architecture transition) |
 | 4 | MCP validation errors as Go errors | Medium | Rule #6 | Open |

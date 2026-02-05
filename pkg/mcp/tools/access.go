@@ -4,7 +4,6 @@ package tools
 import (
 	"context"
 	"fmt"
-	"slices"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -107,24 +106,13 @@ func CheckToolAccess(ctx context.Context, deps ToolAccessDeps, toolName string) 
 }
 
 // computeToolsForRole determines the tool set based on JWT claims.
-// - Agents (Subject == "agent") get limited agent tools
-// - Admin/Data/Developer roles get developer tools
-// - Regular users get user tools
+// Uses ComputeEnabledToolsFromConfig to ensure consistency with NewToolFilter's listing behavior.
 func computeToolsForRole(claims *auth.Claims, state map[string]*models.ToolGroupConfig) []services.ToolSpec {
 	// Check if caller is an agent (API key authentication)
-	if claims.Subject == "agent" {
-		return services.ComputeAgentTools(state)
-	}
+	isAgent := claims.Subject == "agent"
 
-	// Check if caller has admin/data/developer role
-	if slices.Contains(claims.Roles, models.RoleAdmin) ||
-		slices.Contains(claims.Roles, models.RoleData) ||
-		slices.Contains(claims.Roles, "developer") {
-		return services.ComputeDeveloperTools(state)
-	}
-
-	// Regular user gets user tools
-	return services.ComputeUserTools(state)
+	// Use the same function as the tool filter to ensure listing and calling are consistent
+	return services.ComputeEnabledToolsFromConfig(state, isAgent)
 }
 
 // isToolInList checks if a tool name is in the enabled tools list.

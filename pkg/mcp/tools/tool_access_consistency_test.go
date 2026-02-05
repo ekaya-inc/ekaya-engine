@@ -16,7 +16,7 @@ import (
 )
 
 // TestToolAccessConsistency verifies that if a tool is listed via NewToolFilter,
-// it can also be called via checkApprovedQueriesEnabled. This ensures no mismatch
+// it can also be called via AcquireToolAccess. This ensures no mismatch
 // between what tools are visible and what tools are executable.
 
 // consistencyTestDatasourceID is a fixed UUID used in tests to simulate a configured datasource.
@@ -137,10 +137,10 @@ func TestAgentToolsEnabled_ListAndCallConsistency(t *testing.T) {
 		QueryService:   &mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
 	}
 
-	// checkApprovedQueriesEnabled is called when executing list_approved_queries or execute_approved_query
-	_, tenantCtx, cleanup, err := checkApprovedQueriesEnabled(ctx, queryDeps, "list_approved_queries")
+	// AcquireToolAccess is called when executing list_approved_queries or execute_approved_query
+	_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, queryDeps, "list_approved_queries")
 	if err != nil {
-		t.Fatalf("CALLING: checkApprovedQueriesEnabled failed: %v\n"+
+		t.Fatalf("CALLING: AcquireToolAccess failed: %v\n"+
 			"This means tools are LISTED but cannot be CALLED - list/call inconsistency!", err)
 	}
 	if cleanup != nil {
@@ -212,9 +212,9 @@ func TestApprovedQueriesEnabled_ListAndCallConsistency(t *testing.T) {
 		QueryService:   &mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
 	}
 
-	_, tenantCtx, cleanup, err := checkApprovedQueriesEnabled(ctx, queryDeps, "list_approved_queries")
+	_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, queryDeps, "list_approved_queries")
 	if err != nil {
-		t.Fatalf("CALLING: checkApprovedQueriesEnabled failed: %v", err)
+		t.Fatalf("CALLING: AcquireToolAccess failed: %v", err)
 	}
 	if cleanup != nil {
 		defer cleanup()
@@ -302,13 +302,13 @@ func TestNeitherEnabled_QueryToolsNotListed(t *testing.T) {
 		QueryService:   &mockQueryService{},
 	}
 
-	_, _, cleanup, err := checkApprovedQueriesEnabled(ctx, queryDeps, "list_approved_queries")
+	_, _, cleanup, err := AcquireToolAccess(ctx, queryDeps, "list_approved_queries")
 	if cleanup != nil {
 		defer cleanup()
 	}
 
 	if err == nil {
-		t.Fatal("CALLING: checkApprovedQueriesEnabled should fail when AddQueryTools is not enabled")
+		t.Fatal("CALLING: AcquireToolAccess should fail when AddQueryTools is not enabled")
 	}
 
 	t.Logf("CALLING: correctly rejected with error: %v", err)
@@ -427,9 +427,9 @@ func TestBothEnabled_UserSeesApprovedQueries(t *testing.T) {
 		QueryService:   &mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
 	}
 
-	_, tenantCtx, cleanup, err := checkApprovedQueriesEnabled(ctx, queryDeps, "list_approved_queries")
+	_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, queryDeps, "list_approved_queries")
 	if err != nil {
-		t.Fatalf("CALLING: checkApprovedQueriesEnabled failed for user: %v", err)
+		t.Fatalf("CALLING: AcquireToolAccess failed for user: %v", err)
 	}
 	if cleanup != nil {
 		defer cleanup()
