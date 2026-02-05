@@ -30,12 +30,11 @@ func TestSchemaHandler_GetSchema_Success(t *testing.T) {
 			DatasourceID: datasourceID,
 			Tables: []*models.DatasourceTable{
 				{
-					ID:           tableID,
-					SchemaName:   "public",
-					TableName:    "users",
-					BusinessName: "User Accounts",
-					IsSelected:   true,
-					RowCount:     100,
+					ID:         tableID,
+					SchemaName: "public",
+					TableName:  "users",
+					IsSelected: true,
+					RowCount:   100,
 					Columns: []*models.DatasourceColumn{
 						{
 							ID:           columnID,
@@ -93,9 +92,8 @@ func TestSchemaHandler_GetSchema_Success(t *testing.T) {
 	if table["table_name"] != "users" {
 		t.Errorf("expected table_name 'users', got %q", table["table_name"])
 	}
-	if table["business_name"] != "User Accounts" {
-		t.Errorf("expected business_name 'User Accounts', got %q", table["business_name"])
-	}
+	// Note: business_name is no longer included in the response - table metadata
+	// is now in engine_ontology_table_metadata, not engine_schema_tables.
 }
 
 func TestSchemaHandler_GetSchema_InvalidProjectID(t *testing.T) {
@@ -308,49 +306,10 @@ func TestSchemaHandler_GetTable_NotFound(t *testing.T) {
 	}
 }
 
-func TestSchemaHandler_UpdateTableMetadata_Success(t *testing.T) {
-	service := &mockSchemaService{}
-	handler := NewSchemaHandler(service, zap.NewNop())
-
-	projectID := uuid.New()
-	datasourceID := uuid.New()
-	tableID := uuid.New()
-
-	body := `{"business_name": "User Accounts", "description": "Contains all user data"}`
-	req := httptest.NewRequest(http.MethodPut, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/tables/"+tableID.String()+"/metadata", bytes.NewBufferString(body))
-	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsid", datasourceID.String())
-	req.SetPathValue("tableId", tableID.String())
-
-	rec := httptest.NewRecorder()
-	handler.UpdateTableMetadata(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", rec.Code)
-	}
-}
-
-func TestSchemaHandler_UpdateTableMetadata_NotFound(t *testing.T) {
-	service := &mockSchemaService{err: apperrors.ErrNotFound}
-	handler := NewSchemaHandler(service, zap.NewNop())
-
-	projectID := uuid.New()
-	datasourceID := uuid.New()
-	tableID := uuid.New()
-
-	body := `{"business_name": "Test"}`
-	req := httptest.NewRequest(http.MethodPut, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/tables/"+tableID.String()+"/metadata", bytes.NewBufferString(body))
-	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsid", datasourceID.String())
-	req.SetPathValue("tableId", tableID.String())
-
-	rec := httptest.NewRecorder()
-	handler.UpdateTableMetadata(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected status 404, got %d", rec.Code)
-	}
-}
+// Note: TestSchemaHandler_UpdateTableMetadata_Success and _NotFound removed because
+// table metadata is now managed through MCP tools (update_table) and stored
+// in engine_ontology_table_metadata. The PUT /schema/tables/{tableId}/metadata
+// endpoint has been removed.
 
 // Note: TestSchemaHandler_UpdateColumnMetadata_Success removed because
 // column metadata is now managed through MCP tools (update_column) and stored

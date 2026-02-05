@@ -158,7 +158,7 @@ CREATE TABLE engine_ontology_table_metadata (
 
 ### Phase 6: Handler Updates
 
-- [ ] 6.1 Update `SchemaHandler` in `pkg/handlers/schema_handler.go`:
+- [x] 6.1 Update `SchemaHandler` in `pkg/handlers/schema_handler.go`:
   - Remove dropped field references from API responses
 
 ### Phase 7: Cleanup
