@@ -1,6 +1,16 @@
 # Issue: deleted_at Columns Not Detected as Soft-Delete Timestamps
 
-## Observed Behavior
+**Status:** FIXED (2026-02-05)
+
+Timestamp classification has been improved with:
+1. Semantic guidance: "null rate indicates frequency, not purpose - a 2% non-null rate can still indicate soft delete"
+2. Explicit `soft_delete` purpose in classification options
+3. Cross-column validation phase for soft delete timestamps
+4. `IsSoftDelete` field in timestamp features
+
+See `pkg/services/column_feature_extraction.go` lines 962, 971, 998.
+
+## Observed Behavior (Historical)
 
 The `deleted_at` column on `media` table is incorrectly classified:
 

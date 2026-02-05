@@ -1,6 +1,11 @@
 # ISSUE: Glossary term creation fails - missing enrichment_status column
 
-## Summary
+**Status:** FIXED (migration exists)
+
+The `enrichment_status` column is defined in `migrations/010_business_glossary.up.sql:13`.
+If this error occurs, ensure migrations have been applied.
+
+## Summary (Historical)
 
 Creating a glossary term via MCP tools fails because the glossary repository references a column `enrichment_status` that doesn't exist in the database schema.
 

@@ -1,5 +1,11 @@
 # ISSUE: DAG Node Implementation Inconsistencies
 
+**Status:** MOSTLY OBSOLETE (2026-02-05)
+
+- Entity-related nodes (entity_discovery, entity_enrichment, entity_promotion, relationship_enrichment) have been **removed**
+- Knowledge seeding error handling has been **fixed** (endpoint/auth errors now propagate)
+- Remaining: Progress callback duplication (low priority code cleanup)
+
 ## Summary
 
 Architectural review identified three inconsistencies across DAG node implementations in `pkg/services/dag/`. The nodes generally follow good patterns (BaseNode inheritance, consistent interfaces, adapter pattern), but there are variations that may or may not be intentional.

@@ -1,5 +1,7 @@
 # Issue: Cancelling Ontology Extraction Causes Server-Side Errors
 
+**Status:** OPEN (Low Priority) - Cosmetic issue, extraction cancellation works correctly.
+
 ## Observed Behavior
 
 When a user cancels an in-progress ontology extraction via the UI "Cancel" button, multiple errors with stack traces appear in `output.log`.

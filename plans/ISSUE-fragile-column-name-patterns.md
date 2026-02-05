@@ -1,5 +1,14 @@
 # ISSUE: Fragile Column Name Pattern Matching
 
+**Status:** PARTIALLY OBSOLETE (2026-02-05)
+
+Many files referenced have been **removed** (entity_promotion.go, etc.). Remaining patterns:
+- `relationship_discovery.go:574` - attributeColumnPatterns (still exists)
+- `column_enrichment.go:482` - enumPatterns (still exists)
+- `glossary_service.go` - various patterns (still exist)
+
+Lower priority since ColumnFeatures pipeline now handles most classification.
+
 ## Summary
 
 Multiple services use string pattern matching on column/table names to classify or make decisions. This is fragile because it relies on naming conventions that vary across databases and teams. The `column_feature_extraction` pipeline was designed to replace this approach, but adoption is incomplete.
