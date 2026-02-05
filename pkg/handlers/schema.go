@@ -177,13 +177,17 @@ func (h *SchemaHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.
 	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/schema/selections",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.SaveSelections)))
 
-	// Relationship operations
+	// Relationship operations (datasource-level)
 	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsid}/schema/relationships",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetRelationships)))
 	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/schema/relationships",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.AddRelationship)))
 	mux.HandleFunc("DELETE /api/projects/{pid}/datasources/{dsid}/schema/relationships/{relId}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.RemoveRelationship)))
+
+	// Project-level relationship operations (aggregates across all datasources)
+	mux.HandleFunc("GET /api/projects/{pid}/relationships",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetProjectRelationships)))
 
 	// Relationship discovery operations
 	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/schema/relationships/discover",
@@ -401,6 +405,44 @@ func (h *SchemaHandler) GetRelationships(w http.ResponseWriter, r *http.Request)
 		h.logger.Error("Failed to get relationships",
 			zap.String("project_id", projectID.String()),
 			zap.String("datasource_id", datasourceID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "get_relationships_failed", "Failed to get relationships"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Convert model response to handler response
+	data := GetRelationshipsResponse{
+		TotalCount:   relResponse.TotalCount,
+		EmptyTables:  relResponse.EmptyTables,
+		OrphanTables: relResponse.OrphanTables,
+	}
+
+	data.Relationships = make([]RelationshipDetailResponse, len(relResponse.Relationships))
+	for i, rel := range relResponse.Relationships {
+		data.Relationships[i] = h.toRelationshipDetailResponse(rel)
+	}
+
+	response := ApiResponse{Success: true, Data: data}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// GetProjectRelationships handles GET /api/projects/{pid}/relationships
+// Returns all relationships across all datasources for a project.
+func (h *SchemaHandler) GetProjectRelationships(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	// Use uuid.Nil to indicate "all datasources"
+	relResponse, err := h.schemaService.GetRelationshipsResponse(r.Context(), projectID, uuid.Nil)
+	if err != nil {
+		h.logger.Error("Failed to get project relationships",
+			zap.String("project_id", projectID.String()),
 			zap.Error(err))
 		if err := ErrorResponse(w, http.StatusInternalServerError, "get_relationships_failed", "Failed to get relationships"); err != nil {
 			h.logger.Error("Failed to write error response", zap.Error(err))

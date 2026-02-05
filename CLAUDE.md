@@ -14,10 +14,10 @@ This is **ekaya-engine** - a clean architecture rebuild of the Ekaya regional co
 
 ## Current State
 
-The project has full operational infrastructure but a minimal Go backend:
-- **Working:** Build system, CI/CD, Docker, frontend (React/TypeScript/Vite)
-- **Shell only:** `main.go` with just `/health`, `/ping`, and static file serving
-- **Empty scaffold:** `pkg/` directories ready for implementation
+The project has full operational infrastructure with a complete Go backend:
+- **Infrastructure:** Build system, CI/CD, Docker, frontend (React/TypeScript/Vite)
+- **Backend:** Full ontology extraction DAG, MCP server, schema discovery, relationship inference
+- **MCP Tools:** Developer tools for database context, queries, and ontology management
 
 ## Greenfield Project: No Backward Compatibility
 
@@ -481,7 +481,7 @@ FROM engine_llm_conversations GROUP BY model;
 
 ### What to Watch For
 
-1. **DAG state progression** - Should move through steps: KnowledgeSeeding → ColumnFeatureExtraction → FKDiscovery → TableFeatureExtraction → PKMatchDiscovery → ColumnEnrichment → OntologyFinalization
+1. **DAG state progression** - Should move through steps: KnowledgeSeeding → ColumnFeatureExtraction → FKDiscovery → TableFeatureExtraction → PKMatchDiscovery → ColumnEnrichment → OntologyFinalization → GlossaryDiscovery → GlossaryEnrichment
 2. **Parallel execution** - Multiple LLM calls processed concurrently within each step
 3. **Column/table metadata counts** - Check `engine_ontology_column_metadata` and `engine_ontology_table_metadata` are populated
 4. **Token limit errors** - Large tables may exceed LLM context limits

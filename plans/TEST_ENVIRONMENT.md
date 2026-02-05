@@ -27,12 +27,10 @@ http://localhost:3443/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/
 Key pages:
 
 - Dashboard: `/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/`
-- Entities: `/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/entities`
-- Relationships: `/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/relationships`
 - Glossary: `/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/glossary`
 - Schema: `/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/schema`
 
-## MCP Tools Available (42 base, up to 50 with optional apps)
+## MCP Tools Available (36 base, up to 44 with optional apps)
 
 ### Read Operations
 
@@ -43,10 +41,9 @@ Key pages:
 | `mcp__test_data__get_schema` | Database schema with semantic annotations |
 | `mcp__test_data__get_ontology` | Structured ontology at configurable depth levels |
 | `mcp__test_data__get_context` | Unified context at depth: domain, entities, tables, columns |
-| `mcp__test_data__get_entity` | Full entity details by name |
+| `mcp__test_data__get_column_metadata` | Get current ontology metadata for a column |
 | `mcp__test_data__probe_column` | Column statistics and semantic info |
 | `mcp__test_data__probe_columns` | Batch variant for multiple columns |
-| `mcp__test_data__probe_relationship` | Relationship metrics and data quality |
 | `mcp__test_data__search_schema` | Full-text search across tables, columns, entities |
 | `mcp__test_data__list_glossary` | List business glossary terms |
 | `mcp__test_data__get_glossary_sql` | Get SQL for a glossary term |
@@ -63,12 +60,10 @@ Key pages:
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__test_data__update_entity` | Create/update entity (upsert by name) |
-| `mcp__test_data__delete_entity` | Delete entity |
-| `mcp__test_data__update_relationship` | Create/update relationship |
-| `mcp__test_data__delete_relationship` | Delete relationship |
 | `mcp__test_data__update_column` | Add/update column metadata |
 | `mcp__test_data__delete_column_metadata` | Remove column metadata |
+| `mcp__test_data__update_table` | Add/update table metadata |
+| `mcp__test_data__delete_table_metadata` | Remove table metadata |
 | `mcp__test_data__create_glossary_term` | Create new glossary term with SQL |
 | `mcp__test_data__update_glossary_term` | Update existing glossary term |
 | `mcp__test_data__delete_glossary_term` | Delete glossary term |
@@ -93,7 +88,7 @@ Key pages:
 
 ### Optional: AI Data Liaison Application (+8 tools)
 
-The **AI Data Liaison** application adds tools for AI agents to suggest and manage approved SQL queries. When installed, the total tool count increases from 42 to 50.
+The **AI Data Liaison** application adds tools for AI agents to suggest and manage approved SQL queries. When installed, the total tool count increases from 36 to 44.
 
 To check if installed, verify these tools are available:
 
@@ -133,7 +128,7 @@ mcp__claude-in-chrome__navigate({
 mcp__claude-in-chrome__computer({ action: "screenshot", tabId: <tabId> })
 
 // Find element by description
-mcp__claude-in-chrome__find({ query: "Add Entity button", tabId: <tabId> })
+mcp__claude-in-chrome__find({ query: "Add Term button", tabId: <tabId> })
 
 // Click at coordinates
 mcp__claude-in-chrome__computer({ action: "left_click", coordinate: [x, y], tabId: <tabId> })
@@ -159,7 +154,7 @@ mcp__claude-in-chrome__get_page_text({ tabId: <tabId> })
 Test that changes made via MCP appear in the UI:
 
 ```
-1. Make change via MCP tool (e.g., update_entity)
+1. Make change via MCP tool (e.g., create_glossary_term)
 2. Navigate to relevant UI page
 3. Take screenshot or read_page to verify change appears
 ```
@@ -167,23 +162,23 @@ Test that changes made via MCP appear in the UI:
 Example:
 
 ```javascript
-// 1. Create entity via MCP
-mcp__test_data__update_entity({
-  name: "TestEntity2026",
-  description: "Test entity for sync verification",
-  aliases: ["test_ent"]
+// 1. Create glossary term via MCP
+mcp__test_data__create_glossary_term({
+  term: "TestTerm2026",
+  definition: "Test term for sync verification",
+  defining_sql: "SELECT COUNT(*) as count FROM users"
 })
 
-// 2. Navigate to entities page
+// 2. Navigate to glossary page
 mcp__claude-in-chrome__navigate({
-  url: "http://localhost:3443/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/entities",
+  url: "http://localhost:3443/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/glossary",
   tabId: <tabId>
 })
 
 // 3. Verify in UI
 mcp__claude-in-chrome__computer({ action: "screenshot", tabId: <tabId> })
 // Or search for it:
-mcp__claude-in-chrome__find({ query: "TestEntity2026", tabId: <tabId> })
+mcp__claude-in-chrome__find({ query: "TestTerm2026", tabId: <tabId> })
 ```
 
 ## Test Pattern: UI→MCP Sync
@@ -224,15 +219,6 @@ The "Create Term" button is disabled until SQL is tested. Workflow:
 4. Then "Create Term" button becomes enabled
 
 See: `ui/src/components/GlossaryTermEditor.tsx` lines 172-175, 247-252
-
-### Entity Deletion
-
-Entities with relationships cannot be deleted. Delete relationships first:
-
-```javascript
-mcp__test_data__delete_relationship({ from_entity: "EntityA", to_entity: "EntityB" })
-mcp__test_data__delete_entity({ name: "EntityA" })
-```
 
 ## Current Bugs (as of 2026-01-21)
 
@@ -377,12 +363,12 @@ psql -d ekaya_engine -c "
 ## Cleanup After Testing
 
 ```javascript
-// Delete test entities
-mcp__test_data__delete_entity({ name: "TestEntity2026" })
-
 // Delete test glossary terms
 mcp__test_data__delete_glossary_term({ term: "TestTerm2026" })
 
-// Delete test relationships
-mcp__test_data__delete_relationship({ from_entity: "TestA", to_entity: "TestB" })
+// Delete test column metadata
+mcp__test_data__delete_column_metadata({ table: "users", column: "created_at" })
+
+// Delete test table metadata
+mcp__test_data__delete_table_metadata({ table: "users" })
 ```

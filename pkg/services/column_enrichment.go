@@ -106,12 +106,24 @@ func (s *columnEnrichmentService) EnrichProject(ctx context.Context, projectID u
 		TablesFailed:   make(map[string]string),
 	}
 
-	// tableNames should be provided by the caller (typically from DAG node).
-	// If empty, the caller should have already determined the tables to enrich.
-
+	// If no tableNames provided, fetch all selected tables
 	if len(tableNames) == 0 {
-		result.DurationMs = time.Since(startTime).Milliseconds()
-		return result, nil
+		tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil, true)
+		if err != nil {
+			return nil, fmt.Errorf("fetch selected tables: %w", err)
+		}
+		if len(tables) == 0 {
+			s.logger.Info("No selected tables to enrich",
+				zap.String("project_id", projectID.String()))
+			result.DurationMs = time.Since(startTime).Milliseconds()
+			return result, nil
+		}
+		for _, t := range tables {
+			tableNames = append(tableNames, t.TableName)
+		}
+		s.logger.Debug("Fetched tables for enrichment",
+			zap.String("project_id", projectID.String()),
+			zap.Int("table_count", len(tableNames)))
 	}
 
 	// Build work items for parallel processing
