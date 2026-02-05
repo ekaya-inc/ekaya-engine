@@ -1,5 +1,9 @@
 //go:build ignore
 
+// TODO: This test needs deletion or complete rewrite after entity removal.
+// OntologyEntityRepository and EntityRelationshipRepository no longer exist.
+// NewDeterministicRelationshipService signature changed.
+
 package services
 
 import (

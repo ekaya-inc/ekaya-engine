@@ -190,21 +190,17 @@ func (e *OntologyToolExecutor) querySchemaMetadata(ctx context.Context, argument
 	}
 
 	type tableInfo struct {
-		Name         string       `json:"name"`
-		RowCount     *int64       `json:"row_count,omitempty"`
-		BusinessName *string      `json:"business_name,omitempty"`
-		Description  *string      `json:"description,omitempty"`
-		Columns      []columnInfo `json:"columns"`
+		Name     string       `json:"name"`
+		RowCount *int64       `json:"row_count,omitempty"`
+		Columns  []columnInfo `json:"columns"`
 	}
 
 	result := make([]tableInfo, 0, len(tables))
 	for _, t := range tables {
 		info := tableInfo{
-			Name:         t.TableName,
-			RowCount:     t.RowCount,
-			BusinessName: t.BusinessName,
-			Description:  t.Description,
-			Columns:      []columnInfo{},
+			Name:     t.TableName,
+			RowCount: t.RowCount,
+			Columns:  []columnInfo{},
 		}
 
 		// Get columns for this table

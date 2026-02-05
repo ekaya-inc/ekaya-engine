@@ -1,5 +1,9 @@
 //go:build ignore
 
+// TODO: This test needs significant refactoring after schema refactors:
+// - NewOntologyFinalizationService signature changed (added ColumnMetadataRepository)
+// - EntitySummary methods removed from OntologyRepository
+
 package services
 
 import (
@@ -44,14 +48,6 @@ func (m *mockOntologyRepoForFinalization) UpdateDomainSummary(ctx context.Contex
 		return m.updateSummaryErr
 	}
 	m.updatedDomainSummary = summary
-	return nil
-}
-
-func (m *mockOntologyRepoForFinalization) UpdateEntitySummary(ctx context.Context, projectID uuid.UUID, tableName string, summary *models.EntitySummary) error {
-	return nil
-}
-
-func (m *mockOntologyRepoForFinalization) UpdateEntitySummaries(ctx context.Context, projectID uuid.UUID, summaries map[string]*models.EntitySummary) error {
 	return nil
 }
 
@@ -105,9 +101,6 @@ func (m *mockSchemaRepoForFinalization) SoftDeleteRemovedTables(ctx context.Cont
 	return 0, nil
 }
 func (m *mockSchemaRepoForFinalization) UpdateTableSelection(ctx context.Context, projectID, tableID uuid.UUID, isSelected bool) error {
-	return nil
-}
-func (m *mockSchemaRepoForFinalization) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
 	return nil
 }
 func (m *mockSchemaRepoForFinalization) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {

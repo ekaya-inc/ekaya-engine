@@ -29,6 +29,10 @@ type TableMetadataRepository interface {
 	// List retrieves all table metadata for a project.
 	List(ctx context.Context, projectID uuid.UUID) ([]*models.TableMetadata, error)
 
+	// ListByTableNames retrieves table metadata for specified table names, returning a map keyed by table_name.
+	// Joins with engine_schema_tables to resolve schema_table_id to table names.
+	ListByTableNames(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string]*models.TableMetadata, error)
+
 	// Delete removes table metadata by schema_table_id.
 	Delete(ctx context.Context, schemaTableID uuid.UUID) error
 }
@@ -210,6 +214,61 @@ func (r *tableMetadataRepository) List(ctx context.Context, projectID uuid.UUID)
 	defer rows.Close()
 
 	return scanTableMetadataRows(rows)
+}
+
+func (r *tableMetadataRepository) ListByTableNames(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string]*models.TableMetadata, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	if len(tableNames) == 0 {
+		return make(map[string]*models.TableMetadata), nil
+	}
+
+	query := `
+		SELECT m.id, m.project_id, m.schema_table_id,
+		       m.table_type, m.description, m.usage_notes, m.is_ephemeral, m.preferred_alternative, m.confidence,
+		       m.features, m.analyzed_at, m.llm_model_used,
+		       m.source, m.last_edit_source, m.created_by, m.updated_by, m.created_at, m.updated_at,
+		       t.table_name
+		FROM engine_ontology_table_metadata m
+		JOIN engine_schema_tables t ON m.schema_table_id = t.id
+		WHERE m.project_id = $1
+		  AND t.table_name = ANY($2)
+		  AND t.deleted_at IS NULL
+		ORDER BY t.table_name`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID, tableNames)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query table metadata by names: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]*models.TableMetadata)
+	for rows.Next() {
+		var m models.TableMetadata
+		var tableName string
+
+		err := rows.Scan(
+			&m.ID, &m.ProjectID, &m.SchemaTableID,
+			&m.TableType, &m.Description, &m.UsageNotes, &m.IsEphemeral, &m.PreferredAlternative, &m.Confidence,
+			&m.Features, &m.AnalyzedAt, &m.LLMModelUsed,
+			&m.Source, &m.LastEditSource, &m.CreatedBy, &m.UpdatedBy, &m.CreatedAt, &m.UpdatedAt,
+			&tableName,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan table metadata: %w", err)
+		}
+
+		result[tableName] = &m
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating table metadata: %w", err)
+	}
+
+	return result, nil
 }
 
 func (r *tableMetadataRepository) Delete(ctx context.Context, schemaTableID uuid.UUID) error {

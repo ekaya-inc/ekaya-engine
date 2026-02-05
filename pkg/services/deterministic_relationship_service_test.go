@@ -1,9 +1,9 @@
 //go:build ignore
-// +build ignore
 
-// TODO: This test file needs refactoring for the column schema refactor:
+// TODO: This test file needs refactoring for multiple schema refactors:
 // - SchemaColumn.Metadata was removed
 // - Column features are now stored in engine_ontology_column_metadata.features JSONB
+// - EntitySummary methods removed from OntologyRepository
 // See plans/PLAN-column-schema-refactor.md for details
 
 package services
@@ -1654,10 +1654,6 @@ func (m *mockTestSchemaRepo) UpsertRelationshipWithMetrics(ctx context.Context, 
 }
 
 func (m *mockTestSchemaRepo) UpdateTableSelection(ctx context.Context, projectID, tableID uuid.UUID, isSelected bool) error {
-	return nil
-}
-
-func (m *mockTestSchemaRepo) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
 	return nil
 }
 

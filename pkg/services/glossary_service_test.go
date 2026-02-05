@@ -165,14 +165,6 @@ func (m *mockOntologyRepoForGlossary) UpdateDomainSummary(ctx context.Context, p
 	return nil
 }
 
-func (m *mockOntologyRepoForGlossary) UpdateEntitySummary(ctx context.Context, projectID uuid.UUID, tableName string, summary *models.EntitySummary) error {
-	return nil
-}
-
-func (m *mockOntologyRepoForGlossary) UpdateEntitySummaries(ctx context.Context, projectID uuid.UUID, summaries map[string]*models.EntitySummary) error {
-	return nil
-}
-
 func (m *mockOntologyRepoForGlossary) UpdateColumnDetails(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error {
 	return nil
 }

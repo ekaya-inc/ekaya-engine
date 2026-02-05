@@ -1,5 +1,7 @@
 //go:build ignore
 
+// TODO: This test needs refactoring - NewSchemaService signature changed.
+
 package services
 
 import (

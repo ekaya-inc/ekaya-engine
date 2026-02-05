@@ -309,10 +309,6 @@ func (m *mockSchemaService) GetRelationshipsResponse(ctx context.Context, projec
 	return m.relationshipsResponse, nil
 }
 
-func (m *mockSchemaService) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
-	return nil
-}
-
 func (m *mockSchemaService) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
 	return nil
 }
@@ -363,9 +359,6 @@ func (m *mockSchemaRepository) SoftDeleteRemovedTables(ctx context.Context, proj
 	return 0, nil
 }
 func (m *mockSchemaRepository) UpdateTableSelection(ctx context.Context, projectID, tableID uuid.UUID, isSelected bool) error {
-	return nil
-}
-func (m *mockSchemaRepository) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
 	return nil
 }
 func (m *mockSchemaRepository) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {

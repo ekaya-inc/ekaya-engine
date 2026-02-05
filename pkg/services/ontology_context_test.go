@@ -1,4 +1,3 @@
-
 package services
 
 import (
@@ -37,7 +36,6 @@ func (m *mockOntologyRepository) GetActive(ctx context.Context, projectID uuid.U
 func (m *mockOntologyRepository) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
 	return nil
 }
-
 
 func (m *mockOntologyRepository) UpdateColumnDetails(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error {
 	return nil

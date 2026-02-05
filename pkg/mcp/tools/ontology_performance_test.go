@@ -1,5 +1,3 @@
-//go:build ignore
-
 package tools
 
 import (
@@ -218,8 +216,6 @@ func setupOntologyPerformanceTest(t *testing.T) *ontologyPerformanceTestContext 
 	// Create repositories
 	ontologyRepo := repositories.NewOntologyRepository()
 	schemaRepo := repositories.NewSchemaRepository()
-	columnMetadataRepo := repositories.NewColumnMetadataRepository()
-
 	// Create mock project service for tests
 	projectService := &mockProjectService{defaultDatasourceID: ontologyPerfTestDSID}
 
@@ -228,7 +224,6 @@ func setupOntologyPerformanceTest(t *testing.T) *ontologyPerformanceTestContext 
 		ontologyRepo,
 		schemaRepo,
 		nil, // tableMetadataRepo
-		columnMetadataRepo,
 		projectService,
 		logger,
 	)

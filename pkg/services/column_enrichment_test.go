@@ -114,10 +114,6 @@ func (r *testColEnrichmentSchemaRepo) UpdateTableSelection(ctx context.Context, 
 	return nil
 }
 
-func (r *testColEnrichmentSchemaRepo) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
-	return nil
-}
-
 func (r *testColEnrichmentSchemaRepo) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }

@@ -1,5 +1,11 @@
 //go:build ignore
 
+// TODO: This test needs significant refactoring after schema refactors:
+// - SampleValues removed from SchemaColumn
+// - UpdateColumnStats signature changed
+// - NewColumnFeatureExtractionService signature changed
+// - EntitySummary methods removed from OntologyRepository
+
 package services
 
 import (
@@ -848,9 +854,6 @@ func (m *mockSchemaRepoForFeatureExtraction) SoftDeleteRemovedTables(ctx context
 	return 0, nil
 }
 func (m *mockSchemaRepoForFeatureExtraction) UpdateTableSelection(ctx context.Context, projectID, tableID uuid.UUID, isSelected bool) error {
-	return nil
-}
-func (m *mockSchemaRepoForFeatureExtraction) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
 	return nil
 }
 func (m *mockSchemaRepoForFeatureExtraction) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {

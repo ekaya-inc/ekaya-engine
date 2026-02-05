@@ -1,5 +1,9 @@
 //go:build ignore
 
+// TODO: This test needs rewrite after column schema refactor.
+// ColumnMetadata now uses SchemaColumnID instead of TableName/ColumnName.
+// EnumValues moved to ColumnMetadataFeatures JSONB.
+
 package tools
 
 import (

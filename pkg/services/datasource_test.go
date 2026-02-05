@@ -1,5 +1,3 @@
-//go:build ignore
-
 package services
 
 import (
@@ -144,14 +142,6 @@ func (m *mockDatasourceTestOntologyRepo) GetActive(ctx context.Context, projectI
 }
 
 func (m *mockDatasourceTestOntologyRepo) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
-	return errors.New("not implemented in mock")
-}
-
-func (m *mockDatasourceTestOntologyRepo) UpdateEntitySummary(ctx context.Context, projectID uuid.UUID, tableName string, summary *models.EntitySummary) error {
-	return errors.New("not implemented in mock")
-}
-
-func (m *mockDatasourceTestOntologyRepo) UpdateEntitySummaries(ctx context.Context, projectID uuid.UUID, summaries map[string]*models.EntitySummary) error {
 	return errors.New("not implemented in mock")
 }
 
