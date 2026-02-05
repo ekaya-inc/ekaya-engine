@@ -12,33 +12,15 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
-	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 // DevQueryToolDeps defines dependencies for dev query MCP tools.
 type DevQueryToolDeps struct {
-	DB               *database.DB
-	MCPConfigService services.MCPConfigService
-	ProjectService   services.ProjectService
-	QueryService     services.QueryService
-	Logger           *zap.Logger
-}
-
-// GetDB returns the database connection.
-func (d *DevQueryToolDeps) GetDB() *database.DB {
-	return d.DB
-}
-
-// GetMCPConfigService returns the MCP config service.
-func (d *DevQueryToolDeps) GetMCPConfigService() services.MCPConfigService {
-	return d.MCPConfigService
-}
-
-// GetLogger returns the logger.
-func (d *DevQueryToolDeps) GetLogger() *zap.Logger {
-	return d.Logger
+	BaseMCPToolDeps
+	ProjectService services.ProjectService
+	QueryService   services.QueryService
 }
 
 // RegisterDevQueryTools registers the dev query management tools with the MCP server.
@@ -91,6 +73,9 @@ Use approve_query_suggestion or reject_query_suggestion to process suggestions.`
 		// Check tool access
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "list_query_suggestions")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -348,6 +333,9 @@ Use list_query_suggestions first to see pending suggestions.`),
 		// Check tool access
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "approve_query_suggestion")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -485,6 +473,9 @@ Use list_query_suggestions first to see pending suggestions.`),
 		// Check tool access
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "reject_query_suggestion")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -628,6 +619,9 @@ If datasource_id is not provided, the project's default datasource will be used.
 		// Check tool access
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "create_approved_query")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -892,6 +886,9 @@ Use this for admin-initiated updates that bypass the suggestion workflow.`),
 		// Check tool access
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "update_approved_query")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -1097,6 +1094,9 @@ Any pending update suggestions for this query will be automatically rejected wit
 		// Check tool access
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "delete_approved_query")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()

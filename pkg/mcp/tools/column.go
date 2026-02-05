@@ -10,7 +10,6 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 
-	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
@@ -18,23 +17,12 @@ import (
 
 // ColumnToolDeps contains dependencies for column metadata tools.
 type ColumnToolDeps struct {
-	DB                 *database.DB
-	MCPConfigService   services.MCPConfigService
+	BaseMCPToolDeps
 	OntologyRepo       repositories.OntologyRepository
 	SchemaRepo         repositories.SchemaRepository
 	ColumnMetadataRepo repositories.ColumnMetadataRepository
 	ProjectService     services.ProjectService
-	Logger             *zap.Logger
 }
-
-// GetDB implements ToolAccessDeps.
-func (d *ColumnToolDeps) GetDB() *database.DB { return d.DB }
-
-// GetMCPConfigService implements ToolAccessDeps.
-func (d *ColumnToolDeps) GetMCPConfigService() services.MCPConfigService { return d.MCPConfigService }
-
-// GetLogger implements ToolAccessDeps.
-func (d *ColumnToolDeps) GetLogger() *zap.Logger { return d.Logger }
 
 // RegisterColumnTools registers column metadata MCP tools.
 func RegisterColumnTools(s *server.MCPServer, deps *ColumnToolDeps) {
@@ -309,6 +297,9 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "update_column")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -597,6 +588,9 @@ func registerDeleteColumnMetadataTool(s *server.MCPServer, deps *ColumnToolDeps)
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "delete_column_metadata")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()

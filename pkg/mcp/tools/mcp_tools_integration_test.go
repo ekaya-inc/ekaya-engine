@@ -99,10 +99,12 @@ func (tc *mcpToolsTestContext) filterToolsForTest(claims *auth.Claims) []string 
 	// Create a mock project service that returns the datasource ID
 	projectService := &mockProjectService{defaultDatasourceID: tc.datasourceID}
 	deps := &MCPToolDeps{
-		DB:               tc.engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, projectService, nil, "http://localhost", zap.NewNop()),
-		ProjectService:   projectService,
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               tc.engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, projectService, nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: projectService,
 	}
 
 	filter := NewToolFilter(deps)
@@ -355,9 +357,11 @@ func TestMCPTools_AllRolesGetHealthTool(t *testing.T) {
 	// Also test unauthenticated (no claims) - should only get health
 	t.Run("Unauthenticated", func(t *testing.T) {
 		deps := &MCPToolDeps{
-			DB:               tc.engineDB.DB,
-			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, nil, "http://localhost", zap.NewNop()),
-			Logger:           zap.NewNop(),
+			BaseMCPToolDeps: BaseMCPToolDeps{
+				DB:               tc.engineDB.DB,
+				MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, nil, "http://localhost", zap.NewNop()),
+				Logger:           zap.NewNop(),
+			},
 		}
 
 		filter := NewToolFilter(deps)

@@ -3,10 +3,11 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/google/uuid"
+	"github.com/mark3labs/mcp-go/mcp"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
@@ -15,6 +16,48 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
+// ToolAccessError represents an actionable error that should be returned as a
+// JSON success response to the MCP client, not as a Go error. Per CLAUDE.md
+// Rule #6, actionable errors (authentication, invalid parameters, tool not
+// enabled) must be returned as JSON so the LLM can see and act on them.
+type ToolAccessError struct {
+	Code    string
+	Message string
+	// MCPResult contains the pre-built MCP response for this error
+	MCPResult *mcp.CallToolResult
+}
+
+func (e *ToolAccessError) Error() string {
+	return e.Message
+}
+
+// IsToolAccessError checks if an error is a ToolAccessError and returns it.
+// Use this in tool handlers to convert actionable errors to JSON responses:
+//
+//	projectID, ctx, cleanup, err := AcquireToolAccess(ctx, deps, "my_tool")
+//	if err != nil {
+//	    if result := AsToolAccessResult(err); result != nil {
+//	        return result, nil
+//	    }
+//	    return nil, err
+//	}
+func AsToolAccessResult(err error) *mcp.CallToolResult {
+	var accessErr *ToolAccessError
+	if errors.As(err, &accessErr) {
+		return accessErr.MCPResult
+	}
+	return nil
+}
+
+// newToolAccessError creates a ToolAccessError with the given code and message.
+func newToolAccessError(code, message string) *ToolAccessError {
+	return &ToolAccessError{
+		Code:      code,
+		Message:   message,
+		MCPResult: NewErrorResult(code, message),
+	}
+}
+
 // ToolAccessDeps defines the common dependencies needed for tool access control.
 // All tool dependency structs should embed or satisfy this interface.
 type ToolAccessDeps interface {
@@ -22,6 +65,24 @@ type ToolAccessDeps interface {
 	GetMCPConfigService() services.MCPConfigService
 	GetLogger() *zap.Logger
 }
+
+// BaseMCPToolDeps provides the common dependencies that all MCP tools need.
+// Tool-specific *Deps structs should embed this to avoid repeating the
+// GetDB/GetMCPConfigService/GetLogger method implementations.
+type BaseMCPToolDeps struct {
+	DB               *database.DB
+	MCPConfigService services.MCPConfigService
+	Logger           *zap.Logger
+}
+
+// GetDB implements ToolAccessDeps.
+func (d *BaseMCPToolDeps) GetDB() *database.DB { return d.DB }
+
+// GetMCPConfigService implements ToolAccessDeps.
+func (d *BaseMCPToolDeps) GetMCPConfigService() services.MCPConfigService { return d.MCPConfigService }
+
+// GetLogger implements ToolAccessDeps.
+func (d *BaseMCPToolDeps) GetLogger() *zap.Logger { return d.Logger }
 
 // ToolAccessResult contains the result of a successful access check.
 type ToolAccessResult struct {
@@ -36,7 +97,11 @@ type ToolAccessResult struct {
 // - Agents (API key auth) get ComputeAgentTools
 // - Admin/Data/Developer roles get ComputeDeveloperTools
 // - Regular users get ComputeUserTools
+//
 // Returns project ID, tenant-scoped context, cleanup function, and any error.
+// Per CLAUDE.md Rule #6, actionable errors (authentication, invalid parameters, tool not enabled)
+// are returned as ToolAccessError which can be converted to JSON MCP responses using AsToolAccessResult.
+// System errors (database failures) are returned as regular Go errors.
 func CheckToolAccess(ctx context.Context, deps ToolAccessDeps, toolName string) (*ToolAccessResult, error) {
 	db := deps.GetDB()
 	mcpConfig := deps.GetMCPConfigService()
@@ -45,12 +110,12 @@ func CheckToolAccess(ctx context.Context, deps ToolAccessDeps, toolName string) 
 	// Get claims from context
 	claims, ok := auth.GetClaims(ctx)
 	if !ok {
-		return nil, fmt.Errorf("authentication required")
+		return nil, newToolAccessError("authentication_required", "authentication required")
 	}
 
 	projectID, err := uuid.Parse(claims.ProjectID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid project ID: %w", err)
+		return nil, newToolAccessError("invalid_project_id", fmt.Sprintf("invalid project ID: %v", err))
 	}
 
 	// Acquire connection with tenant scope
@@ -85,28 +150,17 @@ func CheckToolAccess(ctx context.Context, deps ToolAccessDeps, toolName string) 
 	}
 
 	scope.Close()
-	return nil, fmt.Errorf("%s tool is not enabled for this project", toolName)
+	return nil, newToolAccessError("tool_not_enabled", fmt.Sprintf("%s tool is not enabled for this project", toolName))
 }
 
 // computeToolsForRole determines the tool set based on JWT claims.
-// - Agents (Subject == "agent") get limited agent tools
-// - Admin/Data/Developer roles get developer tools
-// - Regular users get user tools
+// Uses ComputeEnabledToolsFromConfig to ensure consistency with NewToolFilter's listing behavior.
 func computeToolsForRole(claims *auth.Claims, state map[string]*models.ToolGroupConfig) []services.ToolSpec {
 	// Check if caller is an agent (API key authentication)
-	if claims.Subject == "agent" {
-		return services.ComputeAgentTools(state)
-	}
+	isAgent := claims.Subject == "agent"
 
-	// Check if caller has admin/data/developer role
-	if slices.Contains(claims.Roles, models.RoleAdmin) ||
-		slices.Contains(claims.Roles, models.RoleData) ||
-		slices.Contains(claims.Roles, "developer") {
-		return services.ComputeDeveloperTools(state)
-	}
-
-	// Regular user gets user tools
-	return services.ComputeUserTools(state)
+	// Use the same function as the tool filter to ensure listing and calling are consistent
+	return services.ComputeEnabledToolsFromConfig(state, isAgent)
 }
 
 // isToolInList checks if a tool name is in the enabled tools list.

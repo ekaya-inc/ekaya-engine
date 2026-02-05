@@ -54,6 +54,10 @@ func NewRelationshipDiscoveryNode(
 }
 
 // Execute runs the LLM-validated relationship discovery phase.
+//
+// Note: This node does not require dag.OntologyID. Relationship discovery uses LLM
+// validation to infer FK relationships from schema data and column features, storing
+// results in engine metadata tables independently of the ontology.
 func (n *RelationshipDiscoveryNode) Execute(ctx context.Context, dag *models.OntologyDAG) error {
 	n.Logger().Info("Starting LLM-validated relationship discovery",
 		zap.String("project_id", dag.ProjectID.String()),

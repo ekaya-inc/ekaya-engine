@@ -10,27 +10,15 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 
-	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 // GlossaryToolDeps contains dependencies for glossary tools.
 type GlossaryToolDeps struct {
-	DB               *database.DB
-	MCPConfigService services.MCPConfigService
-	GlossaryService  services.GlossaryService
-	Logger           *zap.Logger
+	BaseMCPToolDeps
+	GlossaryService services.GlossaryService
 }
-
-// GetDB implements ToolAccessDeps.
-func (d *GlossaryToolDeps) GetDB() *database.DB { return d.DB }
-
-// GetMCPConfigService implements ToolAccessDeps.
-func (d *GlossaryToolDeps) GetMCPConfigService() services.MCPConfigService { return d.MCPConfigService }
-
-// GetLogger implements ToolAccessDeps.
-func (d *GlossaryToolDeps) GetLogger() *zap.Logger { return d.Logger }
 
 // RegisterGlossaryTools registers glossary-related MCP tools.
 func RegisterGlossaryTools(s *server.MCPServer, deps *GlossaryToolDeps) {
@@ -61,6 +49,9 @@ func registerListGlossaryTool(s *server.MCPServer, deps *GlossaryToolDeps) {
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "list_glossary")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -118,6 +109,9 @@ func registerGetGlossarySQLTool(s *server.MCPServer, deps *GlossaryToolDeps) {
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "get_glossary_sql")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -231,6 +225,9 @@ func registerCreateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "create_glossary_term")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -338,6 +335,9 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "update_glossary_term")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -559,6 +559,9 @@ func registerDeleteGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "delete_glossary_term")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()

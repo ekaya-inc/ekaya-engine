@@ -40,6 +40,10 @@ func NewPKMatchDiscoveryNode(
 }
 
 // Execute runs the pk_match discovery phase.
+//
+// Note: This node does not require dag.OntologyID. PK match discovery uses pairwise
+// SQL join analysis to infer relationships from the datasource, storing results in
+// engine metadata tables independently of the ontology.
 func (n *PKMatchDiscoveryNode) Execute(ctx context.Context, dag *models.OntologyDAG) error {
 	n.Logger().Info("Starting pk_match relationship discovery",
 		zap.String("project_id", dag.ProjectID.String()),

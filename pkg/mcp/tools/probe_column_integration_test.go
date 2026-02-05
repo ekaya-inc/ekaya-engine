@@ -86,13 +86,15 @@ func setupProbeColumnIntegrationTest(t *testing.T) *probeColumnTestContext {
 
 	// Register probe tools with real repositories
 	probeDeps := &ProbeToolDeps{
-		DB:                 engineDB.DB,
-		MCPConfigService:   mockMCPConfig,
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: mockMCPConfig,
+			Logger:           zap.NewNop(),
+		},
 		SchemaRepo:         schemaRepo,
 		OntologyRepo:       ontologyRepo,
 		ColumnMetadataRepo: columnMetadataRepo,
 		ProjectService:     &mockProjectService{defaultDatasourceID: datasourceID},
-		Logger:             zap.NewNop(),
 	}
 	RegisterProbeTools(mcpServer, probeDeps)
 

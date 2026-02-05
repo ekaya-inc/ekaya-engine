@@ -43,6 +43,10 @@ func NewColumnEnrichmentNode(
 }
 
 // Execute runs the column enrichment phase.
+//
+// Note: This node does not require dag.OntologyID. Column enrichment generates LLM-based
+// descriptions and semantic types for columns, storing results in engine_ontology_column_metadata
+// which is linked via schema_column_id, not ontology_id.
 func (n *ColumnEnrichmentNode) Execute(ctx context.Context, dag *models.OntologyDAG) error {
 	n.Logger().Info("Starting column enrichment",
 		zap.String("project_id", dag.ProjectID.String()))

@@ -13,28 +13,15 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 
-	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
-	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 // QuestionToolDeps contains dependencies for ontology question tools.
 type QuestionToolDeps struct {
-	DB               *database.DB
-	MCPConfigService services.MCPConfigService
-	QuestionRepo     repositories.OntologyQuestionRepository
-	Logger           *zap.Logger
+	BaseMCPToolDeps
+	QuestionRepo repositories.OntologyQuestionRepository
 }
-
-// GetDB implements ToolAccessDeps.
-func (d *QuestionToolDeps) GetDB() *database.DB { return d.DB }
-
-// GetMCPConfigService implements ToolAccessDeps.
-func (d *QuestionToolDeps) GetMCPConfigService() services.MCPConfigService { return d.MCPConfigService }
-
-// GetLogger implements ToolAccessDeps.
-func (d *QuestionToolDeps) GetLogger() *zap.Logger { return d.Logger }
 
 // RegisterQuestionTools registers ontology question MCP tools.
 func RegisterQuestionTools(s *server.MCPServer, deps *QuestionToolDeps) {
@@ -128,6 +115,9 @@ func registerListOntologyQuestionsTool(s *server.MCPServer, deps *QuestionToolDe
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "list_ontology_questions")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -437,6 +427,9 @@ func registerResolveOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "resolve_ontology_question")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -539,6 +532,9 @@ func registerSkipOntologyQuestionTool(s *server.MCPServer, deps *QuestionToolDep
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "skip_ontology_question")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -636,6 +632,9 @@ func registerEscalateOntologyQuestionTool(s *server.MCPServer, deps *QuestionToo
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "escalate_ontology_question")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -733,6 +732,9 @@ func registerDismissOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "dismiss_ontology_question")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()

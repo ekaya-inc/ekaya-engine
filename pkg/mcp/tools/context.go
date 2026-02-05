@@ -11,7 +11,6 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 
-	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
@@ -19,8 +18,7 @@ import (
 
 // ContextToolDeps contains dependencies for the unified context tool.
 type ContextToolDeps struct {
-	DB                     *database.DB
-	MCPConfigService       services.MCPConfigService
+	BaseMCPToolDeps
 	ProjectService         services.ProjectService
 	OntologyContextService services.OntologyContextService
 	OntologyRepo           repositories.OntologyRepository
@@ -30,17 +28,7 @@ type ContextToolDeps struct {
 	ColumnMetadataRepo     repositories.ColumnMetadataRepository
 	TableMetadataRepo      repositories.TableMetadataRepository
 	KnowledgeRepo          repositories.KnowledgeRepository
-	Logger                 *zap.Logger
 }
-
-// GetDB implements ToolAccessDeps.
-func (d *ContextToolDeps) GetDB() *database.DB { return d.DB }
-
-// GetMCPConfigService implements ToolAccessDeps.
-func (d *ContextToolDeps) GetMCPConfigService() services.MCPConfigService { return d.MCPConfigService }
-
-// GetLogger implements ToolAccessDeps.
-func (d *ContextToolDeps) GetLogger() *zap.Logger { return d.Logger }
 
 // includeOptions specifies what additional data to include in the response.
 type includeOptions struct {
@@ -105,6 +93,9 @@ func registerGetContextTool(s *server.MCPServer, deps *ContextToolDeps) {
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "get_context")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()

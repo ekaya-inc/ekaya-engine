@@ -25,8 +25,7 @@ import (
 // MCPToolDeps contains dependencies for MCP tools.
 // This includes developer tools, business user tools, and approved query tools.
 type MCPToolDeps struct {
-	DB                           *database.DB
-	MCPConfigService             services.MCPConfigService
+	BaseMCPToolDeps
 	DatasourceService            services.DatasourceService
 	SchemaService                services.SchemaService
 	ProjectService               services.ProjectService
@@ -37,21 +36,11 @@ type MCPToolDeps struct {
 	PendingChangeRepo            repositories.PendingChangeRepository
 	InstalledAppService          services.InstalledAppService
 	Auditor                      *audit.SecurityAuditor // Optional: for modifying query SIEM logging
-	Logger                       *zap.Logger
 }
 
 // dataLiaisonTools is a reference to the shared list in services.DataLiaisonTools.
 // These tools require the AI Data Liaison app to be installed.
 var dataLiaisonTools = services.DataLiaisonTools
-
-// GetDB implements ToolAccessDeps.
-func (d *MCPToolDeps) GetDB() *database.DB { return d.DB }
-
-// GetMCPConfigService implements ToolAccessDeps.
-func (d *MCPToolDeps) GetMCPConfigService() services.MCPConfigService { return d.MCPConfigService }
-
-// GetLogger implements ToolAccessDeps.
-func (d *MCPToolDeps) GetLogger() *zap.Logger { return d.Logger }
 
 // GetAuditor implements QueryLoggingDeps.
 func (d *MCPToolDeps) GetAuditor() *audit.SecurityAuditor { return d.Auditor }
@@ -417,6 +406,9 @@ func registerEchoTool(s *server.MCPServer, deps *MCPToolDeps) {
 		// Check if echo tool is enabled using unified access checker
 		_, _, cleanup, err := AcquireToolAccess(ctx, deps, "echo")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -479,6 +471,9 @@ func registerQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "query")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -605,6 +600,9 @@ func registerSampleTool(s *server.MCPServer, deps *MCPToolDeps) {
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "sample")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -711,6 +709,9 @@ func registerExecuteTool(s *server.MCPServer, deps *MCPToolDeps) {
 		// Check if execute tool is enabled using unified access checker
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "execute")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -858,6 +859,9 @@ func registerValidateTool(s *server.MCPServer, deps *MCPToolDeps) {
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "validate")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -933,6 +937,9 @@ func registerExplainQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "explain_query")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -1019,6 +1026,9 @@ func registerRefreshSchemaTool(s *server.MCPServer, deps *MCPToolDeps) {
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "refresh_schema")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -1141,6 +1151,9 @@ func registerListPendingChangesTool(s *server.MCPServer, deps *MCPToolDeps) {
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "list_pending_changes")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -1245,6 +1258,9 @@ func registerApproveChangeTool(s *server.MCPServer, deps *MCPToolDeps) {
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "approve_change")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -1331,6 +1347,9 @@ func registerRejectChangeTool(s *server.MCPServer, deps *MCPToolDeps) {
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "reject_change")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -1412,6 +1431,9 @@ func registerApproveAllChangesTool(s *server.MCPServer, deps *MCPToolDeps) {
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "approve_all_changes")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -1471,6 +1493,9 @@ func registerScanDataChangesTool(s *server.MCPServer, deps *MCPToolDeps) {
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "scan_data_changes")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()

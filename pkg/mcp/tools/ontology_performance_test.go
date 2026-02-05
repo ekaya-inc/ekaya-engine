@@ -236,12 +236,14 @@ func setupOntologyPerformanceTest(t *testing.T) *ontologyPerformanceTestContext 
 
 	// Create dependencies
 	deps := &OntologyToolDeps{
-		DB:                     engineDB.DB,
-		MCPConfigService:       mcpConfigService,
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: mcpConfigService,
+			Logger:           logger,
+		},
 		OntologyContextService: ontologyContextService,
 		OntologyRepo:           ontologyRepo,
 		SchemaRepo:             schemaRepo,
-		Logger:                 logger,
 	}
 
 	tc := &ontologyPerformanceTestContext{

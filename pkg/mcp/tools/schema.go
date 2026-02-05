@@ -8,29 +8,16 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"go.uber.org/zap"
 
-	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 // SchemaToolDeps contains dependencies for schema context tools.
 type SchemaToolDeps struct {
-	DB               *database.DB
-	MCPConfigService services.MCPConfigService
-	ProjectService   services.ProjectService
-	SchemaService    services.SchemaService
-	Logger           *zap.Logger
+	BaseMCPToolDeps
+	ProjectService services.ProjectService
+	SchemaService  services.SchemaService
 }
-
-// GetDB implements ToolAccessDeps.
-func (d *SchemaToolDeps) GetDB() *database.DB { return d.DB }
-
-// GetMCPConfigService implements ToolAccessDeps.
-func (d *SchemaToolDeps) GetMCPConfigService() services.MCPConfigService { return d.MCPConfigService }
-
-// GetLogger implements ToolAccessDeps.
-func (d *SchemaToolDeps) GetLogger() *zap.Logger { return d.Logger }
 
 // SchemaToolNames lists all tools in the schema group.
 var SchemaToolNames = map[string]bool{
@@ -70,6 +57,9 @@ func registerGetSchemaContextTool(s *server.MCPServer, deps *SchemaToolDeps) {
 		// Check if get_schema tool is enabled using unified access checker
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "get_schema")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()

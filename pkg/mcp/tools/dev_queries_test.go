@@ -19,12 +19,14 @@ func TestRegisterDevQueryTools(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &DevQueryToolDeps{
-		MCPConfigService: &mockMCPConfigService{
-			config: &models.ToolGroupConfig{Enabled: true},
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			MCPConfigService: &mockMCPConfigService{
+				config: &models.ToolGroupConfig{Enabled: true},
+			},
+			Logger: zap.NewNop(),
 		},
 		ProjectService: &mockProjectService{},
 		QueryService:   &mockQueryService{},
-		Logger:         zap.NewNop(),
 	}
 
 	RegisterDevQueryTools(mcpServer, deps)
@@ -491,12 +493,14 @@ func TestListQuerySuggestions_ToolDescription(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &DevQueryToolDeps{
-		MCPConfigService: &mockMCPConfigService{
-			config: &models.ToolGroupConfig{Enabled: true},
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			MCPConfigService: &mockMCPConfigService{
+				config: &models.ToolGroupConfig{Enabled: true},
+			},
+			Logger: zap.NewNop(),
 		},
 		ProjectService: &mockProjectService{},
 		QueryService:   &mockQueryService{},
-		Logger:         zap.NewNop(),
 	}
 
 	RegisterDevQueryTools(mcpServer, deps)
@@ -641,12 +645,14 @@ func TestApproveQuerySuggestion_ToolRegistration(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &DevQueryToolDeps{
-		MCPConfigService: &mockMCPConfigService{
-			config: &models.ToolGroupConfig{Enabled: true},
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			MCPConfigService: &mockMCPConfigService{
+				config: &models.ToolGroupConfig{Enabled: true},
+			},
+			Logger: zap.NewNop(),
 		},
 		ProjectService: &mockProjectService{},
 		QueryService:   &mockQueryService{},
-		Logger:         zap.NewNop(),
 	}
 
 	RegisterDevQueryTools(mcpServer, deps)
@@ -686,12 +692,14 @@ func TestApproveQuerySuggestion_ToolDescription(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &DevQueryToolDeps{
-		MCPConfigService: &mockMCPConfigService{
-			config: &models.ToolGroupConfig{Enabled: true},
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			MCPConfigService: &mockMCPConfigService{
+				config: &models.ToolGroupConfig{Enabled: true},
+			},
+			Logger: zap.NewNop(),
 		},
 		ProjectService: &mockProjectService{},
 		QueryService:   &mockQueryService{},
-		Logger:         zap.NewNop(),
 	}
 
 	RegisterDevQueryTools(mcpServer, deps)
@@ -772,12 +780,14 @@ func TestRejectQuerySuggestion_ToolRegistration(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &DevQueryToolDeps{
-		MCPConfigService: &mockMCPConfigService{
-			config: &models.ToolGroupConfig{Enabled: true},
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			MCPConfigService: &mockMCPConfigService{
+				config: &models.ToolGroupConfig{Enabled: true},
+			},
+			Logger: zap.NewNop(),
 		},
 		ProjectService: &mockProjectService{},
 		QueryService:   &mockQueryService{},
-		Logger:         zap.NewNop(),
 	}
 
 	RegisterDevQueryTools(mcpServer, deps)
@@ -814,12 +824,14 @@ func TestRejectQuerySuggestion_ToolDescription(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &DevQueryToolDeps{
-		MCPConfigService: &mockMCPConfigService{
-			config: &models.ToolGroupConfig{Enabled: true},
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			MCPConfigService: &mockMCPConfigService{
+				config: &models.ToolGroupConfig{Enabled: true},
+			},
+			Logger: zap.NewNop(),
 		},
 		ProjectService: &mockProjectService{},
 		QueryService:   &mockQueryService{},
-		Logger:         zap.NewNop(),
 	}
 
 	RegisterDevQueryTools(mcpServer, deps)
@@ -906,12 +918,14 @@ func TestCreateApprovedQuery_ToolRegistration(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &DevQueryToolDeps{
-		MCPConfigService: &mockMCPConfigService{
-			config: &models.ToolGroupConfig{Enabled: true},
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			MCPConfigService: &mockMCPConfigService{
+				config: &models.ToolGroupConfig{Enabled: true},
+			},
+			Logger: zap.NewNop(),
 		},
 		ProjectService: &mockProjectService{},
 		QueryService:   &mockQueryService{},
-		Logger:         zap.NewNop(),
 	}
 
 	RegisterDevQueryTools(mcpServer, deps)
@@ -949,12 +963,14 @@ func TestCreateApprovedQuery_ToolDescription(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &DevQueryToolDeps{
-		MCPConfigService: &mockMCPConfigService{
-			config: &models.ToolGroupConfig{Enabled: true},
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			MCPConfigService: &mockMCPConfigService{
+				config: &models.ToolGroupConfig{Enabled: true},
+			},
+			Logger: zap.NewNop(),
 		},
 		ProjectService: &mockProjectService{},
 		QueryService:   &mockQueryService{},
-		Logger:         zap.NewNop(),
 	}
 
 	RegisterDevQueryTools(mcpServer, deps)
@@ -1156,12 +1172,14 @@ func TestUpdateApprovedQuery_ToolRegistration(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &DevQueryToolDeps{
-		MCPConfigService: &mockMCPConfigService{
-			config: &models.ToolGroupConfig{Enabled: true},
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			MCPConfigService: &mockMCPConfigService{
+				config: &models.ToolGroupConfig{Enabled: true},
+			},
+			Logger: zap.NewNop(),
 		},
 		ProjectService: &mockProjectService{},
 		QueryService:   &mockQueryService{},
-		Logger:         zap.NewNop(),
 	}
 
 	RegisterDevQueryTools(mcpServer, deps)
@@ -1200,12 +1218,14 @@ func TestUpdateApprovedQuery_ToolDescription(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &DevQueryToolDeps{
-		MCPConfigService: &mockMCPConfigService{
-			config: &models.ToolGroupConfig{Enabled: true},
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			MCPConfigService: &mockMCPConfigService{
+				config: &models.ToolGroupConfig{Enabled: true},
+			},
+			Logger: zap.NewNop(),
 		},
 		ProjectService: &mockProjectService{},
 		QueryService:   &mockQueryService{},
-		Logger:         zap.NewNop(),
 	}
 
 	RegisterDevQueryTools(mcpServer, deps)
@@ -1366,12 +1386,14 @@ func TestDeleteApprovedQuery_ToolRegistration(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &DevQueryToolDeps{
-		MCPConfigService: &mockMCPConfigService{
-			config: &models.ToolGroupConfig{Enabled: true},
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			MCPConfigService: &mockMCPConfigService{
+				config: &models.ToolGroupConfig{Enabled: true},
+			},
+			Logger: zap.NewNop(),
 		},
 		ProjectService: &mockProjectService{},
 		QueryService:   &mockQueryService{},
-		Logger:         zap.NewNop(),
 	}
 
 	RegisterDevQueryTools(mcpServer, deps)
@@ -1411,12 +1433,14 @@ func TestDeleteApprovedQuery_ToolDescription(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &DevQueryToolDeps{
-		MCPConfigService: &mockMCPConfigService{
-			config: &models.ToolGroupConfig{Enabled: true},
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			MCPConfigService: &mockMCPConfigService{
+				config: &models.ToolGroupConfig{Enabled: true},
+			},
+			Logger: zap.NewNop(),
 		},
 		ProjectService: &mockProjectService{},
 		QueryService:   &mockQueryService{},
-		Logger:         zap.NewNop(),
 	}
 
 	RegisterDevQueryTools(mcpServer, deps)

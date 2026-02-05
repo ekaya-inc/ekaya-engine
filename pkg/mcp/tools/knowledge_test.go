@@ -106,9 +106,11 @@ func setupKnowledgeTest(t *testing.T) (*mockKnowledgeRepository, *KnowledgeToolD
 	}
 
 	deps := &KnowledgeToolDeps{
-		MCPConfigService:    &mockMCPConfigService{},
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			MCPConfigService: &mockMCPConfigService{},
+			Logger:           zap.NewNop(),
+		},
 		KnowledgeRepository: mockRepo,
-		Logger:              zap.NewNop(),
 	}
 
 	return mockRepo, deps
@@ -148,9 +150,11 @@ func TestKnowledgeToolDeps_Initialization(t *testing.T) {
 	mcpConfigService := &mockMCPConfigService{}
 
 	deps := &KnowledgeToolDeps{
-		MCPConfigService:    mcpConfigService,
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			MCPConfigService: mcpConfigService,
+			Logger:           logger,
+		},
 		KnowledgeRepository: knowledgeRepo,
-		Logger:              logger,
 	}
 
 	assert.NotNil(t, deps, "KnowledgeToolDeps should be initialized")
@@ -163,7 +167,9 @@ func TestRegisterKnowledgeTools(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &KnowledgeToolDeps{
-		Logger: zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			Logger: zap.NewNop(),
+		},
 	}
 
 	RegisterKnowledgeTools(mcpServer, deps)

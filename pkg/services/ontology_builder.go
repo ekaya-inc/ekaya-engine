@@ -96,7 +96,7 @@ func (s *ontologyBuilderService) ProcessAnswer(ctx context.Context, projectID uu
 	result, err := s.parseAnswerProcessingResponse(llmResult.Content, projectID, question.OntologyID)
 	if err != nil {
 		// If parsing fails, return a basic result with thinking preserved
-		s.logger.Warn("Failed to parse answer processing response", zap.Error(err))
+		s.logger.Error("Failed to parse answer processing response", zap.Error(err))
 		return &AnswerProcessingResult{
 			ActionsSummary: "Answer recorded",
 			Thinking:       thinking,

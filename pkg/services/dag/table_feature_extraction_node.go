@@ -44,6 +44,10 @@ func NewTableFeatureExtractionNode(
 }
 
 // Execute runs the table feature extraction phase.
+//
+// Note: This node does not require dag.OntologyID. Table feature extraction generates
+// table-level descriptions based on column features and schema structure, storing
+// results in engine metadata tables independently of the ontology.
 func (n *TableFeatureExtractionNode) Execute(ctx context.Context, dag *models.OntologyDAG) error {
 	n.Logger().Info("Starting table feature extraction",
 		zap.String("project_id", dag.ProjectID.String()),

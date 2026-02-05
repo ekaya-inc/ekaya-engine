@@ -55,8 +55,11 @@ func TestContextToolDeps_Initialization(t *testing.T) {
 
 	// Verify struct can be initialized with all dependencies
 	deps := &ContextToolDeps{
-		DB:                     db,
-		MCPConfigService:       mcpConfigService,
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               db,
+			MCPConfigService: mcpConfigService,
+			Logger:           logger,
+		},
 		ProjectService:         projectService,
 		OntologyContextService: ontologyContextService,
 		OntologyRepo:           ontologyRepo,
@@ -64,7 +67,6 @@ func TestContextToolDeps_Initialization(t *testing.T) {
 		GlossaryService:        glossaryService,
 		SchemaRepo:             schemaRepo,
 		KnowledgeRepo:          knowledgeRepo,
-		Logger:                 logger,
 	}
 
 	assert.NotNil(t, deps, "ContextToolDeps should be initialized")
@@ -76,7 +78,9 @@ func TestRegisterContextTools(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &ContextToolDeps{
-		Logger: zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			Logger: zap.NewNop(),
+		},
 	}
 
 	RegisterContextTools(mcpServer, deps)
@@ -147,7 +151,9 @@ func TestCheckContextToolsEnabled(t *testing.T) {
 
 			// Create mock dependencies (minimal for error path testing)
 			deps := &ContextToolDeps{
-				Logger: zap.NewNop(),
+				BaseMCPToolDeps: BaseMCPToolDeps{
+					Logger: zap.NewNop(),
+				},
 			}
 
 			// Call AcquireToolAccess
