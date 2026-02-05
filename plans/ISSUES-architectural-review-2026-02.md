@@ -328,7 +328,7 @@ func (d *QueryToolDeps) GetMCPConfigService() services.MCPConfigService { return
 | 3 | Column name pattern heuristics | High | Rule #5 | [x] **Resolved** (via architecture transition) |
 | 4 | MCP validation errors as Go errors | Medium | Rule #6 | [x] **Resolved** |
 | 5 | DAG node validation inconsistency | Low | Rule #4 | [x] **Resolved** |
-| 6 | Logger.Warn for errors | Low | Fail-fast philosophy | Open |
+| 6 | Logger.Warn for errors | Low | Fail-fast philosophy | [x] **Resolved** |
 | 7 | QueryToolDeps missing interface method | Low | Code consistency | Open |
 
 ---

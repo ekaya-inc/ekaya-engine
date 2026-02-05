@@ -747,12 +747,12 @@ func (s *ontologyDAGService) startHeartbeat(dagID, projectID uuid.UUID) {
 			case <-ticker.C:
 				tenantCtx, cleanup, err := s.getTenantCtx(context.Background(), projectID)
 				if err != nil {
-					s.logger.Warn("Failed to get tenant context for heartbeat", zap.Error(err))
+					s.logger.Error("Failed to get tenant context for heartbeat", zap.Error(err))
 					continue
 				}
 
 				if err := s.dagRepo.UpdateHeartbeat(tenantCtx, dagID, s.serverInstanceID); err != nil {
-					s.logger.Warn("Failed to update heartbeat", zap.Error(err))
+					s.logger.Error("Failed to update heartbeat", zap.Error(err))
 				}
 				cleanup()
 			}
