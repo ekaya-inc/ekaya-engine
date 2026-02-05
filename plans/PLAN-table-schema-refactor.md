@@ -95,66 +95,76 @@ CREATE TABLE engine_ontology_table_metadata (
 
 ## Implementation Tasks
 
-### Phase 1: Database Migration
+### Phase 1: Database Migration (023_table_schema_refactor)
 
-- [ ] 1.1 Drop `engine_table_metadata` table
-- [ ] 1.2 Create migration that drops and recreates `engine_schema_tables` with new schema
-- [ ] 1.3 Create `engine_ontology_table_metadata` with new schema
-- [ ] 1.4 Add indexes and RLS policies
+- [x] 1.1 Create single migration file `migrations/023_table_schema_refactor.up.sql` that:
+  - Drops `engine_table_metadata` table
+  - Drops and recreates `engine_schema_tables` with new schema (removes `business_name`, `description`, `metadata`)
+  - Creates `engine_ontology_table_metadata` with new schema
+  - Adds indexes and RLS policies
 
 ### Phase 2: Model Updates
 
-- [ ] 2.1 Update `models.SchemaTable`:
-  - Remove `BusinessName`, `Description`, `Metadata`
+- [ ] 2.1 Update `models.SchemaTable` in `pkg/models/schema.go`:
+  - Remove `BusinessName`, `Description`, `Metadata` fields
 
-- [ ] 2.2 Rename `models.TableMetadata` and update:
+- [ ] 2.2 Update `models.TableMetadata` in `pkg/models/table_metadata.go`:
   - Remove `DatasourceID`, `TableName`
   - Add `SchemaTableID uuid`
   - Add `TableType`, `Confidence`
-  - Add `Features` JSONB field
-  - Add `Entity`
+  - Add `Features` JSONB field (with `TableMetadataFeatures` struct)
   - Add `AnalyzedAt`, `LLMModelUsed`
+  - Add helper methods similar to ColumnMetadata pattern
 
 ### Phase 3: Repository Updates
 
-- [ ] 3.1 Update `SchemaRepository`:
-  - Update all queries to exclude dropped columns
+- [ ] 3.1 Update `SchemaRepository` in `pkg/repositories/schema_repository.go`:
+  - Update all queries to exclude dropped columns (`business_name`, `description`, `metadata`)
 
-- [ ] 3.2 Rename and update `TableMetadataRepository`:
-  - Change from `table_name` to `schema_table_id`
-  - Add `GetBySchemaTableID()`
-  - Add `UpsertFromExtraction()` for extraction pipeline
-  - Update `Upsert()` for MCP/manual edits
+- [ ] 3.2 Update `TableMetadataRepository` in `pkg/repositories/table_metadata_repository.go`:
+  - Change from `datasource_id` + `table_name` key to `schema_table_id` FK
+  - Update table name from `engine_table_metadata` to `engine_ontology_table_metadata`
+  - Add `GetBySchemaTableID(ctx context.Context, schemaTableID uuid.UUID) (*models.TableMetadata, error)`
+  - Add `UpsertFromExtraction(ctx context.Context, meta *models.TableMetadata) error` for extraction pipeline
+  - Update `Upsert()` for MCP/manual edits with proper provenance handling
 
 ### Phase 4: Service Updates
 
-- [ ] 4.1 Wire up `TableFeatureExtractionService` in main.go:
-  - Create the service instance
-  - Call `ontologyDAGService.SetTableFeatureExtractionMethods()`
+- [ ] 4.1 Wire up `TableFeatureExtractionService` in `main.go`:
+  - Create `tableFeatureExtractionSvc` instance using `NewTableFeatureExtractionService()`
+  - Call `ontologyDAGService.SetTableFeatureExtractionMethods(tableFeatureExtractionSvc)`
+  - Note: The DAG node already exists and handles nil methods gracefully; wiring enables it
 
-- [ ] 4.2 Update `TableFeatureExtractionService`:
-  - Write to `tableMetadataRepo.UpsertFromExtraction()` instead of current broken path
-  - Add `table_type` to LLM response schema
-  - Set `source='inferred'`
+- [ ] 4.2 Update `TableFeatureExtractionService` in `pkg/services/table_feature_extraction.go`:
+  - Write to `tableMetadataRepo.UpsertFromExtraction()` instead of `tableMetadataRepo.Upsert()`
+  - Add `table_type` classification to LLM prompt and response parsing
+  - Ensure `source='inferred'` is set via UpsertFromExtraction
 
-- [ ] 4.3 Update `OntologyContextService`:
-  - Fetch table metadata from ontology table using `schema_table_id`
+- [ ] 4.3 Update `OntologyContextService` in `pkg/services/ontology_context.go`:
+  - Fetch table metadata from `engine_ontology_table_metadata` using `schema_table_id`
 
 ### Phase 5: MCP Tool Updates
 
-- [ ] 5.1 Update `update_table` tool - use `schema_table_id`, write typed columns
-- [ ] 5.2 Update `get_context` tool - fetch table metadata from ontology table
-- [ ] 5.3 Update `search_schema` tool - remove dropped column references
+- [ ] 5.1 Update `update_table` tool in `pkg/mcp/tools/table.go`:
+  - Use `schema_table_id` instead of `table_name` for lookup
+  - Write typed columns including `table_type`
+
+- [ ] 5.2 Update `get_context` tool in `pkg/mcp/tools/context.go`:
+  - Fetch table metadata from ontology table using `schema_table_id`
+
+- [ ] 5.3 Update `search_schema` tool in `pkg/mcp/tools/search.go`:
+  - Remove dropped column references (`business_name`, `description`, `metadata`)
 
 ### Phase 6: Handler Updates
 
-- [ ] 6.1 Update `SchemaHandler` - remove dropped field references
+- [ ] 6.1 Update `SchemaHandler` in `pkg/handlers/schema_handler.go`:
+  - Remove dropped field references from API responses
 
 ### Phase 7: Cleanup
 
 - [ ] 7.1 Delete dead code referencing old schema
-- [ ] 7.2 Update tests
-- [ ] 7.3 Update CLAUDE.md
+- [ ] 7.2 Update integration tests (table_metadata tests need schema_table_id changes)
+- [ ] 7.3 Update CLAUDE.md (if any table metadata documentation exists)
 
 ## Notes
 
