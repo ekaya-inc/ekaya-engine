@@ -73,6 +73,9 @@ Use approve_query_suggestion or reject_query_suggestion to process suggestions.`
 		// Check tool access
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "list_query_suggestions")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -330,6 +333,9 @@ Use list_query_suggestions first to see pending suggestions.`),
 		// Check tool access
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "approve_query_suggestion")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -467,6 +473,9 @@ Use list_query_suggestions first to see pending suggestions.`),
 		// Check tool access
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "reject_query_suggestion")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -610,6 +619,9 @@ If datasource_id is not provided, the project's default datasource will be used.
 		// Check tool access
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "create_approved_query")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -874,6 +886,9 @@ Use this for admin-initiated updates that bypass the suggestion workflow.`),
 		// Check tool access
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "update_approved_query")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -1079,6 +1094,9 @@ Any pending update suggestions for this query will be automatically rejected wit
 		// Check tool access
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "delete_approved_query")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()

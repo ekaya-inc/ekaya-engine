@@ -57,6 +57,9 @@ func registerGetSchemaContextTool(s *server.MCPServer, deps *SchemaToolDeps) {
 		// Check if get_schema tool is enabled using unified access checker
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "get_schema")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()

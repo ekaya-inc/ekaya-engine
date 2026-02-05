@@ -115,6 +115,9 @@ func registerListOntologyQuestionsTool(s *server.MCPServer, deps *QuestionToolDe
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "list_ontology_questions")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -424,6 +427,9 @@ func registerResolveOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "resolve_ontology_question")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -526,6 +532,9 @@ func registerSkipOntologyQuestionTool(s *server.MCPServer, deps *QuestionToolDep
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "skip_ontology_question")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -623,6 +632,9 @@ func registerEscalateOntologyQuestionTool(s *server.MCPServer, deps *QuestionToo
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "escalate_ontology_question")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -720,6 +732,9 @@ func registerDismissOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "dismiss_ontology_question")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()

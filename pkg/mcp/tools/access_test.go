@@ -227,6 +227,42 @@ func TestIsToolInList(t *testing.T) {
 	assert.False(t, isToolInList("execute", tools), "execute should NOT be in list")
 }
 
+// TestToolAccessError verifies that ToolAccessError is created correctly
+// and can be converted to MCP results using AsToolAccessResult.
+func TestToolAccessError(t *testing.T) {
+	t.Run("newToolAccessError creates correct structure", func(t *testing.T) {
+		err := newToolAccessError("authentication_required", "authentication required")
+
+		assert.Equal(t, "authentication_required", err.Code)
+		assert.Equal(t, "authentication required", err.Message)
+		assert.NotNil(t, err.MCPResult)
+		assert.Equal(t, "authentication required", err.Error())
+	})
+
+	t.Run("AsToolAccessResult extracts MCPResult from ToolAccessError", func(t *testing.T) {
+		err := newToolAccessError("tool_not_enabled", "query tool is not enabled")
+
+		result := AsToolAccessResult(err)
+
+		assert.NotNil(t, result)
+		assert.True(t, result.IsError)
+	})
+
+	t.Run("AsToolAccessResult returns nil for regular errors", func(t *testing.T) {
+		err := assert.AnError
+
+		result := AsToolAccessResult(err)
+
+		assert.Nil(t, result, "regular errors should not convert to tool access results")
+	})
+
+	t.Run("AsToolAccessResult returns nil for nil", func(t *testing.T) {
+		result := AsToolAccessResult(nil)
+
+		assert.Nil(t, result)
+	})
+}
+
 // toolSpecNamesToMap converts a slice of ToolSpec to a map for easy lookup.
 func toolSpecNamesToMap(tools []services.ToolSpec) map[string]bool {
 	result := make(map[string]bool)
