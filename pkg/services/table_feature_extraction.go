@@ -196,7 +196,7 @@ func (s *tableFeatureExtractionService) ExtractTableFeatures(
 		}
 
 		// Store the metadata
-		if err := s.storeTableMetadata(ctx, projectID, datasourceID, r.Result); err != nil {
+		if err := s.storeTableMetadata(ctx, projectID, r.Result); err != nil {
 			s.logger.Error("Failed to store table metadata",
 				zap.String("table", r.ID),
 				zap.Error(err))
@@ -257,10 +257,12 @@ func (s *tableFeatureExtractionService) buildTableContexts(
 
 // tableFeatureResult holds the LLM analysis result for a table.
 type tableFeatureResult struct {
-	TableName   string
-	Description string
-	UsageNotes  string
-	IsEphemeral bool
+	SchemaTableID uuid.UUID
+	TableName     string
+	TableType     string
+	Description   string
+	UsageNotes    string
+	IsEphemeral   bool
 }
 
 // analyzeTable sends an LLM request to analyze a single table.
@@ -298,7 +300,7 @@ func (s *tableFeatureExtractionService) analyzeTable(
 	}
 
 	// Parse the response
-	return s.parseResponse(tc.Table.TableName, result.Content)
+	return s.parseResponse(tc.Table.ID, tc.Table.TableName, result.Content)
 }
 
 func (s *tableFeatureExtractionService) systemMessage() string {
@@ -435,19 +437,22 @@ func (s *tableFeatureExtractionService) buildPrompt(tc *tableContext) string {
 	// Task and response format
 	sb.WriteString("\n## Task\n\n")
 	sb.WriteString("Based on the column features and relationships, determine:\n")
-	sb.WriteString("1. What this table represents (1-2 sentences)\n")
-	sb.WriteString("2. Usage notes: when to use or not use this table for queries\n")
-	sb.WriteString("3. Whether the table is ephemeral (session data, caches, temporary processing)\n")
+	sb.WriteString("1. The table type classification\n")
+	sb.WriteString("2. What this table represents (1-2 sentences)\n")
+	sb.WriteString("3. Usage notes: when to use or not use this table for queries\n")
+	sb.WriteString("4. Whether the table is ephemeral (session data, caches, temporary processing)\n")
 
-	sb.WriteString("\n**Table Type Indicators:**\n")
-	sb.WriteString("- **Transactional:** Has created_at/updated_at, event timestamps, references to other entities\n")
-	sb.WriteString("- **Reference/Lookup:** Small row count, few FKs, mostly static data (countries, status codes)\n")
-	sb.WriteString("- **Logging/Audit:** append-only pattern, high volume, timestamp-indexed\n")
-	sb.WriteString("- **Ephemeral:** session_, tmp_, cache_, queue_ patterns; job/task tables with short retention\n")
+	sb.WriteString("\n**Table Type Classifications:**\n")
+	sb.WriteString("- **transactional:** Event/action tables with created_at/updated_at timestamps, references to other entities\n")
+	sb.WriteString("- **reference:** Static lookup tables with small row count, few FKs (countries, status codes)\n")
+	sb.WriteString("- **logging:** Audit/history tables with append-only pattern, high volume, timestamp-indexed\n")
+	sb.WriteString("- **ephemeral:** Temporary/session data (session_, tmp_, cache_, queue_ patterns)\n")
+	sb.WriteString("- **junction:** Many-to-many relationship tables (primarily contains two FKs linking other tables)\n")
 
 	sb.WriteString("\n## Response Format\n\n")
 	sb.WriteString("```json\n")
 	sb.WriteString("{\n")
+	sb.WriteString("  \"table_type\": \"transactional\",\n")
 	sb.WriteString("  \"description\": \"Stores user account information including authentication credentials and profile data.\",\n")
 	sb.WriteString("  \"usage_notes\": \"Primary table for user data. Join with user_profiles for extended attributes.\",\n")
 	sb.WriteString("  \"is_ephemeral\": false\n")
@@ -495,42 +500,49 @@ func (s *tableFeatureExtractionService) writeColumnSummary(sb *strings.Builder, 
 
 // tableAnalysisResponse is the expected JSON response from the LLM.
 type tableAnalysisResponse struct {
+	TableType   string `json:"table_type"`
 	Description string `json:"description"`
 	UsageNotes  string `json:"usage_notes"`
 	IsEphemeral bool   `json:"is_ephemeral"`
 }
 
-func (s *tableFeatureExtractionService) parseResponse(tableName, content string) (*tableFeatureResult, error) {
+func (s *tableFeatureExtractionService) parseResponse(schemaTableID uuid.UUID, tableName, content string) (*tableFeatureResult, error) {
 	response, err := llm.ParseJSONResponse[tableAnalysisResponse](content)
 	if err != nil {
 		return nil, fmt.Errorf("parse table analysis response: %w", err)
 	}
 
 	return &tableFeatureResult{
-		TableName:   tableName,
-		Description: response.Description,
-		UsageNotes:  response.UsageNotes,
-		IsEphemeral: response.IsEphemeral,
+		SchemaTableID: schemaTableID,
+		TableName:     tableName,
+		TableType:     response.TableType,
+		Description:   response.Description,
+		UsageNotes:    response.UsageNotes,
+		IsEphemeral:   response.IsEphemeral,
 	}, nil
 }
 
 // storeTableMetadata persists the analysis result to the database.
 func (s *tableFeatureExtractionService) storeTableMetadata(
 	ctx context.Context,
-	projectID, datasourceID uuid.UUID,
+	projectID uuid.UUID,
 	result *tableFeatureResult,
 ) error {
 	meta := &models.TableMetadata{
-		ProjectID:    projectID,
-		DatasourceID: datasourceID,
-		TableName:    result.TableName,
-		Description:  &result.Description,
-		UsageNotes:   &result.UsageNotes,
-		IsEphemeral:  result.IsEphemeral,
-		Source:       "inferred",
+		ProjectID:     projectID,
+		SchemaTableID: result.SchemaTableID,
+		Description:   &result.Description,
+		UsageNotes:    &result.UsageNotes,
+		IsEphemeral:   result.IsEphemeral,
+		Source:        "inferred",
 	}
 
-	return s.tableMetadataRepo.Upsert(ctx, meta)
+	// Set TableType if provided
+	if result.TableType != "" {
+		meta.TableType = &result.TableType
+	}
+
+	return s.tableMetadataRepo.UpsertFromExtraction(ctx, meta)
 }
 
 // Ensure the service implements the dag.TableFeatureExtractionMethods interface.

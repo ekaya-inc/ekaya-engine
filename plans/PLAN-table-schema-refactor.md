@@ -131,12 +131,12 @@ CREATE TABLE engine_ontology_table_metadata (
 
 ### Phase 4: Service Updates
 
-- [ ] 4.1 Wire up `TableFeatureExtractionService` in `main.go`:
+- [x] 4.1 Wire up `TableFeatureExtractionService` in `main.go`:
   - Create `tableFeatureExtractionSvc` instance using `NewTableFeatureExtractionService()`
   - Call `ontologyDAGService.SetTableFeatureExtractionMethods(tableFeatureExtractionSvc)`
   - Note: The DAG node already exists and handles nil methods gracefully; wiring enables it
 
-- [ ] 4.2 Update `TableFeatureExtractionService` in `pkg/services/table_feature_extraction.go`:
+- [x] 4.2 Update `TableFeatureExtractionService` in `pkg/services/table_feature_extraction.go`:
   - Write to `tableMetadataRepo.UpsertFromExtraction()` instead of `tableMetadataRepo.Upsert()`
   - Add `table_type` classification to LLM prompt and response parsing
   - Ensure `source='inferred'` is set via UpsertFromExtraction
