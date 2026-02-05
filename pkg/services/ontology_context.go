@@ -121,26 +121,12 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 		return nil, fmt.Errorf("failed to get columns: %w", err)
 	}
 
-	// Fetch table metadata if repository is available
+	// Fetch table metadata keyed by table name (joins with engine_schema_tables)
 	var tableMetadataMap map[string]*models.TableMetadata
 	if s.tableMetadataRepo != nil {
-		dsID, err := s.projectService.GetDefaultDatasourceID(ctx, projectID)
+		tableMetadataMap, err = s.tableMetadataRepo.ListByTableNames(ctx, projectID, tablesToInclude)
 		if err != nil {
-			s.logger.Warn("Failed to get default datasource for table metadata",
-				zap.String("project_id", projectID.String()),
-				zap.Error(err))
-		} else {
-			metaList, err := s.tableMetadataRepo.List(ctx, projectID, dsID)
-			if err != nil {
-				s.logger.Warn("Failed to get table metadata",
-					zap.String("project_id", projectID.String()),
-					zap.Error(err))
-			} else if len(metaList) > 0 {
-				tableMetadataMap = make(map[string]*models.TableMetadata, len(metaList))
-				for _, meta := range metaList {
-					tableMetadataMap[meta.TableName] = meta
-				}
-			}
+			return nil, fmt.Errorf("failed to get table metadata: %w", err)
 		}
 	}
 
@@ -175,20 +161,18 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 		}
 
 		// Merge table metadata if available
-		if tableMetadataMap != nil {
-			if meta, ok := tableMetadataMap[tableName]; ok {
-				if meta.Description != nil && *meta.Description != "" {
-					summary.Description = *meta.Description
-				}
-				if meta.UsageNotes != nil && *meta.UsageNotes != "" {
-					summary.UsageNotes = *meta.UsageNotes
-				}
-				if meta.IsEphemeral {
-					summary.IsEphemeral = true
-				}
-				if meta.PreferredAlternative != nil && *meta.PreferredAlternative != "" {
-					summary.PreferredAlternative = *meta.PreferredAlternative
-				}
+		if meta, ok := tableMetadataMap[tableName]; ok {
+			if meta.Description != nil && *meta.Description != "" {
+				summary.Description = *meta.Description
+			}
+			if meta.UsageNotes != nil && *meta.UsageNotes != "" {
+				summary.UsageNotes = *meta.UsageNotes
+			}
+			if meta.IsEphemeral {
+				summary.IsEphemeral = true
+			}
+			if meta.PreferredAlternative != nil && *meta.PreferredAlternative != "" {
+				summary.PreferredAlternative = *meta.PreferredAlternative
 			}
 		}
 
@@ -239,26 +223,12 @@ func (s *ontologyContextService) GetColumnsContext(ctx context.Context, projectI
 		return nil, fmt.Errorf("failed to get columns: %w", err)
 	}
 
-	// Fetch table metadata if repository is available
+	// Fetch table metadata keyed by table name (joins with engine_schema_tables)
 	var tableMetadataMap map[string]*models.TableMetadata
 	if s.tableMetadataRepo != nil {
-		dsID, err := s.projectService.GetDefaultDatasourceID(ctx, projectID)
+		tableMetadataMap, err = s.tableMetadataRepo.ListByTableNames(ctx, projectID, tableNames)
 		if err != nil {
-			s.logger.Warn("Failed to get default datasource for table metadata",
-				zap.String("project_id", projectID.String()),
-				zap.Error(err))
-		} else {
-			metaList, err := s.tableMetadataRepo.List(ctx, projectID, dsID)
-			if err != nil {
-				s.logger.Warn("Failed to get table metadata",
-					zap.String("project_id", projectID.String()),
-					zap.Error(err))
-			} else if len(metaList) > 0 {
-				tableMetadataMap = make(map[string]*models.TableMetadata, len(metaList))
-				for _, meta := range metaList {
-					tableMetadataMap[meta.TableName] = meta
-				}
-			}
+			return nil, fmt.Errorf("failed to get table metadata: %w", err)
 		}
 	}
 
@@ -290,20 +260,18 @@ func (s *ontologyContextService) GetColumnsContext(ctx context.Context, projectI
 		}
 
 		// Merge table metadata if available
-		if tableMetadataMap != nil {
-			if meta, ok := tableMetadataMap[tableName]; ok {
-				if meta.Description != nil && *meta.Description != "" {
-					detail.Description = *meta.Description
-				}
-				if meta.UsageNotes != nil && *meta.UsageNotes != "" {
-					detail.UsageNotes = *meta.UsageNotes
-				}
-				if meta.IsEphemeral {
-					detail.IsEphemeral = true
-				}
-				if meta.PreferredAlternative != nil && *meta.PreferredAlternative != "" {
-					detail.PreferredAlternative = *meta.PreferredAlternative
-				}
+		if meta, ok := tableMetadataMap[tableName]; ok {
+			if meta.Description != nil && *meta.Description != "" {
+				detail.Description = *meta.Description
+			}
+			if meta.UsageNotes != nil && *meta.UsageNotes != "" {
+				detail.UsageNotes = *meta.UsageNotes
+			}
+			if meta.IsEphemeral {
+				detail.IsEphemeral = true
+			}
+			if meta.PreferredAlternative != nil && *meta.PreferredAlternative != "" {
+				detail.PreferredAlternative = *meta.PreferredAlternative
 			}
 		}
 

@@ -141,7 +141,7 @@ CREATE TABLE engine_ontology_table_metadata (
   - Add `table_type` classification to LLM prompt and response parsing
   - Ensure `source='inferred'` is set via UpsertFromExtraction
 
-- [ ] 4.3 Update `OntologyContextService` in `pkg/services/ontology_context.go`:
+- [x] 4.3 Update `OntologyContextService` in `pkg/services/ontology_context.go`:
   - Fetch table metadata from `engine_ontology_table_metadata` using `schema_table_id`
 
 ### Phase 5: MCP Tool Updates

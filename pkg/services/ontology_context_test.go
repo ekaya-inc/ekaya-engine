@@ -1,4 +1,3 @@
-//go:build ignore
 
 package services
 
@@ -39,13 +38,6 @@ func (m *mockOntologyRepository) UpdateDomainSummary(ctx context.Context, projec
 	return nil
 }
 
-func (m *mockOntologyRepository) UpdateEntitySummary(ctx context.Context, projectID uuid.UUID, tableName string, summary *models.EntitySummary) error {
-	return nil
-}
-
-func (m *mockOntologyRepository) UpdateEntitySummaries(ctx context.Context, projectID uuid.UUID, summaries map[string]*models.EntitySummary) error {
-	return nil
-}
 
 func (m *mockOntologyRepository) UpdateColumnDetails(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error {
 	return nil
@@ -56,6 +48,44 @@ func (m *mockOntologyRepository) GetNextVersion(ctx context.Context, projectID u
 }
 
 func (m *mockOntologyRepository) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
+// mockTableMetadataRepository is a mock for TableMetadataRepository.
+type mockTableMetadataRepository struct {
+	metadataByTableName map[string]*models.TableMetadata
+}
+
+func (m *mockTableMetadataRepository) GetBySchemaTableID(ctx context.Context, schemaTableID uuid.UUID) (*models.TableMetadata, error) {
+	return nil, nil
+}
+
+func (m *mockTableMetadataRepository) UpsertFromExtraction(ctx context.Context, meta *models.TableMetadata) error {
+	return nil
+}
+
+func (m *mockTableMetadataRepository) Upsert(ctx context.Context, meta *models.TableMetadata) error {
+	return nil
+}
+
+func (m *mockTableMetadataRepository) List(ctx context.Context, projectID uuid.UUID) ([]*models.TableMetadata, error) {
+	return nil, nil
+}
+
+func (m *mockTableMetadataRepository) ListByTableNames(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string]*models.TableMetadata, error) {
+	if m.metadataByTableName == nil {
+		return make(map[string]*models.TableMetadata), nil
+	}
+	result := make(map[string]*models.TableMetadata)
+	for _, name := range tableNames {
+		if meta, ok := m.metadataByTableName[name]; ok {
+			result[name] = meta
+		}
+	}
+	return result, nil
+}
+
+func (m *mockTableMetadataRepository) Delete(ctx context.Context, schemaTableID uuid.UUID) error {
 	return nil
 }
 
@@ -162,7 +192,7 @@ func TestGetDomainContext(t *testing.T) {
 	}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
 	result, err := svc.GetDomainContext(ctx, projectID)
 
@@ -186,7 +216,7 @@ func TestGetDomainContext_NoActiveOntology(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
 	result, err := svc.GetDomainContext(ctx, projectID)
 
@@ -226,7 +256,7 @@ func TestGetTablesContext(t *testing.T) {
 	}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
 	// Test with specific table filter
 	result, err := svc.GetTablesContext(ctx, projectID, []string{"users"})
@@ -273,7 +303,7 @@ func TestGetTablesContext_AllTables(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
 	// Test without filter - should return all tables from column_details
 	result, err := svc.GetTablesContext(ctx, projectID, nil)
@@ -322,7 +352,7 @@ func TestGetTablesContext_FKRoles(t *testing.T) {
 	}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
 	result, err := svc.GetTablesContext(ctx, projectID, []string{"billing_engagements"})
 
@@ -395,7 +425,7 @@ func TestGetColumnsContext(t *testing.T) {
 	}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
 	result, err := svc.GetColumnsContext(ctx, projectID, []string{"users"})
 
@@ -434,7 +464,7 @@ func TestGetColumnsContext_RequiresTableFilter(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
 	result, err := svc.GetColumnsContext(ctx, projectID, nil)
 
@@ -451,7 +481,7 @@ func TestGetColumnsContext_TooManyTables(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
 	// Create list of tables exceeding the limit
 	tables := make([]string, MaxColumnsDepthTables+1)
@@ -493,7 +523,7 @@ func TestGetColumnsContext_NoEnrichment(t *testing.T) {
 	}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, nil, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
 	result, err := svc.GetColumnsContext(ctx, projectID, []string{"users"})
 
@@ -515,4 +545,113 @@ func TestGetColumnsContext_NoEnrichment(t *testing.T) {
 	assert.NotNil(t, idCol)
 	assert.True(t, idCol.IsPrimaryKey)
 	assert.Empty(t, idCol.Description) // No enrichment
+}
+
+func TestGetTablesContext_WithTableMetadata(t *testing.T) {
+	// Test that table metadata from engine_ontology_table_metadata is merged correctly
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	tableID := uuid.New()
+
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"orders": {{Name: "id", IsPrimaryKey: true}},
+		},
+	}
+
+	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
+	schemaRepo := &mockSchemaRepository{
+		columnsByTable: map[string][]*models.SchemaColumn{
+			"orders": {
+				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+			},
+		},
+	}
+	projectService := &mockProjectServiceForOntology{}
+
+	// Set up table metadata with description and usage notes
+	description := "Customer order records"
+	usageNotes := "Contains payment information - handle with care"
+	preferredAlternative := "orders_v2"
+	tableMetadataRepo := &mockTableMetadataRepository{
+		metadataByTableName: map[string]*models.TableMetadata{
+			"orders": {
+				SchemaTableID:        tableID,
+				Description:          &description,
+				UsageNotes:           &usageNotes,
+				IsEphemeral:          true,
+				PreferredAlternative: &preferredAlternative,
+			},
+		},
+	}
+
+	svc := NewOntologyContextService(ontologyRepo, schemaRepo, tableMetadataRepo, projectService, zap.NewNop())
+
+	result, err := svc.GetTablesContext(ctx, projectID, []string{"orders"})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result.Tables, 1)
+
+	ordersTable := result.Tables["orders"]
+	assert.Equal(t, "Customer order records", ordersTable.Description)
+	assert.Equal(t, "Contains payment information - handle with care", ordersTable.UsageNotes)
+	assert.True(t, ordersTable.IsEphemeral)
+	assert.Equal(t, "orders_v2", ordersTable.PreferredAlternative)
+}
+
+func TestGetColumnsContext_WithTableMetadata(t *testing.T) {
+	// Test that table metadata from engine_ontology_table_metadata is merged at columns depth
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	tableID := uuid.New()
+
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"orders": {{Name: "id", IsPrimaryKey: true}},
+		},
+	}
+
+	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
+	schemaRepo := &mockSchemaRepository{
+		columnsByTable: map[string][]*models.SchemaColumn{
+			"orders": {
+				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+			},
+		},
+	}
+	projectService := &mockProjectServiceForOntology{}
+
+	// Set up table metadata
+	description := "Customer order records"
+	usageNotes := "Join with customers table for full details"
+	tableMetadataRepo := &mockTableMetadataRepository{
+		metadataByTableName: map[string]*models.TableMetadata{
+			"orders": {
+				SchemaTableID: tableID,
+				Description:   &description,
+				UsageNotes:    &usageNotes,
+			},
+		},
+	}
+
+	svc := NewOntologyContextService(ontologyRepo, schemaRepo, tableMetadataRepo, projectService, zap.NewNop())
+
+	result, err := svc.GetColumnsContext(ctx, projectID, []string{"orders"})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result.Tables, 1)
+
+	ordersTable := result.Tables["orders"]
+	assert.Equal(t, "Customer order records", ordersTable.Description)
+	assert.Equal(t, "Join with customers table for full details", ordersTable.UsageNotes)
 }
