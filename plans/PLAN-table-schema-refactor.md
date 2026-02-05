@@ -108,7 +108,7 @@ CREATE TABLE engine_ontology_table_metadata (
 - [x] 2.1 Update `models.SchemaTable` in `pkg/models/schema.go`:
   - Remove `BusinessName`, `Description`, `Metadata` fields
 
-- [ ] 2.2 Update `models.TableMetadata` in `pkg/models/table_metadata.go`:
+- [x] 2.2 Update `models.TableMetadata` in `pkg/models/table_metadata.go`:
   - Remove `DatasourceID`, `TableName`
   - Add `SchemaTableID uuid`
   - Add `TableType`, `Confidence`
