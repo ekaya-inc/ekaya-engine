@@ -104,7 +104,6 @@ type SQLTestResult struct {
 type glossaryService struct {
 	glossaryRepo   repositories.GlossaryRepository
 	ontologyRepo   repositories.OntologyRepository
-	entityRepo     repositories.OntologyEntityRepository
 	knowledgeRepo  repositories.KnowledgeRepository
 	schemaRepo     repositories.SchemaRepository
 	datasourceSvc  DatasourceService
@@ -122,7 +121,6 @@ type glossaryService struct {
 func NewGlossaryService(
 	glossaryRepo repositories.GlossaryRepository,
 	ontologyRepo repositories.OntologyRepository,
-	entityRepo repositories.OntologyEntityRepository,
 	knowledgeRepo repositories.KnowledgeRepository,
 	schemaRepo repositories.SchemaRepository,
 	datasourceSvc DatasourceService,
@@ -135,7 +133,6 @@ func NewGlossaryService(
 	return &glossaryService{
 		glossaryRepo:   glossaryRepo,
 		ontologyRepo:   ontologyRepo,
-		entityRepo:     entityRepo,
 		knowledgeRepo:  knowledgeRepo,
 		schemaRepo:     schemaRepo,
 		datasourceSvc:  datasourceSvc,
@@ -482,14 +479,14 @@ func (s *glossaryService) SuggestTerms(ctx context.Context, projectID uuid.UUID)
 		return nil, fmt.Errorf("no active ontology found for project")
 	}
 
-	// Get entities for context
-	entities, err := s.entityRepo.GetByProject(ctx, projectID)
+	// Get tables for context (replaces entity concept)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil, true)
 	if err != nil {
-		return nil, fmt.Errorf("get entities: %w", err)
+		return nil, fmt.Errorf("get tables: %w", err)
 	}
 
-	if len(entities) == 0 {
-		s.logger.Info("No entities found, skipping term suggestion",
+	if len(tables) == 0 {
+		s.logger.Info("No tables found, skipping term suggestion",
 			zap.String("project_id", projectID.String()))
 		return []*models.BusinessGlossaryTerm{}, nil
 	}
@@ -507,7 +504,7 @@ func (s *glossaryService) SuggestTerms(ctx context.Context, projectID uuid.UUID)
 	}
 
 	// Build context for LLM
-	prompt := s.buildSuggestTermsPrompt(ontology, entities, knowledgeFacts)
+	prompt := s.buildSuggestTermsPrompt(ontology, tables, knowledgeFacts)
 	systemMessage := s.suggestTermsSystemMessage()
 
 	// Create LLM client
@@ -533,8 +530,8 @@ func (s *glossaryService) SuggestTerms(ctx context.Context, projectID uuid.UUID)
 		return nil, fmt.Errorf("parse LLM response: %w", err)
 	}
 
-	// Filter out inapplicable terms based on entity types
-	filtered := filterInapplicableTerms(suggestions, entities)
+	// Filter out inapplicable terms based on table names
+	filtered := filterInapplicableTerms(suggestions, tables)
 
 	s.logger.Info("Generated term suggestions",
 		zap.String("project_id", projectID.String()),
@@ -575,7 +572,7 @@ DO NOT include SQL in this response. SQL definitions will be generated separatel
 Suggest 5-15 terms that are specific and meaningful for this domain.`
 }
 
-func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntology, entities []*models.OntologyEntity, knowledgeFacts []*models.KnowledgeFact) string {
+func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntology, tables []*models.SchemaTable, knowledgeFacts []*models.KnowledgeFact) string {
 	var sb strings.Builder
 
 	sb.WriteString("# Database Schema Analysis for Business Metrics\n\n")
@@ -636,21 +633,12 @@ func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntolog
 		sb.WriteString("\n")
 	}
 
-	// List entities with their descriptions
-	sb.WriteString("## Entities\n\n")
-	for _, e := range entities {
-		if e.IsDeleted {
-			continue // Skip deleted entities
-		}
-		domain := e.Domain
-		if domain == "" {
-			domain = "general"
-		}
-		sb.WriteString(fmt.Sprintf("### %s (%s)\n", e.Name, domain))
-		sb.WriteString(fmt.Sprintf("- Table: `%s`\n", e.PrimaryTable))
-		if e.Description != "" {
-			sb.WriteString(fmt.Sprintf("- Description: %s\n", e.Description))
-		}
+	// List tables
+	// Note: BusinessName and Description now live in TableMetadata
+	// (engine_ontology_table_metadata), not SchemaTable.
+	sb.WriteString("## Tables\n\n")
+	for _, t := range tables {
+		sb.WriteString(fmt.Sprintf("### %s\n", t.TableName))
 		sb.WriteString("\n")
 	}
 
@@ -692,13 +680,13 @@ func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntolog
 	sb.WriteString("- \"Inventory Turnover\" - requires inventory management tables\n")
 	sb.WriteString("- \"MRR/ARR\" - only for subscription businesses with recurring revenue\n\n")
 	sb.WriteString("Instead, look for domain-specific metrics based on:\n")
-	sb.WriteString("- What entities actually exist (Engagement, Transaction, Session, etc.)\n")
+	sb.WriteString("- What tables actually exist (Engagement, Transaction, Session, etc.)\n")
 	sb.WriteString("- What columns track value (amount, fee, revenue, earned_amount)\n")
 	sb.WriteString("- What time-based columns exist (duration, start_time, end_time)\n")
 	sb.WriteString("- What user roles are distinguished (host, visitor, creator, viewer)\n\n")
 
 	// Add domain-specific hints based on detected patterns
-	domainHints := getDomainHints(entities, ontology)
+	domainHints := getDomainHints(tables, ontology)
 	if len(domainHints) > 0 {
 		sb.WriteString("## Domain Analysis\n\n")
 		sb.WriteString("Based on the schema structure, the following observations apply to this business:\n\n")
@@ -783,14 +771,14 @@ func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, 
 		return 0, fmt.Errorf("no active ontology found for project")
 	}
 
-	// Get entities for context
-	entities, err := s.entityRepo.GetByProject(ctx, projectID)
+	// Get tables for context (replaces entity concept)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil, true)
 	if err != nil {
-		return 0, fmt.Errorf("get entities: %w", err)
+		return 0, fmt.Errorf("get tables: %w", err)
 	}
 
-	if len(entities) == 0 {
-		s.logger.Info("No entities found, skipping term discovery",
+	if len(tables) == 0 {
+		s.logger.Info("No tables found, skipping term discovery",
 			zap.String("project_id", projectID.String()))
 		return 0, nil
 	}
@@ -808,7 +796,7 @@ func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, 
 	}
 
 	// Build context for LLM
-	prompt := s.buildSuggestTermsPrompt(ontology, entities, knowledgeFacts)
+	prompt := s.buildSuggestTermsPrompt(ontology, tables, knowledgeFacts)
 	systemMessage := s.suggestTermsSystemMessage()
 
 	// Create LLM client
@@ -834,8 +822,8 @@ func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, 
 		return 0, fmt.Errorf("parse LLM response: %w", err)
 	}
 
-	// Filter out inapplicable terms based on entity types
-	filtered := filterInapplicableTerms(suggestions, entities)
+	// Filter out inapplicable terms based on table names
+	filtered := filterInapplicableTerms(suggestions, tables)
 
 	s.logger.Debug("Filtered inapplicable terms",
 		zap.Int("suggested", len(suggestions)),
@@ -928,40 +916,30 @@ func (s *glossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, on
 		return fmt.Errorf("no active ontology found for project")
 	}
 
-	// Get entities for context
-	entities, err := s.entityRepo.GetByProject(ctx, projectID)
+	// Get tables for context (replaces entity concept)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil, true)
 	if err != nil {
-		return fmt.Errorf("get entities: %w", err)
+		return fmt.Errorf("get tables: %w", err)
 	}
 
 	// Get schema columns for accurate column reference (prevents LLM hallucinations)
 	var schemaColumnsByTable map[string][]*models.SchemaColumn
 	if s.schemaRepo != nil {
-		// Get datasource for the project
-		datasources, err := s.datasourceSvc.List(ctx, projectID)
+		// Get all table names
+		tableNames := make([]string, 0, len(tables))
+		for _, t := range tables {
+			tableNames = append(tableNames, t.TableName)
+		}
+		// Fetch columns for all tables in one query
+		schemaColumnsByTable, err = s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames, false)
 		if err != nil {
-			s.logger.Warn("Failed to get datasources for schema columns, continuing without",
+			s.logger.Warn("Failed to get schema columns, continuing without",
 				zap.String("project_id", projectID.String()),
 				zap.Error(err))
-		} else if len(datasources) > 0 {
-			// Get all table names from entities
-			tableNames := make([]string, 0, len(entities))
-			for _, e := range entities {
-				if !e.IsDeleted && e.PrimaryTable != "" {
-					tableNames = append(tableNames, e.PrimaryTable)
-				}
-			}
-			// Fetch columns for all tables in one query
-			schemaColumnsByTable, err = s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames, false)
-			if err != nil {
-				s.logger.Warn("Failed to get schema columns, continuing without",
-					zap.String("project_id", projectID.String()),
-					zap.Error(err))
-				schemaColumnsByTable = nil
-			} else {
-				s.logger.Debug("Loaded schema columns for enrichment",
-					zap.Int("tables", len(schemaColumnsByTable)))
-			}
+			schemaColumnsByTable = nil
+		} else {
+			s.logger.Debug("Loaded schema columns for enrichment",
+				zap.Int("tables", len(schemaColumnsByTable)))
 		}
 	}
 
@@ -980,7 +958,7 @@ func (s *glossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, on
 		semaphore <- struct{}{} // Acquire
 		go func(t *models.BusinessGlossaryTerm) {
 			defer func() { <-semaphore }() // Release
-			results <- s.enrichSingleTerm(ctx, t, ontology, entities, schemaColumnsByTable, llmClient, projectID)
+			results <- s.enrichSingleTerm(ctx, t, ontology, tables, schemaColumnsByTable, llmClient, projectID)
 		}(term)
 	}
 
@@ -1025,7 +1003,7 @@ func (s *glossaryService) enrichSingleTerm(
 	ctx context.Context,
 	term *models.BusinessGlossaryTerm,
 	ontology *models.TieredOntology,
-	entities []*models.OntologyEntity,
+	tables []*models.SchemaTable,
 	schemaColumnsByTable map[string][]*models.SchemaColumn,
 	llmClient llm.LLMClient,
 	projectID uuid.UUID,
@@ -1040,7 +1018,7 @@ func (s *glossaryService) enrichSingleTerm(
 	defer cleanup()
 
 	// First attempt: normal enrichment
-	result, firstErr := s.tryEnrichTerm(tenantCtx, term, ontology, entities, schemaColumnsByTable, llmClient, projectID, false, "")
+	result, firstErr := s.tryEnrichTerm(tenantCtx, term, ontology, tables, schemaColumnsByTable, llmClient, projectID, false, "")
 	if firstErr == nil {
 		return result
 	}
@@ -1050,7 +1028,7 @@ func (s *glossaryService) enrichSingleTerm(
 		zap.String("term", term.Term),
 		zap.Error(firstErr))
 
-	result, retryErr := s.tryEnrichTerm(tenantCtx, term, ontology, entities, schemaColumnsByTable, llmClient, projectID, true, firstErr.Error())
+	result, retryErr := s.tryEnrichTerm(tenantCtx, term, ontology, tables, schemaColumnsByTable, llmClient, projectID, true, firstErr.Error())
 	if retryErr == nil {
 		s.logger.Info("Enrichment succeeded on retry with enhanced context",
 			zap.String("term", term.Term))
@@ -1076,7 +1054,7 @@ func (s *glossaryService) tryEnrichTerm(
 	ctx context.Context,
 	term *models.BusinessGlossaryTerm,
 	ontology *models.TieredOntology,
-	entities []*models.OntologyEntity,
+	tables []*models.SchemaTable,
 	schemaColumnsByTable map[string][]*models.SchemaColumn,
 	llmClient llm.LLMClient,
 	projectID uuid.UUID,
@@ -1085,9 +1063,9 @@ func (s *glossaryService) tryEnrichTerm(
 ) (enrichmentResult, error) {
 	var prompt string
 	if enhanced {
-		prompt = s.buildEnhancedEnrichTermPrompt(term, ontology, entities, schemaColumnsByTable, previousError)
+		prompt = s.buildEnhancedEnrichTermPrompt(term, ontology, tables, schemaColumnsByTable, previousError)
 	} else {
-		prompt = s.buildEnrichTermPrompt(term, ontology, entities, schemaColumnsByTable)
+		prompt = s.buildEnrichTermPrompt(term, ontology, tables, schemaColumnsByTable)
 	}
 	systemMessage := s.enrichTermSystemMessage()
 
@@ -1238,7 +1216,7 @@ Be specific and use exact table/column names from the provided schema.`
 func (s *glossaryService) buildEnrichTermPrompt(
 	term *models.BusinessGlossaryTerm,
 	ontology *models.TieredOntology,
-	entities []*models.OntologyEntity,
+	tables []*models.SchemaTable,
 	schemaColumnsByTable map[string][]*models.SchemaColumn,
 ) string {
 	var sb strings.Builder
@@ -1270,17 +1248,12 @@ func (s *glossaryService) buildEnrichTermPrompt(
 		sb.WriteString("\n")
 	}
 
-	// List entities
-	sb.WriteString("## Entities\n\n")
-	for _, e := range entities {
-		if e.IsDeleted {
-			continue
-		}
-		sb.WriteString(fmt.Sprintf("### %s\n", e.Name))
-		sb.WriteString(fmt.Sprintf("- Table: `%s`\n", e.PrimaryTable))
-		if e.Description != "" {
-			sb.WriteString(fmt.Sprintf("- Description: %s\n", e.Description))
-		}
+	// List tables
+	// Note: BusinessName and Description now live in TableMetadata
+	// (engine_ontology_table_metadata), not SchemaTable.
+	sb.WriteString("## Tables\n\n")
+	for _, t := range tables {
+		sb.WriteString(fmt.Sprintf("### %s\n", t.TableName))
 		sb.WriteString("\n")
 	}
 
@@ -1296,19 +1269,9 @@ func (s *glossaryService) buildEnrichTermPrompt(
 				if col.IsPrimaryKey {
 					colInfo += " [PK]"
 				}
-				if col.Description != nil && *col.Description != "" {
-					colInfo += fmt.Sprintf(" - %s", *col.Description)
-				}
+				// NOTE: Description is now in ColumnMetadata, not SchemaColumn
 				sb.WriteString(colInfo + "\n")
-
-				// Include sample values for low-cardinality columns (helps LLM use correct values)
-				if len(col.SampleValues) > 0 && len(col.SampleValues) <= 10 {
-					quotedValues := make([]string, len(col.SampleValues))
-					for i, v := range col.SampleValues {
-						quotedValues[i] = fmt.Sprintf("'%s'", v)
-					}
-					sb.WriteString(fmt.Sprintf("  Sample values: %s\n", strings.Join(quotedValues, ", ")))
-				}
+				// NOTE: Sample values are no longer persisted to avoid storing target datasource data.
 			}
 			sb.WriteString("\n")
 		}
@@ -1393,7 +1356,7 @@ func (s *glossaryService) buildEnrichTermPrompt(
 func (s *glossaryService) buildEnhancedEnrichTermPrompt(
 	term *models.BusinessGlossaryTerm,
 	ontology *models.TieredOntology,
-	entities []*models.OntologyEntity,
+	tables []*models.SchemaTable,
 	schemaColumnsByTable map[string][]*models.SchemaColumn,
 	previousError string,
 ) string {
@@ -1434,17 +1397,12 @@ func (s *glossaryService) buildEnhancedEnrichTermPrompt(
 		sb.WriteString("\n")
 	}
 
-	// List entities with descriptions
-	sb.WriteString("## Entities\n\n")
-	for _, e := range entities {
-		if e.IsDeleted {
-			continue
-		}
-		sb.WriteString(fmt.Sprintf("### %s\n", e.Name))
-		sb.WriteString(fmt.Sprintf("- Table: `%s`\n", e.PrimaryTable))
-		if e.Description != "" {
-			sb.WriteString(fmt.Sprintf("- Description: %s\n", e.Description))
-		}
+	// List tables
+	// Note: BusinessName and Description now live in TableMetadata
+	// (engine_ontology_table_metadata), not SchemaTable.
+	sb.WriteString("## Tables\n\n")
+	for _, t := range tables {
+		sb.WriteString(fmt.Sprintf("### %s\n", t.TableName))
 		sb.WriteString("\n")
 	}
 
@@ -1460,19 +1418,9 @@ func (s *glossaryService) buildEnhancedEnrichTermPrompt(
 				if col.IsPrimaryKey {
 					colInfo += " [PK]"
 				}
-				if col.Description != nil && *col.Description != "" {
-					colInfo += fmt.Sprintf(" - %s", *col.Description)
-				}
+				// NOTE: Description is now in ColumnMetadata, not SchemaColumn
 				sb.WriteString(colInfo + "\n")
-
-				// Include sample values for low-cardinality columns
-				if len(col.SampleValues) > 0 && len(col.SampleValues) <= 10 {
-					quotedValues := make([]string, len(col.SampleValues))
-					for i, v := range col.SampleValues {
-						quotedValues[i] = fmt.Sprintf("'%s'", v)
-					}
-					sb.WriteString(fmt.Sprintf("  Sample values: %s\n", strings.Join(quotedValues, ", ")))
-				}
+				// NOTE: Sample values are no longer persisted to avoid storing target datasource data.
 			}
 			sb.WriteString("\n")
 		}
@@ -1758,17 +1706,17 @@ func capitalizeWords(s string) string {
 	return strings.Join(words, " ")
 }
 
-// getDomainHints analyzes entities and column details to detect domain patterns
+// getDomainHints analyzes tables and column details to detect domain patterns
 // and returns hints to guide the LLM toward domain-specific term suggestions.
-func getDomainHints(entities []*models.OntologyEntity, ontology *models.TieredOntology) []string {
+func getDomainHints(tables []*models.SchemaTable, ontology *models.TieredOntology) []string {
 	var hints []string
 
-	// Detect patterns from entity names
-	hasEngagement := containsEntityByName(entities, "engagement", "session", "meeting", "call", "booking")
-	hasSubscription := containsEntityByName(entities, "subscription", "plan", "membership", "tier")
-	hasBilling := containsEntityByName(entities, "billing", "transaction", "payment", "invoice", "charge")
-	hasInventory := containsEntityByName(entities, "inventory", "product", "stock", "warehouse", "sku")
-	hasEcommerce := containsEntityByName(entities, "order", "cart", "checkout", "purchase")
+	// Detect patterns from table names
+	hasEngagement := containsTableByName(tables, "engagement", "session", "meeting", "call", "booking")
+	hasSubscription := containsTableByName(tables, "subscription", "plan", "membership", "tier")
+	hasBilling := containsTableByName(tables, "billing", "transaction", "payment", "invoice", "charge")
+	hasInventory := containsTableByName(tables, "inventory", "product", "stock", "warehouse", "sku")
+	hasEcommerce := containsTableByName(tables, "order", "cart", "checkout", "purchase")
 
 	// Check for distinct user roles in column details
 	hasUserRoles := hasRoleDistinctingColumns(ontology)
@@ -1797,18 +1745,14 @@ func getDomainHints(entities []*models.OntologyEntity, ontology *models.TieredOn
 	return hints
 }
 
-// containsEntityByName checks if any entity name contains one of the specified keywords.
+// containsTableByName checks if any table name contains one of the specified keywords.
 // The comparison is case-insensitive and matches substrings.
-func containsEntityByName(entities []*models.OntologyEntity, keywords ...string) bool {
-	for _, entity := range entities {
-		if entity.IsDeleted {
-			continue
-		}
-		nameLower := strings.ToLower(entity.Name)
-		tableLower := strings.ToLower(entity.PrimaryTable)
+func containsTableByName(tables []*models.SchemaTable, keywords ...string) bool {
+	for _, table := range tables {
+		tableLower := strings.ToLower(table.TableName)
 		for _, keyword := range keywords {
 			keywordLower := strings.ToLower(keyword)
-			if strings.Contains(nameLower, keywordLower) || strings.Contains(tableLower, keywordLower) {
+			if strings.Contains(tableLower, keywordLower) {
 				return true
 			}
 		}
@@ -1864,48 +1808,48 @@ func hasRoleDistinctingColumns(ontology *models.TieredOntology) bool {
 }
 
 // filterInapplicableTerms removes glossary terms that don't match the domain's
-// business model based on detected entity types. This provides a safety net after
+// business model based on detected table types. This provides a safety net after
 // LLM generation to catch generic SaaS terms that slipped through prompt guidance.
 func filterInapplicableTerms(
 	terms []*models.BusinessGlossaryTerm,
-	entities []*models.OntologyEntity,
+	tables []*models.SchemaTable,
 ) []*models.BusinessGlossaryTerm {
-	// Terms that require subscription-based business model entities
+	// Terms that require subscription-based business model tables
 	subscriptionTerms := []string{
 		"subscriber", "subscription", "churn", "mrr", "arr",
 		"monthly recurring", "annual recurring", "recurring revenue",
 	}
 
-	// Terms that require inventory management entities
+	// Terms that require inventory management tables
 	inventoryTerms := []string{
 		"inventory", "stock", "warehouse", "turnover",
 		"stock level", "reorder", "stockout",
 	}
 
-	// Terms that require e-commerce/order entities
+	// Terms that require e-commerce/order tables
 	ecommerceTerms := []string{
 		"order value", "cart", "checkout", "aov", "gmv",
 		"average order", "gross merchandise",
 	}
 
-	// Detect what entity types exist in the schema
-	hasSubscription := containsEntityByName(entities, "subscription", "plan", "membership", "tier")
-	hasInventory := containsEntityByName(entities, "inventory", "product", "stock", "warehouse", "sku")
-	hasEcommerce := containsEntityByName(entities, "order", "cart", "checkout", "purchase")
+	// Detect what table types exist in the schema
+	hasSubscription := containsTableByName(tables, "subscription", "plan", "membership", "tier")
+	hasInventory := containsTableByName(tables, "inventory", "product", "stock", "warehouse", "sku")
+	hasEcommerce := containsTableByName(tables, "order", "cart", "checkout", "purchase")
 
 	var filtered []*models.BusinessGlossaryTerm
 	for _, term := range terms {
 		termLower := strings.ToLower(term.Term)
 
-		// Skip subscription terms if no subscription entities
+		// Skip subscription terms if no subscription tables
 		if !hasSubscription && matchesAny(termLower, subscriptionTerms) {
 			continue
 		}
-		// Skip inventory terms if no inventory entities
+		// Skip inventory terms if no inventory tables
 		if !hasInventory && matchesAny(termLower, inventoryTerms) {
 			continue
 		}
-		// Skip e-commerce terms if no e-commerce entities
+		// Skip e-commerce terms if no e-commerce tables
 		if !hasEcommerce && matchesAny(termLower, ecommerceTerms) {
 			continue
 		}

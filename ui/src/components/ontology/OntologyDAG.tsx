@@ -680,11 +680,23 @@ export const OntologyDAG = ({
                         <ExtractionProgress
                           progress={node.progress}
                           nodeStatus={node.status}
+                          nodeType="ColumnFeatureExtraction"
+                          className="mt-2"
+                        />
+                      )}
+                    {/* Multi-phase progress for PKMatchDiscovery node */}
+                    {node.name === 'PKMatchDiscovery' &&
+                      (node.status === 'running' || node.status === 'completed') && (
+                        <ExtractionProgress
+                          progress={node.progress}
+                          nodeStatus={node.status}
+                          nodeType="PKMatchDiscovery"
                           className="mt-2"
                         />
                       )}
                     {/* Standard progress bar for other nodes */}
                     {node.name !== 'ColumnFeatureExtraction' &&
+                      node.name !== 'PKMatchDiscovery' &&
                       node.status === 'running' &&
                       node.progress &&
                       node.progress.total > 0 && (
@@ -787,7 +799,7 @@ export const OntologyDAG = ({
           <DialogHeader>
             <DialogTitle>Delete Ontology?</DialogTitle>
             <DialogDescription>
-              This will permanently delete all ontology data, including entities, relationships,
+              This will permanently delete all ontology data, including table metadata, relationships,
               questions, and chat history. This action cannot be undone.
             </DialogDescription>
           </DialogHeader>

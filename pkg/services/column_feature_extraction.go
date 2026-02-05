@@ -40,13 +40,18 @@ type ColumnFeatureExtractionService interface {
 }
 
 type columnFeatureExtractionService struct {
-	schemaRepo        repositories.SchemaRepository
-	datasourceService DatasourceService
-	adapterFactory    datasource.DatasourceAdapterFactory
-	llmFactory        llm.LLMClientFactory
-	workerPool        *llm.WorkerPool
-	getTenantCtx      TenantContextFunc
-	logger            *zap.Logger
+	schemaRepo         repositories.SchemaRepository
+	columnMetadataRepo repositories.ColumnMetadataRepository
+	datasourceService  DatasourceService
+	adapterFactory     datasource.DatasourceAdapterFactory
+	llmFactory         llm.LLMClientFactory
+	workerPool         *llm.WorkerPool
+	getTenantCtx       TenantContextFunc
+	logger             *zap.Logger
+
+	// Dependencies for question creation when classifiers are uncertain
+	questionService OntologyQuestionService
+	ontologyRepo    repositories.OntologyRepository
 
 	// Cached classifiers (created lazily)
 	classifiersMu sync.RWMutex
@@ -56,12 +61,14 @@ type columnFeatureExtractionService struct {
 // NewColumnFeatureExtractionService creates a new column feature extraction service.
 func NewColumnFeatureExtractionService(
 	schemaRepo repositories.SchemaRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
 	logger *zap.Logger,
 ) ColumnFeatureExtractionService {
 	return &columnFeatureExtractionService{
-		schemaRepo:  schemaRepo,
-		logger:      logger.Named("column-feature-extraction"),
-		classifiers: make(map[models.ClassificationPath]ColumnClassifier),
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		logger:             logger.Named("column-feature-extraction"),
+		classifiers:        make(map[models.ClassificationPath]ColumnClassifier),
 	}
 }
 
@@ -69,18 +76,20 @@ func NewColumnFeatureExtractionService(
 // Use this constructor for full Phase 2+ functionality.
 func NewColumnFeatureExtractionServiceWithLLM(
 	schemaRepo repositories.SchemaRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
 	llmFactory llm.LLMClientFactory,
 	workerPool *llm.WorkerPool,
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) ColumnFeatureExtractionService {
 	return &columnFeatureExtractionService{
-		schemaRepo:   schemaRepo,
-		llmFactory:   llmFactory,
-		workerPool:   workerPool,
-		getTenantCtx: getTenantCtx,
-		logger:       logger.Named("column-feature-extraction"),
-		classifiers:  make(map[models.ClassificationPath]ColumnClassifier),
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		llmFactory:         llmFactory,
+		workerPool:         workerPool,
+		getTenantCtx:       getTenantCtx,
+		logger:             logger.Named("column-feature-extraction"),
+		classifiers:        make(map[models.ClassificationPath]ColumnClassifier),
 	}
 }
 
@@ -88,22 +97,28 @@ func NewColumnFeatureExtractionServiceWithLLM(
 // Use this constructor for full Phase 2-4 functionality including FK resolution with data overlap queries.
 func NewColumnFeatureExtractionServiceFull(
 	schemaRepo repositories.SchemaRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
 	datasourceService DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	llmFactory llm.LLMClientFactory,
 	workerPool *llm.WorkerPool,
 	getTenantCtx TenantContextFunc,
+	questionService OntologyQuestionService,
+	ontologyRepo repositories.OntologyRepository,
 	logger *zap.Logger,
 ) ColumnFeatureExtractionService {
 	return &columnFeatureExtractionService{
-		schemaRepo:        schemaRepo,
-		datasourceService: datasourceService,
-		adapterFactory:    adapterFactory,
-		llmFactory:        llmFactory,
-		workerPool:        workerPool,
-		getTenantCtx:      getTenantCtx,
-		logger:            logger.Named("column-feature-extraction"),
-		classifiers:       make(map[models.ClassificationPath]ColumnClassifier),
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		datasourceService:  datasourceService,
+		adapterFactory:     adapterFactory,
+		llmFactory:         llmFactory,
+		workerPool:         workerPool,
+		getTenantCtx:       getTenantCtx,
+		questionService:    questionService,
+		ontologyRepo:       ontologyRepo,
+		logger:             logger.Named("column-feature-extraction"),
+		classifiers:        make(map[models.ClassificationPath]ColumnClassifier),
 	}
 }
 
@@ -274,8 +289,10 @@ func (s *columnFeatureExtractionService) runPhase1DataCollection(
 		// Build the column profile
 		profile := s.buildColumnProfile(col, tableNameByID, tableRowCountByID)
 
-		// Detect patterns in sample values
-		profile.DetectedPatterns = s.detectPatternsInSamples(col.SampleValues)
+		// Note: Pattern detection requires sample values, which are no longer stored
+		// in engine_schema_columns. DetectedPatterns will be empty.
+		// Sample values are now fetched on-demand from the datasource when needed.
+		profile.DetectedPatterns = nil
 
 		// Route to classification path based on TYPE + DATA (not names)
 		profile.ClassificationPath = s.routeToClassificationPath(profile)
@@ -310,7 +327,9 @@ func (s *columnFeatureExtractionService) buildColumnProfile(
 		IsPrimaryKey: col.IsPrimaryKey,
 		IsUnique:     col.IsUnique,
 		IsNullable:   col.IsNullable,
-		SampleValues: col.SampleValues,
+		// Note: SampleValues are no longer stored in engine_schema_columns to avoid
+		// persisting target datasource data into the engine database.
+		// Sample values will be fetched on-demand from the datasource when needed.
 	}
 
 	// Get row count from table
@@ -326,8 +345,11 @@ func (s *columnFeatureExtractionService) buildColumnProfile(
 	}
 
 	// Set null count and compute null rate
+	// Adapters populate NonNullCount via COUNT(col); calculate NullCount from it
 	if col.NullCount != nil {
 		profile.NullCount = *col.NullCount
+	} else if col.NonNullCount != nil && rowCount > 0 {
+		profile.NullCount = rowCount - *col.NonNullCount
 	}
 	if rowCount > 0 {
 		profile.NullRate = float64(profile.NullCount) / float64(rowCount)
@@ -667,6 +689,9 @@ func (s *columnFeatureExtractionService) runPhase2ColumnClassification(
 		result.Phase5CrossColumnQueue = append(result.Phase5CrossColumnQueue, table)
 	}
 
+	// Collect questions from uncertain classifications and store them
+	s.createQuestionsFromUncertainClassifications(ctx, projectID, result.Features, profiles)
+
 	s.logger.Info("Column classification complete",
 		zap.Int("total_columns", len(profiles)),
 		zap.Int("classified", len(result.Features)),
@@ -683,6 +708,82 @@ func (s *columnFeatureExtractionService) runPhase2ColumnClassification(
 	}
 
 	return result, nil
+}
+
+// createQuestionsFromUncertainClassifications collects questions from columns where the
+// classifier was uncertain and stores them in the ontology questions table.
+func (s *columnFeatureExtractionService) createQuestionsFromUncertainClassifications(
+	ctx context.Context,
+	projectID uuid.UUID,
+	features []*models.ColumnFeatures,
+	profiles []*models.ColumnDataProfile,
+) {
+	// Build a map of profiles by column ID for quick lookup
+	profileByColumnID := make(map[uuid.UUID]*models.ColumnDataProfile)
+	for _, p := range profiles {
+		profileByColumnID[p.ColumnID] = p
+	}
+
+	// Collect questions from uncertain classifications
+	var questionInputs []OntologyQuestionInput
+	for _, f := range features {
+		if f.NeedsClarification && f.ClarificationQuestion != "" {
+			// Get profile for column context (table name, column name, data type, null rate)
+			profile := profileByColumnID[f.ColumnID]
+			if profile == nil {
+				// Skip if we can't find the profile - we need it for context
+				continue
+			}
+
+			questionInputs = append(questionInputs, OntologyQuestionInput{
+				Question: f.ClarificationQuestion,
+				Category: models.QuestionCategoryTerminology,
+				Priority: 3, // Medium priority
+				Context: fmt.Sprintf("Column: %s.%s, Type: %s, Null Rate: %.1f%%",
+					profile.TableName, profile.ColumnName, profile.DataType, profile.NullRate*100),
+			})
+		}
+	}
+
+	if len(questionInputs) == 0 {
+		return
+	}
+
+	// Get active ontology for question storage
+	if s.ontologyRepo == nil || s.questionService == nil {
+		s.logger.Debug("Question service or ontology repo not available, skipping question creation",
+			zap.Int("questions_skipped", len(questionInputs)))
+		return
+	}
+
+	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
+	if err != nil {
+		s.logger.Error("failed to get active ontology for classification question storage",
+			zap.Error(err))
+		// Non-fatal: continue even if we can't store questions
+		return
+	}
+
+	if ontology == nil {
+		s.logger.Debug("No active ontology found, skipping classification question storage",
+			zap.Int("questions_skipped", len(questionInputs)))
+		return
+	}
+
+	questionModels := ConvertQuestionInputs(questionInputs, projectID, ontology.ID, nil)
+	if len(questionModels) == 0 {
+		return
+	}
+
+	if err := s.questionService.CreateQuestions(ctx, questionModels); err != nil {
+		s.logger.Error("failed to store classification questions",
+			zap.Int("count", len(questionModels)),
+			zap.Error(err))
+		// Non-fatal: continue even if question storage fails
+	} else {
+		s.logger.Info("Stored classification questions from uncertain columns",
+			zap.Int("question_count", len(questionModels)))
+	}
 }
 
 // classifySingleColumn sends ONE focused LLM request for ONE column.
@@ -852,24 +953,26 @@ func (c *timestampClassifier) buildPrompt(profile *models.ColumnDataProfile) str
 	}
 
 	sb.WriteString("\n## Task\n\n")
-	sb.WriteString("Based on the DATA characteristics (especially null rate), determine the timestamp's purpose.\n\n")
+	sb.WriteString("Based on the column's data characteristics and semantic context, determine the timestamp's purpose.\n\n")
 
-	sb.WriteString("**Classification rules:**\n")
-	sb.WriteString("- **90-100% NULL:** Likely soft delete or optional event timestamp\n")
-	sb.WriteString("- **0-5% NULL:** Likely required audit field (created_at, updated_at) or event time\n")
-	sb.WriteString("- **5-90% NULL:** Conditional timestamp (populated under certain conditions)\n")
+	sb.WriteString("**Analysis guidance:**\n")
+	sb.WriteString("- Consider what NULL vs non-NULL means semantically for this column\n")
+	sb.WriteString("- NULL might mean: 'not yet happened', 'never will happen', 'was removed/deleted', or 'unknown'\n")
+	sb.WriteString("- Non-NULL might mean: 'event occurred at this time', 'record was modified', 'soft deleted'\n")
+	sb.WriteString("- The null rate indicates frequency, not purpose - a 2% non-null rate can still indicate soft delete\n")
+	sb.WriteString("- Column name provides context but DATA characteristics should inform your decision\n")
 	if timestampScale == "nanoseconds" {
-		sb.WriteString("- **Nanosecond precision:** Suggests cursor/pagination use (high precision for ordering)\n")
+		sb.WriteString("- Nanosecond precision suggests cursor/pagination use (high precision for ordering)\n")
 	}
 
 	sb.WriteString("\n**Possible purposes:**\n")
-	sb.WriteString("- `audit_created`: Records when the row was created\n")
-	sb.WriteString("- `audit_updated`: Records when the row was last modified\n")
-	sb.WriteString("- `soft_delete`: Records when the row was soft-deleted (high null rate)\n")
-	sb.WriteString("- `event_time`: Records when a business event occurred\n")
-	sb.WriteString("- `scheduled_time`: Records when something is scheduled\n")
-	sb.WriteString("- `expiration`: Records when something expires\n")
-	sb.WriteString("- `cursor`: Used for pagination/ordering\n")
+	sb.WriteString("- `audit_created`: Records when the row was created (typically NOT NULL, set once)\n")
+	sb.WriteString("- `audit_updated`: Records when the row was last modified (typically NOT NULL, updated frequently)\n")
+	sb.WriteString("- `soft_delete`: Records when the row was logically deleted (NULL = active, non-NULL = deleted)\n")
+	sb.WriteString("- `event_time`: Records when a specific business event occurred\n")
+	sb.WriteString("- `scheduled_time`: Records when something is scheduled to happen\n")
+	sb.WriteString("- `expiration`: Records when something expires or becomes invalid\n")
+	sb.WriteString("- `cursor`: Used for pagination/ordering (typically high precision)\n")
 
 	sb.WriteString("\n## Response Format\n\n")
 	sb.WriteString("```json\n")
@@ -878,20 +981,25 @@ func (c *timestampClassifier) buildPrompt(profile *models.ColumnDataProfile) str
 	sb.WriteString("  \"confidence\": 0.85,\n")
 	sb.WriteString("  \"is_soft_delete\": false,\n")
 	sb.WriteString("  \"is_audit_field\": true,\n")
-	sb.WriteString("  \"description\": \"Records when the record was created.\"\n")
+	sb.WriteString("  \"description\": \"Records when the record was created.\",\n")
+	sb.WriteString("  \"needs_clarification\": false,\n")
+	sb.WriteString("  \"clarification_question\": \"\"\n")
 	sb.WriteString("}\n")
-	sb.WriteString("```\n")
+	sb.WriteString("```\n\n")
+	sb.WriteString("If you are uncertain (confidence < 0.7), set `needs_clarification: true` and provide a specific question.\n")
 
 	return sb.String()
 }
 
 // timestampClassificationResponse is the expected JSON response from the LLM.
 type timestampClassificationResponse struct {
-	Purpose      string  `json:"purpose"`
-	Confidence   float64 `json:"confidence"`
-	IsSoftDelete bool    `json:"is_soft_delete"`
-	IsAuditField bool    `json:"is_audit_field"`
-	Description  string  `json:"description"`
+	Purpose               string  `json:"purpose"`
+	Confidence            float64 `json:"confidence"`
+	IsSoftDelete          bool    `json:"is_soft_delete"`
+	IsAuditField          bool    `json:"is_audit_field"`
+	Description           string  `json:"description"`
+	NeedsClarification    bool    `json:"needs_clarification,omitempty"`
+	ClarificationQuestion string  `json:"clarification_question,omitempty"`
 }
 
 func (c *timestampClassifier) parseResponse(profile *models.ColumnDataProfile, content, model string) (*models.ColumnFeatures, error) {
@@ -933,9 +1041,16 @@ func (c *timestampClassifier) parseResponse(profile *models.ColumnDataProfile, c
 		LLMModelUsed: model,
 	}
 
-	// Soft delete timestamps may need cross-column validation
-	if response.IsSoftDelete {
+	// Nullable timestamps with mixed null/non-null values may need cross-column validation
+	// to understand the semantic meaning of nullability
+	if profile.IsNullable && profile.NullRate > 0 && profile.NullRate < 1.0 {
 		features.NeedsCrossColumnCheck = true
+	}
+
+	// If LLM is uncertain, flag for clarification question
+	if response.NeedsClarification && response.ClarificationQuestion != "" && response.Confidence < 0.7 {
+		features.NeedsClarification = true
+		features.ClarificationQuestion = response.ClarificationQuestion
 	}
 
 	return features, nil
@@ -3280,8 +3395,8 @@ func (s *columnFeatureExtractionService) mergeCrossColumnAnalysis(
 	}
 }
 
-// storeFeatures persists all column features to the database.
-// Each column's features are stored in the metadata JSONB field under the "column_features" key.
+// storeFeatures persists all column features to the ontology column metadata table.
+// Converts ColumnFeatures to ColumnMetadata and upserts with source='inferred'.
 func (s *columnFeatureExtractionService) storeFeatures(
 	ctx context.Context,
 	projectID uuid.UUID,
@@ -3315,7 +3430,35 @@ func (s *columnFeatureExtractionService) storeFeatures(
 			continue
 		}
 
-		err := s.schemaRepo.UpdateColumnFeatures(workCtx, projectID, f.ColumnID, f)
+		// Convert ColumnFeatures to ColumnMetadata
+		meta := &models.ColumnMetadata{
+			ProjectID:      projectID,
+			SchemaColumnID: f.ColumnID,
+			// Processing flags
+			NeedsEnumAnalysis:     f.NeedsEnumAnalysis,
+			NeedsFKResolution:     f.NeedsFKResolution,
+			NeedsCrossColumnCheck: f.NeedsCrossColumnCheck,
+			NeedsClarification:    f.NeedsClarification,
+		}
+
+		// Copy clarification question if present
+		if f.ClarificationQuestion != "" {
+			meta.ClarificationQuestion = &f.ClarificationQuestion
+		}
+
+		// Copy analysis metadata
+		if !f.AnalyzedAt.IsZero() {
+			meta.AnalyzedAt = &f.AnalyzedAt
+		}
+		if f.LLMModelUsed != "" {
+			meta.LLMModelUsed = &f.LLMModelUsed
+		}
+
+		// Use SetFeatures to populate classification fields and type-specific features
+		meta.SetFeatures(f)
+
+		// UpsertFromExtraction automatically sets source='inferred'
+		err := s.columnMetadataRepo.UpsertFromExtraction(workCtx, meta)
 		if err != nil {
 			s.logger.Error("Failed to store column features",
 				zap.String("column_id", f.ColumnID.String()),

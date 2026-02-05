@@ -492,7 +492,8 @@ func registerQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 		// Validate it's a SELECT statement
 		sqlUpper := strings.ToUpper(strings.TrimSpace(sql))
 		if !strings.HasPrefix(sqlUpper, "SELECT") && !strings.HasPrefix(sqlUpper, "WITH") {
-			return nil, fmt.Errorf("query tool only accepts SELECT statements; use execute tool for DDL/DML")
+			return NewErrorResult("invalid_sql_type",
+				"query tool only accepts SELECT statements; use execute tool for DDL/DML"), nil
 		}
 
 		// Get limit parameter

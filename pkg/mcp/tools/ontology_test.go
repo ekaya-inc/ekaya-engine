@@ -29,7 +29,6 @@ func TestOntologyToolDeps_Structure(t *testing.T) {
 	assert.Nil(t, deps.ProjectService, "ProjectService field should be nil by default")
 	assert.Nil(t, deps.OntologyContextService, "OntologyContextService field should be nil by default")
 	assert.Nil(t, deps.OntologyRepo, "OntologyRepo field should be nil by default")
-	assert.Nil(t, deps.EntityRepo, "EntityRepo field should be nil by default")
 	assert.Nil(t, deps.SchemaRepo, "SchemaRepo field should be nil by default")
 	assert.Nil(t, deps.Logger, "Logger field should be nil by default")
 }
@@ -42,7 +41,6 @@ func TestOntologyToolDeps_Initialization(t *testing.T) {
 	var projectService services.ProjectService
 	var ontologyContextService services.OntologyContextService
 	var ontologyRepo repositories.OntologyRepository
-	var entityRepo repositories.OntologyEntityRepository
 	var schemaRepo repositories.SchemaRepository
 	logger := zap.NewNop()
 
@@ -53,7 +51,6 @@ func TestOntologyToolDeps_Initialization(t *testing.T) {
 		ProjectService:         projectService,
 		OntologyContextService: ontologyContextService,
 		OntologyRepo:           ontologyRepo,
-		EntityRepo:             entityRepo,
 		SchemaRepo:             schemaRepo,
 		Logger:                 logger,
 	}

@@ -99,13 +99,10 @@ type DAGNodeName string
 const (
 	DAGNodeKnowledgeSeeding        DAGNodeName = "KnowledgeSeeding"
 	DAGNodeColumnFeatureExtraction DAGNodeName = "ColumnFeatureExtraction"
-	DAGNodeEntityDiscovery         DAGNodeName = "EntityDiscovery"
-	DAGNodeEntityEnrichment        DAGNodeName = "EntityEnrichment"
 	DAGNodeFKDiscovery             DAGNodeName = "FKDiscovery"
+	DAGNodeTableFeatureExtraction  DAGNodeName = "TableFeatureExtraction"
 	DAGNodeColumnEnrichment        DAGNodeName = "ColumnEnrichment"
 	DAGNodePKMatchDiscovery        DAGNodeName = "PKMatchDiscovery"
-	DAGNodeRelationshipEnrichment  DAGNodeName = "RelationshipEnrichment"
-	DAGNodeEntityPromotion         DAGNodeName = "EntityPromotion"
 	DAGNodeOntologyFinalization    DAGNodeName = "OntologyFinalization"
 	DAGNodeGlossaryDiscovery       DAGNodeName = "GlossaryDiscovery"
 	DAGNodeGlossaryEnrichment      DAGNodeName = "GlossaryEnrichment"
@@ -115,16 +112,13 @@ const (
 var DAGNodeOrder = map[DAGNodeName]int{
 	DAGNodeKnowledgeSeeding:        1,
 	DAGNodeColumnFeatureExtraction: 2,
-	DAGNodeEntityDiscovery:         3,
-	DAGNodeEntityEnrichment:        4,
-	DAGNodeFKDiscovery:             5,
+	DAGNodeFKDiscovery:             3,
+	DAGNodeTableFeatureExtraction:  4,
+	DAGNodePKMatchDiscovery:        5,
 	DAGNodeColumnEnrichment:        6,
-	DAGNodePKMatchDiscovery:        7,
-	DAGNodeRelationshipEnrichment:  8,
-	DAGNodeEntityPromotion:         9,
-	DAGNodeOntologyFinalization:    10,
-	DAGNodeGlossaryDiscovery:       11,
-	DAGNodeGlossaryEnrichment:      12,
+	DAGNodeOntologyFinalization:    7,
+	DAGNodeGlossaryDiscovery:       8,
+	DAGNodeGlossaryEnrichment:      9,
 }
 
 // AllDAGNodes returns all DAG node names in execution order.
@@ -132,13 +126,10 @@ func AllDAGNodes() []DAGNodeName {
 	return []DAGNodeName{
 		DAGNodeKnowledgeSeeding,
 		DAGNodeColumnFeatureExtraction,
-		DAGNodeEntityDiscovery,
-		DAGNodeEntityEnrichment,
 		DAGNodeFKDiscovery,
-		DAGNodeColumnEnrichment,
+		DAGNodeTableFeatureExtraction,
 		DAGNodePKMatchDiscovery,
-		DAGNodeRelationshipEnrichment,
-		DAGNodeEntityPromotion,
+		DAGNodeColumnEnrichment,
 		DAGNodeOntologyFinalization,
 		DAGNodeGlossaryDiscovery,
 		DAGNodeGlossaryEnrichment,

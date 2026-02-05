@@ -397,10 +397,12 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 		if existing == nil {
 			// Create new term
 			if definition == "" {
-				return nil, fmt.Errorf("definition is required when creating a new term")
+				return NewErrorResult("missing_required",
+					"definition is required when creating a new term"), nil
 			}
 			if sql == "" {
-				return nil, fmt.Errorf("sql is required when creating a new term")
+				return NewErrorResult("missing_required",
+					"sql is required when creating a new term"), nil
 			}
 
 			term = &models.BusinessGlossaryTerm{

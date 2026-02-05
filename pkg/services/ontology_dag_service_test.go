@@ -23,16 +23,15 @@ import (
 func TestDAGNodes_AllNodesHaveCorrectOrder(t *testing.T) {
 	allNodes := models.AllDAGNodes()
 
+	// NOTE: The current DAG order is designed for schema-first extraction.
+	// FKDiscovery and TableFeatureExtraction run BEFORE column enrichment.
 	expectedOrder := []models.DAGNodeName{
 		models.DAGNodeKnowledgeSeeding,
 		models.DAGNodeColumnFeatureExtraction,
-		models.DAGNodeEntityDiscovery,
-		models.DAGNodeEntityEnrichment,
 		models.DAGNodeFKDiscovery,
-		models.DAGNodeColumnEnrichment,
+		models.DAGNodeTableFeatureExtraction,
 		models.DAGNodePKMatchDiscovery,
-		models.DAGNodeRelationshipEnrichment,
-		models.DAGNodeEntityPromotion,
+		models.DAGNodeColumnEnrichment,
 		models.DAGNodeOntologyFinalization,
 		models.DAGNodeGlossaryDiscovery,
 		models.DAGNodeGlossaryEnrichment,
@@ -50,14 +49,6 @@ func TestNodeExecutorInterfaces_AreWellDefined(t *testing.T) {
 	// Verify that the interface methods are properly defined
 	// by creating implementations that satisfy them
 
-	// EntityDiscoveryMethods
-	var edm dag.EntityDiscoveryMethods = &testEntityDiscovery{}
-	assert.NotNil(t, edm)
-
-	// EntityEnrichmentMethods
-	var eem dag.EntityEnrichmentMethods = &testEntityEnrichment{}
-	assert.NotNil(t, eem)
-
 	// FKDiscoveryMethods
 	var fkm dag.FKDiscoveryMethods = &testFKDiscovery{}
 	assert.NotNil(t, fkm)
@@ -65,10 +56,6 @@ func TestNodeExecutorInterfaces_AreWellDefined(t *testing.T) {
 	// PKMatchDiscoveryMethods
 	var pkm dag.PKMatchDiscoveryMethods = &testPKMatchDiscovery{}
 	assert.NotNil(t, pkm)
-
-	// RelationshipEnrichmentMethods
-	var rem dag.RelationshipEnrichmentMethods = &testRelationshipEnrichment{}
-	assert.NotNil(t, rem)
 
 	// OntologyFinalizationMethods
 	var ofm dag.OntologyFinalizationMethods = &testFinalization{}
@@ -85,6 +72,10 @@ func TestNodeExecutorInterfaces_AreWellDefined(t *testing.T) {
 	// ColumnFeatureExtractionMethods
 	var cfm dag.ColumnFeatureExtractionMethods = &testColumnFeatureExtraction{}
 	assert.NotNil(t, cfm)
+
+	// TableFeatureExtractionMethods
+	var tfm dag.TableFeatureExtractionMethods = &testTableFeatureExtraction{}
+	assert.NotNil(t, tfm)
 }
 
 func TestDAGStatus_ValidStatuses(t *testing.T) {
@@ -132,7 +123,7 @@ func TestNewExecutionContext(t *testing.T) {
 	node := &models.DAGNode{
 		ID:       nodeID,
 		DAGID:    dagID,
-		NodeName: string(models.DAGNodeEntityDiscovery),
+		NodeName: string(models.DAGNodeKnowledgeSeeding),
 	}
 
 	ctx := dag.NewExecutionContext(dagRecord, node)
@@ -160,7 +151,7 @@ func TestNewExecutionContext_NilOntologyID(t *testing.T) {
 	node := &models.DAGNode{
 		ID:       nodeID,
 		DAGID:    dagID,
-		NodeName: string(models.DAGNodeEntityDiscovery),
+		NodeName: string(models.DAGNodeKnowledgeSeeding),
 	}
 
 	ctx := dag.NewExecutionContext(dagRecord, node)
@@ -169,18 +160,6 @@ func TestNewExecutionContext_NilOntologyID(t *testing.T) {
 }
 
 // Test implementations to verify interfaces compile correctly
-
-type testEntityDiscovery struct{}
-
-func (t *testEntityDiscovery) IdentifyEntitiesFromDDL(_ context.Context, _, _, _ uuid.UUID) (int, []*models.SchemaTable, []*models.SchemaColumn, error) {
-	return 0, nil, nil, nil
-}
-
-type testEntityEnrichment struct{}
-
-func (t *testEntityEnrichment) EnrichEntitiesWithLLM(_ context.Context, _, _, _ uuid.UUID, _ dag.ProgressCallback) error {
-	return nil
-}
 
 type testFKDiscovery struct{}
 
@@ -191,12 +170,6 @@ func (t *testFKDiscovery) DiscoverFKRelationships(_ context.Context, _, _ uuid.U
 type testPKMatchDiscovery struct{}
 
 func (t *testPKMatchDiscovery) DiscoverPKMatchRelationships(_ context.Context, _, _ uuid.UUID, _ dag.ProgressCallback) (*dag.PKMatchDiscoveryResult, error) {
-	return nil, nil
-}
-
-type testRelationshipEnrichment struct{}
-
-func (t *testRelationshipEnrichment) EnrichProject(_ context.Context, _ uuid.UUID, _ dag.ProgressCallback) (*dag.RelationshipEnrichmentResult, error) {
 	return nil, nil
 }
 
@@ -221,6 +194,12 @@ func (t *testGlossaryDiscovery) DiscoverGlossaryTerms(_ context.Context, _, _ uu
 type testColumnFeatureExtraction struct{}
 
 func (t *testColumnFeatureExtraction) ExtractColumnFeatures(_ context.Context, _, _ uuid.UUID, _ dag.ProgressCallback) (int, error) {
+	return 0, nil
+}
+
+type testTableFeatureExtraction struct{}
+
+func (t *testTableFeatureExtraction) ExtractTableFeatures(_ context.Context, _, _ uuid.UUID, _ dag.ProgressCallback) (int, error) {
 	return 0, nil
 }
 
@@ -321,7 +300,9 @@ func (m *mockDAGRepository) GetNextPendingNode(ctx context.Context, dagID uuid.U
 
 // mockKnowledgeRepository is a mock implementation of KnowledgeRepository for testing Start.
 type mockKnowledgeRepository struct {
-	createFunc func(ctx context.Context, fact *models.KnowledgeFact) error
+	createFunc    func(ctx context.Context, fact *models.KnowledgeFact) error
+	updateFunc    func(ctx context.Context, fact *models.KnowledgeFact) error
+	getByTypeFunc func(ctx context.Context, projectID uuid.UUID, factType string) ([]*models.KnowledgeFact, error)
 }
 
 func (m *mockKnowledgeRepository) Create(ctx context.Context, fact *models.KnowledgeFact) error {
@@ -331,7 +312,10 @@ func (m *mockKnowledgeRepository) Create(ctx context.Context, fact *models.Knowl
 	return nil
 }
 
-func (m *mockKnowledgeRepository) Update(_ context.Context, _ *models.KnowledgeFact) error {
+func (m *mockKnowledgeRepository) Update(ctx context.Context, fact *models.KnowledgeFact) error {
+	if m.updateFunc != nil {
+		return m.updateFunc(ctx, fact)
+	}
 	return nil
 }
 
@@ -339,7 +323,10 @@ func (m *mockKnowledgeRepository) GetByProject(_ context.Context, _ uuid.UUID) (
 	return nil, nil
 }
 
-func (m *mockKnowledgeRepository) GetByType(_ context.Context, _ uuid.UUID, _ string) ([]*models.KnowledgeFact, error) {
+func (m *mockKnowledgeRepository) GetByType(ctx context.Context, projectID uuid.UUID, factType string) ([]*models.KnowledgeFact, error) {
+	if m.getByTypeFunc != nil {
+		return m.getByTypeFunc(ctx, projectID, factType)
+	}
 	return nil, nil
 }
 
@@ -422,17 +409,12 @@ func TestStart_StoresProjectOverview(t *testing.T) {
 	}
 
 	// Create entity and relationship repository mocks (use existing mocks from same package)
-	mockEntityRepo := &mockOntologyEntityRepository{}
-	mockRelationshipRepo := &mockEntityRelationshipRepository{}
-
 	logger := zap.NewNop()
 	service := &ontologyDAGService{
-		dagRepo:          mockDAGRepo,
-		knowledgeRepo:    mockKnowledgeRepo,
-		ontologyRepo:     mockOntologyRepo,
-		entityRepo:       mockEntityRepo,
-		relationshipRepo: mockRelationshipRepo,
-		logger:           logger,
+		dagRepo:       mockDAGRepo,
+		knowledgeRepo: mockKnowledgeRepo,
+		ontologyRepo:  mockOntologyRepo,
+		logger:        logger,
 		// Provide getTenantCtx to prevent panic in background goroutine
 		getTenantCtx: func(ctx context.Context, _ uuid.UUID) (context.Context, func(), error) {
 			return ctx, func() {}, nil
@@ -452,6 +434,100 @@ func TestStart_StoresProjectOverview(t *testing.T) {
 	assert.Equal(t, projectID, capturedFact.ProjectID, "ProjectID should match")
 	assert.Equal(t, "project_overview", capturedFact.FactType, "FactType should be 'project_overview'")
 	assert.Equal(t, projectOverview, capturedFact.Value, "Value should match the overview text")
+}
+
+// TestStart_UpdatesExistingProjectOverview verifies that when a project_overview
+// already exists, it is updated rather than creating a duplicate.
+func TestStart_UpdatesExistingProjectOverview(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userID := uuid.New()
+	existingOverviewID := uuid.New()
+	originalOverview := "Original project overview"
+	newOverview := "Updated project overview with more details"
+
+	// Track calls
+	var createCalled bool
+	var updateCalled bool
+	var updatedFact *models.KnowledgeFact
+
+	mockKnowledgeRepo := &mockKnowledgeRepository{
+		getByTypeFunc: func(_ context.Context, _ uuid.UUID, factType string) ([]*models.KnowledgeFact, error) {
+			if factType == "project_overview" {
+				// Return existing project_overview
+				return []*models.KnowledgeFact{
+					{
+						ID:        existingOverviewID,
+						ProjectID: projectID,
+						FactType:  "project_overview",
+						Value:     originalOverview,
+					},
+				}, nil
+			}
+			return nil, nil
+		},
+		createFunc: func(_ context.Context, _ *models.KnowledgeFact) error {
+			createCalled = true
+			return nil
+		},
+		updateFunc: func(ctx context.Context, fact *models.KnowledgeFact) error {
+			updateCalled = true
+			updatedFact = fact
+
+			// Verify provenance was set correctly (manual provenance)
+			prov, ok := models.GetProvenance(ctx)
+			assert.True(t, ok, "Provenance should be set in context")
+			assert.Equal(t, models.SourceManual, prov.Source, "Source should be manual")
+			assert.Equal(t, userID, prov.UserID, "UserID should match the authenticated user")
+
+			return nil
+		},
+	}
+
+	dagID := uuid.New()
+	mockDAGRepo := &mockDAGRepository{
+		getActiveByDatasourceFunc: func(_ context.Context, _ uuid.UUID) (*models.OntologyDAG, error) {
+			return nil, nil
+		},
+		getByIDWithNodesFunc: func(_ context.Context, _ uuid.UUID) (*models.OntologyDAG, error) {
+			return &models.OntologyDAG{
+				ID:        dagID,
+				ProjectID: projectID,
+				Nodes:     []models.DAGNode{},
+			}, nil
+		},
+	}
+
+	mockOntologyRepo := &mockOntologyRepository{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+		},
+	}
+
+	logger := zap.NewNop()
+	service := &ontologyDAGService{
+		dagRepo:       mockDAGRepo,
+		knowledgeRepo: mockKnowledgeRepo,
+		ontologyRepo:  mockOntologyRepo,
+		logger:        logger,
+		getTenantCtx: func(ctx context.Context, _ uuid.UUID) (context.Context, func(), error) {
+			return ctx, func() {}, nil
+		},
+	}
+
+	ctx := createAuthenticatedContext(userID)
+
+	// Call Start with new overview
+	_, _ = service.Start(ctx, projectID, datasourceID, newOverview)
+
+	// Verify Update was called instead of Create
+	assert.False(t, createCalled, "Create should NOT be called when project_overview exists")
+	assert.True(t, updateCalled, "Update should be called when project_overview exists")
+	assert.NotNil(t, updatedFact, "Updated fact should be captured")
+	assert.Equal(t, existingOverviewID, updatedFact.ID, "Should update the existing fact")
+	assert.Equal(t, newOverview, updatedFact.Value, "Value should be updated to new overview")
 }
 
 // TestStart_SkipsOverviewStorageWhenEmpty verifies that when an empty project
@@ -495,17 +571,12 @@ func TestStart_SkipsOverviewStorageWhenEmpty(t *testing.T) {
 		},
 	}
 
-	mockEntityRepo := &mockOntologyEntityRepository{}
-	mockRelationshipRepo := &mockEntityRelationshipRepository{}
-
 	logger := zap.NewNop()
 	service := &ontologyDAGService{
-		dagRepo:          mockDAGRepo,
-		knowledgeRepo:    mockKnowledgeRepo,
-		ontologyRepo:     mockOntologyRepo,
-		entityRepo:       mockEntityRepo,
-		relationshipRepo: mockRelationshipRepo,
-		logger:           logger,
+		dagRepo:       mockDAGRepo,
+		knowledgeRepo: mockKnowledgeRepo,
+		ontologyRepo:  mockOntologyRepo,
+		logger:        logger,
 		// Provide getTenantCtx to prevent panic in background goroutine
 		getTenantCtx: func(ctx context.Context, _ uuid.UUID) (context.Context, func(), error) {
 			return ctx, func() {}, nil
@@ -566,17 +637,12 @@ func TestStart_ContinuesOnOverviewStorageError(t *testing.T) {
 		},
 	}
 
-	mockEntityRepo := &mockOntologyEntityRepository{}
-	mockRelationshipRepo := &mockEntityRelationshipRepository{}
-
 	logger := zap.NewNop()
 	service := &ontologyDAGService{
-		dagRepo:          mockDAGRepo,
-		knowledgeRepo:    mockKnowledgeRepo,
-		ontologyRepo:     mockOntologyRepo,
-		entityRepo:       mockEntityRepo,
-		relationshipRepo: mockRelationshipRepo,
-		logger:           logger,
+		dagRepo:       mockDAGRepo,
+		knowledgeRepo: mockKnowledgeRepo,
+		ontologyRepo:  mockOntologyRepo,
+		logger:        logger,
 		// Provide getTenantCtx to prevent panic in background goroutine
 		getTenantCtx: func(ctx context.Context, _ uuid.UUID) (context.Context, func(), error) {
 			return ctx, func() {}, nil
@@ -661,13 +727,13 @@ func TestCancel_MarksNonCompletedNodesAsSkipped(t *testing.T) {
 func TestMarkDAGFailed_StoresErrorOnCurrentNode(t *testing.T) {
 	dagID := uuid.New()
 	projectID := uuid.New()
-	currentNodeName := string(models.DAGNodeEntityDiscovery)
+	currentNodeName := string(models.DAGNodeKnowledgeSeeding)
 	errorMessage := "failed to get tenant context"
 
 	// Create test nodes
 	nodes := []models.DAGNode{
-		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeEntityDiscovery), Status: models.DAGNodeStatusRunning},
-		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeEntityEnrichment), Status: models.DAGNodeStatusPending},
+		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeKnowledgeSeeding), Status: models.DAGNodeStatusRunning},
+		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeColumnFeatureExtraction), Status: models.DAGNodeStatusPending},
 		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeFKDiscovery), Status: models.DAGNodeStatusPending},
 	}
 
@@ -733,8 +799,8 @@ func TestMarkDAGFailed_StoresErrorOnFirstPendingNode(t *testing.T) {
 
 	// Create test nodes - first node is pending (no current node set yet)
 	nodes := []models.DAGNode{
-		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeEntityDiscovery), Status: models.DAGNodeStatusPending},
-		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeEntityEnrichment), Status: models.DAGNodeStatusPending},
+		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeKnowledgeSeeding), Status: models.DAGNodeStatusPending},
+		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeColumnFeatureExtraction), Status: models.DAGNodeStatusPending},
 	}
 
 	dag := &models.OntologyDAG{
@@ -832,8 +898,8 @@ func TestMarkDAGFailed_WithAllNodesCompleted_MarksFirstNode(t *testing.T) {
 
 	// Create test nodes - all completed
 	nodes := []models.DAGNode{
-		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeEntityDiscovery), Status: models.DAGNodeStatusCompleted},
-		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeEntityEnrichment), Status: models.DAGNodeStatusCompleted},
+		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeKnowledgeSeeding), Status: models.DAGNodeStatusCompleted},
+		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeColumnFeatureExtraction), Status: models.DAGNodeStatusCompleted},
 	}
 
 	dag := &models.OntologyDAG{
@@ -941,7 +1007,7 @@ func TestExecuteDAG_PanicRecovery(t *testing.T) {
 					{
 						ID:       uuid.New(),
 						DAGID:    dagID,
-						NodeName: string(models.DAGNodeEntityDiscovery),
+						NodeName: string(models.DAGNodeKnowledgeSeeding),
 						Status:   models.DAGNodeStatusPending,
 					},
 				},

@@ -1,7 +1,7 @@
 /**
  * WorkQueue Component
- * Displays the list of tasks or entities being processed with their status
- * Supports both task-based (NEW) and entity-based (LEGACY) queues
+ * Displays the list of tasks or tables being processed with their status
+ * Supports both task-based (NEW) and table-based (LEGACY) queues
  */
 
 import {
@@ -20,13 +20,14 @@ import { useRef, useEffect } from 'react';
 import type { EntityStatus, TaskStatus, WorkItem, WorkQueueTaskItem } from '../../types';
 
 interface WorkQueueProps {
-  items: WorkItem[];           // LEGACY: entity-based queue
+  items: WorkItem[];           // LEGACY: table-based queue
   taskItems?: WorkQueueTaskItem[];  // NEW: task-based queue
   maxHeight?: string;
 }
 
 // ============================================================================
-// Entity-based helpers (LEGACY)
+// Table-based helpers (LEGACY)
+// Note: Function names use "Entity" prefix for backwards compatibility
 // ============================================================================
 
 const getEntityStatusIcon = (status: EntityStatus) => {
@@ -314,7 +315,7 @@ const WorkQueue = ({ items, taskItems, maxHeight = '400px' }: WorkQueueProps) =>
     </>
   );
 
-  // Render entity-based queue (LEGACY)
+  // Render table-based queue (LEGACY)
   const renderEntityQueue = () => (
     <>
       {/* Header with summary */}
@@ -357,7 +358,7 @@ const WorkQueue = ({ items, taskItems, maxHeight = '400px' }: WorkQueueProps) =>
       {/* Scrollable list */}
       <div ref={containerRef} className="overflow-y-auto" style={{ maxHeight }}>
         {sortedEntityItems.length === 0 ? (
-          <div className="p-8 text-center text-text-secondary">No entities in queue</div>
+          <div className="p-8 text-center text-text-secondary">No tables in queue</div>
         ) : (
           <div className="divide-y divide-border-light">
             {sortedEntityItems.map((item) => (

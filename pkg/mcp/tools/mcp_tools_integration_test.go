@@ -166,7 +166,6 @@ func TestMCPTools_NewProject_AdminGetsDevTools(t *testing.T) {
 		"validate",                // Query loadout
 		"get_schema",              // Query loadout
 		"get_context",             // Query loadout
-		"update_entity",           // Ontology Maintenance
 		"refresh_schema",          // Ontology Maintenance
 		"list_ontology_questions", // Ontology Questions
 	}
@@ -298,7 +297,6 @@ func TestMCPTools_NewProject_AgentGetsAgentTools(t *testing.T) {
 		"execute",        // Developer Core
 		"query",          // Query loadout (ad-hoc)
 		"sample",         // Query loadout
-		"update_entity",  // Ontology Maintenance
 		"refresh_schema", // Ontology Maintenance
 	}
 

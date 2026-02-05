@@ -42,9 +42,6 @@ type SchemaService interface {
 	// GetRelationshipsResponse returns enriched relationships with table/column details and empty/orphan tables.
 	GetRelationshipsResponse(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RelationshipsResponse, error)
 
-	// UpdateTableMetadata updates business_name and/or description for a table.
-	UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error
-
 	// UpdateColumnMetadata updates business_name and/or description for a column.
 	UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error
 
@@ -59,8 +56,9 @@ type SchemaService interface {
 	// GetDatasourceSchemaForPrompt returns schema formatted for LLM context.
 	GetDatasourceSchemaForPrompt(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) (string, error)
 
-	// GetDatasourceSchemaWithEntities returns schema enriched with entity/role semantic information.
-	// This includes entity names and roles for columns that represent domain entities.
+	// GetDatasourceSchemaWithEntities returns schema formatted for LLM context.
+	// Note: Entity semantic information has been removed for v1.0 simplification.
+	// This method now delegates to GetDatasourceSchemaForPrompt for backward compatibility.
 	GetDatasourceSchemaWithEntities(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) (string, error)
 
 	// SelectAllTables marks all tables and columns for this datasource as selected.
@@ -70,9 +68,7 @@ type SchemaService interface {
 
 type schemaService struct {
 	schemaRepo     repositories.SchemaRepository
-	entityRepo     repositories.OntologyEntityRepository
 	ontologyRepo   repositories.OntologyRepository
-	entityRelRepo  repositories.EntityRelationshipRepository
 	datasourceSvc  DatasourceService
 	adapterFactory datasource.DatasourceAdapterFactory
 	logger         *zap.Logger
@@ -81,18 +77,14 @@ type schemaService struct {
 // NewSchemaService creates a new schema service with dependencies.
 func NewSchemaService(
 	schemaRepo repositories.SchemaRepository,
-	entityRepo repositories.OntologyEntityRepository,
 	ontologyRepo repositories.OntologyRepository,
-	entityRelRepo repositories.EntityRelationshipRepository,
 	datasourceSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	logger *zap.Logger,
 ) SchemaService {
 	return &schemaService{
 		schemaRepo:     schemaRepo,
-		entityRepo:     entityRepo,
 		ontologyRepo:   ontologyRepo,
-		entityRelRepo:  entityRelRepo,
 		datasourceSvc:  datasourceSvc,
 		adapterFactory: adapterFactory,
 		logger:         logger,
@@ -506,12 +498,8 @@ func (s *schemaService) GetDatasourceSchema(ctx context.Context, projectID, data
 			TableName:  t.TableName,
 			IsSelected: t.IsSelected,
 		}
-		if t.BusinessName != nil {
-			dt.BusinessName = *t.BusinessName
-		}
-		if t.Description != nil {
-			dt.Description = *t.Description
-		}
+		// Note: BusinessName and Description now live in TableMetadata
+		// (engine_ontology_table_metadata), not SchemaTable.
 		if t.RowCount != nil {
 			dt.RowCount = *t.RowCount
 		}
@@ -532,12 +520,7 @@ func (s *schemaService) GetDatasourceSchema(ctx context.Context, projectID, data
 				DefaultValue:    c.DefaultValue,
 				DistinctCount:   c.DistinctCount,
 				NullCount:       c.NullCount,
-			}
-			if c.BusinessName != nil {
-				dc.BusinessName = *c.BusinessName
-			}
-			if c.Description != nil {
-				dc.Description = *c.Description
+				// Note: BusinessName and Description now live in ColumnMetadata, not SchemaColumn
 			}
 			dt.Columns[j] = dc
 		}
@@ -595,17 +578,13 @@ func (s *schemaService) GetDatasourceTable(ctx context.Context, projectID, datas
 	}
 
 	// Convert to service-layer type
+	// Note: BusinessName and Description now live in TableMetadata
+	// (engine_ontology_table_metadata), not SchemaTable.
 	dt := &models.DatasourceTable{
 		ID:         table.ID,
 		SchemaName: table.SchemaName,
 		TableName:  table.TableName,
 		IsSelected: table.IsSelected,
-	}
-	if table.BusinessName != nil {
-		dt.BusinessName = *table.BusinessName
-	}
-	if table.Description != nil {
-		dt.Description = *table.Description
 	}
 	if table.RowCount != nil {
 		dt.RowCount = *table.RowCount
@@ -625,12 +604,7 @@ func (s *schemaService) GetDatasourceTable(ctx context.Context, projectID, datas
 			DefaultValue:    c.DefaultValue,
 			DistinctCount:   c.DistinctCount,
 			NullCount:       c.NullCount,
-		}
-		if c.BusinessName != nil {
-			dc.BusinessName = *c.BusinessName
-		}
-		if c.Description != nil {
-			dc.Description = *c.Description
+			// Note: BusinessName and Description now live in ColumnMetadata, not SchemaColumn
 		}
 		dt.Columns[i] = dc
 	}
@@ -725,99 +699,10 @@ func (s *schemaService) AddManualRelationship(ctx context.Context, projectID, da
 		zap.String("target", req.TargetTableName+"."+req.TargetColumnName),
 	)
 
-	// If ontology exists, also create entity relationship for immediate visibility
-	if s.ontologyRepo != nil && s.entityRelRepo != nil && s.entityRepo != nil {
-		s.createEntityRelationshipForManual(ctx, projectID, sourceTable, sourceColumn, targetTable, targetColumn)
-	}
-
 	return rel, nil
 }
 
-// createEntityRelationshipForManual creates an entity relationship for a manual schema relationship.
-// This is best-effort - if ontology or entities don't exist, it silently skips.
-func (s *schemaService) createEntityRelationshipForManual(
-	ctx context.Context,
-	projectID uuid.UUID,
-	sourceTable *models.SchemaTable,
-	sourceColumn *models.SchemaColumn,
-	targetTable *models.SchemaTable,
-	targetColumn *models.SchemaColumn,
-) {
-	// Get active ontology
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err != nil || ontology == nil {
-		s.logger.Debug("No active ontology for manual relationship, will be created on next extraction",
-			zap.String("project_id", projectID.String()))
-		return
-	}
-
-	// Get entities for source and target tables
-	entities, err := s.entityRepo.GetByProject(ctx, projectID)
-	if err != nil {
-		s.logger.Debug("Failed to get entities for manual relationship",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		return
-	}
-
-	// Build entity lookup by primary table
-	entityByTable := make(map[string]*models.OntologyEntity)
-	for _, e := range entities {
-		if e.PrimaryTable != "" {
-			entityByTable[e.PrimaryTable] = e
-		}
-	}
-
-	// Find source and target entities
-	sourceKey := fmt.Sprintf("%s.%s", sourceTable.SchemaName, sourceTable.TableName)
-	targetKey := fmt.Sprintf("%s.%s", targetTable.SchemaName, targetTable.TableName)
-	sourceEntity := entityByTable[sourceKey]
-	targetEntity := entityByTable[targetKey]
-
-	if sourceEntity == nil || targetEntity == nil {
-		s.logger.Debug("Entities not found for manual relationship tables",
-			zap.String("source_table", sourceKey),
-			zap.String("target_table", targetKey),
-			zap.Bool("source_entity_found", sourceEntity != nil),
-			zap.Bool("target_entity_found", targetEntity != nil))
-		return
-	}
-
-	// Don't create self-referencing relationships
-	if sourceEntity.ID == targetEntity.ID {
-		return
-	}
-
-	// Create entity relationship
-	entityRel := &models.EntityRelationship{
-		OntologyID:         ontology.ID,
-		SourceEntityID:     sourceEntity.ID,
-		TargetEntityID:     targetEntity.ID,
-		SourceColumnSchema: sourceTable.SchemaName,
-		SourceColumnTable:  sourceTable.TableName,
-		SourceColumnName:   sourceColumn.ColumnName,
-		TargetColumnSchema: targetTable.SchemaName,
-		TargetColumnTable:  targetTable.TableName,
-		TargetColumnName:   targetColumn.ColumnName,
-		DetectionMethod:    models.DetectionMethodManual,
-		Confidence:         1.0,
-		Status:             models.RelationshipStatusConfirmed,
-	}
-
-	if err := s.entityRelRepo.Create(ctx, entityRel); err != nil {
-		s.logger.Debug("Failed to create entity relationship for manual relationship (may already exist)",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		return
-	}
-
-	s.logger.Info("Created entity relationship for manual relationship",
-		zap.String("project_id", projectID.String()),
-		zap.String("source_entity", sourceEntity.Name),
-		zap.String("target_entity", targetEntity.Name))
-}
-
-// RemoveRelationship marks a relationship as removed (is_approved=false).
+// RemoveRelationship soft-deletes a relationship so it stays deleted on re-extraction.
 func (s *schemaService) RemoveRelationship(ctx context.Context, projectID, relationshipID uuid.UUID) error {
 	// Verify relationship exists and belongs to project
 	rel, err := s.schemaRepo.GetRelationshipByID(ctx, projectID, relationshipID)
@@ -830,9 +715,9 @@ func (s *schemaService) RemoveRelationship(ctx context.Context, projectID, relat
 		return apperrors.ErrNotFound
 	}
 
-	// Set is_approved=false to mark as removed
-	if err := s.schemaRepo.UpdateRelationshipApproval(ctx, projectID, relationshipID, false); err != nil {
-		return fmt.Errorf("failed to update relationship: %w", err)
+	// Soft-delete the relationship so it stays deleted on re-extraction
+	if err := s.schemaRepo.SoftDeleteRelationship(ctx, projectID, relationshipID); err != nil {
+		return fmt.Errorf("failed to delete relationship: %w", err)
 	}
 
 	s.logger.Info("Removed relationship",
@@ -880,32 +765,20 @@ func (s *schemaService) GetRelationshipsResponse(ctx context.Context, projectID,
 	}, nil
 }
 
-// UpdateTableMetadata updates business_name and/or description for a table.
-func (s *schemaService) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
-	if err := s.schemaRepo.UpdateTableMetadata(ctx, projectID, tableID, businessName, description); err != nil {
-		return fmt.Errorf("failed to update table metadata: %w", err)
-	}
-
-	s.logger.Info("Updated table metadata",
-		zap.String("project_id", projectID.String()),
-		zap.String("table_id", tableID.String()),
-	)
-
-	return nil
-}
-
 // UpdateColumnMetadata updates business_name and/or description for a column.
 func (s *schemaService) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
-	if err := s.schemaRepo.UpdateColumnMetadata(ctx, projectID, columnID, businessName, description); err != nil {
-		return fmt.Errorf("failed to update column metadata: %w", err)
-	}
-
-	s.logger.Info("Updated column metadata",
+	// TODO: This function needs to be updated for the new ColumnMetadata schema.
+	// Column BusinessName and Description now live in ColumnMetadata (engine_ontology_column_metadata)
+	// rather than SchemaColumn (engine_schema_columns).
+	// The implementation should:
+	// 1. Add columnMetadataRepo to schemaService
+	// 2. Call columnMetadataRepo.Upsert() with a ColumnMetadata object
+	// See PLAN-column-schema-refactor.md for details.
+	s.logger.Warn("UpdateColumnMetadata not yet implemented for new schema",
 		zap.String("project_id", projectID.String()),
 		zap.String("column_id", columnID.String()),
 	)
-
-	return nil
+	return fmt.Errorf("UpdateColumnMetadata not yet implemented for new schema (column_id: %s)", columnID)
 }
 
 // SaveSelections updates is_selected flags for tables and columns using their UUIDs.
@@ -1024,11 +897,8 @@ func (s *schemaService) GetDatasourceSchemaForPrompt(ctx context.Context, projec
 		sb.WriteString(table.TableName)
 		sb.WriteString("\n")
 
-		if table.Description != "" {
-			sb.WriteString("Description: ")
-			sb.WriteString(table.Description)
-			sb.WriteString("\n")
-		}
+		// Note: Table description is now in engine_ontology_table_metadata.
+		// This prompt generation uses only schema-level information.
 
 		if table.RowCount > 0 {
 			sb.WriteString(fmt.Sprintf("Row count: %d\n", table.RowCount))
@@ -1081,197 +951,11 @@ func (s *schemaService) GetDatasourceSchemaForPrompt(ctx context.Context, projec
 	return sb.String(), nil
 }
 
-// GetDatasourceSchemaWithEntities returns schema enriched with entity/role semantic information.
+// GetDatasourceSchemaWithEntities returns schema formatted for LLM context.
+// Note: Entity semantic information has been removed for v1.0 simplification.
+// This method now delegates to GetDatasourceSchemaForPrompt for backward compatibility.
 func (s *schemaService) GetDatasourceSchemaWithEntities(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) (string, error) {
-	// Get base schema
-	var schema *models.DatasourceSchema
-	var err error
-
-	if selectedOnly {
-		schema, err = s.GetSelectedDatasourceSchema(ctx, projectID, datasourceID)
-	} else {
-		schema, err = s.GetDatasourceSchema(ctx, projectID, datasourceID)
-	}
-	if err != nil {
-		return "", err
-	}
-
-	// Get entities for the project (from active ontology)
-	entities, err := s.entityRepo.GetByProject(ctx, projectID)
-	if err != nil {
-		return "", fmt.Errorf("failed to get entities: %w", err)
-	}
-
-	// Filter entities to only include those from selected tables
-	if selectedOnly {
-		selectedTableNames := make(map[string]bool)
-		for _, table := range schema.Tables {
-			selectedTableNames[table.TableName] = true
-		}
-
-		filteredEntities := make([]*models.OntologyEntity, 0)
-		for _, entity := range entities {
-			if selectedTableNames[entity.PrimaryTable] {
-				filteredEntities = append(filteredEntities, entity)
-			}
-		}
-		entities = filteredEntities
-	}
-
-	// TODO: Compute occurrences from relationships (task 2.9 or later)
-	// This function needs to be updated to query relationships and compute occurrences at runtime
-	// similar to how entity_service.go and ontology_context.go were updated in tasks 2.5 and 2.6.
-	// For now, entity/role annotations in schema output are disabled.
-
-	// Build entity lookup maps
-	entityByID := make(map[uuid.UUID]*models.OntologyEntity)
-	for _, e := range entities {
-		entityByID[e.ID] = e
-	}
-
-	// Build occurrence lookup map: schema.table.column -> []occurrence
-	// TODO: Remove this empty map once the function is updated to compute occurrences from relationships
-	occurrencesByColumn := make(map[string][]*models.OntologyEntityOccurrence)
-
-	// Build schema context with entity information
-	var sb strings.Builder
-	sb.WriteString("DATABASE SCHEMA WITH ENTITY SEMANTICS:\n")
-	sb.WriteString("=====================================\n\n")
-
-	// First, list all entities
-	if len(entities) > 0 {
-		sb.WriteString("DOMAIN ENTITIES:\n")
-		for _, entity := range entities {
-			sb.WriteString(fmt.Sprintf("  - %s: %s\n", entity.Name, entity.Description))
-			sb.WriteString(fmt.Sprintf("    Primary location: %s.%s.%s\n",
-				entity.PrimarySchema, entity.PrimaryTable, entity.PrimaryColumn))
-		}
-		sb.WriteString("\n")
-	}
-
-	// Then list tables with entity annotations
-	for _, table := range schema.Tables {
-		sb.WriteString("\nTable: ")
-		sb.WriteString(table.SchemaName)
-		sb.WriteString(".")
-		sb.WriteString(table.TableName)
-		sb.WriteString("\n")
-
-		if table.Description != "" {
-			sb.WriteString("Description: ")
-			sb.WriteString(table.Description)
-			sb.WriteString("\n")
-		}
-
-		if table.RowCount > 0 {
-			sb.WriteString(fmt.Sprintf("Row count: %d\n", table.RowCount))
-		}
-
-		sb.WriteString("Columns:\n")
-		for _, col := range table.Columns {
-			sb.WriteString("  - ")
-			sb.WriteString(col.ColumnName)
-			sb.WriteString(": ")
-			sb.WriteString(col.DataType)
-
-			// Add column attributes
-			attrs := make([]string, 0)
-			if col.IsPrimaryKey {
-				attrs = append(attrs, "PRIMARY KEY")
-			}
-			if !col.IsNullable {
-				attrs = append(attrs, "NOT NULL")
-			}
-			if len(attrs) > 0 {
-				sb.WriteString(" [")
-				sb.WriteString(strings.Join(attrs, ", "))
-				sb.WriteString("]")
-			}
-
-			// Add entity/role information
-			columnKey := fmt.Sprintf("%s.%s.%s", table.SchemaName, table.TableName, col.ColumnName)
-			if occs, ok := occurrencesByColumn[columnKey]; ok {
-				sb.WriteString(" => ")
-				entityAnnotations := make([]string, 0, len(occs))
-				for _, occ := range occs {
-					if entity, found := entityByID[occ.EntityID]; found {
-						if occ.Association != nil && *occ.Association != "" {
-							entityAnnotations = append(entityAnnotations,
-								fmt.Sprintf("%s (association: %s)", entity.Name, *occ.Association))
-						} else {
-							entityAnnotations = append(entityAnnotations, entity.Name)
-						}
-					}
-				}
-				sb.WriteString(strings.Join(entityAnnotations, ", "))
-			}
-
-			sb.WriteString("\n")
-		}
-	}
-
-	// Add relationships with entity context
-	if len(schema.Relationships) > 0 {
-		sb.WriteString("\nRELATIONSHIPS (with entity context):\n")
-		for _, rel := range schema.Relationships {
-			sb.WriteString("  ")
-			sb.WriteString(rel.SourceTableName)
-			sb.WriteString(".")
-			sb.WriteString(rel.SourceColumnName)
-
-			// Add entity info for source
-			var sourceKey string
-			if idx := strings.Index(rel.SourceTableName, "."); idx != -1 {
-				sourceKey = fmt.Sprintf("%s.%s.%s", rel.SourceTableName[:idx],
-					rel.SourceTableName[idx+1:], rel.SourceColumnName)
-			} else {
-				sourceKey = fmt.Sprintf("public.%s.%s", rel.SourceTableName, rel.SourceColumnName)
-			}
-
-			if occs, ok := occurrencesByColumn[sourceKey]; ok && len(occs) > 0 {
-				if entity, found := entityByID[occs[0].EntityID]; found {
-					if occs[0].Association != nil && *occs[0].Association != "" {
-						sb.WriteString(fmt.Sprintf(" [%s as %s]", entity.Name, *occs[0].Association))
-					} else {
-						sb.WriteString(fmt.Sprintf(" [%s]", entity.Name))
-					}
-				}
-			}
-
-			sb.WriteString(" -> ")
-			sb.WriteString(rel.TargetTableName)
-			sb.WriteString(".")
-			sb.WriteString(rel.TargetColumnName)
-
-			// Add entity info for target
-			var targetKey string
-			if idx := strings.Index(rel.TargetTableName, "."); idx != -1 {
-				targetKey = fmt.Sprintf("%s.%s.%s", rel.TargetTableName[:idx],
-					rel.TargetTableName[idx+1:], rel.TargetColumnName)
-			} else {
-				targetKey = fmt.Sprintf("public.%s.%s", rel.TargetTableName, rel.TargetColumnName)
-			}
-
-			if occs, ok := occurrencesByColumn[targetKey]; ok && len(occs) > 0 {
-				if entity, found := entityByID[occs[0].EntityID]; found {
-					if occs[0].Association != nil && *occs[0].Association != "" {
-						sb.WriteString(fmt.Sprintf(" [%s as %s]", entity.Name, *occs[0].Association))
-					} else {
-						sb.WriteString(fmt.Sprintf(" [%s]", entity.Name))
-					}
-				}
-			}
-
-			if rel.Cardinality != "" && rel.Cardinality != "unknown" {
-				sb.WriteString(" (")
-				sb.WriteString(rel.Cardinality)
-				sb.WriteString(")")
-			}
-			sb.WriteString("\n")
-		}
-	}
-
-	return sb.String(), nil
+	return s.GetDatasourceSchemaForPrompt(ctx, projectID, datasourceID, selectedOnly)
 }
 
 // SelectAllTables marks all tables and columns for this datasource as selected.

@@ -579,7 +579,18 @@ func TestAddStatisticsToColumnDetail(t *testing.T) {
 			expectNotPresent: []string{},
 		},
 		{
-			name: "missing null count",
+			name: "missing null count but has non_null_count - calculates null_rate",
+			schemaCol: &models.SchemaColumn{
+				DistinctCount: ptrInt64(100),
+				RowCount:      ptrInt64(1000),
+				NonNullCount:  ptrInt64(950), // 950 non-null = 50 nulls = 5% null rate
+			},
+			datasourceCol:    &models.DatasourceColumn{},
+			expectFields:     []string{"distinct_count", "row_count", "cardinality_ratio", "null_rate"},
+			expectNotPresent: []string{},
+		},
+		{
+			name: "missing both null_count and non_null_count",
 			schemaCol: &models.SchemaColumn{
 				DistinctCount: ptrInt64(100),
 				RowCount:      ptrInt64(1000),
@@ -619,7 +630,7 @@ func TestAddStatisticsToColumnDetail(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			colDetail := make(map[string]any)
-			addStatisticsToColumnDetail(colDetail, tt.schemaCol, tt.datasourceCol)
+			addStatisticsToColumnDetail(colDetail, tt.schemaCol)
 
 			// Check expected fields are present
 			for _, field := range tt.expectFields {
@@ -634,9 +645,15 @@ func TestAddStatisticsToColumnDetail(t *testing.T) {
 			}
 
 			// Verify calculated values are correct
-			if tt.schemaCol.RowCount != nil && tt.schemaCol.NullCount != nil {
+			if tt.schemaCol.RowCount != nil {
 				if nullRate, ok := colDetail["null_rate"].(float64); ok {
-					expectedRate := float64(*tt.schemaCol.NullCount) / float64(*tt.schemaCol.RowCount)
+					var expectedRate float64
+					if tt.schemaCol.NullCount != nil {
+						expectedRate = float64(*tt.schemaCol.NullCount) / float64(*tt.schemaCol.RowCount)
+					} else if tt.schemaCol.NonNullCount != nil {
+						nullCount := *tt.schemaCol.RowCount - *tt.schemaCol.NonNullCount
+						expectedRate = float64(nullCount) / float64(*tt.schemaCol.RowCount)
+					}
 					assert.InDelta(t, expectedRate, nullRate, 0.0001, "null_rate calculation should be accurate")
 				}
 			}
@@ -734,21 +751,20 @@ func TestSampleValuesRedaction(t *testing.T) {
 			col := &models.DatasourceColumn{
 				ColumnName: tt.columnName,
 			}
-			schemaCol := &models.SchemaColumn{
-				SampleValues: tt.sampleValues,
-			}
+			// Use the test's sample values directly (SampleValues was removed from SchemaColumn)
+			sampleValues := tt.sampleValues
 
 			// Simulate the sample_values logic from buildColumnDetails
-			if len(schemaCol.SampleValues) > 0 {
+			if len(sampleValues) > 0 {
 				// Check if column name indicates sensitive data
 				if DefaultSensitiveDetector.IsSensitiveColumn(col.ColumnName) {
 					colDetail["sample_values_redacted"] = true
 					colDetail["redaction_reason"] = "column name matches sensitive pattern"
 				} else {
 					// Check each sample value for sensitive content and redact if needed
-					redactedValues := make([]string, 0, len(schemaCol.SampleValues))
+					redactedValues := make([]string, 0, len(sampleValues))
 					anyRedacted := false
-					for _, val := range schemaCol.SampleValues {
+					for _, val := range sampleValues {
 						if DefaultSensitiveDetector.IsSensitiveContent(val) {
 							redactedValues = append(redactedValues, DefaultSensitiveDetector.RedactContent(val))
 							anyRedacted = true
@@ -851,26 +867,24 @@ func TestColumnMetadataEnrichment(t *testing.T) {
 			notExpectedFields: []string{"description", "entity", "role", "enum_values"},
 		},
 		{
-			name:       "metadata with description overrides datasource",
+			name:       "metadata provides description from ontology table",
 			columnName: "host_id",
 			datasourceCol: &models.DatasourceColumn{
-				ColumnName:  "host_id",
-				DataType:    "uuid",
-				IsNullable:  false,
-				Description: "Original datasource description",
+				ColumnName: "host_id",
+				DataType:   "uuid",
+				IsNullable: false,
 			},
 			columnMeta: &models.ColumnMetadata{
-				ColumnName:  "host_id",
 				Description: ptrString("Use this to find all hosts who had engagements"),
 			},
 			expectedFields: map[string]any{
 				"column_name": "host_id",
-				"description": "Use this to find all hosts who had engagements", // Should override
+				"description": "Use this to find all hosts who had engagements",
 			},
 			notExpectedFields: []string{"entity", "role", "enum_values"},
 		},
 		{
-			name:       "metadata with entity and role",
+			name:       "metadata with entity (via IdentifierFeatures) and role",
 			columnName: "status",
 			datasourceCol: &models.DatasourceColumn{
 				ColumnName: "status",
@@ -878,9 +892,12 @@ func TestColumnMetadataEnrichment(t *testing.T) {
 				IsNullable: false,
 			},
 			columnMeta: &models.ColumnMetadata{
-				ColumnName: "status",
-				Entity:     ptrString("User"),
-				Role:       ptrString("dimension"),
+				Role: ptrString("dimension"),
+				Features: models.ColumnMetadataFeatures{
+					IdentifierFeatures: &models.IdentifierFeatures{
+						EntityReferenced: "User",
+					},
+				},
 			},
 			expectedFields: map[string]any{
 				"column_name": "status",
@@ -890,7 +907,7 @@ func TestColumnMetadataEnrichment(t *testing.T) {
 			notExpectedFields: []string{"description", "enum_values"},
 		},
 		{
-			name:       "metadata with enum_values",
+			name:       "metadata with enum_values (via EnumFeatures)",
 			columnName: "order_status",
 			datasourceCol: &models.DatasourceColumn{
 				ColumnName: "order_status",
@@ -898,8 +915,14 @@ func TestColumnMetadataEnrichment(t *testing.T) {
 				IsNullable: false,
 			},
 			columnMeta: &models.ColumnMetadata{
-				ColumnName: "order_status",
-				EnumValues: []string{"PENDING - Order is pending", "COMPLETED - Order completed"},
+				Features: models.ColumnMetadataFeatures{
+					EnumFeatures: &models.EnumFeatures{
+						Values: []models.ColumnEnumValue{
+							{Value: "PENDING", Label: "Order is pending"},
+							{Value: "COMPLETED", Label: "Order completed"},
+						},
+					},
+				},
 			},
 			expectedFields: map[string]any{
 				"column_name": "order_status",
@@ -916,10 +939,13 @@ func TestColumnMetadataEnrichment(t *testing.T) {
 				IsNullable: false,
 			},
 			columnMeta: &models.ColumnMetadata{
-				ColumnName:  "amount",
 				Description: ptrString("Transaction amount in USD cents"),
-				Entity:      ptrString("Transaction"),
 				Role:        ptrString("measure"),
+				Features: models.ColumnMetadataFeatures{
+					IdentifierFeatures: &models.IdentifierFeatures{
+						EntityReferenced: "Transaction",
+					},
+				},
 			},
 			expectedFields: map[string]any{
 				"column_name": "amount",
@@ -940,11 +966,13 @@ func TestColumnMetadataEnrichment(t *testing.T) {
 				IsNullable: true,
 			},
 			columnMeta: &models.ColumnMetadata{
-				ColumnName:  "test_col",
 				Description: ptrString(""), // Empty string
-				Entity:      ptrString(""), // Empty string
 				Role:        ptrString(""), // Empty string
-				EnumValues:  []string{},    // Empty slice
+				Features: models.ColumnMetadataFeatures{
+					EnumFeatures: &models.EnumFeatures{
+						Values: []models.ColumnEnumValue{}, // Empty slice
+					},
+				},
 			},
 			expectedFields: map[string]any{
 				"column_name": "test_col",
@@ -956,35 +984,40 @@ func TestColumnMetadataEnrichment(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Build column detail as done in buildColumnDetails
+			// Note: business_name and description are now in engine_ontology_column_metadata,
+			// not DatasourceColumn
 			colDetail := map[string]any{
 				"column_name": tt.datasourceCol.ColumnName,
 				"data_type":   tt.datasourceCol.DataType,
 				"is_nullable": tt.datasourceCol.IsNullable,
 			}
-			if tt.datasourceCol.BusinessName != "" {
-				colDetail["business_name"] = tt.datasourceCol.BusinessName
-			}
-			if tt.datasourceCol.Description != "" {
-				colDetail["description"] = tt.datasourceCol.Description
-			}
 
 			// Apply column metadata enrichment (same logic as context.go)
+			// Column metadata now uses Features JSONB with typed sub-features
 			if tt.columnMeta != nil {
-				// Description from update_column overrides datasource description
+				// Description from column metadata (from ontology table)
 				if tt.columnMeta.Description != nil && *tt.columnMeta.Description != "" {
 					colDetail["description"] = *tt.columnMeta.Description
 				}
-				// Entity association
-				if tt.columnMeta.Entity != nil && *tt.columnMeta.Entity != "" {
-					colDetail["entity"] = *tt.columnMeta.Entity
+				// Entity association is now in Features.IdentifierFeatures.EntityReferenced
+				if idFeatures := tt.columnMeta.GetIdentifierFeatures(); idFeatures != nil && idFeatures.EntityReferenced != "" {
+					colDetail["entity"] = idFeatures.EntityReferenced
 				}
 				// Semantic role
 				if tt.columnMeta.Role != nil && *tt.columnMeta.Role != "" {
 					colDetail["role"] = *tt.columnMeta.Role
 				}
-				// Enum values
-				if len(tt.columnMeta.EnumValues) > 0 {
-					colDetail["enum_values"] = tt.columnMeta.EnumValues
+				// Enum values are now in Features.EnumFeatures.Values
+				if enumFeatures := tt.columnMeta.GetEnumFeatures(); enumFeatures != nil && len(enumFeatures.Values) > 0 {
+					enumStrings := make([]string, len(enumFeatures.Values))
+					for i, ev := range enumFeatures.Values {
+						if ev.Label != "" {
+							enumStrings[i] = ev.Value + " - " + ev.Label
+						} else {
+							enumStrings[i] = ev.Value
+						}
+					}
+					colDetail["enum_values"] = enumStrings
 				}
 			}
 

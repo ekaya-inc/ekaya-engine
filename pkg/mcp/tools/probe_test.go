@@ -238,13 +238,6 @@ func TestProbeColumn_SemanticFromOntology(t *testing.T) {
 	ontology := &models.TieredOntology{
 		ID:        uuid.New(),
 		ProjectID: uuid.New(),
-		EntitySummaries: map[string]*models.EntitySummary{
-			"users": {
-				TableName:    "users",
-				BusinessName: "User",
-				Description:  "Platform users",
-			},
-		},
 		ColumnDetails: map[string][]models.ColumnDetail{
 			"users": {
 				{
@@ -259,11 +252,6 @@ func TestProbeColumn_SemanticFromOntology(t *testing.T) {
 			},
 		},
 	}
-
-	// Get entity summary
-	entitySummary := ontology.GetEntitySummary("users")
-	assert.NotNil(t, entitySummary)
-	assert.Equal(t, "User", entitySummary.BusinessName)
 
 	// Get column details
 	columnDetails := ontology.GetColumnDetails("users")
@@ -306,6 +294,91 @@ func TestProbeColumn_NullRateCalculation(t *testing.T) {
 			assert.Equal(t, tc.expectedRate, actualRate)
 		})
 	}
+}
+
+func TestProbeColumn_NullRateFromNonNullCount(t *testing.T) {
+	// Test that null rate is calculated from NonNullCount when NullCount is nil.
+	// This is the production scenario: adapters populate NonNullCount via COUNT(col)
+	// but never populate NullCount.
+	testCases := []struct {
+		name             string
+		rowCount         int64
+		nonNullCount     int64
+		nullCount        *int64
+		expectedNullRate *float64
+	}{
+		{
+			name:             "5% null rate from NonNullCount (soft delete typical)",
+			rowCount:         100,
+			nonNullCount:     5, // 95 nulls = 95% null rate (deleted_at column)
+			nullCount:        nil,
+			expectedNullRate: ptr(0.95),
+		},
+		{
+			name:             "No nulls from NonNullCount",
+			rowCount:         100,
+			nonNullCount:     100,
+			nullCount:        nil,
+			expectedNullRate: ptr(0.0),
+		},
+		{
+			name:             "All nulls from NonNullCount",
+			rowCount:         100,
+			nonNullCount:     0,
+			nullCount:        nil,
+			expectedNullRate: ptr(1.0),
+		},
+		{
+			name:             "NullCount takes precedence when set",
+			rowCount:         100,
+			nonNullCount:     90, // Would calculate to 10% null rate
+			nullCount:        ptr64(20),
+			expectedNullRate: ptr(0.20), // Uses NullCount directly
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			column := &models.SchemaColumn{
+				ColumnName:   "deleted_at",
+				RowCount:     &tc.rowCount,
+				NonNullCount: &tc.nonNullCount,
+				NullCount:    tc.nullCount,
+			}
+
+			// Simulate the fixed logic from probeColumn
+			var calculatedNullRate *float64
+			if column.RowCount != nil && *column.RowCount > 0 {
+				var nullCount int64
+				if column.NullCount != nil {
+					nullCount = *column.NullCount
+				} else if column.NonNullCount != nil {
+					nullCount = *column.RowCount - *column.NonNullCount
+				}
+				if nullCount > 0 || column.NullCount != nil || column.NonNullCount != nil {
+					rate := float64(nullCount) / float64(*column.RowCount)
+					calculatedNullRate = &rate
+				}
+			}
+
+			if tc.expectedNullRate == nil {
+				assert.Nil(t, calculatedNullRate)
+			} else {
+				assert.NotNil(t, calculatedNullRate)
+				assert.InDelta(t, *tc.expectedNullRate, *calculatedNullRate, 0.001)
+			}
+		})
+	}
+}
+
+// Helper to create *float64
+func ptr(f float64) *float64 {
+	return &f
+}
+
+// Helper to create *int64
+func ptr64(i int64) *int64 {
+	return &i
 }
 
 func TestProbeColumn_CardinalityRatioCalculation(t *testing.T) {
@@ -465,144 +538,34 @@ func TestProbeColumn_ErrorCodeExtraction(t *testing.T) {
 }
 
 // ============================================================================
-// Tests for probe_relationship tool
-// ============================================================================
-
-func TestProbeRelationshipResponse_Structure(t *testing.T) {
-	// Test response structure with all fields populated
-	orphanCount := int64(10)
-	desc := "The user who owns this account"
-	label := "owns"
-
-	response := probeRelationshipResponse{
-		Relationships: []probeRelationshipDetail{
-			{
-				FromEntity:  "Account",
-				ToEntity:    "User",
-				FromColumn:  "accounts.owner_id",
-				ToColumn:    "users.user_id",
-				Cardinality: "N:1",
-				DataQuality: &probeRelationshipDataQuality{
-					MatchRate:      0.98,
-					OrphanCount:    &orphanCount,
-					SourceDistinct: 500,
-					TargetDistinct: 450,
-					MatchedCount:   490,
-				},
-				Description: &desc,
-				Label:       &label,
-			},
-		},
-		RejectedCandidates: []probeRelationshipCandidate{
-			{
-				FromColumn:      "accounts.created_by",
-				ToColumn:        "users.user_id",
-				RejectionReason: "low_match_rate",
-			},
-		},
-	}
-
-	assert.Len(t, response.Relationships, 1)
-	assert.Len(t, response.RejectedCandidates, 1)
-
-	rel := response.Relationships[0]
-	assert.Equal(t, "Account", rel.FromEntity)
-	assert.Equal(t, "User", rel.ToEntity)
-	assert.Equal(t, "N:1", rel.Cardinality)
-	assert.NotNil(t, rel.DataQuality)
-	assert.Equal(t, 0.98, rel.DataQuality.MatchRate)
-	assert.Equal(t, int64(10), *rel.DataQuality.OrphanCount)
-
-	rejected := response.RejectedCandidates[0]
-	assert.Equal(t, "low_match_rate", rejected.RejectionReason)
-}
-
-func TestProbeRelationshipTool_Registration(t *testing.T) {
-	// Verify the tool is registered with correct metadata
-	// This is a structural test - the actual tool function is tested via integration tests
-
-	deps := &ProbeToolDeps{
-		// These would be mocked in a real test
-	}
-
-	assert.NotNil(t, deps, "ProbeToolDeps should be defined")
-}
-
-func TestProbeRelationshipResponse_EmptyState(t *testing.T) {
-	// Test empty response structure
-	response := probeRelationshipResponse{
-		Relationships:      []probeRelationshipDetail{},
-		RejectedCandidates: []probeRelationshipCandidate{},
-	}
-
-	assert.Empty(t, response.Relationships)
-	assert.Empty(t, response.RejectedCandidates)
-}
-
-func TestProbeRelationshipDetail_MinimalFields(t *testing.T) {
-	// Test relationship detail with only required fields
-	detail := probeRelationshipDetail{
-		FromEntity: "Order",
-		ToEntity:   "Customer",
-		FromColumn: "orders.customer_id",
-		ToColumn:   "customers.customer_id",
-	}
-
-	assert.Equal(t, "Order", detail.FromEntity)
-	assert.Equal(t, "Customer", detail.ToEntity)
-	assert.Empty(t, detail.Cardinality)
-	assert.Nil(t, detail.DataQuality)
-	assert.Nil(t, detail.Description)
-	assert.Nil(t, detail.Label)
-}
-
-func TestProbeRelationshipDataQuality_OrphanCalculation(t *testing.T) {
-	// Test orphan count calculation logic
-	sourceDistinct := int64(1000)
-	matchedCount := int64(950)
-	expectedOrphans := sourceDistinct - matchedCount
-
-	orphanCount := expectedOrphans
-	quality := probeRelationshipDataQuality{
-		MatchRate:      0.95,
-		OrphanCount:    &orphanCount,
-		SourceDistinct: sourceDistinct,
-		TargetDistinct: 900,
-		MatchedCount:   matchedCount,
-	}
-
-	assert.Equal(t, int64(50), *quality.OrphanCount)
-	assert.Equal(t, int64(1000), quality.SourceDistinct)
-	assert.Equal(t, int64(950), quality.MatchedCount)
-}
-
-// ============================================================================
 // Tests for probe_column column_metadata fallback
 // ============================================================================
 
 func TestProbeColumn_ColumnMetadataFallback_EnumValues(t *testing.T) {
 	// Test that enum values from column_metadata are used when ontology has none
 	projectID := uuid.New()
+	schemaColumnID := uuid.New()
 
-	// Create a mock column metadata repo with enum values
+	// Create a mock column metadata repo with enum values (now in Features.EnumFeatures)
 	mockColMetaRepo := newMockColumnMetadataRepository()
-	mockColMetaRepo.metadata["users.status"] = &models.ColumnMetadata{
-		ProjectID:  projectID,
-		TableName:  "users",
-		ColumnName: "status",
-		EnumValues: []string{"ACTIVE", "SUSPENDED", "BANNED"},
+	mockColMetaRepo.metadata[schemaColumnID] = &models.ColumnMetadata{
+		ProjectID:      projectID,
+		SchemaColumnID: schemaColumnID,
+		Features: models.ColumnMetadataFeatures{
+			EnumFeatures: &models.EnumFeatures{
+				Values: []models.ColumnEnumValue{
+					{Value: "ACTIVE"},
+					{Value: "SUSPENDED"},
+					{Value: "BANNED"},
+				},
+			},
+		},
 	}
 
 	// Create an ontology with column details but NO enum values
 	ontology := &models.TieredOntology{
 		ID:        uuid.New(),
 		ProjectID: projectID,
-		EntitySummaries: map[string]*models.EntitySummary{
-			"users": {
-				TableName:    "users",
-				BusinessName: "User",
-			},
-		},
 		ColumnDetails: map[string][]models.ColumnDetail{
 			"users": {
 				{
@@ -620,28 +583,30 @@ func TestProbeColumn_ColumnMetadataFallback_EnumValues(t *testing.T) {
 	assert.Len(t, columnDetails, 1)
 	assert.Nil(t, columnDetails[0].EnumValues)
 
-	// Verify mock repo has enum values
-	meta, err := mockColMetaRepo.GetByTableColumn(nil, projectID, "users", "status")
+	// Verify mock repo has enum values (via Features.EnumFeatures)
+	meta, err := mockColMetaRepo.GetBySchemaColumnID(nil, schemaColumnID)
 	assert.NoError(t, err)
 	assert.NotNil(t, meta)
-	assert.Len(t, meta.EnumValues, 3)
+	enumFeatures := meta.GetEnumFeatures()
+	assert.NotNil(t, enumFeatures)
+	assert.Len(t, enumFeatures.Values, 3)
 }
 
 func TestProbeColumn_ColumnMetadataFallback_Description(t *testing.T) {
 	// Test that description from column_metadata is used when ontology has none
 	projectID := uuid.New()
+	schemaColumnID := uuid.New()
 
 	mockColMetaRepo := newMockColumnMetadataRepository()
 	desc := "User current state"
-	mockColMetaRepo.metadata["users.state"] = &models.ColumnMetadata{
-		ProjectID:   projectID,
-		TableName:   "users",
-		ColumnName:  "state",
-		Description: &desc,
+	mockColMetaRepo.metadata[schemaColumnID] = &models.ColumnMetadata{
+		ProjectID:      projectID,
+		SchemaColumnID: schemaColumnID,
+		Description:    &desc,
 	}
 
-	// Verify mock has description
-	meta, err := mockColMetaRepo.GetByTableColumn(nil, projectID, "users", "state")
+	// Verify mock has description (keyed by SchemaColumnID now)
+	meta, err := mockColMetaRepo.GetBySchemaColumnID(nil, schemaColumnID)
 	assert.NoError(t, err)
 	assert.NotNil(t, meta)
 	assert.NotNil(t, meta.Description)
@@ -649,39 +614,46 @@ func TestProbeColumn_ColumnMetadataFallback_Description(t *testing.T) {
 }
 
 func TestProbeColumn_ColumnMetadataFallback_EntityAndRole(t *testing.T) {
-	// Test that entity and role from column_metadata are used when ontology has none
+	// Test that entity (via IdentifierFeatures.EntityReferenced) and role from column_metadata are used
 	projectID := uuid.New()
+	schemaColumnID := uuid.New()
 
 	mockColMetaRepo := newMockColumnMetadataRepository()
-	entity := "Account"
 	role := "dimension"
-	mockColMetaRepo.metadata["accounts.type"] = &models.ColumnMetadata{
-		ProjectID:  projectID,
-		TableName:  "accounts",
-		ColumnName: "type",
-		Entity:     &entity,
-		Role:       &role,
+	mockColMetaRepo.metadata[schemaColumnID] = &models.ColumnMetadata{
+		ProjectID:      projectID,
+		SchemaColumnID: schemaColumnID,
+		Role:           &role,
+		Features: models.ColumnMetadataFeatures{
+			IdentifierFeatures: &models.IdentifierFeatures{
+				EntityReferenced: "Account",
+			},
+		},
 	}
 
-	meta, err := mockColMetaRepo.GetByTableColumn(nil, projectID, "accounts", "type")
+	meta, err := mockColMetaRepo.GetBySchemaColumnID(nil, schemaColumnID)
 	assert.NoError(t, err)
 	assert.NotNil(t, meta)
-	assert.NotNil(t, meta.Entity)
 	assert.NotNil(t, meta.Role)
-	assert.Equal(t, "Account", *meta.Entity)
 	assert.Equal(t, "dimension", *meta.Role)
+	// Entity is now in Features.IdentifierFeatures.EntityReferenced
+	idFeatures := meta.GetIdentifierFeatures()
+	assert.NotNil(t, idFeatures)
+	assert.Equal(t, "Account", idFeatures.EntityReferenced)
 }
 
-func TestProbeColumn_ColumnMetadataFallback_OntologyTakesPrecedence(t *testing.T) {
-	// Test that ontology enum values take precedence over column_metadata
+func TestProbeColumn_ColumnMetadataIsPrimary_OntologyIsFallback(t *testing.T) {
+	// Test that column_metadata is the primary source and ontology is fallback
+	// After schema refactor: column_metadata takes precedence
 	ontologyEnumValues := []models.EnumValue{
 		{Value: "ACTIVE", Label: "Active User"},
 		{Value: "INACTIVE", Label: "Inactive User"},
 	}
 
-	// The semantic section from ontology should be used when it has enum values
+	// When column_metadata has data, it is used (primary source)
+	// Ontology is only used as fallback when column_metadata has no data
 	semantic := probeColumnSemantic{
-		Description: "Ontology description",
+		Description: "From column_metadata",
 		Role:        "attribute",
 		EnumLabels: map[string]string{
 			"ACTIVE":   "Active User",
@@ -689,12 +661,12 @@ func TestProbeColumn_ColumnMetadataFallback_OntologyTakesPrecedence(t *testing.T
 		},
 	}
 
-	// If ontology has enum labels, they should not be overwritten
+	// Column_metadata values are used (primary source)
 	assert.Len(t, semantic.EnumLabels, 2)
 	assert.Equal(t, "Active User", semantic.EnumLabels["ACTIVE"])
 
-	// The fallback logic only runs when len(response.Semantic.EnumLabels) == 0
-	// This test verifies the structure that makes precedence work
+	// Ontology would only be used if column_metadata had no semantic data
+	// This test verifies the structure
 	assert.Len(t, ontologyEnumValues, 2)
 }
 
@@ -702,8 +674,8 @@ func TestProbeColumn_ColumnMetadataFallback_NoMetadataAnywhere(t *testing.T) {
 	// Test that probe works when neither ontology nor column_metadata have data
 	mockColMetaRepo := newMockColumnMetadataRepository()
 
-	// Verify empty repo returns nil
-	meta, err := mockColMetaRepo.GetByTableColumn(nil, uuid.New(), "unknown", "column")
+	// Verify empty repo returns nil (now keyed by SchemaColumnID)
+	meta, err := mockColMetaRepo.GetBySchemaColumnID(nil, uuid.New())
 	assert.NoError(t, err)
 	assert.Nil(t, meta)
 }

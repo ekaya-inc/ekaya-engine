@@ -154,7 +154,7 @@ func (tc *sensitiveTestContext) createTestContext() (context.Context, func()) {
 func (tc *sensitiveTestContext) createTestTable(tableName string, columns []struct {
 	name         string
 	dataType     string
-	sampleValues []string
+	sampleValues []string // Note: sampleValues not persisted to DB (removed in schema refactor)
 }) uuid.UUID {
 	tc.t.Helper()
 
@@ -171,12 +171,12 @@ func (tc *sensitiveTestContext) createTestTable(tableName string, columns []stru
 	`, tableID, tc.projectID, tc.datasourceID, tableName)
 	require.NoError(tc.t, err)
 
-	// Create columns
+	// Create columns (sample_values and metadata columns removed in schema refactor)
 	for i, col := range columns {
 		_, err = scope.Conn.Exec(ctx, `
-			INSERT INTO engine_schema_columns (id, project_id, schema_table_id, column_name, data_type, is_nullable, ordinal_position, sample_values, metadata)
-			VALUES ($1, $2, $3, $4, $5, true, $6, $7, '{}')
-		`, uuid.New(), tc.projectID, tableID, col.name, col.dataType, i+1, col.sampleValues)
+			INSERT INTO engine_schema_columns (id, project_id, schema_table_id, column_name, data_type, is_nullable, ordinal_position, is_selected)
+			VALUES ($1, $2, $3, $4, $5, true, $6, true)
+		`, uuid.New(), tc.projectID, tableID, col.name, col.dataType, i+1)
 		require.NoError(tc.t, err)
 	}
 
@@ -377,15 +377,26 @@ func TestSensitiveFlag_GetContextRedaction(t *testing.T) {
 	defer scope.Close()
 	scopeCtx := database.SetTenantScope(context.Background(), scope)
 
+	// First, find the table to get column IDs
+	table, err := tc.schemaRepo.FindTableByName(scopeCtx, tc.projectID, tc.datasourceID, "test_redaction")
+	require.NoError(t, err)
+	require.NotNil(t, table)
+
 	// Check display_name is marked as sensitive
-	displayMeta, err := tc.columnMetadataRepo.GetByTableColumn(scopeCtx, tc.projectID, "test_redaction", "display_name")
+	displayCol, err := tc.schemaRepo.GetColumnByName(scopeCtx, table.ID, "display_name")
+	require.NoError(t, err)
+	require.NotNil(t, displayCol)
+	displayMeta, err := tc.columnMetadataRepo.GetBySchemaColumnID(scopeCtx, displayCol.ID)
 	require.NoError(t, err)
 	require.NotNil(t, displayMeta)
 	require.NotNil(t, displayMeta.IsSensitive)
 	assert.True(t, *displayMeta.IsSensitive)
 
 	// Check password is marked as not sensitive
-	passwordMeta, err := tc.columnMetadataRepo.GetByTableColumn(scopeCtx, tc.projectID, "test_redaction", "password")
+	passwordCol, err := tc.schemaRepo.GetColumnByName(scopeCtx, table.ID, "password")
+	require.NoError(t, err)
+	require.NotNil(t, passwordCol)
+	passwordMeta, err := tc.columnMetadataRepo.GetBySchemaColumnID(scopeCtx, passwordCol.ID)
 	require.NoError(t, err)
 	require.NotNil(t, passwordMeta)
 	require.NotNil(t, passwordMeta.IsSensitive)

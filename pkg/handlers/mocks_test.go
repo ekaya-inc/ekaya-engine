@@ -316,10 +316,6 @@ func (m *mockSchemaService) GetRelationshipsForDatasource(ctx context.Context, p
 	return []*models.SchemaRelationship{}, nil
 }
 
-func (m *mockSchemaService) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
-	return m.err
-}
-
 func (m *mockSchemaService) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
 	return m.err
 }

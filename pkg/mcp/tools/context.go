@@ -123,7 +123,8 @@ func registerGetContextTool(s *server.MCPServer, deps *ContextToolDeps) {
 			"columns":  true,
 		}
 		if !validDepths[depth] {
-			return nil, fmt.Errorf("invalid depth: must be one of 'domain', 'entities', 'tables', 'columns'")
+			return NewErrorResult("invalid_parameters",
+				"invalid depth: must be one of 'domain', 'entities', 'tables', 'columns'"), nil
 		}
 
 		// Parse optional parameters
@@ -201,20 +202,16 @@ func handleContextWithOntology(
 	}
 
 	// Route to appropriate handler based on depth
-	// Domain/Entities: Ontology-driven (conceptual business entities)
+	// Domain: Ontology-driven (domain summary)
 	// Tables/Columns: Schema-driven (physical structure with column features)
+	// Note: "entities" depth has been removed for v1.0 entity simplification
 	switch depth {
 	case "domain":
 		domainCtx, err := deps.OntologyContextService.GetDomainContext(ctx, projectID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get domain context: %w", err)
 		}
-		if !includeRelationships {
-			domainCtx.Relationships = nil
-		}
 		response["domain"] = domainCtx.Domain
-		response["entities"] = domainCtx.Entities
-		response["relationships"] = domainCtx.Relationships
 
 		// Include project knowledge at domain level
 		if deps.KnowledgeRepo != nil {
@@ -230,15 +227,14 @@ func handleContextWithOntology(
 		}
 
 	case "entities":
-		entitiesCtx, err := deps.OntologyContextService.GetEntitiesContext(ctx, projectID)
+		// Entity-level depth has been removed for v1.0 entity simplification.
+		// Fall back to domain-level response.
+		domainCtx, err := deps.OntologyContextService.GetDomainContext(ctx, projectID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get entities context: %w", err)
+			return nil, fmt.Errorf("failed to get domain context: %w", err)
 		}
-		if !includeRelationships {
-			entitiesCtx.Relationships = nil
-		}
-		response["entities"] = entitiesCtx.Entities
-		response["relationships"] = entitiesCtx.Relationships
+		response["domain"] = domainCtx.Domain
+		response["note"] = "Entity-level depth is deprecated. Use 'domain' or 'tables' instead."
 
 	case "tables", "columns":
 		// Tables and columns always come from schema (engine_schema_columns)
@@ -381,20 +377,21 @@ func buildTablesFromSchema(
 		filteredTables = filterDatasourceTables(schema.Tables, tableFilter)
 	}
 
-	// Fetch table metadata for all tables in one batch
+	// Fetch table metadata for all filtered tables
+	// TableMetadata uses schema_table_id FK; ListByTableNames does the join
 	var tableMetadataMap map[string]*models.TableMetadata
-	if deps.TableMetadataRepo != nil {
-		metaList, err := deps.TableMetadataRepo.List(ctx, projectID, dsID)
+	if deps.TableMetadataRepo != nil && len(filteredTables) > 0 {
+		tableNames := make([]string, len(filteredTables))
+		for i, t := range filteredTables {
+			tableNames[i] = t.TableName
+		}
+		var err error
+		tableMetadataMap, err = deps.TableMetadataRepo.ListByTableNames(ctx, projectID, tableNames)
 		if err != nil {
 			deps.Logger.Warn("Failed to get table metadata",
 				zap.String("project_id", projectID.String()),
 				zap.Error(err))
 			// Continue without table metadata - not a fatal error
-		} else if len(metaList) > 0 {
-			tableMetadataMap = make(map[string]*models.TableMetadata, len(metaList))
-			for _, meta := range metaList {
-				tableMetadataMap[meta.TableName] = meta
-			}
 		}
 	}
 
@@ -410,6 +407,9 @@ func buildTablesFromSchema(
 		// Merge table metadata if available (omit null/empty fields)
 		if tableMetadataMap != nil {
 			if meta, ok := tableMetadataMap[table.TableName]; ok {
+				if meta.TableType != nil && *meta.TableType != "" {
+					tableDetail["table_type"] = *meta.TableType
+				}
 				if meta.Description != nil && *meta.Description != "" {
 					tableDetail["description"] = *meta.Description
 				}
@@ -522,7 +522,7 @@ func filterDatasourceTables(tables []*models.DatasourceTable, tableNames []strin
 }
 
 // buildColumnDetails builds column detail maps including features, statistics, and sample values.
-// Column features are always included when available (from engine_schema_columns.metadata).
+// Column features are always included when available (from engine_ontology_column_metadata).
 func buildColumnDetails(
 	ctx context.Context,
 	deps *ContextToolDeps,
@@ -548,17 +548,22 @@ func buildColumnDetails(
 	}
 
 	// Fetch column metadata for sensitive flag overrides
-	var columnMetadata map[string]*models.ColumnMetadata
-	if deps.ColumnMetadataRepo != nil {
-		metaList, err := deps.ColumnMetadataRepo.GetByTable(ctx, projectID, table.TableName)
+	// Column metadata is now keyed by schema_column_id (FK to engine_schema_columns)
+	columnMetadataByColID := make(map[uuid.UUID]*models.ColumnMetadata)
+	if deps.ColumnMetadataRepo != nil && len(schemaColumns) > 0 {
+		// Collect schema column IDs for metadata lookup
+		schemaColIDs := make([]uuid.UUID, 0, len(schemaColumns))
+		for _, schemaCol := range schemaColumns {
+			schemaColIDs = append(schemaColIDs, schemaCol.ID)
+		}
+		metaList, err := deps.ColumnMetadataRepo.GetBySchemaColumnIDs(ctx, schemaColIDs)
 		if err != nil {
 			deps.Logger.Warn("Failed to get column metadata",
 				zap.String("table", table.TableName),
 				zap.Error(err))
 		} else if len(metaList) > 0 {
-			columnMetadata = make(map[string]*models.ColumnMetadata, len(metaList))
 			for _, meta := range metaList {
-				columnMetadata[meta.ColumnName] = meta
+				columnMetadataByColID[meta.SchemaColumnID] = meta
 			}
 		}
 	}
@@ -569,35 +574,8 @@ func buildColumnDetails(
 			"data_type":   col.DataType,
 			"is_nullable": col.IsNullable,
 		}
-		if col.BusinessName != "" {
-			colDetail["business_name"] = col.BusinessName
-		}
-		if col.Description != "" {
-			colDetail["description"] = col.Description
-		}
-
-		// Add enriched column metadata from update_column (MCP enrichment)
-		// These take precedence over datasource column values when present
-		if columnMetadata != nil {
-			if meta, ok := columnMetadata[col.ColumnName]; ok {
-				// Description from update_column overrides datasource description
-				if meta.Description != nil && *meta.Description != "" {
-					colDetail["description"] = *meta.Description
-				}
-				// Entity association (e.g., 'User', 'Account')
-				if meta.Entity != nil && *meta.Entity != "" {
-					colDetail["entity"] = *meta.Entity
-				}
-				// Semantic role (e.g., 'dimension', 'measure', 'identifier', 'attribute')
-				if meta.Role != nil && *meta.Role != "" {
-					colDetail["role"] = *meta.Role
-				}
-				// Enum value labels if defined
-				if len(meta.EnumValues) > 0 {
-					colDetail["enum_values"] = meta.EnumValues
-				}
-			}
-		}
+		// Note: business_name and description are now in engine_ontology_column_metadata,
+		// retrieved via columnMetadataByColID below (from update_column MCP enrichment).
 
 		// Get corresponding schema column if available
 		var schemaCol *models.SchemaColumn
@@ -605,135 +583,122 @@ func buildColumnDetails(
 			schemaCol = schemaColumns[col.ColumnName]
 		}
 
+		// Add enriched column metadata from update_column (MCP enrichment)
+		// These take precedence over datasource column values when present
+		// Column metadata is now keyed by schema_column_id
+		if schemaCol != nil && len(columnMetadataByColID) > 0 {
+			if meta, ok := columnMetadataByColID[schemaCol.ID]; ok {
+				// Description from update_column overrides datasource description
+				if meta.Description != nil && *meta.Description != "" {
+					colDetail["description"] = *meta.Description
+				}
+				// Entity association (e.g., 'User', 'Account') - now stored in Features.IdentifierFeatures
+				if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil && idFeatures.EntityReferenced != "" {
+					colDetail["entity"] = idFeatures.EntityReferenced
+				}
+				// Semantic role (e.g., 'dimension', 'measure', 'identifier', 'attribute')
+				if meta.Role != nil && *meta.Role != "" {
+					colDetail["role"] = *meta.Role
+				}
+				// Enum value labels if defined - now stored in Features.EnumFeatures
+				if enumFeatures := meta.GetEnumFeatures(); enumFeatures != nil && len(enumFeatures.Values) > 0 {
+					// Convert ColumnEnumValue to simple strings for display
+					enumStrings := make([]string, len(enumFeatures.Values))
+					for i, ev := range enumFeatures.Values {
+						if ev.Label != "" {
+							enumStrings[i] = ev.Value + " - " + ev.Label
+						} else {
+							enumStrings[i] = ev.Value
+						}
+					}
+					colDetail["enum_values"] = enumStrings
+				}
+			}
+		}
+
 		// Add statistics if requested
 		if include.Statistics && schemaCol != nil {
-			addStatisticsToColumnDetail(colDetail, schemaCol, col)
+			addStatisticsToColumnDetail(colDetail, schemaCol)
 		}
 
 		// Add sample values if requested and available
-		// Sample values are persisted during ontology extraction for low-cardinality columns (≤50 distinct values)
-		// Sensitive data is automatically redacted to prevent exposure of API keys, secrets, etc.
-		// Manual is_sensitive flag overrides automatic detection: true=always redact, false=never redact, nil=auto-detect
-		if include.SampleValues && schemaCol != nil && len(schemaCol.SampleValues) > 0 {
+		// NOTE: Sample values are no longer stored in SchemaColumn after the column schema refactor.
+		// The include.SampleValues flag is still accepted but values won't be returned until
+		// sample value storage is re-implemented in the new schema.
+		// TODO: Re-implement sample values support with the new ColumnMetadata schema
+		if include.SampleValues && schemaCol != nil {
 			// Check for manual sensitive override from column metadata
 			var isSensitiveOverride *bool
-			if columnMetadata != nil {
-				if meta, ok := columnMetadata[col.ColumnName]; ok && meta.IsSensitive != nil {
-					isSensitiveOverride = meta.IsSensitive
-				}
+			if meta, ok := columnMetadataByColID[schemaCol.ID]; ok && meta.IsSensitive != nil {
+				isSensitiveOverride = meta.IsSensitive
 			}
 
-			// Determine if column should be treated as sensitive
-			isSensitive := false
-			redactionReason := ""
-
-			if isSensitiveOverride != nil {
-				// Manual override takes precedence
-				if *isSensitiveOverride {
-					isSensitive = true
-					redactionReason = "column marked as sensitive (manual override)"
-				}
-				// If explicitly marked as not sensitive (*isSensitiveOverride == false), skip auto-detection
-			} else {
-				// Use automatic detection
-				if DefaultSensitiveDetector.IsSensitiveColumn(col.ColumnName) {
-					isSensitive = true
-					redactionReason = "column name matches sensitive pattern"
-				}
-			}
-
-			if isSensitive {
+			// Sample values storage was removed in the column schema refactor.
+			// For now, just check if column is marked as sensitive.
+			if isSensitiveOverride != nil && *isSensitiveOverride {
 				colDetail["sample_values_redacted"] = true
-				colDetail["redaction_reason"] = redactionReason
-			} else {
-				// Check each sample value for sensitive content and redact if needed
-				// (only if not explicitly marked as not sensitive)
-				redactedValues := make([]string, 0, len(schemaCol.SampleValues))
-				anyRedacted := false
-
-				// Only do content-based detection if no manual override
-				if isSensitiveOverride == nil {
-					for _, val := range schemaCol.SampleValues {
-						if DefaultSensitiveDetector.IsSensitiveContent(val) {
-							redactedValues = append(redactedValues, DefaultSensitiveDetector.RedactContent(val))
-							anyRedacted = true
-						} else {
-							redactedValues = append(redactedValues, val)
-						}
-					}
-				} else {
-					// Manual override to not sensitive - return values as-is
-					redactedValues = schemaCol.SampleValues
-				}
-
-				colDetail["sample_values"] = redactedValues
-				if anyRedacted {
-					colDetail["sample_values_redacted"] = true
-					colDetail["redaction_reason"] = "values contain sensitive patterns (api keys, secrets, etc.)"
-				}
+				colDetail["redaction_reason"] = "column marked as sensitive (manual override)"
 			}
 		}
 
 		// Add column features from metadata (from feature extraction pipeline)
+		// Column features are now stored in ColumnMetadata.Features (engine_ontology_column_metadata)
 		if schemaCol != nil {
-			if features := schemaCol.GetColumnFeatures(); features != nil {
+			if meta, ok := columnMetadataByColID[schemaCol.ID]; ok {
 				featuresMap := map[string]any{}
-				if features.Purpose != "" {
-					featuresMap["purpose"] = features.Purpose
+				if meta.Purpose != nil && *meta.Purpose != "" {
+					featuresMap["purpose"] = *meta.Purpose
 				}
-				if features.SemanticType != "" {
-					featuresMap["semantic_type"] = features.SemanticType
+				if meta.SemanticType != nil && *meta.SemanticType != "" {
+					featuresMap["semantic_type"] = *meta.SemanticType
 				}
-				if features.Role != "" {
-					featuresMap["role"] = features.Role
+				if meta.Role != nil && *meta.Role != "" {
+					featuresMap["role"] = *meta.Role
 				}
-				if features.Description != "" {
-					featuresMap["description"] = features.Description
+				if meta.Description != nil && *meta.Description != "" {
+					featuresMap["description"] = *meta.Description
 				}
-				if features.Confidence > 0 {
-					featuresMap["confidence"] = features.Confidence
-				}
-				if features.ClassificationPath != "" {
-					featuresMap["classification_path"] = string(features.ClassificationPath)
+				if meta.ClassificationPath != nil && *meta.ClassificationPath != "" {
+					featuresMap["classification_path"] = *meta.ClassificationPath
 				}
 
-				// Add path-specific features
-				if features.TimestampFeatures != nil {
+				// Add path-specific features from Features JSONB
+				if tsFeatures := meta.GetTimestampFeatures(); tsFeatures != nil {
 					featuresMap["timestamp_features"] = map[string]any{
-						"timestamp_purpose": features.TimestampFeatures.TimestampPurpose,
-						"is_soft_delete":    features.TimestampFeatures.IsSoftDelete,
-						"is_audit_field":    features.TimestampFeatures.IsAuditField,
+						"timestamp_purpose": tsFeatures.TimestampPurpose,
+						"is_soft_delete":    tsFeatures.IsSoftDelete,
+						"is_audit_field":    tsFeatures.IsAuditField,
 					}
 				}
-				if features.BooleanFeatures != nil {
+				if boolFeatures := meta.GetBooleanFeatures(); boolFeatures != nil {
 					featuresMap["boolean_features"] = map[string]any{
-						"true_meaning":  features.BooleanFeatures.TrueMeaning,
-						"false_meaning": features.BooleanFeatures.FalseMeaning,
-						"boolean_type":  features.BooleanFeatures.BooleanType,
+						"true_meaning":  boolFeatures.TrueMeaning,
+						"false_meaning": boolFeatures.FalseMeaning,
+						"boolean_type":  boolFeatures.BooleanType,
 					}
 				}
-				if features.IdentifierFeatures != nil {
-					idFeatures := map[string]any{
-						"identifier_type": features.IdentifierFeatures.IdentifierType,
+				if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil {
+					idFeaturesMap := map[string]any{
+						"identifier_type": idFeatures.IdentifierType,
 					}
-					if features.IdentifierFeatures.ExternalService != "" {
-						idFeatures["external_service"] = features.IdentifierFeatures.ExternalService
+					if idFeatures.ExternalService != "" {
+						idFeaturesMap["external_service"] = idFeatures.ExternalService
 					}
-					if features.IdentifierFeatures.FKTargetTable != "" {
-						idFeatures["fk_target_table"] = features.IdentifierFeatures.FKTargetTable
-						idFeatures["fk_target_column"] = features.IdentifierFeatures.FKTargetColumn
-						idFeatures["fk_confidence"] = features.IdentifierFeatures.FKConfidence
+					if idFeatures.FKTargetTable != "" {
+						idFeaturesMap["fk_target_table"] = idFeatures.FKTargetTable
+						idFeaturesMap["fk_target_column"] = idFeatures.FKTargetColumn
+						idFeaturesMap["fk_confidence"] = idFeatures.FKConfidence
 					}
-					if features.IdentifierFeatures.EntityReferenced != "" {
-						idFeatures["entity_referenced"] = features.IdentifierFeatures.EntityReferenced
+					if idFeatures.EntityReferenced != "" {
+						idFeaturesMap["entity_referenced"] = idFeatures.EntityReferenced
 					}
-					featuresMap["identifier_features"] = idFeatures
+					featuresMap["identifier_features"] = idFeaturesMap
 				}
-				if features.MonetaryFeatures != nil {
+				if monFeatures := meta.GetMonetaryFeatures(); monFeatures != nil {
 					featuresMap["monetary_features"] = map[string]any{
-						"is_monetary":            features.MonetaryFeatures.IsMonetary,
-						"currency_unit":          features.MonetaryFeatures.CurrencyUnit,
-						"paired_currency_column": features.MonetaryFeatures.PairedCurrencyColumn,
+						"is_monetary":            monFeatures.IsMonetary,
+						"currency_unit":          monFeatures.CurrencyUnit,
+						"paired_currency_column": monFeatures.PairedCurrencyColumn,
 					}
 				}
 
@@ -750,7 +715,7 @@ func buildColumnDetails(
 }
 
 // addStatisticsToColumnDetail adds statistics fields to a column detail map from SchemaColumn.
-func addStatisticsToColumnDetail(colDetail map[string]any, schemaCol *models.SchemaColumn, datasourceCol *models.DatasourceColumn) {
+func addStatisticsToColumnDetail(colDetail map[string]any, schemaCol *models.SchemaColumn) {
 	// Add distinct_count if available
 	if schemaCol.DistinctCount != nil {
 		colDetail["distinct_count"] = *schemaCol.DistinctCount
@@ -761,8 +726,13 @@ func addStatisticsToColumnDetail(colDetail map[string]any, schemaCol *models.Sch
 		colDetail["row_count"] = *schemaCol.RowCount
 
 		// Calculate null_rate if we have the data
+		// NullCount is rarely populated; calculate from NonNullCount when available
 		if schemaCol.NullCount != nil {
 			nullRate := float64(*schemaCol.NullCount) / float64(*schemaCol.RowCount)
+			colDetail["null_rate"] = nullRate
+		} else if schemaCol.NonNullCount != nil {
+			nullCount := *schemaCol.RowCount - *schemaCol.NonNullCount
+			nullRate := float64(nullCount) / float64(*schemaCol.RowCount)
 			colDetail["null_rate"] = nullRate
 		}
 

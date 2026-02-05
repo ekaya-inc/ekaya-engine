@@ -225,57 +225,17 @@ func (s *ontologyQuestionService) AnswerQuestion(ctx context.Context, questionID
 }
 
 // applyEntityUpdates applies entity updates from answer processing to the ontology.
+// Note: EntitySummaries have been removed for v1.0 entity simplification.
+// This method is now a no-op. Entity updates are logged but not persisted.
 func (s *ontologyQuestionService) applyEntityUpdates(ctx context.Context, projectID uuid.UUID, updates []EntityUpdate) error {
 	if len(updates) == 0 {
 		return nil
 	}
 
-	// Get the active ontology to merge updates
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err != nil {
-		return fmt.Errorf("get active ontology: %w", err)
-	}
-	if ontology == nil {
-		return fmt.Errorf("no active ontology for project %s", projectID.String())
-	}
-
-	for _, update := range updates {
-		// Get existing summary or create new one
-		existingSummary := ontology.EntitySummaries[update.TableName]
-		if existingSummary == nil {
-			existingSummary = &models.EntitySummary{
-				TableName: update.TableName,
-			}
-		}
-
-		// Merge updates into existing summary
-		if update.BusinessName != nil {
-			existingSummary.BusinessName = *update.BusinessName
-		}
-		if update.Description != nil {
-			existingSummary.Description = *update.Description
-		}
-		if update.Domain != nil {
-			existingSummary.Domain = *update.Domain
-		}
-		if len(update.Synonyms) > 0 {
-			// Deduplicate synonyms
-			existingSynonyms := make(map[string]bool)
-			for _, syn := range existingSummary.Synonyms {
-				existingSynonyms[syn] = true
-			}
-			for _, syn := range update.Synonyms {
-				if !existingSynonyms[syn] {
-					existingSummary.Synonyms = append(existingSummary.Synonyms, syn)
-				}
-			}
-		}
-
-		// Persist the update
-		if err := s.ontologyRepo.UpdateEntitySummary(ctx, projectID, update.TableName, existingSummary); err != nil {
-			return fmt.Errorf("update entity %s: %w", update.TableName, err)
-		}
-	}
+	// Log updates for debugging, but don't persist (entity functionality removed)
+	s.logger.Debug("Skipping entity updates - entity functionality removed for v1.0",
+		zap.String("project_id", projectID.String()),
+		zap.Int("update_count", len(updates)))
 
 	return nil
 }

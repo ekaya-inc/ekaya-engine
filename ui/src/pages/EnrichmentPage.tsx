@@ -240,13 +240,13 @@ const EnrichmentPage = () => {
             {column.is_primary_key && (
               <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
                 <Key className="h-3 w-3" />
-                PK
+                Primary Key
               </span>
             )}
             {column.is_foreign_key && (
               <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
                 <Link2 className="h-3 w-3" />
-                FK
+                Foreign Key
               </span>
             )}
           </div>
@@ -386,9 +386,11 @@ const EnrichmentPage = () => {
   };
 
   // Get list of tables to render - prefer entitySummaries, fall back to column_details tables
-  const tablesToRender = entitySummaries.length > 0
+  // Sort alphabetically by table name for consistency with other ontology screens
+  const tablesToRender = (entitySummaries.length > 0
     ? entitySummaries.map(e => ({ tableName: e.table_name, entity: e }))
-    : columnDetails.map(cd => ({ tableName: cd.table_name, entity: undefined }));
+    : columnDetails.map(cd => ({ tableName: cd.table_name, entity: undefined }))
+  ).sort((a, b) => a.tableName.localeCompare(b.tableName));
 
   return (
     <div className="mx-auto max-w-6xl">

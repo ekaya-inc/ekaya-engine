@@ -1,5 +1,21 @@
 package services
 
+// DEPRECATED: This file is scheduled for removal.
+// The value-overlap discovery approach with magic thresholds produces unreliable results.
+// Use LLMRelationshipDiscoveryService (relationship_discovery_service.go) instead, which uses
+// LLM validation for semantic accuracy.
+//
+// Migration path:
+// - RelationshipDiscoveryService.DiscoverRelationships → LLMRelationshipDiscoveryService.DiscoverRelationships
+// - All threshold-based heuristics (DefaultMatchThreshold, ReviewMinCardinalityRatio, etc.)
+//   are replaced by LLM semantic validation.
+//
+// Note: The CardinalityUniqueThreshold constant has been moved to relationship_utils.go
+// as it's still needed by InferCardinality().
+//
+// This file will be removed after validation in staging environments confirms the new
+// LLM-based approach produces better results.
+
 import (
 	"context"
 	"fmt"
@@ -15,14 +31,15 @@ import (
 )
 
 // Discovery configuration constants
+// DEPRECATED: These constants use magic thresholds that produce unreliable results.
+// The new LLM-based approach in LLMRelationshipDiscoveryService doesn't use these thresholds.
 const (
 	DefaultMatchThreshold   = 0.95 // 95% match (allow 5% for data issues)
 	DefaultSampleLimit      = 1000 // Max values to sample for overlap check
 	MaxColumnsPerStatsQuery = 25   // Batch size for column stats
 
-	// CardinalityUniqueThreshold allows 10% tolerance for uniqueness detection
-	// to account for minor data inconsistencies or sampling variance.
-	CardinalityUniqueThreshold = 1.1
+	// CardinalityUniqueThreshold has been moved to relationship_utils.go
+	// It's still used by InferCardinality() which remains active.
 
 	// Review candidate configuration - more aggressive discovery for orphan tables
 	// ReviewMinCardinalityRatio is the minimum distinct/total ratio for review candidates.
@@ -369,6 +386,20 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 		if joinAnalysis.OrphanCount > 0 {
 			s.recordRejectedCandidate(ctx, projectID, candidate, overlap, models.RejectionOrphanIntegrity)
 			continue
+		}
+
+		// Bidirectional validation: Check for false positives where source has few values
+		// that coincidentally exist in target. Example:
+		// - identity_provider has 3 values {1,2,3}, jobs.id has 83 values {1-83}
+		// - Source→target: all 3 exist → 0 orphans → would pass above check
+		// - Target→source: 80 values (4-83) don't exist in source → 96% reverse orphans
+		// Reject if reverse_orphan_count / target_distinct > 0.5 (>50% of target values are orphans)
+		if joinAnalysis.TargetMatched > 0 && joinAnalysis.ReverseOrphanCount > 0 {
+			reverseOrphanRate := float64(joinAnalysis.ReverseOrphanCount) / float64(joinAnalysis.TargetMatched+joinAnalysis.ReverseOrphanCount)
+			if reverseOrphanRate > 0.5 {
+				s.recordRejectedCandidate(ctx, projectID, candidate, overlap, models.RejectionReverseOrphanHigh)
+				continue
+			}
 		}
 
 		// Phase 5: Create verified relationship

@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
 
@@ -212,6 +213,70 @@ func TestKnowledgeSeedingNode_Execute_ExtractionError(t *testing.T) {
 
 	// Verify progress message indicates no facts (graceful degradation)
 	assert.Contains(t, progressMessages, "No knowledge facts extracted")
+}
+
+func TestKnowledgeSeedingNode_Execute_EndpointError_Propagates(t *testing.T) {
+	// Endpoint errors (like connection refused) should propagate to fail the DAG
+	// because they indicate LLM configuration problems that will affect ALL nodes.
+	mockRepo := &mockKnowledgeDAGRepo{
+		updateProgressFunc: func(ctx context.Context, nodeID uuid.UUID, progress *models.DAGNodeProgress) error {
+			return nil
+		},
+	}
+
+	// Mock that returns an endpoint error (connection refused)
+	endpointErr := llm.NewError(llm.ErrorTypeEndpoint, "connection failed", true, errors.New("dial tcp: connection refused"))
+	mockMethods := &mockKnowledgeSeedingMethods{
+		extractResult: 0,
+		extractErr:    endpointErr,
+	}
+
+	node := NewKnowledgeSeedingNode(mockRepo, mockMethods, zap.NewNop())
+	nodeID := uuid.New()
+	node.SetCurrentNodeID(nodeID)
+
+	dag := &models.OntologyDAG{
+		ID:           uuid.New(),
+		ProjectID:    uuid.New(),
+		DatasourceID: uuid.New(),
+	}
+
+	// Should FAIL - endpoint errors must propagate to show user the configuration problem
+	err := node.Execute(context.Background(), dag)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "LLM configuration error")
+}
+
+func TestKnowledgeSeedingNode_Execute_AuthError_Propagates(t *testing.T) {
+	// Auth errors should propagate to fail the DAG
+	// because they indicate LLM configuration problems that will affect ALL nodes.
+	mockRepo := &mockKnowledgeDAGRepo{
+		updateProgressFunc: func(ctx context.Context, nodeID uuid.UUID, progress *models.DAGNodeProgress) error {
+			return nil
+		},
+	}
+
+	// Mock that returns an auth error (invalid API key)
+	authErr := llm.NewError(llm.ErrorTypeAuth, "invalid API key", false, errors.New("401 Unauthorized"))
+	mockMethods := &mockKnowledgeSeedingMethods{
+		extractResult: 0,
+		extractErr:    authErr,
+	}
+
+	node := NewKnowledgeSeedingNode(mockRepo, mockMethods, zap.NewNop())
+	nodeID := uuid.New()
+	node.SetCurrentNodeID(nodeID)
+
+	dag := &models.OntologyDAG{
+		ID:           uuid.New(),
+		ProjectID:    uuid.New(),
+		DatasourceID: uuid.New(),
+	}
+
+	// Should FAIL - auth errors must propagate
+	err := node.Execute(context.Background(), dag)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "LLM configuration error")
 }
 
 func TestKnowledgeSeedingNode_Name(t *testing.T) {

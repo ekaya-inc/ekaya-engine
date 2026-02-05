@@ -145,14 +145,6 @@ func (m *mockDatasourceTestOntologyRepo) UpdateDomainSummary(ctx context.Context
 	return errors.New("not implemented in mock")
 }
 
-func (m *mockDatasourceTestOntologyRepo) UpdateEntitySummary(ctx context.Context, projectID uuid.UUID, tableName string, summary *models.EntitySummary) error {
-	return errors.New("not implemented in mock")
-}
-
-func (m *mockDatasourceTestOntologyRepo) UpdateEntitySummaries(ctx context.Context, projectID uuid.UUID, summaries map[string]*models.EntitySummary) error {
-	return errors.New("not implemented in mock")
-}
-
 func (m *mockDatasourceTestOntologyRepo) UpdateColumnDetails(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error {
 	return errors.New("not implemented in mock")
 }

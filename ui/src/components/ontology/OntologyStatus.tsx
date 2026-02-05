@@ -110,7 +110,7 @@ const OntologyStatus = ({
             </div>
             {state !== 'idle' && (
               <div className="text-sm text-text-secondary">
-                {current}/{total} entities analyzed
+                {current}/{total} tables analyzed
               </div>
             )}
           </div>

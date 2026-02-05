@@ -448,7 +448,7 @@ const formatToolName = (name: string): string => {
     query_column_values: 'Querying column values',
     query_schema_metadata: 'Checking schema',
     store_knowledge: 'Storing knowledge',
-    update_entity: 'Updating entity',
+    update_column: 'Updating column',
     update_domain: 'Updating domain',
   };
   return nameMap[name] ?? name;

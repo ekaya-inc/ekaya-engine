@@ -43,7 +43,7 @@ export default function UserToolsSection({
             </span>
             <span className="ml-2 text-xs font-medium text-brand-purple">[RECOMMENDED]</span>
             <p className="text-sm text-text-secondary mt-1">
-              Enable the MCP Client to update entities, relationships, and glossary terms as it
+              Enable the MCP Client to update columns, relationships, and glossary terms as it
               learns from user interactions. This helps improve query accuracy over time.
             </p>
           </div>

@@ -22,17 +22,17 @@ const TablesView = ({ entities }: TablesViewProps) => {
       <CardHeader>
         <div className="flex items-center gap-2">
           <Database className="h-5 w-5 text-purple-500" />
-          <CardTitle>Entities Overview</CardTitle>
+          <CardTitle>Tables Overview</CardTitle>
         </div>
         <CardDescription>
-          Database entities with business terminology and semantic metadata
+          Database tables with business terminology and semantic metadata
         </CardDescription>
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
           {!entities || entities.length === 0 ? (
             <div className="text-sm text-text-tertiary italic">
-              No entity data available yet. Start the ontology extraction
+              No table data available yet. Start the ontology extraction
               workflow to analyze your database schema.
             </div>
           ) : (

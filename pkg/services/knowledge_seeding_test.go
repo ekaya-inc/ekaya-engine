@@ -110,9 +110,6 @@ func (m *mockSchemaServiceForSeeding) GetRelationshipsForDatasource(ctx context.
 func (m *mockSchemaServiceForSeeding) GetRelationshipsResponse(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RelationshipsResponse, error) {
 	return nil, nil
 }
-func (m *mockSchemaServiceForSeeding) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
-	return nil
-}
 func (m *mockSchemaServiceForSeeding) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
 	return nil
 }

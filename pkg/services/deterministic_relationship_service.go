@@ -1,5 +1,18 @@
 package services
 
+// DEPRECATED: This file is scheduled for removal.
+// The threshold-based heuristics in this service produce ~90% incorrect relationship inferences.
+// Use LLMRelationshipDiscoveryService (relationship_discovery_service.go) instead, which uses
+// LLM validation for semantic accuracy.
+//
+// Migration path:
+// - DeterministicRelationshipService → LLMRelationshipDiscoveryService
+// - DiscoverFKRelationships → handled by LLMRelationshipDiscoveryService.preserveDBDeclaredFKs
+// - DiscoverPKMatchRelationships → handled by RelationshipCandidateCollector + RelationshipValidator
+//
+// This file will be removed after validation in staging environments confirms the new
+// LLM-based approach produces better results.
+
 import (
 	"context"
 	"fmt"
@@ -28,32 +41,26 @@ type PKMatchDiscoveryResult struct {
 // Parameters: current (items processed), total (total items), message (human-readable status).
 type RelationshipProgressCallback func(current, total int, message string)
 
-// DeterministicRelationshipService discovers entity relationships from FK constraints
+// DeterministicRelationshipService discovers schema relationships from FK constraints
 // and PK-match inference.
 type DeterministicRelationshipService interface {
 	// DiscoverFKRelationships discovers relationships from database FK constraints.
-	// Requires entities to exist before calling.
 	// The progressCallback is called to report progress (can be nil).
 	DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback RelationshipProgressCallback) (*FKDiscoveryResult, error)
 
 	// DiscoverPKMatchRelationships discovers relationships via pairwise SQL join testing.
-	// Requires entities and column enrichment to exist before calling.
 	// The progressCallback is called to report progress (can be nil).
 	DiscoverPKMatchRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback RelationshipProgressCallback) (*PKMatchDiscoveryResult, error)
-
-	// GetByProject returns all entity relationships for a project.
-	GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error)
 }
 
 type deterministicRelationshipService struct {
-	datasourceService DatasourceService
-	projectService    ProjectService
-	adapterFactory    datasource.DatasourceAdapterFactory
-	ontologyRepo      repositories.OntologyRepository
-	entityRepo        repositories.OntologyEntityRepository
-	relationshipRepo  repositories.EntityRelationshipRepository
-	schemaRepo        repositories.SchemaRepository
-	logger            *zap.Logger
+	datasourceService  DatasourceService
+	projectService     ProjectService
+	adapterFactory     datasource.DatasourceAdapterFactory
+	ontologyRepo       repositories.OntologyRepository
+	schemaRepo         repositories.SchemaRepository
+	columnMetadataRepo repositories.ColumnMetadataRepository
+	logger             *zap.Logger
 }
 
 // NewDeterministicRelationshipService creates a new DeterministicRelationshipService.
@@ -62,93 +69,23 @@ func NewDeterministicRelationshipService(
 	projectService ProjectService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	ontologyRepo repositories.OntologyRepository,
-	entityRepo repositories.OntologyEntityRepository,
-	relationshipRepo repositories.EntityRelationshipRepository,
 	schemaRepo repositories.SchemaRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
 	logger *zap.Logger,
 ) DeterministicRelationshipService {
 	return &deterministicRelationshipService{
-		datasourceService: datasourceService,
-		projectService:    projectService,
-		adapterFactory:    adapterFactory,
-		ontologyRepo:      ontologyRepo,
-		entityRepo:        entityRepo,
-		relationshipRepo:  relationshipRepo,
-		schemaRepo:        schemaRepo,
-		logger:            logger.Named("relationship-discovery"),
+		datasourceService:  datasourceService,
+		projectService:     projectService,
+		adapterFactory:     adapterFactory,
+		ontologyRepo:       ontologyRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		logger:             logger.Named("relationship-discovery"),
 	}
-}
-
-// createBidirectionalRelationship creates both forward and reverse relationship rows.
-// The forward relationship is the FK direction (source → target).
-// The reverse relationship swaps source and target to enable bidirectional navigation.
-func (s *deterministicRelationshipService) createBidirectionalRelationship(ctx context.Context, rel *models.EntityRelationship) error {
-	// Create forward relationship
-	if err := s.relationshipRepo.Create(ctx, rel); err != nil {
-		return fmt.Errorf("create forward relationship: %w", err)
-	}
-
-	// Create reverse relationship by swapping source and target
-	reverse := &models.EntityRelationship{
-		OntologyID:         rel.OntologyID,
-		SourceEntityID:     rel.TargetEntityID,     // swap
-		TargetEntityID:     rel.SourceEntityID,     // swap
-		SourceColumnSchema: rel.TargetColumnSchema, // swap
-		SourceColumnTable:  rel.TargetColumnTable,  // swap
-		SourceColumnName:   rel.TargetColumnName,   // swap
-		SourceColumnID:     rel.TargetColumnID,     // swap
-		TargetColumnSchema: rel.SourceColumnSchema, // swap
-		TargetColumnTable:  rel.SourceColumnTable,  // swap
-		TargetColumnName:   rel.SourceColumnName,   // swap
-		TargetColumnID:     rel.SourceColumnID,     // swap
-		DetectionMethod:    rel.DetectionMethod,
-		Confidence:         rel.Confidence,
-		Status:             rel.Status,
-		Cardinality:        ReverseCardinality(rel.Cardinality), // swap: N:1 ↔ 1:N
-		Description:        nil,                                 // reverse direction gets its own description during enrichment
-	}
-
-	// Create reverse relationship
-	if err := s.relationshipRepo.Create(ctx, reverse); err != nil {
-		return fmt.Errorf("create reverse relationship: %w", err)
-	}
-
-	return nil
 }
 
 func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback RelationshipProgressCallback) (*FKDiscoveryResult, error) {
-	// Get active ontology for the project
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("get active ontology: %w", err)
-	}
-	if ontology == nil {
-		return nil, fmt.Errorf("no active ontology found for project")
-	}
-
-	// Get all entities for this ontology
-	entities, err := s.entityRepo.GetByOntology(ctx, ontology.ID)
-	if err != nil {
-		return nil, fmt.Errorf("get entities: %w", err)
-	}
-	if len(entities) == 0 {
-		return &FKDiscoveryResult{}, nil // No entities, no relationships to discover
-	}
-
-	// entityByPrimaryTable: maps "schema.table" to the entity that owns that table
-	entityByPrimaryTable := make(map[string]*models.OntologyEntity)
-	for _, entity := range entities {
-		key := fmt.Sprintf("%s.%s", entity.PrimarySchema, entity.PrimaryTable)
-		entityByPrimaryTable[key] = entity
-	}
-
-	// Get all schema relationships (FKs) for this datasource
-	schemaRels, err := s.schemaRepo.ListRelationshipsByDatasource(ctx, projectID, datasourceID)
-	if err != nil {
-		return nil, fmt.Errorf("list schema relationships: %w", err)
-	}
-
-	// Load tables and columns to resolve IDs to names
+	// Load tables and columns
 	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
 	if err != nil {
 		return nil, fmt.Errorf("list tables: %w", err)
@@ -169,6 +106,23 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 		columnByID[c.ID] = c
 	}
 
+	// Fetch column metadata for all columns (if repo is available)
+	metadataByColumnID := make(map[uuid.UUID]*models.ColumnMetadata)
+	if s.columnMetadataRepo != nil {
+		columnIDs := make([]uuid.UUID, len(columns))
+		for i, col := range columns {
+			columnIDs[i] = col.ID
+		}
+		metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, columnIDs)
+		if err != nil {
+			s.logger.Warn("Failed to fetch column metadata, continuing without",
+				zap.Error(err))
+		}
+		for _, meta := range metadataList {
+			metadataByColumnID[meta.SchemaColumnID] = meta
+		}
+	}
+
 	// Get datasource to create schema discoverer for cardinality analysis
 	ds, err := s.datasourceService.Get(ctx, projectID, datasourceID)
 	if err != nil {
@@ -181,24 +135,34 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 	}
 	defer discoverer.Close()
 
-	// Phase 1: Create relationships from ColumnFeatures (pre-resolved FKs from Phase 4)
+	// Phase 1: Create SchemaRelationship records from ColumnMetadata (pre-resolved FKs from Phase 4)
 	// These are data-driven FK discoveries from ColumnFeatureExtraction
-	columnFeaturesCount, err := s.discoverFKRelationshipsFromColumnFeatures(
-		ctx, ontology, columns, tableByID, tableByName, entityByPrimaryTable, discoverer, progressCallback,
+	columnFeaturesCount, err := s.discoverSchemaRelationshipsFromColumnFeatures(
+		ctx, projectID, columns, tableByID, tableByName, metadataByColumnID, discoverer, progressCallback,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("discover FK relationships from column features: %w", err)
 	}
 	if columnFeaturesCount > 0 {
-		s.logger.Info("Created relationships from ColumnFeatures",
+		s.logger.Info("Created SchemaRelationships from ColumnFeatures",
 			zap.Int("count", columnFeaturesCount))
 	}
 
-	// Phase 2: Process each FK from schema relationships (PostgreSQL foreign keys)
-	// These relationships have confidence=1.0 since they're defined in the schema.
-	// The upsert will update any overlapping relationships from Phase 1.
+	// Phase 2: Update existing schema FK relationships with cardinality analysis
+	// These relationships were created during schema import with inference_method='foreign_key'.
+	// We update them with computed cardinality from join analysis.
+	schemaRels, err := s.schemaRepo.ListRelationshipsByDatasource(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("list schema relationships: %w", err)
+	}
+
 	var schemaFKCount int
 	for i, schemaRel := range schemaRels {
+		// Only process FK relationships (skip inferred ones from Phase 1)
+		if schemaRel.InferenceMethod != nil && *schemaRel.InferenceMethod != models.InferenceMethodForeignKey {
+			continue
+		}
+
 		// Resolve source column/table
 		sourceCol := columnByID[schemaRel.SourceColumnID]
 		sourceTable := tableByID[schemaRel.SourceTableID]
@@ -213,29 +177,9 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 			continue
 		}
 
-		// Find source entity by primary table
-		sourceKey := fmt.Sprintf("%s.%s", sourceTable.SchemaName, sourceTable.TableName)
-		sourceEntity := entityByPrimaryTable[sourceKey]
-		if sourceEntity == nil {
-			continue // No entity owns this table
-		}
-
-		// Find target entity by primary table
-		targetKey := fmt.Sprintf("%s.%s", targetTable.SchemaName, targetTable.TableName)
-		targetEntity := entityByPrimaryTable[targetKey]
-		if targetEntity == nil {
-			continue // No entity owns this table
-		}
-
 		// Self-referential relationships are allowed here - they represent hierarchies/trees
 		// (e.g., employee.manager_id → employee.id, category.parent_id → category.id).
 		// These come from explicit FK constraints in the schema and are intentional.
-
-		// Determine detection method based on schema relationship type
-		detectionMethod := models.DetectionMethodForeignKey
-		if schemaRel.RelationshipType == models.RelationshipTypeManual {
-			detectionMethod = models.DetectionMethodManual
-		}
 
 		// Compute cardinality from actual data using join analysis
 		// This determines if the relationship is 1:1, N:1, 1:N, or N:M
@@ -268,28 +212,12 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 			progressCallback(i+1, len(schemaRels), msg)
 		}
 
-		// Create bidirectional relationship (both forward and reverse)
-		rel := &models.EntityRelationship{
-			OntologyID:         ontology.ID,
-			SourceEntityID:     sourceEntity.ID,
-			TargetEntityID:     targetEntity.ID,
-			SourceColumnSchema: sourceTable.SchemaName,
-			SourceColumnTable:  sourceTable.TableName,
-			SourceColumnName:   sourceCol.ColumnName,
-			SourceColumnID:     &sourceCol.ID,
-			TargetColumnSchema: targetTable.SchemaName,
-			TargetColumnTable:  targetTable.TableName,
-			TargetColumnName:   targetCol.ColumnName,
-			TargetColumnID:     &targetCol.ID,
-			DetectionMethod:    detectionMethod,
-			Confidence:         1.0,
-			Status:             models.RelationshipStatusConfirmed,
-			Cardinality:        cardinality,
-		}
+		// Update the existing SchemaRelationship with computed cardinality
+		schemaRel.Cardinality = cardinality
+		schemaRel.IsValidated = true
 
-		err = s.createBidirectionalRelationship(ctx, rel)
-		if err != nil {
-			return nil, fmt.Errorf("create bidirectional FK relationship: %w", err)
+		if err := s.schemaRepo.UpsertRelationship(ctx, schemaRel); err != nil {
+			return nil, fmt.Errorf("update FK relationship cardinality: %w", err)
 		}
 
 		schemaFKCount++
@@ -315,58 +243,56 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 	}, nil
 }
 
-// discoverFKRelationshipsFromColumnFeatures creates entity relationships from columns
+// discoverSchemaRelationshipsFromColumnFeatures creates SchemaRelationship records from columns
 // where ColumnFeatureExtraction Phase 4 has already resolved FK targets.
 // This avoids redundant SQL queries for FKs that were already discovered via data overlap analysis.
-func (s *deterministicRelationshipService) discoverFKRelationshipsFromColumnFeatures(
+// Unlike the old entity-based approach, this writes directly to engine_schema_relationships
+// with inference_method='column_features'.
+func (s *deterministicRelationshipService) discoverSchemaRelationshipsFromColumnFeatures(
 	ctx context.Context,
-	ontology *models.TieredOntology,
+	projectID uuid.UUID,
 	columns []*models.SchemaColumn,
 	tableByID map[uuid.UUID]*models.SchemaTable,
 	tableByName map[string]*models.SchemaTable,
-	entityByPrimaryTable map[string]*models.OntologyEntity,
+	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata,
 	discoverer datasource.SchemaDiscoverer,
 	progressCallback RelationshipProgressCallback,
 ) (int, error) {
-	// Find columns with pre-resolved FK targets from ColumnFeatureExtraction
-	var fkColumns []*models.SchemaColumn
+	// Find columns with pre-resolved FK targets from ColumnMetadata
+	type fkColumn struct {
+		column     *models.SchemaColumn
+		idFeatures *models.IdentifierFeatures
+	}
+	var fkColumns []fkColumn
 	for _, col := range columns {
-		features := col.GetColumnFeatures()
-		if features == nil || features.IdentifierFeatures == nil {
+		meta := metadataByColumnID[col.ID]
+		if meta == nil {
 			continue
 		}
-		if features.IdentifierFeatures.FKTargetTable == "" {
+		idFeatures := meta.GetIdentifierFeatures()
+		if idFeatures == nil || idFeatures.FKTargetTable == "" {
 			continue
 		}
-		fkColumns = append(fkColumns, col)
+		fkColumns = append(fkColumns, fkColumn{column: col, idFeatures: idFeatures})
 	}
 
 	if len(fkColumns) == 0 {
 		return 0, nil
 	}
 
-	s.logger.Info("Processing pre-resolved FKs from ColumnFeatures",
+	s.logger.Info("Processing pre-resolved FKs from ColumnMetadata",
 		zap.Int("count", len(fkColumns)))
 
 	var createdCount int
-	for i, col := range fkColumns {
-		features := col.GetColumnFeatures()
-		idFeatures := features.IdentifierFeatures
+	for i, fkCol := range fkColumns {
+		col := fkCol.column
+		idFeatures := fkCol.idFeatures
 
 		// Get source table
 		sourceTable := tableByID[col.SchemaTableID]
 		if sourceTable == nil {
 			s.logger.Debug("Source table not found for column",
 				zap.String("column_id", col.ID.String()))
-			continue
-		}
-
-		// Find source entity by primary table
-		sourceKey := fmt.Sprintf("%s.%s", sourceTable.SchemaName, sourceTable.TableName)
-		sourceEntity := entityByPrimaryTable[sourceKey]
-		if sourceEntity == nil {
-			s.logger.Debug("No entity owns source table",
-				zap.String("table", sourceKey))
 			continue
 		}
 
@@ -383,14 +309,6 @@ func (s *deterministicRelationshipService) discoverFKRelationshipsFromColumnFeat
 			s.logger.Debug("Target table not found",
 				zap.String("target_table", targetTableKey),
 				zap.String("source_column", col.ColumnName))
-			continue
-		}
-
-		// Find target entity by primary table
-		targetEntity := entityByPrimaryTable[targetTableKey]
-		if targetEntity == nil {
-			s.logger.Debug("No entity owns target table",
-				zap.String("table", targetTableKey))
 			continue
 		}
 
@@ -445,31 +363,27 @@ func (s *deterministicRelationshipService) discoverFKRelationshipsFromColumnFeat
 			confidence = 0.9 // Default high confidence for data-driven FK discovery
 		}
 
-		// Create bidirectional relationship
-		rel := &models.EntityRelationship{
-			OntologyID:         ontology.ID,
-			SourceEntityID:     sourceEntity.ID,
-			TargetEntityID:     targetEntity.ID,
-			SourceColumnSchema: sourceTable.SchemaName,
-			SourceColumnTable:  sourceTable.TableName,
-			SourceColumnName:   col.ColumnName,
-			SourceColumnID:     &col.ID,
-			TargetColumnSchema: targetTable.SchemaName,
-			TargetColumnTable:  targetTable.TableName,
-			TargetColumnName:   targetCol.ColumnName,
-			TargetColumnID:     &targetCol.ID,
-			DetectionMethod:    models.DetectionMethodDataOverlap, // Indicates data-driven discovery
-			Confidence:         confidence,
-			Status:             models.RelationshipStatusConfirmed,
-			Cardinality:        cardinality,
+		// Create SchemaRelationship (unidirectional, source→target)
+		inferenceMethod := models.InferenceMethodColumnFeatures
+		rel := &models.SchemaRelationship{
+			ProjectID:        projectID,
+			SourceTableID:    sourceTable.ID,
+			SourceColumnID:   col.ID,
+			TargetTableID:    targetTable.ID,
+			TargetColumnID:   targetCol.ID,
+			RelationshipType: models.RelationshipTypeInferred,
+			Cardinality:      cardinality,
+			Confidence:       confidence,
+			InferenceMethod:  &inferenceMethod,
+			IsValidated:      true,
 		}
 
-		if err := s.createBidirectionalRelationship(ctx, rel); err != nil {
-			return createdCount, fmt.Errorf("create bidirectional relationship from ColumnFeatures: %w", err)
+		if err := s.schemaRepo.UpsertRelationship(ctx, rel); err != nil {
+			return createdCount, fmt.Errorf("upsert SchemaRelationship from ColumnFeatures: %w", err)
 		}
 
 		createdCount++
-		s.logger.Debug("Created relationship from ColumnFeatures",
+		s.logger.Debug("Created SchemaRelationship from ColumnFeatures",
 			zap.String("source", fmt.Sprintf("%s.%s.%s", sourceTable.SchemaName, sourceTable.TableName, col.ColumnName)),
 			zap.String("target", fmt.Sprintf("%s.%s.%s", targetTable.SchemaName, targetTable.TableName, targetCol.ColumnName)),
 			zap.Float64("confidence", confidence),
@@ -698,31 +612,6 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 	startTime := time.Now()
 	s.logger.Info("Starting PK-match relationship discovery")
 
-	// Get active ontology for the project
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("get active ontology: %w", err)
-	}
-	if ontology == nil {
-		return nil, fmt.Errorf("no active ontology found for project")
-	}
-
-	// Get all entities for this ontology
-	entities, err := s.entityRepo.GetByOntology(ctx, ontology.ID)
-	if err != nil {
-		return nil, fmt.Errorf("get entities: %w", err)
-	}
-	if len(entities) == 0 {
-		return &PKMatchDiscoveryResult{}, nil // No entities, no relationships to discover
-	}
-
-	// entityByPrimaryTable: maps "schema.table" to the entity that owns that table
-	entityByPrimaryTable := make(map[string]*models.OntologyEntity)
-	for _, entity := range entities {
-		key := fmt.Sprintf("%s.%s", entity.PrimarySchema, entity.PrimaryTable)
-		entityByPrimaryTable[key] = entity
-	}
-
 	// Load tables and columns
 	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
 	if err != nil {
@@ -738,20 +627,35 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 		return nil, fmt.Errorf("list columns: %w", err)
 	}
 
-	// Build a map of column IDs that already have relationships created by FKDiscovery/Phase 4.
-	// This avoids running redundant SQL join analysis for columns we've already processed.
-	existingRelationships, err := s.relationshipRepo.GetByOntology(ctx, ontology.ID)
-	if err != nil {
-		return nil, fmt.Errorf("get existing relationships: %w", err)
-	}
-	columnsWithRelationships := make(map[uuid.UUID]bool)
-	for _, rel := range existingRelationships {
-		if rel.SourceColumnID != nil {
-			columnsWithRelationships[*rel.SourceColumnID] = true
+	// Fetch column metadata for all columns (if repo is available)
+	metadataByColumnID := make(map[uuid.UUID]*models.ColumnMetadata)
+	if s.columnMetadataRepo != nil {
+		columnIDs := make([]uuid.UUID, len(columns))
+		for i, col := range columns {
+			columnIDs[i] = col.ID
+		}
+		metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, columnIDs)
+		if err != nil {
+			s.logger.Warn("Failed to fetch column metadata, continuing without",
+				zap.Error(err))
+		}
+		for _, meta := range metadataList {
+			metadataByColumnID[meta.SchemaColumnID] = meta
 		}
 	}
-	s.logger.Debug("Loaded existing relationships for deduplication",
-		zap.Int("existing_count", len(existingRelationships)),
+
+	// Build a map of column IDs that already have SchemaRelationships (from FKDiscovery).
+	// This avoids running redundant SQL join analysis for columns we've already processed.
+	existingSchemaRels, err := s.schemaRepo.ListRelationshipsByDatasource(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("get existing schema relationships: %w", err)
+	}
+	columnsWithRelationships := make(map[uuid.UUID]bool)
+	for _, rel := range existingSchemaRels {
+		columnsWithRelationships[rel.SourceColumnID] = true
+	}
+	s.logger.Debug("Loaded existing schema relationships for deduplication",
+		zap.Int("existing_count", len(existingSchemaRels)),
 		zap.Int("columns_with_relationships", len(columnsWithRelationships)))
 
 	// Get datasource to create schema discoverer for join analysis
@@ -766,65 +670,53 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 	}
 	defer discoverer.Close()
 
-	// Build list of "entity reference columns" - columns in entity tables that could be
-	// join targets (PKs, unique columns, *_id naming, high cardinality)
-	type entityRefColumn struct {
-		entity *models.OntologyEntity
+	// Build list of "target columns" - columns that could be join targets
+	// These are PKs, unique columns, or high cardinality columns
+	// (No entity dependency - built from schema metadata)
+	type targetColumn struct {
 		column *models.SchemaColumn
-		schema string
-		table  string
+		table  *models.SchemaTable
 	}
-	var entityRefColumns []entityRefColumn
+	var targetColumns []targetColumn
 
-	for _, entity := range entities {
-		// Find all columns in this entity's primary table
-		for _, col := range columns {
-			table, ok := tableByID[col.SchemaTableID]
-			if !ok {
-				continue
-			}
-			if table.SchemaName != entity.PrimarySchema || table.TableName != entity.PrimaryTable {
-				continue
-			}
-
-			// Include if: PK, unique, or high cardinality (potential join target)
-			// Note: PurposeIdentifier columns are included as FK candidates (below),
-			// but not as entity ref columns unless they're PK/unique, since identifier
-			// columns are often FKs that reference other entities.
-			isCandidate := col.IsPrimaryKey || col.IsUnique ||
-				(col.DistinctCount != nil && *col.DistinctCount >= 20)
-
-			if !isCandidate {
-				continue
-			}
-
-			// Get column features for exclusion checks
-			features := col.GetColumnFeatures()
-
-			// Exclude types unlikely to be join keys
-			if isPKMatchExcludedType(col) {
-				continue
-			}
-
-			// Exclude columns based on stored purpose (timestamp, flag, measure, etc.)
-			if features != nil {
-				switch features.Purpose {
-				case models.PurposeTimestamp, models.PurposeFlag, models.PurposeMeasure, models.PurposeEnum:
-					continue
-				}
-			}
-
-			entityRefColumns = append(entityRefColumns, entityRefColumn{
-				entity: entity,
-				column: col,
-				schema: table.SchemaName,
-				table:  table.TableName,
-			})
+	for _, col := range columns {
+		table, ok := tableByID[col.SchemaTableID]
+		if !ok {
+			continue
 		}
+
+		// Include if: PK, unique, or high cardinality (potential join target)
+		isCandidate := col.IsPrimaryKey || col.IsUnique ||
+			(col.DistinctCount != nil && *col.DistinctCount >= 20)
+
+		if !isCandidate {
+			continue
+		}
+
+		// Get column metadata for exclusion checks
+		meta := metadataByColumnID[col.ID]
+
+		// Exclude types unlikely to be join keys
+		if isPKMatchExcludedType(col) {
+			continue
+		}
+
+		// Exclude columns based on stored purpose (timestamp, flag, measure, etc.)
+		if meta != nil && meta.Purpose != nil {
+			switch *meta.Purpose {
+			case models.PurposeTimestamp, models.PurposeFlag, models.PurposeMeasure, models.PurposeEnum:
+				continue
+			}
+		}
+
+		targetColumns = append(targetColumns, targetColumn{
+			column: col,
+			table:  table,
+		})
 	}
 
-	// Build list of filtered FK candidate columns (columns that could reference entity columns)
-	// We track priority candidates (Role=foreign_key) separately to process them first.
+	// Build list of FK candidate columns (columns that could reference target columns)
+	// Priority: Role=foreign_key or Purpose=identifier from ColumnMetadata
 	var priorityCandidates []*pkMatchCandidate
 	var regularCandidates []*pkMatchCandidate
 	var skippedHighConfidence int
@@ -841,21 +733,23 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 			continue
 		}
 
-		// Get column features for purpose-based filtering
-		features := col.GetColumnFeatures()
+		// Get column metadata for purpose-based filtering
+		meta := metadataByColumnID[col.ID]
 
 		// Skip columns with high FK confidence (>0.8) from Phase 4 - they already have
 		// resolved FK targets and relationships were created in FKDiscovery.
 		// This avoids redundant SQL join analysis.
-		if features != nil && features.IdentifierFeatures != nil {
-			if features.IdentifierFeatures.FKConfidence > 0.8 && features.IdentifierFeatures.FKTargetTable != "" {
-				s.logger.Debug("Skipping column with high FK confidence from Phase 4",
-					zap.String("table", table.TableName),
-					zap.String("column", col.ColumnName),
-					zap.Float64("fk_confidence", features.IdentifierFeatures.FKConfidence),
-					zap.String("fk_target", features.IdentifierFeatures.FKTargetTable))
-				skippedHighConfidence++
-				continue
+		if meta != nil {
+			if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil {
+				if idFeatures.FKConfidence > 0.8 && idFeatures.FKTargetTable != "" {
+					s.logger.Debug("Skipping column with high FK confidence from Phase 4",
+						zap.String("table", table.TableName),
+						zap.String("column", col.ColumnName),
+						zap.Float64("fk_confidence", idFeatures.FKConfidence),
+						zap.String("fk_target", idFeatures.FKTargetTable))
+					skippedHighConfidence++
+					continue
+				}
 			}
 		}
 
@@ -869,33 +763,41 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 		}
 
 		// Exclude columns based on stored purpose (timestamp, flag, measure, etc.)
-		if features != nil {
-			switch features.Purpose {
+		if meta != nil && meta.Purpose != nil {
+			switch *meta.Purpose {
 			case models.PurposeTimestamp, models.PurposeFlag, models.PurposeMeasure, models.PurposeEnum:
 				continue
 			}
 		}
 
-		// Require explicit joinability determination
-		// All columns must have explicit joinability determination from feature extraction.
-		// Columns with is_joinable=true (or purpose=identifier) proceed to validation.
-		if col.IsJoinable == nil {
-			// Allow identifier columns even without explicit joinability
-			if features != nil && features.Purpose == models.PurposeIdentifier {
-				// Identifier columns proceed to validation
-			} else {
-				continue // No joinability info = skip
+		// Determine if this column is a FK candidate based on ColumnMetadata
+		isFKCandidate := false
+		isPriorityCandidate := false
+
+		// Priority: Role=foreign_key indicates a likely FK
+		if meta != nil && meta.Role != nil && *meta.Role == models.RoleForeignKey {
+			isFKCandidate = true
+			isPriorityCandidate = true
+		}
+
+		// Also include Purpose=identifier columns (likely FKs even without explicit Role)
+		if meta != nil && meta.Purpose != nil && *meta.Purpose == models.PurposeIdentifier {
+			isFKCandidate = true
+		}
+
+		// For columns without ColumnMetadata or without explicit Role/Purpose,
+		// fall back to joinability check
+		if !isFKCandidate {
+			if col.IsJoinable == nil || !*col.IsJoinable {
+				continue // No joinability info or not joinable = skip
 			}
-		} else if !*col.IsJoinable {
-			continue
+			isFKCandidate = true
 		}
 
 		// Apply cardinality filters only if stats exist
-		// Columns with is_joinable=true but no stats proceed to join validation
-		// where CheckValueOverlap will determine actual FK validity.
-		// Identifier columns (as determined by feature extraction) skip cardinality checks
-		// since they are often valid FK columns even with low cardinality.
-		skipCardinalityCheck := features != nil && features.Purpose == models.PurposeIdentifier
+		// Identifier columns skip cardinality checks since they are often valid FKs
+		// even with low cardinality (e.g., user_id with only a few users)
+		skipCardinalityCheck := meta != nil && ((meta.Purpose != nil && *meta.Purpose == models.PurposeIdentifier) || (meta.Role != nil && *meta.Role == models.RoleForeignKey))
 		if col.DistinctCount != nil && !skipCardinalityCheck {
 			// Check cardinality threshold
 			if *col.DistinctCount < 20 {
@@ -908,8 +810,8 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 					continue
 				}
 			}
-		} else {
-			// Columns without stats but with is_joinable=true proceed to validation
+		} else if col.DistinctCount == nil && !skipCardinalityCheck {
+			// Columns without stats and without FK indicators proceed to validation
 			// Join validation will determine actual FK validity via CheckValueOverlap
 			s.logger.Debug("Including column with NULL stats for validation",
 				zap.String("table", table.TableName),
@@ -923,8 +825,7 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 			table:  table.TableName,
 		}
 
-		// Prioritize columns with Role=foreign_key - they're more likely to be valid FKs
-		if features != nil && features.Role == models.RoleForeignKey {
+		if isPriorityCandidate {
 			priorityCandidates = append(priorityCandidates, candidate)
 		} else {
 			regularCandidates = append(regularCandidates, candidate)
@@ -935,47 +836,45 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 	allCandidates := append(priorityCandidates, regularCandidates...)
 
 	s.logger.Info("PK-match discovery setup complete",
-		zap.Int("entity_ref_columns", len(entityRefColumns)),
+		zap.Int("target_columns", len(targetColumns)),
 		zap.Int("priority_candidates", len(priorityCandidates)),
 		zap.Int("regular_candidates", len(regularCandidates)),
 		zap.Int("total_candidates", len(allCandidates)),
 		zap.Int("skipped_high_confidence", skippedHighConfidence),
 		zap.Int("skipped_existing_relationship", skippedExistingRelationship))
 
-	// For each entity reference column, find candidates with compatible types and test joins
+	// For each target column, find candidates with compatible types and test joins
 	var inferredCount int
-	processedRefs := 0
-	for _, ref := range entityRefColumns {
+	processedTargets := 0
+	for _, target := range targetColumns {
 		for _, candidate := range allCandidates {
 			// Skip if types are incompatible (handles text ↔ uuid, int variants, etc.)
-			if !areTypesCompatibleForFK(candidate.column.DataType, ref.column.DataType) {
+			if !areTypesCompatibleForFK(candidate.column.DataType, target.column.DataType) {
 				continue
 			}
-			// Skip if same table (self-reference)
-			if candidate.schema == ref.schema && candidate.table == ref.table {
-				continue
-			}
-
-			// Skip PK-to-PK matches (both auto-increment)
-			if ref.column.IsPrimaryKey && candidate.column.IsPrimaryKey {
+			// Skip if same table (self-reference handled differently)
+			if candidate.column.SchemaTableID == target.column.SchemaTableID {
 				continue
 			}
 
-			// Find source entity for candidate's table (by primary table ownership)
-			sourceEntity := entityByPrimaryTable[fmt.Sprintf("%s.%s", candidate.schema, candidate.table)]
-			if sourceEntity == nil {
+			// Skip if source is a PK - PKs are never FK sources, they are FK targets.
+			// A PK column references nothing; other columns reference it.
+			if candidate.column.IsPrimaryKey {
 				continue
 			}
 
-			// Don't create self-referencing entity relationships
-			if sourceEntity.ID == ref.entity.ID {
+			// Semantic validation: Check that column names suggest the same entity.
+			// This prevents false positives where UUIDs overlap by chance.
+			// For example, account_id values might exist in channel_id by coincidence,
+			// but "account_id → channel_id" is semantically invalid.
+			if !areColumnNamesSemanticallyCompatible(candidate.column.ColumnName, target.column.ColumnName, target.table.TableName) {
 				continue
 			}
 
 			// Run join analysis
 			joinResult, err := discoverer.AnalyzeJoin(ctx,
 				candidate.schema, candidate.table, candidate.column.ColumnName,
-				ref.schema, ref.table, ref.column.ColumnName)
+				target.table.SchemaName, target.table.TableName, target.column.ColumnName)
 			if err != nil {
 				// Skip this candidate on join error
 				continue
@@ -984,6 +883,19 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 			// Real FK relationships have 0% orphans - all source values must exist in target
 			if joinResult.OrphanCount > 0 {
 				continue
+			}
+
+			// Bidirectional validation: Check for false positives where source has few values
+			// that coincidentally exist in target. Example:
+			// - identity_provider has 3 values {1,2,3}, jobs.id has 83 values {1-83}
+			// - Source→target: all 3 exist → 0 orphans → would pass above check
+			// - Target→source: 80 values (4-83) don't exist in source → 96% reverse orphans
+			// Reject if reverse_orphan_count / target_distinct > 0.5 (>50% of target values are orphans)
+			if joinResult.TargetMatched > 0 && joinResult.ReverseOrphanCount > 0 {
+				reverseOrphanRate := float64(joinResult.ReverseOrphanCount) / float64(joinResult.TargetMatched+joinResult.ReverseOrphanCount)
+				if reverseOrphanRate > 0.5 {
+					continue // Too many target values don't exist in source - likely coincidental match
+				}
 			}
 
 			// Semantic validation: If ALL source values are very small integers (1-10),
@@ -995,61 +907,74 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 				}
 			}
 
-			// Semantic validation: If source column has very low cardinality relative to row count,
-			// it's likely a status/type column, not a FK
-			table := tableByID[ref.column.SchemaTableID]
-			if ref.column.DistinctCount != nil && table.RowCount != nil && *table.RowCount > 0 {
-				ratio := float64(*ref.column.DistinctCount) / float64(*table.RowCount)
+			// Semantic validation: If target column has very low cardinality relative to row count,
+			// it's likely a status/type column, not a valid FK target
+			if target.column.DistinctCount != nil && target.table.RowCount != nil && *target.table.RowCount > 0 {
+				ratio := float64(*target.column.DistinctCount) / float64(*target.table.RowCount)
 				if ratio < 0.01 { // Less than 1% unique values
-					continue // Likely a status/type column, not a FK
+					continue // Likely a status/type column, not a valid FK target
 				}
 			}
 
-			status := models.RelationshipStatusConfirmed
 			confidence := 0.9
 
 			// Calculate cardinality from join analysis
 			cardinality := InferCardinality(joinResult)
 
-			// Create bidirectional relationship (both forward and reverse)
-			rel := &models.EntityRelationship{
-				OntologyID:         ontology.ID,
-				SourceEntityID:     sourceEntity.ID,
-				TargetEntityID:     ref.entity.ID,
-				SourceColumnSchema: candidate.schema,
-				SourceColumnTable:  candidate.table,
-				SourceColumnName:   candidate.column.ColumnName,
-				SourceColumnID:     &candidate.column.ID,
-				TargetColumnSchema: ref.schema,
-				TargetColumnTable:  ref.table,
-				TargetColumnName:   ref.column.ColumnName,
-				TargetColumnID:     &ref.column.ID,
-				DetectionMethod:    models.DetectionMethodPKMatch,
-				Confidence:         confidence,
-				Status:             status,
-				Cardinality:        cardinality,
+			// Create SchemaRelationship (unidirectional, source→target)
+			inferenceMethod := models.InferenceMethodPKMatch
+			rel := &models.SchemaRelationship{
+				ProjectID:        projectID,
+				SourceTableID:    candidate.column.SchemaTableID,
+				SourceColumnID:   candidate.column.ID,
+				TargetTableID:    target.column.SchemaTableID,
+				TargetColumnID:   target.column.ID,
+				RelationshipType: models.RelationshipTypeInferred,
+				Cardinality:      cardinality,
+				Confidence:       confidence,
+				InferenceMethod:  &inferenceMethod,
+				IsValidated:      true,
 			}
 
-			err = s.createBidirectionalRelationship(ctx, rel)
-			if err != nil {
-				return nil, fmt.Errorf("create bidirectional pk-match relationship: %w", err)
+			// Compute discovery metrics from join analysis
+			// SourceDistinct = matched + orphans (total distinct source values)
+			// Since we only save relationships with 0 orphans, MatchRate is 1.0
+			sourceDistinct := joinResult.SourceMatched + joinResult.OrphanCount
+			var matchRate float64
+			if sourceDistinct > 0 {
+				matchRate = float64(joinResult.SourceMatched) / float64(sourceDistinct)
+			}
+			metrics := &models.DiscoveryMetrics{
+				MatchRate:      matchRate,
+				SourceDistinct: sourceDistinct,
+				TargetDistinct: joinResult.TargetMatched,
+				MatchedCount:   joinResult.SourceMatched,
+			}
+
+			if err := s.schemaRepo.UpsertRelationshipWithMetrics(ctx, rel, metrics); err != nil {
+				return nil, fmt.Errorf("upsert pk-match SchemaRelationship: %w", err)
 			}
 
 			inferredCount++
+			s.logger.Debug("Created pk-match SchemaRelationship",
+				zap.String("source", fmt.Sprintf("%s.%s.%s", candidate.schema, candidate.table, candidate.column.ColumnName)),
+				zap.String("target", fmt.Sprintf("%s.%s.%s", target.table.SchemaName, target.table.TableName, target.column.ColumnName)),
+				zap.Float64("confidence", confidence),
+				zap.String("cardinality", cardinality))
 		}
 
-		processedRefs++
-		if processedRefs%10 == 0 || processedRefs == len(entityRefColumns) {
+		processedTargets++
+		if processedTargets%10 == 0 || processedTargets == len(targetColumns) {
 			s.logger.Debug("PK-match discovery progress",
-				zap.Int("processed", processedRefs),
-				zap.Int("total", len(entityRefColumns)),
+				zap.Int("processed", processedTargets),
+				zap.Int("total", len(targetColumns)),
 				zap.Int("inferred_so_far", inferredCount))
 		}
 
 		// Report progress to UI
 		if progressCallback != nil {
-			msg := fmt.Sprintf("Testing join candidates (%d/%d)", processedRefs, len(entityRefColumns))
-			progressCallback(processedRefs, len(entityRefColumns), msg)
+			msg := fmt.Sprintf("Testing join candidates (%d/%d)", processedTargets, len(targetColumns))
+			progressCallback(processedTargets, len(targetColumns), msg)
 		}
 	}
 
@@ -1060,10 +985,6 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 	return &PKMatchDiscoveryResult{
 		InferredRelationships: inferredCount,
 	}, nil
-}
-
-func (s *deterministicRelationshipService) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error) {
-	return s.relationshipRepo.GetByProject(ctx, projectID)
 }
 
 // pkMatchCandidate bundles a column with its table location info for PK-match discovery.
@@ -1164,3 +1085,107 @@ func areTypesCompatibleForFK(sourceType, targetType string) bool {
 // NOTE: isPKMatchExcludedName has been removed. Column classification is now handled by the
 // column_feature_extraction service. Columns are excluded based on their stored Purpose
 // (timestamp, flag, measure, enum) rather than name patterns.
+
+// areColumnNamesSemanticallyCompatible checks if source and target column names suggest
+// they could reference the same entity. This prevents false positives where UUIDs overlap
+// by chance (e.g., account_id → channel_id values coincidentally exist).
+//
+// The check is conservative - it REJECTS relationships where:
+//   - Source has an explicit entity reference (e.g., "account" from "account_id")
+//   - Target has a DIFFERENT explicit entity reference (e.g., "channel" from "channel_id")
+//   - The source entity doesn't match the target table name
+//
+// This means the following are allowed:
+//   - source_id → table.id (generic target)
+//   - entity_id → entity_table.id (entity matches table)
+//   - entity_id → table.entity_id (entity matches)
+//
+// Note: Role-based FKs like visitor_id → users.user_id are rejected by this check.
+// These relationships can be discovered via the LLM validation path instead.
+func areColumnNamesSemanticallyCompatible(sourceColumn, targetColumn, targetTable string) bool {
+	sourceEntity := extractEntityFromColumnName(sourceColumn)
+	targetEntity := extractEntityFromColumnName(targetColumn)
+	normalizedTargetTable := normalizeTableName(targetTable)
+
+	// Case 1: Target column is generic "id" - allow any FK to reference it
+	// This handles references like user_id → users.id, visitor_id → users.id
+	if targetColumn == "id" {
+		return true
+	}
+
+	// Case 2: Source has no entity reference (generic column like "id", "key")
+	// Allow these through - the join stats will determine validity
+	if sourceEntity == "" {
+		return true
+	}
+
+	// Case 3: Target has no entity reference
+	// Allow these through since target is generic
+	if targetEntity == "" {
+		return true
+	}
+
+	// Case 4: Source and target reference the same entity
+	// e.g., user_id → user_id, account_id → account_id
+	if sourceEntity == targetEntity {
+		return true
+	}
+
+	// Case 5: Source entity matches target table name
+	// e.g., account_id (entity=account) → accounts.account_id (table=account)
+	if sourceEntity == normalizedTargetTable {
+		return true
+	}
+
+	// REJECT: Source and target have DIFFERENT explicit entity references
+	// AND source doesn't match target table.
+	// This catches false positives like account_id → channels.channel_id
+	return false
+}
+
+// extractEntityFromColumnName extracts the entity name from a column name.
+// For example: "user_id" → "user", "account_fk" → "account", "host_id" → "host".
+// Returns empty string if no entity can be extracted.
+func extractEntityFromColumnName(column string) string {
+	column = strings.ToLower(column)
+
+	// Strip common FK suffixes
+	suffixes := []string{"_id", "_fk", "_key", "_uuid"}
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(column, suffix) {
+			return strings.TrimSuffix(column, suffix)
+		}
+	}
+
+	// No suffix found - return empty (generic column names like "id" have no entity)
+	return ""
+}
+
+// normalizeTableName normalizes a table name for entity matching.
+// Converts to lowercase and removes common plural suffixes.
+// For example: "users" → "user", "accounts" → "account", "Companies" → "companie".
+func normalizeTableName(table string) string {
+	table = strings.ToLower(table)
+
+	// Remove common plural suffixes (simple heuristic)
+	// Note: This is imperfect but handles common cases
+	if strings.HasSuffix(table, "ies") {
+		// categories → category (but this becomes "categorie" - not perfect)
+		return strings.TrimSuffix(table, "ies") + "y"
+	}
+	if strings.HasSuffix(table, "es") && !strings.HasSuffix(table, "ies") {
+		// Only strip "es" if it's after s, x, z, ch, sh (common English plurals)
+		base := strings.TrimSuffix(table, "es")
+		if strings.HasSuffix(base, "s") || strings.HasSuffix(base, "x") ||
+			strings.HasSuffix(base, "z") || strings.HasSuffix(base, "ch") ||
+			strings.HasSuffix(base, "sh") {
+			return base
+		}
+		// Otherwise don't strip "es" (e.g., "files" should strip just "s")
+	}
+	if strings.HasSuffix(table, "s") && !strings.HasSuffix(table, "ss") {
+		return strings.TrimSuffix(table, "s")
+	}
+
+	return table
+}

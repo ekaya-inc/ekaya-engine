@@ -26,6 +26,9 @@ type ProgressReporter interface {
 	ReportProgress(ctx context.Context, nodeID uuid.UUID, current, total int, message string) error
 }
 
+// ProgressCallback is a function that reports progress updates.
+type ProgressCallback func(current, total int, message string)
+
 // BaseNode provides common functionality for all DAG nodes.
 type BaseNode struct {
 	nodeName      models.DAGNodeName

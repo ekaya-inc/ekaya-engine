@@ -247,19 +247,8 @@ func TestSchemaRepository_UpsertTable_Update(t *testing.T) {
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
 
-	// Create initial table with business_name
+	// Create initial table
 	table := tc.createTestTable(ctx, "public", "products")
-	businessName := "Product Catalog"
-	table.BusinessName = &businessName
-
-	// Update business_name via direct SQL to simulate user modification
-	scope, _ := database.GetTenantScope(ctx)
-	_, err := scope.Conn.Exec(ctx, `
-		UPDATE engine_schema_tables SET business_name = $1 WHERE id = $2
-	`, businessName, table.ID)
-	if err != nil {
-		t.Fatalf("Failed to set business_name: %v", err)
-	}
 
 	originalID := table.ID
 	originalCreatedAt := table.CreatedAt
@@ -268,7 +257,7 @@ func TestSchemaRepository_UpsertTable_Update(t *testing.T) {
 	table.RowCount = ptr(int64(500))
 	table.ID = uuid.Nil // Clear ID to test upsert behavior
 
-	err = tc.repo.UpsertTable(ctx, table)
+	err := tc.repo.UpsertTable(ctx, table)
 	if err != nil {
 		t.Fatalf("UpsertTable failed: %v", err)
 	}
@@ -281,11 +270,6 @@ func TestSchemaRepository_UpsertTable_Update(t *testing.T) {
 	// Verify CreatedAt was preserved
 	if !table.CreatedAt.Equal(originalCreatedAt) {
 		t.Errorf("expected CreatedAt to be preserved")
-	}
-
-	// Verify business_name was preserved
-	if table.BusinessName == nil || *table.BusinessName != businessName {
-		t.Errorf("expected business_name to be preserved, got %v", table.BusinessName)
 	}
 
 	// Verify row_count was updated
@@ -308,19 +292,10 @@ func TestSchemaRepository_UpsertTable_ReactivateSoftDeleted(t *testing.T) {
 
 	// Create and soft-delete a table
 	table := tc.createTestTable(ctx, "public", "archived_table")
-	businessName := "Important Table"
-	description := "This table has important data"
-
-	// Set business metadata
-	err := tc.repo.UpdateTableMetadata(ctx, tc.projectID, table.ID, &businessName, &description)
-	if err != nil {
-		t.Fatalf("UpdateTableMetadata failed: %v", err)
-	}
-
 	originalID := table.ID
 
 	// Soft-delete the table
-	_, err = tc.repo.SoftDeleteRemovedTables(ctx, tc.projectID, tc.dsID, []TableKey{})
+	_, err := tc.repo.SoftDeleteRemovedTables(ctx, tc.projectID, tc.dsID, []TableKey{})
 	if err != nil {
 		t.Fatalf("SoftDeleteRemovedTables failed: %v", err)
 	}
@@ -348,14 +323,6 @@ func TestSchemaRepository_UpsertTable_ReactivateSoftDeleted(t *testing.T) {
 	// Verify original ID was preserved
 	if newTable.ID != originalID {
 		t.Errorf("expected ID to be preserved (%s), got %s", originalID, newTable.ID)
-	}
-
-	// Verify business metadata was preserved
-	if newTable.BusinessName == nil || *newTable.BusinessName != businessName {
-		t.Errorf("expected BusinessName to be preserved, got %v", newTable.BusinessName)
-	}
-	if newTable.Description == nil || *newTable.Description != description {
-		t.Errorf("expected Description to be preserved, got %v", newTable.Description)
 	}
 
 	// Verify row_count was updated
@@ -598,17 +565,16 @@ func TestSchemaRepository_UpsertColumn_Update(t *testing.T) {
 	table := tc.createTestTable(ctx, "public", "products")
 	column := tc.createTestColumn(ctx, table.ID, "price", 1)
 
-	// Set stats and business metadata via direct SQL
+	// Set stats via direct SQL
 	scope, _ := database.GetTenantScope(ctx)
-	businessName := "Product Price"
 	distinctCount := int64(1000)
 	_, err := scope.Conn.Exec(ctx, `
 		UPDATE engine_schema_columns
-		SET business_name = $1, distinct_count = $2
-		WHERE id = $3
-	`, businessName, distinctCount, column.ID)
+		SET distinct_count = $1
+		WHERE id = $2
+	`, distinctCount, column.ID)
 	if err != nil {
-		t.Fatalf("Failed to set column metadata: %v", err)
+		t.Fatalf("Failed to set column stats: %v", err)
 	}
 
 	originalID := column.ID
@@ -631,11 +597,6 @@ func TestSchemaRepository_UpsertColumn_Update(t *testing.T) {
 	// Verify CreatedAt preserved
 	if !column.CreatedAt.Equal(originalCreatedAt) {
 		t.Error("expected CreatedAt to be preserved")
-	}
-
-	// Verify business metadata preserved
-	if column.BusinessName == nil || *column.BusinessName != businessName {
-		t.Errorf("expected BusinessName preserved, got %v", column.BusinessName)
 	}
 
 	// Verify stats preserved
@@ -667,7 +628,7 @@ func TestSchemaRepository_UpsertColumn_ReactivateSoftDeleted(t *testing.T) {
 	// Set stats
 	distinctCount := int64(500)
 	nullCount := int64(10)
-	err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, &nullCount, nil, nil, nil)
+	err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, &nullCount, nil, nil)
 	if err != nil {
 		t.Fatalf("UpdateColumnStats failed: %v", err)
 	}
@@ -983,7 +944,7 @@ func TestSchemaRepository_UpdateColumnStats(t *testing.T) {
 	distinctCount := int64(1500)
 	nullCount := int64(25)
 
-	err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, &nullCount, nil, nil, nil)
+	err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, &nullCount, nil, nil)
 	if err != nil {
 		t.Fatalf("UpdateColumnStats failed: %v", err)
 	}
@@ -1004,8 +965,6 @@ func TestSchemaRepository_UpdateColumnStats(t *testing.T) {
 
 // TestSchemaRepository_UpdateColumnStats_PreservesExistingValues ensures that passing nil
 // to UpdateColumnStats preserves existing values (COALESCE behavior), not overwrites with NULL.
-// This is critical for the sample_values update flow that only wants to set sample_values
-// without clearing other stats like distinct_count.
 func TestSchemaRepository_UpdateColumnStats_PreservesExistingValues(t *testing.T) {
 	tc := setupSchemaTest(t)
 	tc.cleanup()
@@ -1022,7 +981,7 @@ func TestSchemaRepository_UpdateColumnStats_PreservesExistingValues(t *testing.T
 	minLength := int64(5)
 	maxLength := int64(50)
 
-	err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, &nullCount, &minLength, &maxLength, nil)
+	err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, &nullCount, &minLength, &maxLength)
 	if err != nil {
 		t.Fatalf("Initial UpdateColumnStats failed: %v", err)
 	}
@@ -1036,15 +995,14 @@ func TestSchemaRepository_UpdateColumnStats_PreservesExistingValues(t *testing.T
 		t.Fatalf("Initial distinct_count not set correctly: got %v, want %d", retrieved.DistinctCount, distinctCount)
 	}
 
-	// Now update only sample_values, passing nil for all stats
+	// Now update with nil for all stats
 	// This should PRESERVE the existing stats, not clear them
-	sampleValues := []string{"value1", "value2", "value3"}
-	err = tc.repo.UpdateColumnStats(ctx, column.ID, nil, nil, nil, nil, sampleValues)
+	err = tc.repo.UpdateColumnStats(ctx, column.ID, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("UpdateColumnStats with nil stats failed: %v", err)
 	}
 
-	// Verify stats are preserved and sample_values is set
+	// Verify stats are preserved
 	retrieved, err = tc.repo.GetColumnByID(ctx, tc.projectID, column.ID)
 	if err != nil {
 		t.Fatalf("GetColumnByID failed: %v", err)
@@ -1061,9 +1019,6 @@ func TestSchemaRepository_UpdateColumnStats_PreservesExistingValues(t *testing.T
 	}
 	if retrieved.MaxLength == nil || *retrieved.MaxLength != maxLength {
 		t.Errorf("max_length was not preserved: got %v, want %d", retrieved.MaxLength, maxLength)
-	}
-	if len(retrieved.SampleValues) != len(sampleValues) {
-		t.Errorf("sample_values not set correctly: got %v, want %v", retrieved.SampleValues, sampleValues)
 	}
 }
 
@@ -1186,7 +1141,7 @@ func TestSchemaRepository_UpsertRelationship_Create(t *testing.T) {
 	}
 }
 
-func TestSchemaRepository_UpsertRelationship_ReactivateSoftDeleted(t *testing.T) {
+func TestSchemaRepository_UpsertRelationship_RespectsSoftDelete(t *testing.T) {
 	tc := setupSchemaTest(t)
 	tc.cleanup()
 
@@ -1219,7 +1174,7 @@ func TestSchemaRepository_UpsertRelationship_ReactivateSoftDeleted(t *testing.T)
 
 	originalID := rel.ID
 
-	// Soft-delete
+	// Soft-delete (simulates user removing relationship via UI)
 	err = tc.repo.SoftDeleteRelationship(ctx, tc.projectID, rel.ID)
 	if err != nil {
 		t.Fatalf("SoftDeleteRelationship failed: %v", err)
@@ -1231,37 +1186,44 @@ func TestSchemaRepository_UpsertRelationship_ReactivateSoftDeleted(t *testing.T)
 		t.Error("expected relationship to be not found after soft-delete")
 	}
 
-	// Reactivate with updated confidence
+	// Attempt to upsert again (simulates re-extraction discovering the same relationship)
 	newRel := &models.SchemaRelationship{
 		ProjectID:        tc.projectID,
 		SourceTableID:    table1.ID,
 		SourceColumnID:   col1.ID,
 		TargetTableID:    table2.ID,
 		TargetColumnID:   col2.ID,
-		RelationshipType: models.RelationshipTypeManual,
+		RelationshipType: models.RelationshipTypeInferred,
 		Cardinality:      models.Cardinality1To1,
-		Confidence:       1.0,
+		Confidence:       0.90,
 		IsValidated:      true,
 	}
 
 	err = tc.repo.UpsertRelationship(ctx, newRel)
 	if err != nil {
-		t.Fatalf("UpsertRelationship (reactivate) failed: %v", err)
+		t.Fatalf("UpsertRelationship should succeed (no-op): %v", err)
 	}
 
-	// Verify ID preserved
-	if newRel.ID != originalID {
-		t.Errorf("expected ID to be preserved")
+	// Verify relationship is still NOT visible - soft-delete is respected
+	_, err = tc.repo.GetRelationshipByID(ctx, tc.projectID, originalID)
+	if err == nil {
+		t.Error("expected relationship to remain deleted after upsert attempt")
 	}
 
-	// Verify data updated
-	retrieved, err := tc.repo.GetRelationshipByID(ctx, tc.projectID, newRel.ID)
+	// Verify original relationship is still soft-deleted by checking directly
+	// (the relationship should not have been reactivated)
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		t.Fatal("no tenant scope in context")
+	}
+	var deletedAt *time.Time
+	checkQuery := `SELECT deleted_at FROM engine_schema_relationships WHERE id = $1`
+	err = scope.Conn.QueryRow(ctx, checkQuery, originalID).Scan(&deletedAt)
 	if err != nil {
-		t.Fatalf("GetRelationshipByID failed: %v", err)
+		t.Fatalf("failed to query relationship: %v", err)
 	}
-
-	if retrieved.RelationshipType != models.RelationshipTypeManual {
-		t.Errorf("expected RelationshipType 'manual', got %q", retrieved.RelationshipType)
+	if deletedAt == nil {
+		t.Error("expected deleted_at to be set, but it was NULL (relationship was incorrectly reactivated)")
 	}
 }
 
@@ -1543,7 +1505,7 @@ func TestSchemaRepository_NotFound(t *testing.T) {
 
 	// UpdateColumnStats with non-existent column
 	distinctCount := int64(100)
-	err = tc.repo.UpdateColumnStats(ctx, nonExistentID, &distinctCount, nil, nil, nil, nil)
+	err = tc.repo.UpdateColumnStats(ctx, nonExistentID, &distinctCount, nil, nil, nil)
 	if err != apperrors.ErrNotFound {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
@@ -1607,4 +1569,157 @@ func TestSchemaRepository_PerformanceBaseline(t *testing.T) {
 	}
 
 	t.Logf("Created 50 tables with 250 columns and listed them in %v", elapsed)
+}
+
+// ============================================================================
+// GetRelationshipsByMethod Tests
+// ============================================================================
+
+func TestSchemaRepository_GetRelationshipsByMethod(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create tables and columns for relationships
+	usersTable := tc.createTestTable(ctx, "public", "users")
+	userIDCol := tc.createTestColumn(ctx, usersTable.ID, "id", 1)
+
+	ordersTable := tc.createTestTable(ctx, "public", "orders")
+	orderUserIDCol := tc.createTestColumn(ctx, ordersTable.ID, "user_id", 1)
+
+	productsTable := tc.createTestTable(ctx, "public", "products")
+	productIDCol := tc.createTestColumn(ctx, productsTable.ID, "id", 1)
+
+	orderItemsTable := tc.createTestTable(ctx, "public", "order_items")
+	itemProductIDCol := tc.createTestColumn(ctx, orderItemsTable.ID, "product_id", 1)
+
+	// Create relationship with foreign_key method
+	fkMethod := models.InferenceMethodForeignKey
+	fkRel := &models.SchemaRelationship{
+		ProjectID:        tc.projectID,
+		SourceTableID:    ordersTable.ID,
+		SourceColumnID:   orderUserIDCol.ID,
+		TargetTableID:    usersTable.ID,
+		TargetColumnID:   userIDCol.ID,
+		RelationshipType: models.RelationshipTypeFK,
+		Cardinality:      models.CardinalityNTo1,
+		Confidence:       1.0,
+		InferenceMethod:  &fkMethod,
+	}
+	if err := tc.repo.UpsertRelationship(ctx, fkRel); err != nil {
+		t.Fatalf("UpsertRelationship (FK) failed: %v", err)
+	}
+
+	// Create relationship with value_overlap method
+	valueOverlapMethod := models.InferenceMethodValueOverlap
+	inferredRel := &models.SchemaRelationship{
+		ProjectID:        tc.projectID,
+		SourceTableID:    orderItemsTable.ID,
+		SourceColumnID:   itemProductIDCol.ID,
+		TargetTableID:    productsTable.ID,
+		TargetColumnID:   productIDCol.ID,
+		RelationshipType: models.RelationshipTypeInferred,
+		Cardinality:      models.CardinalityNTo1,
+		Confidence:       0.85,
+		InferenceMethod:  &valueOverlapMethod,
+	}
+	if err := tc.repo.UpsertRelationship(ctx, inferredRel); err != nil {
+		t.Fatalf("UpsertRelationship (value_overlap) failed: %v", err)
+	}
+
+	// Query by foreign_key method
+	fkRels, err := tc.repo.GetRelationshipsByMethod(ctx, tc.projectID, tc.dsID, models.InferenceMethodForeignKey)
+	if err != nil {
+		t.Fatalf("GetRelationshipsByMethod (foreign_key) failed: %v", err)
+	}
+	if len(fkRels) != 1 {
+		t.Errorf("expected 1 FK relationship, got %d", len(fkRels))
+	}
+	if fkRels[0].ID != fkRel.ID {
+		t.Errorf("expected FK relationship ID %s, got %s", fkRel.ID, fkRels[0].ID)
+	}
+
+	// Query by value_overlap method
+	inferredRels, err := tc.repo.GetRelationshipsByMethod(ctx, tc.projectID, tc.dsID, models.InferenceMethodValueOverlap)
+	if err != nil {
+		t.Fatalf("GetRelationshipsByMethod (value_overlap) failed: %v", err)
+	}
+	if len(inferredRels) != 1 {
+		t.Errorf("expected 1 value_overlap relationship, got %d", len(inferredRels))
+	}
+	if inferredRels[0].ID != inferredRel.ID {
+		t.Errorf("expected inferred relationship ID %s, got %s", inferredRel.ID, inferredRels[0].ID)
+	}
+
+	// Query by non-existent method should return empty
+	noRels, err := tc.repo.GetRelationshipsByMethod(ctx, tc.projectID, tc.dsID, "nonexistent_method")
+	if err != nil {
+		t.Fatalf("GetRelationshipsByMethod (nonexistent) failed: %v", err)
+	}
+	if len(noRels) != 0 {
+		t.Errorf("expected 0 relationships for nonexistent method, got %d", len(noRels))
+	}
+}
+
+func TestSchemaRepository_GetRelationshipsByMethod_IncludesDiscoveryMetrics(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create tables and columns
+	table1 := tc.createTestTable(ctx, "public", "source_table")
+	col1 := tc.createTestColumn(ctx, table1.ID, "fk_col", 1)
+
+	table2 := tc.createTestTable(ctx, "public", "target_table")
+	col2 := tc.createTestColumn(ctx, table2.ID, "pk_col", 1)
+
+	// Create relationship with metrics using UpsertRelationshipWithMetrics
+	pkMatchMethod := "pk_match"
+	rel := &models.SchemaRelationship{
+		ProjectID:        tc.projectID,
+		SourceTableID:    table1.ID,
+		SourceColumnID:   col1.ID,
+		TargetTableID:    table2.ID,
+		TargetColumnID:   col2.ID,
+		RelationshipType: models.RelationshipTypeInferred,
+		Cardinality:      models.CardinalityNTo1,
+		Confidence:       0.95,
+		InferenceMethod:  &pkMatchMethod,
+	}
+	metrics := &models.DiscoveryMetrics{
+		MatchRate:      0.95,
+		SourceDistinct: 100,
+		TargetDistinct: 50,
+		MatchedCount:   95,
+	}
+	if err := tc.repo.UpsertRelationshipWithMetrics(ctx, rel, metrics); err != nil {
+		t.Fatalf("UpsertRelationshipWithMetrics failed: %v", err)
+	}
+
+	// Query and verify discovery metrics are returned
+	rels, err := tc.repo.GetRelationshipsByMethod(ctx, tc.projectID, tc.dsID, "pk_match")
+	if err != nil {
+		t.Fatalf("GetRelationshipsByMethod failed: %v", err)
+	}
+	if len(rels) != 1 {
+		t.Fatalf("expected 1 relationship, got %d", len(rels))
+	}
+
+	retrieved := rels[0]
+	if retrieved.MatchRate == nil || *retrieved.MatchRate != 0.95 {
+		t.Errorf("expected MatchRate 0.95, got %v", retrieved.MatchRate)
+	}
+	if retrieved.SourceDistinct == nil || *retrieved.SourceDistinct != 100 {
+		t.Errorf("expected SourceDistinct 100, got %v", retrieved.SourceDistinct)
+	}
+	if retrieved.TargetDistinct == nil || *retrieved.TargetDistinct != 50 {
+		t.Errorf("expected TargetDistinct 50, got %v", retrieved.TargetDistinct)
+	}
+	if retrieved.MatchedCount == nil || *retrieved.MatchedCount != 95 {
+		t.Errorf("expected MatchedCount 95, got %v", retrieved.MatchedCount)
+	}
 }

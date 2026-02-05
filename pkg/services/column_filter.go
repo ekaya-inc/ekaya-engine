@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"go.uber.org/zap"
@@ -26,12 +28,13 @@ type ColumnFilterResult struct {
 
 // FilterEntityCandidates applies heuristics to identify entity candidate columns.
 // Returns separate lists of candidates and excluded columns with reasons.
-// Filtering uses stored ColumnFeatures.Purpose when available (from feature extraction pipeline),
+// Filtering uses stored ColumnMetadata.Purpose when available (from feature extraction pipeline),
 // and falls back to data-based analysis (type, statistics) otherwise.
 func FilterEntityCandidates(
 	columns []*models.SchemaColumn,
 	tableByID map[string]*models.SchemaTable,
 	statsByTableColumn map[string]datasource.ColumnStats,
+	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata,
 	logger *zap.Logger,
 ) (candidates []ColumnFilterResult, excluded []ColumnFilterResult) {
 	candidates = make([]ColumnFilterResult, 0)
@@ -69,8 +72,8 @@ func FilterEntityCandidates(
 			IsUnique:      col.IsUnique,
 		}
 
-		// Check stored column features for classification (from feature extraction pipeline)
-		features := col.GetColumnFeatures()
+		// Check stored column metadata for classification (from feature extraction pipeline)
+		meta := metadataByColumnID[col.ID]
 
 		// Apply exclusion heuristics first (highest priority)
 		if isExcludedType(col.DataType) {
@@ -82,17 +85,21 @@ func FilterEntityCandidates(
 
 		// Use stored purpose to exclude non-identifier columns
 		// Purpose values like "timestamp", "flag", "enum" indicate the column is not an entity reference
-		if features != nil && features.Purpose != "" {
-			switch features.Purpose {
+		if meta != nil && meta.Purpose != nil && *meta.Purpose != "" {
+			switch *meta.Purpose {
 			case models.PurposeTimestamp, models.PurposeFlag, models.PurposeEnum, models.PurposeMeasure, models.PurposeText, models.PurposeJSON:
 				result.IsCandidate = false
-				result.Reason = fmt.Sprintf("excluded by purpose (%s)", features.Purpose)
+				result.Reason = fmt.Sprintf("excluded by purpose (%s)", *meta.Purpose)
 				excluded = append(excluded, result)
 				continue
 			case models.PurposeIdentifier:
 				// Identifier columns are candidates
 				result.IsCandidate = true
-				result.Reason = fmt.Sprintf("identifier (feature extraction: %s)", features.SemanticType)
+				semanticType := ""
+				if meta.SemanticType != nil {
+					semanticType = *meta.SemanticType
+				}
+				result.Reason = fmt.Sprintf("identifier (feature extraction: %s)", semanticType)
 				candidates = append(candidates, result)
 				continue
 			}

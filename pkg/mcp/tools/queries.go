@@ -34,6 +34,7 @@ type QueryToolDeps struct {
 type QueryLoggingDeps interface {
 	GetLogger() *zap.Logger
 	GetAuditor() *audit.SecurityAuditor
+	GetDB() *database.DB
 }
 
 // GetLogger implements QueryLoggingDeps.
@@ -41,6 +42,9 @@ func (d *QueryToolDeps) GetLogger() *zap.Logger { return d.Logger }
 
 // GetAuditor implements QueryLoggingDeps.
 func (d *QueryToolDeps) GetAuditor() *audit.SecurityAuditor { return d.Auditor }
+
+// GetDB implements QueryLoggingDeps.
+func (d *QueryToolDeps) GetDB() *database.DB { return d.DB }
 
 const approvedQueriesToolGroup = "approved_queries"
 
@@ -640,7 +644,8 @@ func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			if paramsArray, ok := args["parameters"].([]any); ok {
 				paramDefs, err = parseParameterDefinitions(paramsArray)
 				if err != nil {
-					return nil, fmt.Errorf("invalid parameters: %w", err)
+					return NewErrorResult("invalid_parameters",
+						fmt.Sprintf("invalid parameters: %s", err.Error())), nil
 				}
 			}
 		}
@@ -673,7 +678,8 @@ func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		// Validate SQL and parameters with dry-run execution
 		validationResult, err := validateAndTestQuery(tenantCtx, deps, projectID, dsID, sqlQuery, paramDefs)
 		if err != nil {
-			return nil, fmt.Errorf("validation failed: %w", err)
+			return NewErrorResult("validation_error",
+				fmt.Sprintf("validation failed: %s", err.Error())), nil
 		}
 
 		// Merge output column descriptions with detected columns
@@ -1124,23 +1130,39 @@ type QueryExecutionLog struct {
 // logQueryExecution logs a query execution to the history table.
 // This runs in a goroutine and uses best-effort logging - failures are logged but don't affect the caller.
 // The deps parameter must implement QueryLoggingDeps interface.
+// IMPORTANT: This function acquires its own database connection because it runs asynchronously
+// and the caller's connection may be released before this goroutine executes.
 func logQueryExecution(ctx context.Context, deps QueryLoggingDeps, log QueryExecutionLog) {
 	logger := deps.GetLogger()
 
 	// Get user ID from context if available
 	userID := auth.GetUserIDFromContext(ctx)
 
-	// Get tenant scope
-	scope, ok := database.GetTenantScope(ctx)
-	if !ok || scope == nil {
-		logger.Warn("Failed to log query execution: tenant scope not found")
+	// Acquire a fresh database connection for this goroutine.
+	// We cannot use the connection from context because it may be released
+	// by the time this goroutine runs (race condition).
+	db := deps.GetDB()
+	if db == nil {
+		logger.Warn("Failed to log query execution: database not available")
 		return
 	}
+
+	// Use a background context with timeout since the original context may be cancelled
+	execCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	scope, err := db.WithTenant(execCtx, log.ProjectID)
+	if err != nil {
+		logger.Warn("Failed to log query execution: could not acquire tenant scope",
+			zap.Error(err),
+			zap.String("project_id", log.ProjectID.String()))
+		return
+	}
+	defer scope.Close()
 
 	// Marshal parameters to JSON
 	var paramsJSON []byte
 	if len(log.Params) > 0 {
-		var err error
 		paramsJSON, err = json.Marshal(log.Params)
 		if err != nil {
 			logger.Warn("Failed to marshal parameters for query execution log",
@@ -1171,7 +1193,7 @@ func logQueryExecution(ctx context.Context, deps QueryLoggingDeps, log QueryExec
 		errorMessage = &log.ErrorMessage
 	}
 
-	_, err := scope.Conn.Exec(ctx, query,
+	_, err = scope.Conn.Exec(execCtx, query,
 		log.ProjectID,
 		log.QueryID,
 		log.SQL,

@@ -309,10 +309,6 @@ func (m *mockSchemaService) GetRelationshipsResponse(ctx context.Context, projec
 	return m.relationshipsResponse, nil
 }
 
-func (m *mockSchemaService) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
-	return nil
-}
-
 func (m *mockSchemaService) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
 	return nil
 }
@@ -365,9 +361,6 @@ func (m *mockSchemaRepository) SoftDeleteRemovedTables(ctx context.Context, proj
 func (m *mockSchemaRepository) UpdateTableSelection(ctx context.Context, projectID, tableID uuid.UUID, isSelected bool) error {
 	return nil
 }
-func (m *mockSchemaRepository) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
-	return nil
-}
 func (m *mockSchemaRepository) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }
@@ -395,7 +388,7 @@ func (m *mockSchemaRepository) SoftDeleteRemovedColumns(ctx context.Context, tab
 func (m *mockSchemaRepository) UpdateColumnSelection(ctx context.Context, projectID, columnID uuid.UUID, isSelected bool) error {
 	return nil
 }
-func (m *mockSchemaRepository) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64, sampleValues []string) error {
+func (m *mockSchemaRepository) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64) error {
 	return nil
 }
 func (m *mockSchemaRepository) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
@@ -437,6 +430,9 @@ func (m *mockSchemaRepository) GetOrphanTables(ctx context.Context, projectID, d
 func (m *mockSchemaRepository) UpsertRelationshipWithMetrics(ctx context.Context, rel *models.SchemaRelationship, metrics *models.DiscoveryMetrics) error {
 	return nil
 }
+func (m *mockSchemaRepository) GetRelationshipsByMethod(ctx context.Context, projectID, datasourceID uuid.UUID, method string) ([]*models.SchemaRelationship, error) {
+	return nil, nil
+}
 func (m *mockSchemaRepository) GetJoinableColumns(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }
@@ -455,49 +451,65 @@ func (m *mockSchemaRepository) SelectAllTablesAndColumns(ctx context.Context, pr
 func (m *mockSchemaRepository) GetColumnsWithFeaturesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) (map[string][]*models.SchemaColumn, error) {
 	return nil, nil
 }
-func (m *mockSchemaRepository) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
-	return nil
+func (m *mockSchemaRepository) DeleteInferredRelationshipsByProject(ctx context.Context, projectID uuid.UUID) (int64, error) {
+	return 0, nil
 }
 
 // mockColumnMetadataRepository implements repositories.ColumnMetadataRepository for testing.
+// Column metadata is now keyed by schema_column_id (FK to engine_schema_columns).
 type mockColumnMetadataRepository struct {
-	metadata map[string]*models.ColumnMetadata // key is "table.column"
+	metadata map[uuid.UUID]*models.ColumnMetadata // key is schema_column_id
 }
 
 func newMockColumnMetadataRepository() *mockColumnMetadataRepository {
 	return &mockColumnMetadataRepository{
-		metadata: make(map[string]*models.ColumnMetadata),
+		metadata: make(map[uuid.UUID]*models.ColumnMetadata),
 	}
 }
 
 func (m *mockColumnMetadataRepository) Upsert(ctx context.Context, meta *models.ColumnMetadata) error {
-	key := meta.TableName + "." + meta.ColumnName
-	m.metadata[key] = meta
+	m.metadata[meta.SchemaColumnID] = meta
 	return nil
 }
 
-func (m *mockColumnMetadataRepository) GetByTableColumn(ctx context.Context, projectID uuid.UUID, tableName, columnName string) (*models.ColumnMetadata, error) {
-	key := tableName + "." + columnName
-	if meta, ok := m.metadata[key]; ok {
+func (m *mockColumnMetadataRepository) UpsertFromExtraction(ctx context.Context, meta *models.ColumnMetadata) error {
+	m.metadata[meta.SchemaColumnID] = meta
+	return nil
+}
+
+func (m *mockColumnMetadataRepository) GetBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
+	if meta, ok := m.metadata[schemaColumnID]; ok {
 		return meta, nil
 	}
 	return nil, nil
 }
 
-func (m *mockColumnMetadataRepository) GetByTable(ctx context.Context, projectID uuid.UUID, tableName string) ([]*models.ColumnMetadata, error) {
-	return nil, nil
+func (m *mockColumnMetadataRepository) GetBySchemaColumnIDs(ctx context.Context, schemaColumnIDs []uuid.UUID) ([]*models.ColumnMetadata, error) {
+	var result []*models.ColumnMetadata
+	for _, id := range schemaColumnIDs {
+		if meta, ok := m.metadata[id]; ok {
+			result = append(result, meta)
+		}
+	}
+	return result, nil
 }
 
 func (m *mockColumnMetadataRepository) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.ColumnMetadata, error) {
-	return nil, nil
+	var result []*models.ColumnMetadata
+	for _, meta := range m.metadata {
+		if meta.ProjectID == projectID {
+			result = append(result, meta)
+		}
+	}
+	return result, nil
 }
 
 func (m *mockColumnMetadataRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	delete(m.metadata, id)
 	return nil
 }
 
-func (m *mockColumnMetadataRepository) DeleteByTableColumn(ctx context.Context, projectID uuid.UUID, tableName, columnName string) error {
-	key := tableName + "." + columnName
-	delete(m.metadata, key)
+func (m *mockColumnMetadataRepository) DeleteBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) error {
+	delete(m.metadata, schemaColumnID)
 	return nil
 }

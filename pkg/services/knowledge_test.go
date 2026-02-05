@@ -88,8 +88,8 @@ func (tc *knowledgeServiceTestContext) ensureTestOntology() {
 
 	scope, _ := database.GetTenantScope(ctx)
 	err := scope.Conn.QueryRow(ctx, `
-		INSERT INTO engine_ontologies (id, project_id, is_active, domain_summary, entity_summaries, column_details)
-		VALUES ($1, $2, true, '{}', '{}', '{}')
+		INSERT INTO engine_ontologies (id, project_id, is_active, domain_summary, column_details)
+		VALUES ($1, $2, true, '{}', '{}')
 		ON CONFLICT (project_id, version) DO UPDATE SET is_active = true
 		RETURNING id
 	`, tc.ontologyID, tc.projectID).Scan(&tc.ontologyID)

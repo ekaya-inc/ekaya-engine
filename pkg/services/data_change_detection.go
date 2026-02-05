@@ -48,19 +48,21 @@ func DefaultDataChangeDetectionConfig() DataChangeDetectionConfig {
 }
 
 type dataChangeDetectionService struct {
-	schemaRepo        repositories.SchemaRepository
-	ontologyRepo      repositories.OntologyRepository
-	pendingChangeRepo repositories.PendingChangeRepository
-	datasourceService DatasourceService
-	projectService    ProjectService
-	adapterFactory    datasource.DatasourceAdapterFactory
-	config            DataChangeDetectionConfig
-	logger            *zap.Logger
+	schemaRepo         repositories.SchemaRepository
+	columnMetadataRepo repositories.ColumnMetadataRepository
+	ontologyRepo       repositories.OntologyRepository
+	pendingChangeRepo  repositories.PendingChangeRepository
+	datasourceService  DatasourceService
+	projectService     ProjectService
+	adapterFactory     datasource.DatasourceAdapterFactory
+	config             DataChangeDetectionConfig
+	logger             *zap.Logger
 }
 
 // NewDataChangeDetectionService creates a new DataChangeDetectionService.
 func NewDataChangeDetectionService(
 	schemaRepo repositories.SchemaRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
 	ontologyRepo repositories.OntologyRepository,
 	pendingChangeRepo repositories.PendingChangeRepository,
 	datasourceService DatasourceService,
@@ -69,14 +71,15 @@ func NewDataChangeDetectionService(
 	logger *zap.Logger,
 ) DataChangeDetectionService {
 	return &dataChangeDetectionService{
-		schemaRepo:        schemaRepo,
-		ontologyRepo:      ontologyRepo,
-		pendingChangeRepo: pendingChangeRepo,
-		datasourceService: datasourceService,
-		projectService:    projectService,
-		adapterFactory:    adapterFactory,
-		config:            DefaultDataChangeDetectionConfig(),
-		logger:            logger,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		ontologyRepo:       ontologyRepo,
+		pendingChangeRepo:  pendingChangeRepo,
+		datasourceService:  datasourceService,
+		projectService:     projectService,
+		adapterFactory:     adapterFactory,
+		config:             DefaultDataChangeDetectionConfig(),
+		logger:             logger,
 	}
 }
 
@@ -199,8 +202,24 @@ func (s *dataChangeDetectionService) ScanTables(
 			}
 		}
 
+		// Fetch metadata for columns in this table
+		columnIDs := make([]uuid.UUID, len(columns))
+		for i, col := range columns {
+			columnIDs[i] = col.ID
+		}
+		metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, columnIDs)
+		if err != nil {
+			s.logger.Warn("Failed to fetch column metadata",
+				zap.String("table", tableName),
+				zap.Error(err))
+		}
+		metadataByColumnID := make(map[uuid.UUID]*models.ColumnMetadata)
+		for _, meta := range metadataList {
+			metadataByColumnID[meta.SchemaColumnID] = meta
+		}
+
 		// Detect potential FK patterns for non-FK columns
-		fkChanges, err := s.detectPotentialFKs(ctx, discoverer, table, columns, tables)
+		fkChanges, err := s.detectPotentialFKs(ctx, discoverer, table, columns, tables, metadataByColumnID)
 		if err != nil {
 			s.logger.Warn("Failed to detect FK patterns",
 				zap.String("table", tableName),
@@ -318,13 +337,14 @@ func (s *dataChangeDetectionService) detectEnumChanges(
 }
 
 // detectPotentialFKs looks for columns that look like FKs but aren't declared as such.
-// Uses stored ColumnFeatures.Purpose to identify identifier columns as FK candidates.
+// Uses stored ColumnMetadata.Purpose to identify identifier columns as FK candidates.
 func (s *dataChangeDetectionService) detectPotentialFKs(
 	ctx context.Context,
 	discoverer datasource.SchemaDiscoverer,
 	table *models.SchemaTable,
 	columns []*models.SchemaColumn,
 	allTables []*models.SchemaTable,
+	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata,
 ) ([]*models.PendingChange, error) {
 	var changes []*models.PendingChange
 
@@ -345,14 +365,14 @@ func (s *dataChangeDetectionService) detectPotentialFKs(
 			continue
 		}
 
-		// Check column features - only check columns classified as identifiers
-		features := col.GetColumnFeatures()
-		if features != nil && features.Purpose != models.PurposeIdentifier {
+		// Check column metadata - only check columns classified as identifiers
+		meta := metadataByColumnID[col.ID]
+		if meta != nil && meta.Purpose != nil && *meta.Purpose != models.PurposeIdentifier {
 			continue
 		}
 
-		// Also check columns ending in _id as a fallback (for columns without features)
-		if features == nil && !strings.HasSuffix(col.ColumnName, "_id") {
+		// Also check columns ending in _id as a fallback (for columns without metadata)
+		if meta == nil && !strings.HasSuffix(col.ColumnName, "_id") {
 			continue
 		}
 

@@ -29,12 +29,11 @@ func ensureOntologyExists(
 
 	// Create empty ontology for backward compatibility
 	ontology = &models.TieredOntology{
-		ProjectID:       projectID,
-		Version:         1,
-		IsActive:        true,
-		EntitySummaries: make(map[string]*models.EntitySummary),
-		ColumnDetails:   make(map[string][]models.ColumnDetail),
-		Metadata:        make(map[string]any),
+		ProjectID:     projectID,
+		Version:       1,
+		IsActive:      true,
+		ColumnDetails: make(map[string][]models.ColumnDetail),
+		Metadata:      make(map[string]any),
 	}
 	if err := ontologyRepo.Create(ctx, ontology); err != nil {
 		return nil, fmt.Errorf("create empty ontology: %w", err)

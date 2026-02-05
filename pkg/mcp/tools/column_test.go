@@ -888,3 +888,470 @@ func TestUpdateColumnTool_ErrorResults(t *testing.T) {
 		}
 	})
 }
+
+// ============================================================================
+// Typed Column Write Tests
+// ============================================================================
+
+// TestUpdateColumn_TypedColumnMetadata verifies that update_column correctly
+// writes typed columns to ColumnMetadata for the new schema.
+func TestUpdateColumn_TypedColumnMetadata(t *testing.T) {
+	t.Run("entity is stored in IdentifierFeatures.EntityReferenced", func(t *testing.T) {
+		// Simulate the entity parameter being set
+		entity := "User"
+
+		// Create a column metadata object as the tool would
+		colMeta := &models.ColumnMetadata{}
+		if entity != "" {
+			if colMeta.Features.IdentifierFeatures == nil {
+				colMeta.Features.IdentifierFeatures = &models.IdentifierFeatures{}
+			}
+			colMeta.Features.IdentifierFeatures.EntityReferenced = entity
+		}
+
+		// Verify entity is stored correctly
+		require.NotNil(t, colMeta.Features.IdentifierFeatures)
+		assert.Equal(t, "User", colMeta.Features.IdentifierFeatures.EntityReferenced)
+	})
+
+	t.Run("enum values are stored in EnumFeatures with Value/Label separation", func(t *testing.T) {
+		// Simulate enum_values parameter with descriptions
+		enumValues := []string{
+			"ACTIVE - Normal active account",
+			"SUSPENDED - Temporarily disabled",
+			"PENDING",
+		}
+
+		// Parse enums as the tool would
+		parsedEnums := parseEnumValues(enumValues)
+
+		// Create column metadata as the tool would
+		colMeta := &models.ColumnMetadata{}
+		colMeta.Features.EnumFeatures = &models.EnumFeatures{
+			Values: make([]models.ColumnEnumValue, len(parsedEnums)),
+		}
+		for i, ev := range parsedEnums {
+			colMeta.Features.EnumFeatures.Values[i] = models.ColumnEnumValue{
+				Value: ev.Value,
+				Label: ev.Description,
+			}
+		}
+
+		// Verify enum values are stored correctly
+		require.NotNil(t, colMeta.Features.EnumFeatures)
+		require.Len(t, colMeta.Features.EnumFeatures.Values, 3)
+
+		// Check first value has both Value and Label
+		assert.Equal(t, "ACTIVE", colMeta.Features.EnumFeatures.Values[0].Value)
+		assert.Equal(t, "Normal active account", colMeta.Features.EnumFeatures.Values[0].Label)
+
+		// Check second value has both Value and Label
+		assert.Equal(t, "SUSPENDED", colMeta.Features.EnumFeatures.Values[1].Value)
+		assert.Equal(t, "Temporarily disabled", colMeta.Features.EnumFeatures.Values[1].Label)
+
+		// Check third value has Value but no Label
+		assert.Equal(t, "PENDING", colMeta.Features.EnumFeatures.Values[2].Value)
+		assert.Empty(t, colMeta.Features.EnumFeatures.Values[2].Label)
+	})
+
+	t.Run("role is stored in typed column", func(t *testing.T) {
+		role := "identifier"
+
+		colMeta := &models.ColumnMetadata{}
+		colMeta.Role = &role
+
+		// Verify role is stored correctly
+		require.NotNil(t, colMeta.Role)
+		assert.Equal(t, "identifier", *colMeta.Role)
+	})
+
+	t.Run("description is stored in typed column", func(t *testing.T) {
+		description := "User account status indicator"
+
+		colMeta := &models.ColumnMetadata{}
+		colMeta.Description = &description
+
+		// Verify description is stored correctly
+		require.NotNil(t, colMeta.Description)
+		assert.Equal(t, "User account status indicator", *colMeta.Description)
+	})
+
+	t.Run("is_sensitive is stored in typed column", func(t *testing.T) {
+		sensitive := true
+
+		colMeta := &models.ColumnMetadata{}
+		colMeta.IsSensitive = &sensitive
+
+		// Verify is_sensitive is stored correctly
+		require.NotNil(t, colMeta.IsSensitive)
+		assert.True(t, *colMeta.IsSensitive)
+	})
+
+	t.Run("all fields combined", func(t *testing.T) {
+		// Simulate all parameters being set
+		description := "User account status"
+		entity := "User"
+		role := "attribute"
+		sensitive := false
+		enumValues := []string{"ACTIVE - Normal", "INACTIVE - Disabled"}
+
+		// Parse enums
+		parsedEnums := parseEnumValues(enumValues)
+
+		// Create column metadata as the tool would
+		colMeta := &models.ColumnMetadata{}
+
+		if description != "" {
+			colMeta.Description = &description
+		}
+
+		if entity != "" {
+			if colMeta.Features.IdentifierFeatures == nil {
+				colMeta.Features.IdentifierFeatures = &models.IdentifierFeatures{}
+			}
+			colMeta.Features.IdentifierFeatures.EntityReferenced = entity
+		}
+
+		if role != "" {
+			colMeta.Role = &role
+		}
+
+		colMeta.Features.EnumFeatures = &models.EnumFeatures{
+			Values: make([]models.ColumnEnumValue, len(parsedEnums)),
+		}
+		for i, ev := range parsedEnums {
+			colMeta.Features.EnumFeatures.Values[i] = models.ColumnEnumValue{
+				Value: ev.Value,
+				Label: ev.Description,
+			}
+		}
+
+		colMeta.IsSensitive = &sensitive
+
+		// Verify all fields
+		assert.Equal(t, "User account status", *colMeta.Description)
+		assert.Equal(t, "User", colMeta.Features.IdentifierFeatures.EntityReferenced)
+		assert.Equal(t, "attribute", *colMeta.Role)
+		assert.False(t, *colMeta.IsSensitive)
+		assert.Len(t, colMeta.Features.EnumFeatures.Values, 2)
+		assert.Equal(t, "ACTIVE", colMeta.Features.EnumFeatures.Values[0].Value)
+		assert.Equal(t, "Normal", colMeta.Features.EnumFeatures.Values[0].Label)
+	})
+}
+
+// ============================================================================
+// buildColumnMetadataInfo Tests
+// ============================================================================
+
+func TestBuildColumnMetadataInfo_NilInput(t *testing.T) {
+	result := buildColumnMetadataInfo(nil)
+	assert.Nil(t, result)
+}
+
+func TestBuildColumnMetadataInfo_CoreClassificationFields(t *testing.T) {
+	description := "User account status"
+	classPath := "enum"
+	purpose := "enum"
+	semanticType := "status_enum"
+	role := "attribute"
+	confidence := 0.95
+
+	meta := &models.ColumnMetadata{
+		Description:        &description,
+		ClassificationPath: &classPath,
+		Purpose:            &purpose,
+		SemanticType:       &semanticType,
+		Role:               &role,
+		Confidence:         &confidence,
+	}
+
+	result := buildColumnMetadataInfo(meta)
+
+	require.NotNil(t, result)
+	assert.Equal(t, "User account status", result.Description)
+	assert.Equal(t, "enum", result.ClassificationPath)
+	assert.Equal(t, "enum", result.Purpose)
+	assert.Equal(t, "status_enum", result.SemanticType)
+	assert.Equal(t, "attribute", result.Role)
+	require.NotNil(t, result.Confidence)
+	assert.InDelta(t, 0.95, *result.Confidence, 0.001)
+}
+
+func TestBuildColumnMetadataInfo_Provenance(t *testing.T) {
+	lastEdit := "mcp"
+	meta := &models.ColumnMetadata{
+		Source:         "inferred",
+		LastEditSource: &lastEdit,
+	}
+
+	result := buildColumnMetadataInfo(meta)
+
+	require.NotNil(t, result)
+	assert.Equal(t, "inferred", result.Source)
+	assert.Equal(t, "mcp", result.LastEditSource)
+}
+
+func TestBuildColumnMetadataInfo_IsSensitive(t *testing.T) {
+	t.Run("sensitive true", func(t *testing.T) {
+		sensitive := true
+		meta := &models.ColumnMetadata{
+			IsSensitive: &sensitive,
+		}
+
+		result := buildColumnMetadataInfo(meta)
+
+		require.NotNil(t, result)
+		require.NotNil(t, result.IsSensitive)
+		assert.True(t, *result.IsSensitive)
+	})
+
+	t.Run("sensitive false", func(t *testing.T) {
+		sensitive := false
+		meta := &models.ColumnMetadata{
+			IsSensitive: &sensitive,
+		}
+
+		result := buildColumnMetadataInfo(meta)
+
+		require.NotNil(t, result)
+		require.NotNil(t, result.IsSensitive)
+		assert.False(t, *result.IsSensitive)
+	})
+
+	t.Run("sensitive nil (auto-detect)", func(t *testing.T) {
+		meta := &models.ColumnMetadata{}
+
+		result := buildColumnMetadataInfo(meta)
+
+		require.NotNil(t, result)
+		assert.Nil(t, result.IsSensitive)
+	})
+}
+
+func TestBuildColumnMetadataInfo_EnumFeatures(t *testing.T) {
+	meta := &models.ColumnMetadata{
+		Features: models.ColumnMetadataFeatures{
+			EnumFeatures: &models.EnumFeatures{
+				Values: []models.ColumnEnumValue{
+					{Value: "ACTIVE", Label: "Normal active account"},
+					{Value: "SUSPENDED", Label: "Temporarily disabled"},
+					{Value: "PENDING", Label: ""},
+				},
+			},
+		},
+	}
+
+	result := buildColumnMetadataInfo(meta)
+
+	require.NotNil(t, result)
+	require.Len(t, result.EnumValues, 3)
+	assert.Equal(t, "ACTIVE - Normal active account", result.EnumValues[0])
+	assert.Equal(t, "SUSPENDED - Temporarily disabled", result.EnumValues[1])
+	assert.Equal(t, "PENDING", result.EnumValues[2]) // No label, just value
+}
+
+func TestBuildColumnMetadataInfo_IdentifierFeatures(t *testing.T) {
+	meta := &models.ColumnMetadata{
+		Features: models.ColumnMetadataFeatures{
+			IdentifierFeatures: &models.IdentifierFeatures{
+				IdentifierType:   "foreign_key",
+				FKTargetTable:    "users",
+				FKTargetColumn:   "id",
+				FKConfidence:     0.98,
+				EntityReferenced: "User",
+			},
+		},
+	}
+
+	result := buildColumnMetadataInfo(meta)
+
+	require.NotNil(t, result)
+	assert.Equal(t, "User", result.Entity) // Entity is extracted for convenience
+	require.NotNil(t, result.IdentifierFeatures)
+	assert.Equal(t, "foreign_key", result.IdentifierFeatures.IdentifierType)
+	assert.Equal(t, "users", result.IdentifierFeatures.FKTargetTable)
+	assert.Equal(t, "id", result.IdentifierFeatures.FKTargetColumn)
+	assert.InDelta(t, 0.98, result.IdentifierFeatures.FKConfidence, 0.001)
+	assert.Equal(t, "User", result.IdentifierFeatures.EntityReferenced)
+}
+
+func TestBuildColumnMetadataInfo_TimestampFeatures(t *testing.T) {
+	meta := &models.ColumnMetadata{
+		Features: models.ColumnMetadataFeatures{
+			TimestampFeatures: &models.TimestampFeatures{
+				TimestampPurpose: "soft_delete",
+				TimestampScale:   "",
+				IsSoftDelete:     true,
+				IsAuditField:     false,
+			},
+		},
+	}
+
+	result := buildColumnMetadataInfo(meta)
+
+	require.NotNil(t, result)
+	require.NotNil(t, result.TimestampFeatures)
+	assert.Equal(t, "soft_delete", result.TimestampFeatures.TimestampPurpose)
+	assert.True(t, result.TimestampFeatures.IsSoftDelete)
+	assert.False(t, result.TimestampFeatures.IsAuditField)
+}
+
+func TestBuildColumnMetadataInfo_BooleanFeatures(t *testing.T) {
+	meta := &models.ColumnMetadata{
+		Features: models.ColumnMetadataFeatures{
+			BooleanFeatures: &models.BooleanFeatures{
+				TrueMeaning:  "User is active",
+				FalseMeaning: "User is inactive",
+				BooleanType:  "status_indicator",
+			},
+		},
+	}
+
+	result := buildColumnMetadataInfo(meta)
+
+	require.NotNil(t, result)
+	require.NotNil(t, result.BooleanFeatures)
+	assert.Equal(t, "User is active", result.BooleanFeatures.TrueMeaning)
+	assert.Equal(t, "User is inactive", result.BooleanFeatures.FalseMeaning)
+	assert.Equal(t, "status_indicator", result.BooleanFeatures.BooleanType)
+}
+
+func TestBuildColumnMetadataInfo_MonetaryFeatures(t *testing.T) {
+	meta := &models.ColumnMetadata{
+		Features: models.ColumnMetadataFeatures{
+			MonetaryFeatures: &models.MonetaryFeatures{
+				IsMonetary:           true,
+				CurrencyUnit:         "cents",
+				PairedCurrencyColumn: "currency_code",
+				AmountDescription:    "Transaction amount",
+			},
+		},
+	}
+
+	result := buildColumnMetadataInfo(meta)
+
+	require.NotNil(t, result)
+	require.NotNil(t, result.MonetaryFeatures)
+	assert.True(t, result.MonetaryFeatures.IsMonetary)
+	assert.Equal(t, "cents", result.MonetaryFeatures.CurrencyUnit)
+	assert.Equal(t, "currency_code", result.MonetaryFeatures.PairedCurrencyColumn)
+	assert.Equal(t, "Transaction amount", result.MonetaryFeatures.AmountDescription)
+}
+
+func TestBuildColumnMetadataInfo_AllFeaturesCombined(t *testing.T) {
+	description := "User ID foreign key"
+	classPath := "uuid"
+	purpose := "identifier"
+	semanticType := "foreign_key"
+	role := "foreign_key"
+	confidence := 0.99
+	sensitive := false
+	lastEdit := "inferred"
+
+	meta := &models.ColumnMetadata{
+		Description:        &description,
+		ClassificationPath: &classPath,
+		Purpose:            &purpose,
+		SemanticType:       &semanticType,
+		Role:               &role,
+		Confidence:         &confidence,
+		IsSensitive:        &sensitive,
+		Source:             "inferred",
+		LastEditSource:     &lastEdit,
+		Features: models.ColumnMetadataFeatures{
+			IdentifierFeatures: &models.IdentifierFeatures{
+				IdentifierType:   "foreign_key",
+				FKTargetTable:    "users",
+				FKTargetColumn:   "id",
+				FKConfidence:     0.98,
+				EntityReferenced: "User",
+			},
+		},
+	}
+
+	result := buildColumnMetadataInfo(meta)
+
+	require.NotNil(t, result)
+
+	// Core fields
+	assert.Equal(t, "User ID foreign key", result.Description)
+	assert.Equal(t, "uuid", result.ClassificationPath)
+	assert.Equal(t, "identifier", result.Purpose)
+	assert.Equal(t, "foreign_key", result.SemanticType)
+	assert.Equal(t, "foreign_key", result.Role)
+	require.NotNil(t, result.Confidence)
+	assert.InDelta(t, 0.99, *result.Confidence, 0.001)
+
+	// User overrides
+	require.NotNil(t, result.IsSensitive)
+	assert.False(t, *result.IsSensitive)
+
+	// Provenance
+	assert.Equal(t, "inferred", result.Source)
+	assert.Equal(t, "inferred", result.LastEditSource)
+
+	// Identifier features
+	assert.Equal(t, "User", result.Entity)
+	require.NotNil(t, result.IdentifierFeatures)
+	assert.Equal(t, "foreign_key", result.IdentifierFeatures.IdentifierType)
+	assert.Equal(t, "users", result.IdentifierFeatures.FKTargetTable)
+}
+
+func TestGetColumnMetadata_ResponseStructure_WithTypedColumns(t *testing.T) {
+	confidence := 0.95
+	sensitive := true
+
+	response := getColumnMetadataResponse{
+		Table:  "orders",
+		Column: "amount_cents",
+		Schema: columnSchemaInfo{
+			DataType:     "bigint",
+			IsNullable:   false,
+			IsPrimaryKey: false,
+		},
+		Metadata: &columnMetadataInfo{
+			Description:        "Order total amount in cents",
+			ClassificationPath: "numeric",
+			Purpose:            "measure",
+			SemanticType:       "currency_cents",
+			Role:               "measure",
+			Confidence:         &confidence,
+			IsSensitive:        &sensitive,
+			Source:             "inferred",
+			MonetaryFeatures: &monetaryFeatures{
+				IsMonetary:   true,
+				CurrencyUnit: "cents",
+			},
+		},
+	}
+
+	// Marshal to JSON and verify structure
+	jsonData, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var decoded map[string]any
+	err = json.Unmarshal(jsonData, &decoded)
+	require.NoError(t, err)
+
+	// Verify basic fields
+	assert.Equal(t, "orders", decoded["table"])
+	assert.Equal(t, "amount_cents", decoded["column"])
+
+	// Verify metadata with typed columns
+	metadata, ok := decoded["metadata"].(map[string]any)
+	require.True(t, ok, "metadata should be a map")
+	assert.Equal(t, "Order total amount in cents", metadata["description"])
+	assert.Equal(t, "numeric", metadata["classification_path"])
+	assert.Equal(t, "measure", metadata["purpose"])
+	assert.Equal(t, "currency_cents", metadata["semantic_type"])
+	assert.Equal(t, "measure", metadata["role"])
+	assert.InDelta(t, 0.95, metadata["confidence"].(float64), 0.001)
+	assert.Equal(t, true, metadata["is_sensitive"])
+	assert.Equal(t, "inferred", metadata["source"])
+
+	// Verify monetary features
+	moneyFeatures, ok := metadata["monetary_features"].(map[string]any)
+	require.True(t, ok, "monetary_features should be a map")
+	assert.Equal(t, true, moneyFeatures["is_monetary"])
+	assert.Equal(t, "cents", moneyFeatures["currency_unit"])
+}

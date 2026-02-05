@@ -393,7 +393,6 @@ func TestScenario_ProjectWithDatasource_AllAuthTypesGetExpectedTools(t *testing.
 			"validate",                // Query loadout
 			"get_schema",              // Query loadout
 			"get_context",             // Query loadout
-			"update_entity",           // Ontology Maintenance
 			"refresh_schema",          // Ontology Maintenance
 			"list_ontology_questions", // Ontology Questions
 		}
@@ -456,7 +455,6 @@ func TestScenario_ProjectWithDatasource_AllAuthTypesGetExpectedTools(t *testing.
 			"execute",
 			"query",
 			"sample",
-			"update_entity",
 		}
 		for _, tool := range restrictedTools {
 			assert.NotContains(t, tools, tool,

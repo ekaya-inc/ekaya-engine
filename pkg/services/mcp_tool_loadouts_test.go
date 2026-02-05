@@ -29,7 +29,7 @@ func TestComputeUserTools(t *testing.T) {
 		assert.False(t, toolNames["execute"], "execute should NOT be included")
 
 		// Ontology Maintenance NOT included without option
-		assert.False(t, toolNames["update_entity"], "update_entity should NOT be included")
+		assert.False(t, toolNames["update_table"], "update_table should NOT be included")
 		assert.False(t, toolNames["update_column"], "update_column should NOT be included")
 	})
 
@@ -46,9 +46,9 @@ func TestComputeUserTools(t *testing.T) {
 		assert.True(t, toolNames["get_schema"], "get_schema should be included")
 
 		// Ontology Maintenance tools
-		assert.True(t, toolNames["update_entity"], "update_entity should be included")
+		assert.True(t, toolNames["update_table"], "update_table should be included")
 		assert.True(t, toolNames["update_column"], "update_column should be included")
-		assert.True(t, toolNames["update_relationship"], "update_relationship should be included")
+		assert.True(t, toolNames["update_glossary_term"], "update_glossary_term should be included")
 		assert.True(t, toolNames["refresh_schema"], "refresh_schema should be included")
 
 		// Developer-only tools still NOT included
@@ -62,7 +62,7 @@ func TestComputeUserTools(t *testing.T) {
 
 		assert.True(t, toolNames["health"], "health should be included")
 		assert.True(t, toolNames["query"], "query should be included")
-		assert.False(t, toolNames["update_entity"], "update_entity should NOT be included")
+		assert.False(t, toolNames["update_table"], "update_table should NOT be included")
 	})
 }
 
@@ -83,7 +83,7 @@ func TestComputeDeveloperTools(t *testing.T) {
 		assert.False(t, toolNames["get_schema"], "get_schema should NOT be included")
 
 		// Ontology Maintenance NOT included without AddOntologyMaintenance
-		assert.False(t, toolNames["update_entity"], "update_entity should NOT be included")
+		assert.False(t, toolNames["update_table"], "update_table should NOT be included")
 	})
 
 	t.Run("includes Query tools when AddQueryTools is true", func(t *testing.T) {
@@ -103,7 +103,7 @@ func TestComputeDeveloperTools(t *testing.T) {
 		assert.True(t, toolNames["sample"], "sample should be included")
 
 		// Ontology Maintenance NOT included
-		assert.False(t, toolNames["update_entity"], "update_entity should NOT be included")
+		assert.False(t, toolNames["update_table"], "update_table should NOT be included")
 	})
 
 	t.Run("includes Ontology Maintenance and Questions when AddOntologyMaintenance is true", func(t *testing.T) {
@@ -118,7 +118,7 @@ func TestComputeDeveloperTools(t *testing.T) {
 		assert.True(t, toolNames["health"], "health should be included")
 		assert.True(t, toolNames["echo"], "echo should be included")
 		assert.True(t, toolNames["execute"], "execute should be included")
-		assert.True(t, toolNames["update_entity"], "update_entity should be included")
+		assert.True(t, toolNames["update_table"], "update_table should be included")
 		assert.True(t, toolNames["update_column"], "update_column should be included")
 		assert.True(t, toolNames["list_ontology_questions"], "list_ontology_questions should be included")
 		assert.True(t, toolNames["resolve_ontology_question"], "resolve_ontology_question should be included")
@@ -142,7 +142,7 @@ func TestComputeDeveloperTools(t *testing.T) {
 		assert.True(t, toolNames["execute"], "execute should be included")
 		assert.True(t, toolNames["query"], "query should be included")
 		assert.True(t, toolNames["get_schema"], "get_schema should be included")
-		assert.True(t, toolNames["update_entity"], "update_entity should be included")
+		assert.True(t, toolNames["update_table"], "update_table should be included")
 		assert.True(t, toolNames["list_ontology_questions"], "list_ontology_questions should be included")
 	})
 
@@ -181,7 +181,7 @@ func TestComputeAgentTools(t *testing.T) {
 		assert.False(t, toolNames["get_schema"], "get_schema should NOT be included")
 
 		// No ontology maintenance tools
-		assert.False(t, toolNames["update_entity"], "update_entity should NOT be included")
+		assert.False(t, toolNames["update_table"], "update_table should NOT be included")
 	})
 
 	t.Run("ignores all configuration options", func(t *testing.T) {

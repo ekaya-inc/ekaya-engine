@@ -37,29 +37,37 @@ type EnrichColumnsResult struct {
 	DurationMs     int64             `json:"duration_ms"`
 }
 
+// TableContext provides table information for column enrichment.
+// Replaces the entity concept for v1.0.
+type TableContext struct {
+	TableName    string
+	SchemaName   string
+	BusinessName string
+	Description  string
+	DatasourceID uuid.UUID
+}
+
 type columnEnrichmentService struct {
-	ontologyRepo     repositories.OntologyRepository
-	entityRepo       repositories.OntologyEntityRepository
-	relationshipRepo repositories.EntityRelationshipRepository
-	schemaRepo       repositories.SchemaRepository
-	conversationRepo repositories.ConversationRepository
-	projectRepo      repositories.ProjectRepository
-	questionService  OntologyQuestionService
-	dsSvc            DatasourceService
-	adapterFactory   datasource.DatasourceAdapterFactory
-	llmFactory       llm.LLMClientFactory
-	workerPool       *llm.WorkerPool
-	circuitBreaker   *llm.CircuitBreaker
-	getTenantCtx     TenantContextFunc
-	logger           *zap.Logger
+	ontologyRepo       repositories.OntologyRepository
+	schemaRepo         repositories.SchemaRepository
+	columnMetadataRepo repositories.ColumnMetadataRepository
+	conversationRepo   repositories.ConversationRepository
+	projectRepo        repositories.ProjectRepository
+	questionService    OntologyQuestionService
+	dsSvc              DatasourceService
+	adapterFactory     datasource.DatasourceAdapterFactory
+	llmFactory         llm.LLMClientFactory
+	workerPool         *llm.WorkerPool
+	circuitBreaker     *llm.CircuitBreaker
+	getTenantCtx       TenantContextFunc
+	logger             *zap.Logger
 }
 
 // NewColumnEnrichmentService creates a new column enrichment service.
 func NewColumnEnrichmentService(
 	ontologyRepo repositories.OntologyRepository,
-	entityRepo repositories.OntologyEntityRepository,
-	relationshipRepo repositories.EntityRelationshipRepository,
 	schemaRepo repositories.SchemaRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
 	conversationRepo repositories.ConversationRepository,
 	projectRepo repositories.ProjectRepository,
 	questionService OntologyQuestionService,
@@ -72,26 +80,25 @@ func NewColumnEnrichmentService(
 	logger *zap.Logger,
 ) ColumnEnrichmentService {
 	return &columnEnrichmentService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relationshipRepo,
-		schemaRepo:       schemaRepo,
-		conversationRepo: conversationRepo,
-		projectRepo:      projectRepo,
-		questionService:  questionService,
-		dsSvc:            dsSvc,
-		adapterFactory:   adapterFactory,
-		llmFactory:       llmFactory,
-		workerPool:       workerPool,
-		circuitBreaker:   circuitBreaker,
-		getTenantCtx:     getTenantCtx,
-		logger:           logger.Named("column-enrichment"),
+		ontologyRepo:       ontologyRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		conversationRepo:   conversationRepo,
+		projectRepo:        projectRepo,
+		questionService:    questionService,
+		dsSvc:              dsSvc,
+		adapterFactory:     adapterFactory,
+		llmFactory:         llmFactory,
+		workerPool:         workerPool,
+		circuitBreaker:     circuitBreaker,
+		getTenantCtx:       getTenantCtx,
+		logger:             logger.Named("column-enrichment"),
 	}
 }
 
 var _ ColumnEnrichmentService = (*columnEnrichmentService)(nil)
 
-// EnrichProject enriches all specified tables (or all entities if empty).
+// EnrichProject enriches all specified tables (or all selected tables if empty).
 func (s *columnEnrichmentService) EnrichProject(ctx context.Context, projectID uuid.UUID, tableNames []string, progressCallback dag.ProgressCallback) (*EnrichColumnsResult, error) {
 	startTime := time.Now()
 	result := &EnrichColumnsResult{
@@ -99,20 +106,24 @@ func (s *columnEnrichmentService) EnrichProject(ctx context.Context, projectID u
 		TablesFailed:   make(map[string]string),
 	}
 
-	// Get entities if no specific tables provided
+	// If no tableNames provided, fetch all selected tables
 	if len(tableNames) == 0 {
-		entities, err := s.entityRepo.GetByProject(ctx, projectID)
+		tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil, true)
 		if err != nil {
-			return nil, fmt.Errorf("get entities: %w", err)
+			return nil, fmt.Errorf("fetch selected tables: %w", err)
 		}
-		for _, e := range entities {
-			tableNames = append(tableNames, e.PrimaryTable)
+		if len(tables) == 0 {
+			s.logger.Info("No selected tables to enrich",
+				zap.String("project_id", projectID.String()))
+			result.DurationMs = time.Since(startTime).Milliseconds()
+			return result, nil
 		}
-	}
-
-	if len(tableNames) == 0 {
-		result.DurationMs = time.Since(startTime).Milliseconds()
-		return result, nil
+		for _, t := range tables {
+			tableNames = append(tableNames, t.TableName)
+		}
+		s.logger.Debug("Fetched tables for enrichment",
+			zap.String("project_id", projectID.String()),
+			zap.Int("table_count", len(tableNames)))
 	}
 
 	// Build work items for parallel processing
@@ -176,10 +187,10 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 		zap.String("project_id", projectID.String()),
 		zap.String("table", tableName))
 
-	// Get entity for context (business name, domain, description)
-	entity, err := s.getEntityByTableName(ctx, projectID, tableName)
+	// Get table context (schema, business name, description)
+	tableCtx, err := s.getTableContext(ctx, projectID, tableName)
 	if err != nil {
-		return fmt.Errorf("get entity for table %s: %w", tableName, err)
+		return fmt.Errorf("get table context for %s: %w", tableName, err)
 	}
 
 	// Get schema columns for this table
@@ -193,20 +204,38 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 		return nil
 	}
 
-	// Get FK info for this table (simple map for LLM context)
-	fkInfo, err := s.getForeignKeyInfo(ctx, projectID, tableName)
+	// Fetch column metadata for all columns in this table
+	columnIDs := make([]uuid.UUID, len(columns))
+	for i, col := range columns {
+		columnIDs[i] = col.ID
+	}
+	metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, columnIDs)
 	if err != nil {
-		s.logger.Warn("Failed to get FK info, continuing without",
+		s.logger.Warn("Failed to fetch column metadata, continuing without",
 			zap.String("table", tableName),
 			zap.Error(err))
-		fkInfo = make(map[string]string)
+	}
+	// Build map for quick lookup
+	metadataByColumnID := make(map[uuid.UUID]*models.ColumnMetadata)
+	for _, meta := range metadataList {
+		metadataByColumnID[meta.SchemaColumnID] = meta
+	}
+
+	// Extract FK info from column metadata (populated by column_feature_extraction service)
+	fkInfo := make(map[string]string)
+	for _, col := range columns {
+		if meta, ok := metadataByColumnID[col.ID]; ok {
+			if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil && idFeatures.FKTargetTable != "" {
+				fkInfo[col.ColumnName] = idFeatures.FKTargetTable
+			}
+		}
 	}
 
 	// Identify enum candidates
 	enumCandidates := s.identifyEnumCandidates(columns)
 
 	// Sample enum values for likely enum columns
-	enumSamples, err := s.sampleEnumValues(ctx, projectID, entity, columns)
+	enumSamples, err := s.sampleEnumValues(ctx, projectID, tableCtx, columns)
 	if err != nil {
 		s.logger.Warn("Failed to sample enum values, continuing without",
 			zap.String("table", tableName),
@@ -215,7 +244,7 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 	}
 
 	// Analyze enum value distributions (count, percentage, state semantics)
-	enumDistributions, err := s.analyzeEnumDistributions(ctx, projectID, entity, columns, enumCandidates)
+	enumDistributions, err := s.analyzeEnumDistributions(ctx, projectID, tableCtx, columns, enumCandidates)
 	if err != nil {
 		s.logger.Warn("Failed to analyze enum distributions, continuing without",
 			zap.String("table", tableName),
@@ -228,7 +257,7 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 
 	// Separate columns into those needing LLM enrichment and those already complete
 	// from ColumnFeatureExtraction (high confidence threshold: 0.9)
-	columnsNeedingLLM, syntheticEnrichments := s.filterColumnsForLLM(columns)
+	columnsNeedingLLM, syntheticEnrichments := s.filterColumnsForLLM(columns, metadataByColumnID)
 
 	s.logger.Debug("Filtered columns for LLM enrichment",
 		zap.String("table", tableName),
@@ -253,7 +282,7 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 		}
 
 		// Build and send LLM prompt only for columns that need it
-		llmEnrichments, err := s.enrichColumnsWithLLM(ctx, projectID, entity, columnsNeedingLLM, filteredFKInfo, filteredEnumSamples)
+		llmEnrichments, err := s.enrichColumnsWithLLM(ctx, projectID, tableCtx, columnsNeedingLLM, filteredFKInfo, filteredEnumSamples)
 		if err != nil {
 			return fmt.Errorf("LLM enrichment failed: %w", err)
 		}
@@ -264,7 +293,7 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 	enrichments = append(enrichments, syntheticEnrichments...)
 
 	// Convert enrichments to ColumnDetail and save, merging enum definitions, distributions, and FK info
-	columnDetails := s.convertToColumnDetails(tableName, enrichments, columns, fkInfo, enumSamples, enumDefs, enumDistributions)
+	columnDetails := s.convertToColumnDetails(tableName, enrichments, columns, fkInfo, enumSamples, enumDefs, enumDistributions, metadataByColumnID)
 	if err := s.ontologyRepo.UpdateColumnDetails(ctx, projectID, tableName, columnDetails); err != nil {
 		return fmt.Errorf("save column details: %w", err)
 	}
@@ -283,18 +312,44 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 	return nil
 }
 
-// getEntityByTableName finds an entity by its primary table name.
-func (s *columnEnrichmentService) getEntityByTableName(ctx context.Context, projectID uuid.UUID, tableName string) (*models.OntologyEntity, error) {
-	entities, err := s.entityRepo.GetByProject(ctx, projectID)
+// getTableContext retrieves table context for column enrichment.
+// It looks up the SchemaTable to get business name and description.
+func (s *columnEnrichmentService) getTableContext(ctx context.Context, projectID uuid.UUID, tableName string) (*TableContext, error) {
+	// Get datasources to find the one containing this table
+	datasources, err := s.dsSvc.List(ctx, projectID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list datasources: %w", err)
 	}
-	for _, e := range entities {
-		if e.PrimaryTable == tableName {
-			return e, nil
+	if len(datasources) == 0 {
+		return nil, fmt.Errorf("no datasource found for project %s", projectID)
+	}
+
+	// Find the table in schema tables
+	for _, dsStatus := range datasources {
+		ds := dsStatus.Datasource
+		table, err := s.schemaRepo.FindTableByName(ctx, projectID, ds.ID, tableName)
+		if err != nil {
+			continue // Try next datasource
+		}
+		if table != nil {
+			tableCtx := &TableContext{
+				TableName:    table.TableName,
+				SchemaName:   table.SchemaName,
+				DatasourceID: ds.ID,
+			}
+			// Note: BusinessName and Description now live in TableMetadata
+			// (engine_ontology_table_metadata), not SchemaTable. Future enhancement
+			// could fetch this from TableMetadataRepository if needed for enrichment.
+			return tableCtx, nil
 		}
 	}
-	return nil, fmt.Errorf("no entity found for table %s", tableName)
+
+	// Table not found in any datasource - create minimal context
+	// This allows enrichment to proceed even for tables not yet in schema
+	return &TableContext{
+		TableName:    tableName,
+		DatasourceID: datasources[0].Datasource.ID,
+	}, nil
 }
 
 // getColumnsForTable retrieves schema columns for a given table name.
@@ -306,36 +361,16 @@ func (s *columnEnrichmentService) getColumnsForTable(ctx context.Context, projec
 	return columnsByTable[tableName], nil
 }
 
-// getForeignKeyInfo returns a map of column_name -> target_table for FK columns.
-// This simplified version is used for the LLM prompt context.
-func (s *columnEnrichmentService) getForeignKeyInfo(ctx context.Context, projectID uuid.UUID, tableName string) (map[string]string, error) {
-	// Get relationships for this table
-	relationships, err := s.relationshipRepo.GetByTables(ctx, projectID, []string{tableName})
-	if err != nil {
-		return nil, err
-	}
-
-	// Build FK map: source column -> target table
-	fkInfo := make(map[string]string)
-	for _, rel := range relationships {
-		// Only include relationships where this table is the source
-		if rel.SourceColumnTable == tableName && rel.SourceColumnName != "" {
-			fkInfo[rel.SourceColumnName] = rel.TargetColumnTable
-		}
-	}
-
-	return fkInfo, nil
-}
-
-// NOTE: FKRelationshipInfo type and getForeignKeyDetailedInfo function have been removed.
-// Detailed FK information (target table/column, detection method, confidence) is now available
-// through ColumnFeatures.IdentifierFeatures populated by the column_feature_extraction service.
+// NOTE: getForeignKeyInfo function has been removed in v1.0.
+// FK information is now extracted from ColumnFeatures.IdentifierFeatures
+// populated by the column_feature_extraction service in Phase 2.
+// See extractFKInfoFromColumns() for the replacement.
 
 // sampleEnumValues samples distinct values for columns likely to be enums.
 func (s *columnEnrichmentService) sampleEnumValues(
 	ctx context.Context,
 	projectID uuid.UUID,
-	entity *models.OntologyEntity,
+	tableCtx *TableContext,
 	columns []*models.SchemaColumn,
 ) (map[string][]string, error) {
 	result := make(map[string][]string)
@@ -346,8 +381,8 @@ func (s *columnEnrichmentService) sampleEnumValues(
 		return result, nil
 	}
 
-	// Get datasource for this entity
-	ds, err := s.getDatasource(ctx, projectID, entity)
+	// Get datasource for this table
+	ds, err := s.getDatasource(ctx, projectID, tableCtx)
 	if err != nil {
 		return nil, fmt.Errorf("get datasource: %w", err)
 	}
@@ -361,7 +396,7 @@ func (s *columnEnrichmentService) sampleEnumValues(
 
 	// Sample each enum candidate
 	for _, col := range enumCandidates {
-		values, err := adapter.GetDistinctValues(ctx, entity.PrimarySchema, entity.PrimaryTable, col.ColumnName, 50)
+		values, err := adapter.GetDistinctValues(ctx, tableCtx.SchemaName, tableCtx.TableName, col.ColumnName, 50)
 		if err != nil {
 			s.logger.Debug("Failed to sample values for column, skipping",
 				zap.String("column", col.ColumnName),
@@ -376,25 +411,10 @@ func (s *columnEnrichmentService) sampleEnumValues(
 	return result, nil
 }
 
-// persistSampleValues persists sample values for columns with low cardinality (≤50 distinct values)
-// to enable MCP tools to return sample_values without on-demand database queries.
-func (s *columnEnrichmentService) persistSampleValues(ctx context.Context, columns []*models.SchemaColumn, enumSamples map[string][]string) error {
-	for _, col := range columns {
-		if samples, ok := enumSamples[col.ColumnName]; ok && len(samples) > 0 {
-			// Update column stats with sample values
-			// Pass nil for other stats to preserve existing values
-			if err := s.schemaRepo.UpdateColumnStats(ctx, col.ID, nil, nil, nil, nil, samples); err != nil {
-				s.logger.Warn("Failed to persist sample values for column",
-					zap.String("column", col.ColumnName),
-					zap.Error(err))
-				// Continue with other columns even if one fails
-				continue
-			}
-			s.logger.Debug("Persisted sample values",
-				zap.String("column", col.ColumnName),
-				zap.Int("sample_count", len(samples)))
-		}
-	}
+// persistSampleValues is a no-op. Sample values are no longer persisted to avoid storing
+// target datasource data in the engine database. The function signature is preserved for
+// backward compatibility but does nothing.
+func (s *columnEnrichmentService) persistSampleValues(_ context.Context, _ []*models.SchemaColumn, _ map[string][]string) error {
 	return nil
 }
 
@@ -404,43 +424,47 @@ func (s *columnEnrichmentService) persistSampleValues(ctx context.Context, colum
 const highConfidenceThreshold = 0.9
 
 // filterColumnsForLLM separates columns into those needing LLM enrichment and those
-// that already have high-confidence ColumnFeatures from the feature extraction pipeline.
+// that already have high-confidence ColumnMetadata from the feature extraction pipeline.
 // Returns:
 //   - columnsNeedingLLM: columns that should be sent to the LLM for enrichment
 //   - syntheticEnrichments: pre-built enrichments for high-confidence columns
-func (s *columnEnrichmentService) filterColumnsForLLM(columns []*models.SchemaColumn) ([]*models.SchemaColumn, []columnEnrichment) {
+func (s *columnEnrichmentService) filterColumnsForLLM(columns []*models.SchemaColumn, metadataByColumnID map[uuid.UUID]*models.ColumnMetadata) ([]*models.SchemaColumn, []columnEnrichment) {
 	var columnsNeedingLLM []*models.SchemaColumn
 	var syntheticEnrichments []columnEnrichment
 
 	for _, col := range columns {
-		features := col.GetColumnFeatures()
+		meta := metadataByColumnID[col.ID]
 
 		// Column needs LLM enrichment if:
-		// - No ColumnFeatures available
+		// - No ColumnMetadata available
 		// - Confidence below threshold
 		// - Missing description (even if other fields are populated)
-		if features == nil || features.Confidence < highConfidenceThreshold || features.Description == "" {
+		if meta == nil || meta.Confidence == nil || *meta.Confidence < highConfidenceThreshold || meta.Description == nil || *meta.Description == "" {
 			columnsNeedingLLM = append(columnsNeedingLLM, col)
 			continue
 		}
 
-		// Create synthetic enrichment from ColumnFeatures
+		// Create synthetic enrichment from ColumnMetadata
 		enrichment := columnEnrichment{
-			Name:         col.ColumnName,
-			Description:  features.Description,
-			SemanticType: features.SemanticType,
-			Role:         features.Role,
+			Name:        col.ColumnName,
+			Description: *meta.Description,
+		}
+		if meta.SemanticType != nil {
+			enrichment.SemanticType = *meta.SemanticType
+		}
+		if meta.Role != nil {
+			enrichment.Role = *meta.Role
 		}
 
 		// Copy FK association from IdentifierFeatures
-		if features.IdentifierFeatures != nil && features.IdentifierFeatures.EntityReferenced != "" {
-			assoc := features.IdentifierFeatures.EntityReferenced
+		if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil && idFeatures.EntityReferenced != "" {
+			assoc := idFeatures.EntityReferenced
 			enrichment.FKAssociation = &assoc
 		}
 
 		// Copy enum values from EnumFeatures
-		if features.EnumFeatures != nil && len(features.EnumFeatures.Values) > 0 {
-			for _, cev := range features.EnumFeatures.Values {
+		if enumFeatures := meta.GetEnumFeatures(); enumFeatures != nil && len(enumFeatures.Values) > 0 {
+			for _, cev := range enumFeatures.Values {
 				ev := models.EnumValue{
 					Value: cev.Value,
 					Label: cev.Label,
@@ -509,7 +533,7 @@ func (s *columnEnrichmentService) identifyEnumCandidates(columns []*models.Schem
 func (s *columnEnrichmentService) analyzeEnumDistributions(
 	ctx context.Context,
 	projectID uuid.UUID,
-	entity *models.OntologyEntity,
+	tableCtx *TableContext,
 	columns []*models.SchemaColumn,
 	enumCandidates []*models.SchemaColumn,
 ) (map[string]*datasource.EnumDistributionResult, error) {
@@ -519,8 +543,8 @@ func (s *columnEnrichmentService) analyzeEnumDistributions(
 		return result, nil
 	}
 
-	// Get datasource for this entity
-	ds, err := s.getDatasource(ctx, projectID, entity)
+	// Get datasource for this table
+	ds, err := s.getDatasource(ctx, projectID, tableCtx)
 	if err != nil {
 		return nil, fmt.Errorf("get datasource: %w", err)
 	}
@@ -538,7 +562,7 @@ func (s *columnEnrichmentService) analyzeEnumDistributions(
 
 	// Analyze distribution for each enum candidate
 	for _, col := range enumCandidates {
-		dist, err := adapter.GetEnumValueDistribution(ctx, entity.PrimarySchema, entity.PrimaryTable, col.ColumnName, completionCol, 100)
+		dist, err := adapter.GetEnumValueDistribution(ctx, tableCtx.SchemaName, tableCtx.TableName, col.ColumnName, completionCol, 100)
 		if err != nil {
 			s.logger.Debug("Failed to get enum distribution for column, skipping",
 				zap.String("column", col.ColumnName),
@@ -686,18 +710,31 @@ func applyEnumDistributions(enumValues []models.EnumValue, dist *datasource.Enum
 	return enumValues
 }
 
-// getDatasource retrieves the datasource for the entity's primary schema.
-func (s *columnEnrichmentService) getDatasource(ctx context.Context, projectID uuid.UUID, entity *models.OntologyEntity) (*models.Datasource, error) {
-	// Get all datasources and find the one containing this schema
+// getDatasource retrieves the datasource for the table's schema.
+func (s *columnEnrichmentService) getDatasource(ctx context.Context, projectID uuid.UUID, tableCtx *TableContext) (*models.Datasource, error) {
+	// If we have a specific datasource ID from table context, try to get that one
+	if tableCtx.DatasourceID != uuid.Nil {
+		datasources, err := s.dsSvc.List(ctx, projectID)
+		if err != nil {
+			return nil, err
+		}
+		for _, dsStatus := range datasources {
+			if dsStatus.Datasource.ID == tableCtx.DatasourceID {
+				if dsStatus.DecryptionFailed {
+					return nil, fmt.Errorf("datasource credentials were encrypted with a different key")
+				}
+				return dsStatus.Datasource, nil
+			}
+		}
+	}
+
+	// Fallback: return the first datasource (most projects have one)
 	datasources, err := s.dsSvc.List(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
 
-	// For now, just return the first datasource (most projects have one)
-	// TODO: Match based on schema if multiple datasources
 	if len(datasources) > 0 {
-		// If the datasource failed decryption, return an error
 		if datasources[0].DecryptionFailed {
 			return nil, fmt.Errorf("datasource credentials were encrypted with a different key")
 		}
@@ -738,7 +775,7 @@ type columnEnrichment struct {
 func (s *columnEnrichmentService) enrichColumnsWithLLM(
 	ctx context.Context,
 	projectID uuid.UUID,
-	entity *models.OntologyEntity,
+	tableCtx *TableContext,
 	columns []*models.SchemaColumn,
 	fkInfo map[string]string,
 	enumSamples map[string][]string,
@@ -752,14 +789,14 @@ func (s *columnEnrichmentService) enrichColumnsWithLLM(
 	const maxColumnsPerChunk = 50
 	if len(columns) > maxColumnsPerChunk {
 		s.logger.Info("Table has many columns, using chunked enrichment",
-			zap.String("table", entity.PrimaryTable),
+			zap.String("table", tableCtx.TableName),
 			zap.Int("total_columns", len(columns)),
 			zap.Int("chunk_size", maxColumnsPerChunk))
-		return s.enrichColumnsInChunks(ctx, projectID, llmClient, entity, columns, fkInfo, enumSamples, maxColumnsPerChunk)
+		return s.enrichColumnsInChunks(ctx, projectID, llmClient, tableCtx, columns, fkInfo, enumSamples, maxColumnsPerChunk)
 	}
 
 	// Single batch enrichment with retry
-	return s.enrichColumnBatch(ctx, projectID, llmClient, entity, columns, fkInfo, enumSamples)
+	return s.enrichColumnBatch(ctx, projectID, llmClient, tableCtx, columns, fkInfo, enumSamples)
 }
 
 // chunkWorkItem holds metadata for a chunk work item.
@@ -775,7 +812,7 @@ func (s *columnEnrichmentService) enrichColumnsInChunks(
 	ctx context.Context,
 	projectID uuid.UUID,
 	llmClient llm.LLMClient,
-	entity *models.OntologyEntity,
+	tableCtx *TableContext,
 	columns []*models.SchemaColumn,
 	fkInfo map[string]string,
 	enumSamples map[string][]string,
@@ -819,15 +856,15 @@ func (s *columnEnrichmentService) enrichColumnsInChunks(
 		})
 
 		workItems = append(workItems, llm.WorkItem[[]columnEnrichment]{
-			ID: fmt.Sprintf("%s-chunk-%d", entity.PrimaryTable, chunkIdx),
+			ID: fmt.Sprintf("%s-chunk-%d", tableCtx.TableName, chunkIdx),
 			Execute: func(ctx context.Context) ([]columnEnrichment, error) {
 				s.logger.Debug("Enriching column chunk",
-					zap.String("table", entity.PrimaryTable),
+					zap.String("table", tableCtx.TableName),
 					zap.Int("chunk_start", start),
 					zap.Int("chunk_end", chunkEnd),
 					zap.Int("total_columns", len(columns)))
 
-				return s.enrichColumnBatch(ctx, projectID, llmClient, entity, chunkCols, chunkFK, chunkEnum)
+				return s.enrichColumnBatch(ctx, projectID, llmClient, tableCtx, chunkCols, chunkFK, chunkEnum)
 			},
 		})
 	}
@@ -835,7 +872,7 @@ func (s *columnEnrichmentService) enrichColumnsInChunks(
 	// Build ID -> chunk index map for result reassembly
 	chunkIndexByID := make(map[string]int)
 	for _, meta := range chunkMetadata {
-		chunkIndexByID[fmt.Sprintf("%s-chunk-%d", entity.PrimaryTable, meta.Index)] = meta.Index
+		chunkIndexByID[fmt.Sprintf("%s-chunk-%d", tableCtx.TableName, meta.Index)] = meta.Index
 	}
 
 	// Process chunks in parallel using worker pool
@@ -867,7 +904,7 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 	ctx context.Context,
 	projectID uuid.UUID,
 	llmClient llm.LLMClient,
-	entity *models.OntologyEntity,
+	tableCtx *TableContext,
 	columns []*models.SchemaColumn,
 	fkInfo map[string]string,
 	enumSamples map[string][]string,
@@ -876,7 +913,7 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 	allowed, err := s.circuitBreaker.Allow()
 	if !allowed {
 		s.logger.Error("Circuit breaker prevented LLM call",
-			zap.String("table", entity.PrimaryTable),
+			zap.String("table", tableCtx.TableName),
 			zap.String("circuit_state", s.circuitBreaker.State().String()),
 			zap.Int("consecutive_failures", s.circuitBreaker.ConsecutiveFailures()),
 			zap.Error(err))
@@ -884,7 +921,7 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 	}
 
 	systemMsg := s.columnEnrichmentSystemMessage()
-	prompt := s.buildColumnEnrichmentPrompt(entity, columns, fkInfo, enumSamples)
+	prompt := s.buildColumnEnrichmentPrompt(tableCtx, columns, fkInfo, enumSamples)
 
 	// Retry LLM call with exponential backoff
 	retryConfig := &retry.Config{
@@ -903,7 +940,7 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 			classified := llm.ClassifyError(retryErr)
 			if classified.Retryable {
 				s.logger.Warn("LLM call failed, retrying",
-					zap.String("table", entity.PrimaryTable),
+					zap.String("table", tableCtx.TableName),
 					zap.Int("column_count", len(columns)),
 					zap.String("error_type", string(classified.Type)),
 					zap.Error(retryErr))
@@ -911,7 +948,7 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 			}
 			// Non-retryable error, fail immediately
 			s.logger.Error("LLM call failed with non-retryable error",
-				zap.String("table", entity.PrimaryTable),
+				zap.String("table", tableCtx.TableName),
 				zap.Int("column_count", len(columns)),
 				zap.String("error_type", string(classified.Type)),
 				zap.Error(retryErr))
@@ -924,7 +961,7 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 		// Record failure in circuit breaker
 		s.circuitBreaker.RecordFailure()
 		s.logger.Error("Circuit breaker recorded failure",
-			zap.String("table", entity.PrimaryTable),
+			zap.String("table", tableCtx.TableName),
 			zap.String("circuit_state", s.circuitBreaker.State().String()),
 			zap.Int("consecutive_failures", s.circuitBreaker.ConsecutiveFailures()))
 		return nil, fmt.Errorf("LLM call failed after retries: %w", err)
@@ -937,7 +974,7 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 	response, err := llm.ParseJSONResponse[columnEnrichmentResponse](result.Content)
 	if err != nil {
 		s.logger.Error("Failed to parse LLM response",
-			zap.String("table", entity.PrimaryTable),
+			zap.String("table", tableCtx.TableName),
 			zap.Int("column_count", len(columns)),
 			zap.String("response_preview", truncateString(result.Content, 200)),
 			zap.String("conversation_id", result.ConversationID.String()),
@@ -958,7 +995,7 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 	// Store questions generated during enrichment
 	if len(response.Questions) > 0 {
 		s.logger.Info("LLM generated questions during column enrichment",
-			zap.String("table", entity.PrimaryTable),
+			zap.String("table", tableCtx.TableName),
 			zap.Int("question_count", len(response.Questions)),
 			zap.String("project_id", projectID.String()))
 
@@ -981,13 +1018,13 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 			if len(questionModels) > 0 {
 				if err := s.questionService.CreateQuestions(ctx, questionModels); err != nil {
 					s.logger.Error("failed to store ontology questions from column enrichment",
-						zap.String("table", entity.PrimaryTable),
+						zap.String("table", tableCtx.TableName),
 						zap.Int("question_count", len(questionModels)),
 						zap.Error(err))
 					// Non-fatal: continue even if question storage fails
 				} else {
 					s.logger.Debug("Stored ontology questions from column enrichment",
-						zap.String("table", entity.PrimaryTable),
+						zap.String("table", tableCtx.TableName),
 						zap.Int("question_count", len(questionModels)))
 				}
 			}
@@ -1000,24 +1037,29 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 func (s *columnEnrichmentService) columnEnrichmentSystemMessage() string {
 	return `You are a database schema expert. Your task is to analyze database columns and provide semantic metadata that helps AI agents write accurate SQL queries.
 
-Consider the business context of the entity when determining column purposes, semantic types, and roles.`
+Consider the business context of the table when determining column purposes, semantic types, and roles.`
 }
 
 func (s *columnEnrichmentService) buildColumnEnrichmentPrompt(
-	entity *models.OntologyEntity,
+	tableCtx *TableContext,
 	columns []*models.SchemaColumn,
 	fkInfo map[string]string,
 	enumSamples map[string][]string,
 ) string {
 	var sb strings.Builder
 
-	// Entity context
-	sb.WriteString(fmt.Sprintf("# Table: %s\n", entity.PrimaryTable))
-	sb.WriteString(fmt.Sprintf("Entity: \"%s\"", entity.Name))
-	if entity.Description != "" {
-		sb.WriteString(fmt.Sprintf(" - %s", entity.Description))
+	// Table context
+	sb.WriteString(fmt.Sprintf("# Table: %s\n", tableCtx.TableName))
+	if tableCtx.BusinessName != "" {
+		sb.WriteString(fmt.Sprintf("Business Name: \"%s\"", tableCtx.BusinessName))
+		if tableCtx.Description != "" {
+			sb.WriteString(fmt.Sprintf(" - %s", tableCtx.Description))
+		}
+		sb.WriteString("\n")
+	} else if tableCtx.Description != "" {
+		sb.WriteString(fmt.Sprintf("Description: %s\n", tableCtx.Description))
 	}
-	sb.WriteString("\n\n")
+	sb.WriteString("\n")
 
 	// Columns to analyze
 	sb.WriteString("## Columns to Analyze\n")
@@ -1133,7 +1175,7 @@ func (s *columnEnrichmentService) writeFKContext(sb *strings.Builder, fkInfo map
 	if len(multipleRoles) > 0 {
 		sort.Strings(multipleRoles)
 		sb.WriteString("\n## FK Role Context\n")
-		sb.WriteString("These columns reference the same entity - identify what role each FK represents:\n")
+		sb.WriteString("These columns reference the same table - identify what role each FK represents:\n")
 		for _, info := range multipleRoles {
 			sb.WriteString(fmt.Sprintf("- %s\n", info))
 		}
@@ -1152,6 +1194,7 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 	enumSamples map[string][]string,
 	enumDefs []models.EnumDefinition,
 	enumDistributions map[string]*datasource.EnumDistributionResult,
+	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata,
 ) []models.ColumnDetail {
 	// Build a map for quick lookup
 	enrichmentByName := make(map[string]columnEnrichment)
@@ -1185,29 +1228,29 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 			}
 		}
 
-		// Apply stored column features from the feature extraction pipeline (Phase 2+)
+		// Apply stored column metadata from the feature extraction pipeline (Phase 2+)
 		// These features are populated by the column_feature_extraction service
-		// and stored in the column's metadata field. ColumnFeatures take precedence
+		// and stored in the ontology column metadata table. Metadata takes precedence
 		// over LLM-generated values as they are data-driven and more reliable.
-		if features := col.GetColumnFeatures(); features != nil {
-			// Use description from features if available and LLM didn't provide one
-			if features.Description != "" && detail.Description == "" {
-				detail.Description = features.Description
+		if meta := metadataByColumnID[col.ID]; meta != nil {
+			// Use description from metadata if available and LLM didn't provide one
+			if meta.Description != nil && *meta.Description != "" && detail.Description == "" {
+				detail.Description = *meta.Description
 			}
-			// Semantic type from features takes precedence as it's data-driven
-			if features.SemanticType != "" {
-				detail.SemanticType = features.SemanticType
+			// Semantic type from metadata takes precedence as it's data-driven
+			if meta.SemanticType != nil && *meta.SemanticType != "" {
+				detail.SemanticType = *meta.SemanticType
 			}
-			// Role from features takes precedence
-			if features.Role != "" {
-				detail.Role = features.Role
+			// Role from metadata takes precedence
+			if meta.Role != nil && *meta.Role != "" {
+				detail.Role = *meta.Role
 			}
 
 			// Copy EnumFeatures.Values to ColumnDetail.EnumValues if available
 			// EnumFeatures from Phase 3 include LLM-generated labels and state categories
-			if features.EnumFeatures != nil && len(features.EnumFeatures.Values) > 0 {
-				enumValues := make([]models.EnumValue, 0, len(features.EnumFeatures.Values))
-				for _, cev := range features.EnumFeatures.Values {
+			if enumFeatures := meta.GetEnumFeatures(); enumFeatures != nil && len(enumFeatures.Values) > 0 {
+				enumValues := make([]models.EnumValue, 0, len(enumFeatures.Values))
+				for _, cev := range enumFeatures.Values {
 					ev := models.EnumValue{
 						Value: cev.Value,
 						Label: cev.Label,
@@ -1240,28 +1283,28 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 
 			// Copy IdentifierFeatures.EntityReferenced to FKAssociation
 			// This provides semantic role information (e.g., "host", "visitor", "payer")
-			if features.IdentifierFeatures != nil && features.IdentifierFeatures.EntityReferenced != "" {
+			if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil && idFeatures.EntityReferenced != "" {
 				// Only set if not already set by LLM
 				if detail.FKAssociation == "" {
-					detail.FKAssociation = features.IdentifierFeatures.EntityReferenced
+					detail.FKAssociation = idFeatures.EntityReferenced
 				}
 			}
 
 			// Copy FK target info from IdentifierFeatures if available
-			if features.IdentifierFeatures != nil && features.IdentifierFeatures.FKTargetTable != "" {
+			if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil && idFeatures.FKTargetTable != "" {
 				detail.IsForeignKey = true
-				detail.ForeignTable = features.IdentifierFeatures.FKTargetTable
+				detail.ForeignTable = idFeatures.FKTargetTable
 			}
 
 			// Copy BooleanFeatures to description if not already set
 			// BooleanFeatures from Phase 2 include true/false meaning
-			if features.BooleanFeatures != nil && detail.Description == "" {
+			if boolFeatures := meta.GetBooleanFeatures(); boolFeatures != nil && detail.Description == "" {
 				var descParts []string
-				if features.BooleanFeatures.TrueMeaning != "" {
-					descParts = append(descParts, fmt.Sprintf("True: %s", features.BooleanFeatures.TrueMeaning))
+				if boolFeatures.TrueMeaning != "" {
+					descParts = append(descParts, fmt.Sprintf("True: %s", boolFeatures.TrueMeaning))
 				}
-				if features.BooleanFeatures.FalseMeaning != "" {
-					descParts = append(descParts, fmt.Sprintf("False: %s", features.BooleanFeatures.FalseMeaning))
+				if boolFeatures.FalseMeaning != "" {
+					descParts = append(descParts, fmt.Sprintf("False: %s", boolFeatures.FalseMeaning))
 				}
 				if len(descParts) > 0 {
 					detail.Description = strings.Join(descParts, ". ")
@@ -1269,11 +1312,11 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 			}
 
 			// Copy TimestampFeatures to semantic type if applicable
-			if features.TimestampFeatures != nil {
-				if features.TimestampFeatures.IsSoftDelete {
+			if tsFeatures := meta.GetTimestampFeatures(); tsFeatures != nil {
+				if tsFeatures.IsSoftDelete {
 					detail.SemanticType = "soft_delete"
-				} else if features.TimestampFeatures.IsAuditField {
-					switch features.TimestampFeatures.TimestampPurpose {
+				} else if tsFeatures.IsAuditField {
+					switch tsFeatures.TimestampPurpose {
 					case "audit_created":
 						detail.SemanticType = "audit_created"
 					case "audit_updated":

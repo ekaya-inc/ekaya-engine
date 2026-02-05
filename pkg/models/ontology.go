@@ -63,28 +63,6 @@ type AuditColumnInfo struct {
 }
 
 // ============================================================================
-// Tiered Ontology - Entity Layer (Tier 1)
-// ============================================================================
-
-// EntitySummary represents a per-table business summary (~75 tokens each).
-type EntitySummary struct {
-	TableName     string      `json:"table_name"`
-	BusinessName  string      `json:"business_name"`
-	Description   string      `json:"description"`
-	Domain        string      `json:"domain"`
-	Synonyms      []string    `json:"synonyms,omitempty"`
-	KeyColumns    []KeyColumn `json:"key_columns,omitempty"`
-	ColumnCount   int         `json:"column_count"`
-	Relationships []string    `json:"relationships,omitempty"`
-}
-
-// KeyColumn represents an important column in an entity summary.
-type KeyColumn struct {
-	Name     string   `json:"name"`
-	Synonyms []string `json:"synonyms,omitempty"`
-}
-
-// ============================================================================
 // Tiered Ontology - Column Layer (Tier 2)
 // ============================================================================
 
@@ -202,24 +180,15 @@ var ValidDomains = []string{
 
 // TieredOntology represents the complete hierarchical ontology structure.
 type TieredOntology struct {
-	ID              uuid.UUID                 `json:"id"`
-	ProjectID       uuid.UUID                 `json:"project_id"`
-	Version         int                       `json:"version"`
-	IsActive        bool                      `json:"is_active"`
-	DomainSummary   *DomainSummary            `json:"domain_summary,omitempty"`
-	EntitySummaries map[string]*EntitySummary `json:"entity_summaries,omitempty"` // table_name -> summary
-	ColumnDetails   map[string][]ColumnDetail `json:"column_details,omitempty"`   // table_name -> columns
-	Metadata        map[string]any            `json:"metadata,omitempty"`
-	CreatedAt       time.Time                 `json:"created_at"`
-	UpdatedAt       time.Time                 `json:"updated_at"`
-}
-
-// GetEntitySummary returns the summary for a specific table, or nil if not found.
-func (o *TieredOntology) GetEntitySummary(tableName string) *EntitySummary {
-	if o.EntitySummaries == nil {
-		return nil
-	}
-	return o.EntitySummaries[tableName]
+	ID            uuid.UUID                 `json:"id"`
+	ProjectID     uuid.UUID                 `json:"project_id"`
+	Version       int                       `json:"version"`
+	IsActive      bool                      `json:"is_active"`
+	DomainSummary *DomainSummary            `json:"domain_summary,omitempty"`
+	ColumnDetails map[string][]ColumnDetail `json:"column_details,omitempty"` // table_name -> columns
+	Metadata      map[string]any            `json:"metadata,omitempty"`
+	CreatedAt     time.Time                 `json:"created_at"`
+	UpdatedAt     time.Time                 `json:"updated_at"`
 }
 
 // GetColumnDetails returns the column details for a specific table, or nil if not found.
@@ -232,10 +201,10 @@ func (o *TieredOntology) GetColumnDetails(tableName string) []ColumnDetail {
 
 // TableCount returns the number of tables in the ontology.
 func (o *TieredOntology) TableCount() int {
-	if o.EntitySummaries == nil {
+	if o.ColumnDetails == nil {
 		return 0
 	}
-	return len(o.EntitySummaries)
+	return len(o.ColumnDetails)
 }
 
 // ColumnCount returns the total number of columns across all tables.

@@ -788,20 +788,11 @@ func TestDatasourcesIntegration_DeleteClearsOntology(t *testing.T) {
 
 	ontologyID := uuid.New()
 	_, err = scope.Conn.Exec(ctx, `
-		INSERT INTO engine_ontologies (id, project_id, version, is_active, domain_summary, entity_summaries, column_details, metadata, created_at, updated_at)
-		VALUES ($1, $2, 1, true, '{"domain":"test"}'::jsonb, '{"users":{"name":"users"}}'::jsonb, '{}'::jsonb, '{}'::jsonb, NOW(), NOW())
+		INSERT INTO engine_ontologies (id, project_id, version, is_active, domain_summary, column_details, metadata, created_at, updated_at)
+		VALUES ($1, $2, 1, true, '{"domain":"test"}'::jsonb, '{}'::jsonb, '{}'::jsonb, NOW(), NOW())
 	`, ontologyID, tc.projectID)
 	if err != nil {
 		t.Fatalf("failed to create test ontology: %v", err)
-	}
-
-	// Create an entity that references this ontology
-	_, err = scope.Conn.Exec(ctx, `
-		INSERT INTO engine_ontology_entities (id, project_id, ontology_id, name, primary_schema, primary_table, primary_column, created_at, updated_at)
-		VALUES ($1, $2, $3, 'user', 'public', 'users', 'user_id', NOW(), NOW())
-	`, uuid.New(), tc.projectID, ontologyID)
-	if err != nil {
-		t.Fatalf("failed to create test entity: %v", err)
 	}
 
 	// Verify ontology exists
@@ -812,16 +803,6 @@ func TestDatasourcesIntegration_DeleteClearsOntology(t *testing.T) {
 	}
 	if countBefore != 1 {
 		t.Fatalf("expected 1 ontology before delete, got %d", countBefore)
-	}
-
-	// Verify entity exists
-	var entityCountBefore int
-	err = scope.Conn.QueryRow(ctx, `SELECT COUNT(*) FROM engine_ontology_entities WHERE project_id = $1`, tc.projectID).Scan(&entityCountBefore)
-	if err != nil {
-		t.Fatalf("failed to count entities before delete: %v", err)
-	}
-	if entityCountBefore != 1 {
-		t.Fatalf("expected 1 entity before delete, got %d", entityCountBefore)
 	}
 
 	// Delete the datasource
@@ -844,16 +825,6 @@ func TestDatasourcesIntegration_DeleteClearsOntology(t *testing.T) {
 	}
 	if countAfter != 0 {
 		t.Errorf("expected 0 ontologies after delete, got %d", countAfter)
-	}
-
-	// Verify entities are gone (CASCADE)
-	var entityCountAfter int
-	err = scope.Conn.QueryRow(ctx, `SELECT COUNT(*) FROM engine_ontology_entities WHERE project_id = $1`, tc.projectID).Scan(&entityCountAfter)
-	if err != nil {
-		t.Fatalf("failed to count entities after delete: %v", err)
-	}
-	if entityCountAfter != 0 {
-		t.Errorf("expected 0 entities after delete (CASCADE), got %d", entityCountAfter)
 	}
 }
 
@@ -909,8 +880,8 @@ func TestDatasourcesIntegration_DeleteClearsKnowledgeAndGlossary(t *testing.T) {
 
 	ontologyID := uuid.New()
 	_, err = scope.Conn.Exec(ctx, `
-		INSERT INTO engine_ontologies (id, project_id, version, is_active, domain_summary, entity_summaries, column_details, metadata, created_at, updated_at)
-		VALUES ($1, $2, 1, true, '{"domain":"test"}'::jsonb, '{"users":{"name":"users"}}'::jsonb, '{}'::jsonb, '{}'::jsonb, NOW(), NOW())
+		INSERT INTO engine_ontologies (id, project_id, version, is_active, domain_summary, column_details, metadata, created_at, updated_at)
+		VALUES ($1, $2, 1, true, '{"domain":"test"}'::jsonb, '{}'::jsonb, '{}'::jsonb, NOW(), NOW())
 	`, ontologyID, tc.projectID)
 	if err != nil {
 		t.Fatalf("failed to create test ontology: %v", err)

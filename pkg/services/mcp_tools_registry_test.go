@@ -69,7 +69,7 @@ func TestGetEnabledTools_DeveloperWithQueryTools(t *testing.T) {
 	assert.Contains(t, toolNames, "list_approved_queries")
 
 	// Ontology Maintenance tools should NOT be included with AddQueryTools alone
-	assert.NotContains(t, toolNames, "update_entity")
+	assert.NotContains(t, toolNames, "update_table")
 	assert.NotContains(t, toolNames, "update_column")
 	assert.NotContains(t, toolNames, "refresh_schema")
 }
@@ -91,7 +91,7 @@ func TestGetEnabledTools_DeveloperWithOntologyMaintenance(t *testing.T) {
 	assert.Contains(t, toolNames, "resolve_ontology_question")
 	assert.Contains(t, toolNames, "skip_ontology_question")
 	// Ontology Maintenance tools
-	assert.Contains(t, toolNames, "update_entity")
+	assert.Contains(t, toolNames, "update_table")
 	assert.Contains(t, toolNames, "update_column")
 	assert.Contains(t, toolNames, "refresh_schema")
 	assert.Contains(t, toolNames, "list_pending_changes")
@@ -138,7 +138,7 @@ func TestGetEnabledTools_ApprovedQueriesWithOntologyMaintenance(t *testing.T) {
 	assert.Contains(t, toolNames, "execute")
 
 	// Ontology Maintenance requires developer.AddOntologyMaintenance, not approved_queries flags
-	assert.NotContains(t, toolNames, "update_entity")
+	assert.NotContains(t, toolNames, "update_table")
 	assert.NotContains(t, toolNames, "update_column")
 }
 

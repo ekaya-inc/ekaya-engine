@@ -216,6 +216,10 @@ type ColumnFeatures struct {
 	NeedsFKResolution     bool `json:"needs_fk_resolution"`      // Enqueue to Phase 4
 	NeedsCrossColumnCheck bool `json:"needs_cross_column_check"` // Enqueue to Phase 5
 
+	// Uncertainty escalation (set during classification when LLM is uncertain)
+	NeedsClarification    bool   `json:"needs_clarification,omitempty"`
+	ClarificationQuestion string `json:"clarification_question,omitempty"`
+
 	// Analysis metadata
 	AnalyzedAt   time.Time `json:"analyzed_at"`
 	LLMModelUsed string    `json:"llm_model_used,omitempty"`

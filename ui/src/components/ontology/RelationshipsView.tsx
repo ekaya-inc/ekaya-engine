@@ -22,14 +22,14 @@ const RelationshipsView = ({ relationships }: RelationshipsViewProps) => {
           <CardTitle>Relationships Overview</CardTitle>
         </div>
         <CardDescription>
-          Entity relationships discovered in your database
+          Table relationships discovered in your database
         </CardDescription>
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
           {!relationships || relationships.length === 0 ? (
             <div className="text-sm text-text-tertiary italic">
-              No relationship data available yet. Start the ontology extraction workflow to discover entity relationships.
+              No relationship data available yet. Start the ontology extraction workflow to discover table relationships.
             </div>
           ) : (
             <div className="text-sm text-text-secondary">

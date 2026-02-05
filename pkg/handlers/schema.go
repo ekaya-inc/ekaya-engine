@@ -17,12 +17,6 @@ import (
 
 // --- Request Types ---
 
-// UpdateMetadataRequest for updating table or column metadata.
-type UpdateMetadataRequest struct {
-	BusinessName *string `json:"business_name,omitempty"`
-	Description  *string `json:"description,omitempty"`
-}
-
 // SaveSelectionsRequest for bulk updating selection state.
 type SaveSelectionsRequest struct {
 	TableSelections  map[uuid.UUID]bool        `json:"table_selections"`  // table_id -> selected
@@ -39,18 +33,18 @@ type SchemaResponse struct {
 }
 
 // TableResponse represents a table with its columns.
+// Note: business_name and description are now in engine_ontology_table_metadata, not engine_schema_tables.
 type TableResponse struct {
-	ID           string           `json:"id"`
-	SchemaName   string           `json:"schema_name"`
-	TableName    string           `json:"table_name"`
-	BusinessName string           `json:"business_name,omitempty"`
-	Description  string           `json:"description,omitempty"`
-	RowCount     int64            `json:"row_count"`
-	IsSelected   bool             `json:"is_selected"`
-	Columns      []ColumnResponse `json:"columns"`
+	ID         string           `json:"id"`
+	SchemaName string           `json:"schema_name"`
+	TableName  string           `json:"table_name"`
+	RowCount   int64            `json:"row_count"`
+	IsSelected bool             `json:"is_selected"`
+	Columns    []ColumnResponse `json:"columns"`
 }
 
 // ColumnResponse represents a column within a table.
+// Note: business_name and description are now in engine_ontology_column_metadata, not engine_schema_columns.
 type ColumnResponse struct {
 	ID              string `json:"id"`
 	ColumnName      string `json:"column_name"`
@@ -59,8 +53,6 @@ type ColumnResponse struct {
 	IsPrimaryKey    bool   `json:"is_primary_key"`
 	IsSelected      bool   `json:"is_selected"`
 	OrdinalPosition int    `json:"ordinal_position"`
-	BusinessName    string `json:"business_name,omitempty"`
-	Description     string `json:"description,omitempty"`
 	DistinctCount   *int64 `json:"distinct_count,omitempty"`
 	NullCount       *int64 `json:"null_count,omitempty"`
 }
@@ -176,24 +168,26 @@ func (h *SchemaHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.
 	// Table operations
 	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsid}/schema/tables/{tableName}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetTable)))
-	mux.HandleFunc("PUT /api/projects/{pid}/datasources/{dsid}/schema/tables/{tableId}/metadata",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.UpdateTableMetadata)))
+	// Table metadata is now managed through MCP tools (update_table) and stored in engine_ontology_table_metadata.
 
-	// Column operations
-	mux.HandleFunc("PUT /api/projects/{pid}/datasources/{dsid}/schema/columns/{columnId}/metadata",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.UpdateColumnMetadata)))
+	// Column metadata is now managed through MCP tools (update_column) and stored in engine_ontology_column_metadata.
+	// The PUT /schema/columns/{columnId}/metadata endpoint has been removed.
 
 	// Selection operations
 	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/schema/selections",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.SaveSelections)))
 
-	// Relationship operations
+	// Relationship operations (datasource-level)
 	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsid}/schema/relationships",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetRelationships)))
 	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/schema/relationships",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.AddRelationship)))
 	mux.HandleFunc("DELETE /api/projects/{pid}/datasources/{dsid}/schema/relationships/{relId}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.RemoveRelationship)))
+
+	// Project-level relationship operations (aggregates across all datasources)
+	mux.HandleFunc("GET /api/projects/{pid}/relationships",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetProjectRelationships)))
 
 	// Relationship discovery operations
 	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/schema/relationships/discover",
@@ -365,100 +359,6 @@ func (h *SchemaHandler) GetTable(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// UpdateTableMetadata handles PUT /api/projects/{pid}/datasources/{dsid}/schema/tables/{tableId}/metadata
-// Updates the business_name and/or description for a table.
-func (h *SchemaHandler) UpdateTableMetadata(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := ParseProjectID(w, r, h.logger)
-	if !ok {
-		return
-	}
-
-	tableID, err := uuid.Parse(r.PathValue("tableId"))
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_table_id", "Invalid table ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	var req UpdateMetadataRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_request", "Invalid request body"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	if err := h.schemaService.UpdateTableMetadata(r.Context(), projectID, tableID, req.BusinessName, req.Description); err != nil {
-		if errors.Is(err, apperrors.ErrNotFound) {
-			if err := ErrorResponse(w, http.StatusNotFound, "table_not_found", "Table not found"); err != nil {
-				h.logger.Error("Failed to write error response", zap.Error(err))
-			}
-			return
-		}
-		h.logger.Error("Failed to update table metadata",
-			zap.String("project_id", projectID.String()),
-			zap.String("table_id", tableID.String()),
-			zap.Error(err))
-		if err := ErrorResponse(w, http.StatusInternalServerError, "update_metadata_failed", "Failed to update table metadata"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	response := ApiResponse{Success: true}
-	if err := WriteJSON(w, http.StatusOK, response); err != nil {
-		h.logger.Error("Failed to write response", zap.Error(err))
-	}
-}
-
-// UpdateColumnMetadata handles PUT /api/projects/{pid}/datasources/{dsid}/schema/columns/{columnId}/metadata
-// Updates the business_name and/or description for a column.
-func (h *SchemaHandler) UpdateColumnMetadata(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := ParseProjectID(w, r, h.logger)
-	if !ok {
-		return
-	}
-
-	columnID, err := uuid.Parse(r.PathValue("columnId"))
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_column_id", "Invalid column ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	var req UpdateMetadataRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_request", "Invalid request body"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	if err := h.schemaService.UpdateColumnMetadata(r.Context(), projectID, columnID, req.BusinessName, req.Description); err != nil {
-		if errors.Is(err, apperrors.ErrNotFound) {
-			if err := ErrorResponse(w, http.StatusNotFound, "column_not_found", "Column not found"); err != nil {
-				h.logger.Error("Failed to write error response", zap.Error(err))
-			}
-			return
-		}
-		h.logger.Error("Failed to update column metadata",
-			zap.String("project_id", projectID.String()),
-			zap.String("column_id", columnID.String()),
-			zap.Error(err))
-		if err := ErrorResponse(w, http.StatusInternalServerError, "update_metadata_failed", "Failed to update column metadata"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	response := ApiResponse{Success: true}
-	if err := WriteJSON(w, http.StatusOK, response); err != nil {
-		h.logger.Error("Failed to write response", zap.Error(err))
-	}
-}
-
 // SaveSelections handles POST /api/projects/{pid}/datasources/{dsid}/schema/selections
 // Bulk updates is_selected flags for tables and columns.
 func (h *SchemaHandler) SaveSelections(w http.ResponseWriter, r *http.Request) {
@@ -505,6 +405,44 @@ func (h *SchemaHandler) GetRelationships(w http.ResponseWriter, r *http.Request)
 		h.logger.Error("Failed to get relationships",
 			zap.String("project_id", projectID.String()),
 			zap.String("datasource_id", datasourceID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "get_relationships_failed", "Failed to get relationships"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Convert model response to handler response
+	data := GetRelationshipsResponse{
+		TotalCount:   relResponse.TotalCount,
+		EmptyTables:  relResponse.EmptyTables,
+		OrphanTables: relResponse.OrphanTables,
+	}
+
+	data.Relationships = make([]RelationshipDetailResponse, len(relResponse.Relationships))
+	for i, rel := range relResponse.Relationships {
+		data.Relationships[i] = h.toRelationshipDetailResponse(rel)
+	}
+
+	response := ApiResponse{Success: true, Data: data}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// GetProjectRelationships handles GET /api/projects/{pid}/relationships
+// Returns all relationships across all datasources for a project.
+func (h *SchemaHandler) GetProjectRelationships(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	// Use uuid.Nil to indicate "all datasources"
+	relResponse, err := h.schemaService.GetRelationshipsResponse(r.Context(), projectID, uuid.Nil)
+	if err != nil {
+		h.logger.Error("Failed to get project relationships",
+			zap.String("project_id", projectID.String()),
 			zap.Error(err))
 		if err := ErrorResponse(w, http.StatusInternalServerError, "get_relationships_failed", "Failed to get relationships"); err != nil {
 			h.logger.Error("Failed to write error response", zap.Error(err))
@@ -697,14 +635,12 @@ func (h *SchemaHandler) toTableResponse(table *models.DatasourceTable) TableResp
 	}
 
 	return TableResponse{
-		ID:           table.ID.String(),
-		SchemaName:   table.SchemaName,
-		TableName:    table.TableName,
-		BusinessName: table.BusinessName,
-		Description:  table.Description,
-		RowCount:     table.RowCount,
-		IsSelected:   table.IsSelected,
-		Columns:      columns,
+		ID:         table.ID.String(),
+		SchemaName: table.SchemaName,
+		TableName:  table.TableName,
+		RowCount:   table.RowCount,
+		IsSelected: table.IsSelected,
+		Columns:    columns,
 	}
 }
 
@@ -718,8 +654,6 @@ func (h *SchemaHandler) toColumnResponse(col *models.DatasourceColumn) ColumnRes
 		IsPrimaryKey:    col.IsPrimaryKey,
 		IsSelected:      col.IsSelected,
 		OrdinalPosition: col.OrdinalPosition,
-		BusinessName:    col.BusinessName,
-		Description:     col.Description,
 		DistinctCount:   col.DistinctCount,
 		NullCount:       col.NullCount,
 	}

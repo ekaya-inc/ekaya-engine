@@ -7,6 +7,7 @@ import (
 )
 
 // SchemaTable represents a discovered database table from a datasource.
+// Note: BusinessName, Description, and Metadata are now stored in engine_ontology_table_metadata.
 type SchemaTable struct {
 	ID           uuid.UUID      `json:"id"`
 	ProjectID    uuid.UUID      `json:"project_id"`
@@ -15,9 +16,6 @@ type SchemaTable struct {
 	TableName    string         `json:"table_name"`
 	IsSelected   bool           `json:"is_selected"`
 	RowCount     *int64         `json:"row_count,omitempty"`
-	BusinessName *string        `json:"business_name,omitempty"`
-	Description  *string        `json:"description,omitempty"`
-	Metadata     map[string]any `json:"metadata,omitempty"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 	Columns      []SchemaColumn `json:"columns,omitempty"` // populated on demand
@@ -25,187 +23,29 @@ type SchemaTable struct {
 
 // SchemaColumn represents a table column with statistics.
 type SchemaColumn struct {
-	ID              uuid.UUID      `json:"id"`
-	ProjectID       uuid.UUID      `json:"project_id"`
-	SchemaTableID   uuid.UUID      `json:"schema_table_id"`
-	ColumnName      string         `json:"column_name"`
-	DataType        string         `json:"data_type"`
-	IsNullable      bool           `json:"is_nullable"`
-	IsPrimaryKey    bool           `json:"is_primary_key"`
-	IsUnique        bool           `json:"is_unique"`
-	IsSelected      bool           `json:"is_selected"`
-	OrdinalPosition int            `json:"ordinal_position"`
-	DefaultValue    *string        `json:"default_value,omitempty"`
-	DistinctCount   *int64         `json:"distinct_count,omitempty"`
-	NullCount       *int64         `json:"null_count,omitempty"`
-	MinLength       *int64         `json:"min_length,omitempty"` // For text columns: min string length
-	MaxLength       *int64         `json:"max_length,omitempty"` // For text columns: max string length
-	BusinessName    *string        `json:"business_name,omitempty"`
-	Description     *string        `json:"description,omitempty"`
-	Metadata        map[string]any `json:"metadata,omitempty"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
+	ID              uuid.UUID `json:"id"`
+	ProjectID       uuid.UUID `json:"project_id"`
+	SchemaTableID   uuid.UUID `json:"schema_table_id"`
+	ColumnName      string    `json:"column_name"`
+	DataType        string    `json:"data_type"`
+	IsNullable      bool      `json:"is_nullable"`
+	IsPrimaryKey    bool      `json:"is_primary_key"`
+	IsUnique        bool      `json:"is_unique"`
+	IsSelected      bool      `json:"is_selected"`
+	OrdinalPosition int       `json:"ordinal_position"`
+	DefaultValue    *string   `json:"default_value,omitempty"`
+	DistinctCount   *int64    `json:"distinct_count,omitempty"`
+	NullCount       *int64    `json:"null_count,omitempty"`
+	MinLength       *int64    `json:"min_length,omitempty"` // For text columns: min string length
+	MaxLength       *int64    `json:"max_length,omitempty"` // For text columns: max string length
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 	// Discovery-related fields (populated by discovery process)
 	RowCount          *int64     `json:"row_count,omitempty"`          // Denormalized table row count
 	NonNullCount      *int64     `json:"non_null_count,omitempty"`     // Non-null values in column
 	IsJoinable        *bool      `json:"is_joinable,omitempty"`        // Can be used as join key
 	JoinabilityReason *string    `json:"joinability_reason,omitempty"` // Why column is/isn't joinable
 	StatsUpdatedAt    *time.Time `json:"stats_updated_at,omitempty"`   // When stats were computed
-	SampleValues      []string   `json:"sample_values,omitempty"`      // Distinct values for low-cardinality columns (≤50 values)
-	// Sensitive data override (NULL=auto-detect, TRUE=always sensitive, FALSE=never sensitive)
-	IsSensitive *bool `json:"is_sensitive,omitempty"`
-}
-
-// GetColumnFeatures extracts the stored ColumnFeatures from the column's Metadata field.
-// Returns nil if no features have been stored yet.
-// The features are stored under the "column_features" key by UpdateColumnFeatures.
-func (c *SchemaColumn) GetColumnFeatures() *ColumnFeatures {
-	if c.Metadata == nil {
-		return nil
-	}
-	featuresData, ok := c.Metadata["column_features"]
-	if !ok {
-		return nil
-	}
-	featuresMap, ok := featuresData.(map[string]any)
-	if !ok {
-		return nil
-	}
-
-	// Extract purpose which is the primary field we need for filtering
-	features := &ColumnFeatures{}
-	if purpose, ok := featuresMap["purpose"].(string); ok {
-		features.Purpose = purpose
-	}
-	if semanticType, ok := featuresMap["semantic_type"].(string); ok {
-		features.SemanticType = semanticType
-	}
-	if role, ok := featuresMap["role"].(string); ok {
-		features.Role = role
-	}
-	if description, ok := featuresMap["description"].(string); ok {
-		features.Description = description
-	}
-	if confidence, ok := featuresMap["confidence"].(float64); ok {
-		features.Confidence = confidence
-	}
-	if path, ok := featuresMap["classification_path"].(string); ok {
-		features.ClassificationPath = ClassificationPath(path)
-	}
-
-	// Extract timestamp features if present
-	if tsData, ok := featuresMap["timestamp_features"].(map[string]any); ok {
-		features.TimestampFeatures = &TimestampFeatures{}
-		if purpose, ok := tsData["timestamp_purpose"].(string); ok {
-			features.TimestampFeatures.TimestampPurpose = purpose
-		}
-		if scale, ok := tsData["timestamp_scale"].(string); ok {
-			features.TimestampFeatures.TimestampScale = scale
-		}
-		if isSoftDelete, ok := tsData["is_soft_delete"].(bool); ok {
-			features.TimestampFeatures.IsSoftDelete = isSoftDelete
-		}
-		if isAudit, ok := tsData["is_audit_field"].(bool); ok {
-			features.TimestampFeatures.IsAuditField = isAudit
-		}
-	}
-
-	// Extract monetary features if present
-	if moneyData, ok := featuresMap["monetary_features"].(map[string]any); ok {
-		features.MonetaryFeatures = &MonetaryFeatures{}
-		if isMonetary, ok := moneyData["is_monetary"].(bool); ok {
-			features.MonetaryFeatures.IsMonetary = isMonetary
-		}
-		if unit, ok := moneyData["currency_unit"].(string); ok {
-			features.MonetaryFeatures.CurrencyUnit = unit
-		}
-		if paired, ok := moneyData["paired_currency_column"].(string); ok {
-			features.MonetaryFeatures.PairedCurrencyColumn = paired
-		}
-		if desc, ok := moneyData["amount_description"].(string); ok {
-			features.MonetaryFeatures.AmountDescription = desc
-		}
-	}
-
-	// Extract identifier features if present
-	if idData, ok := featuresMap["identifier_features"].(map[string]any); ok {
-		features.IdentifierFeatures = &IdentifierFeatures{}
-		if idType, ok := idData["identifier_type"].(string); ok {
-			features.IdentifierFeatures.IdentifierType = idType
-		}
-		if svc, ok := idData["external_service"].(string); ok {
-			features.IdentifierFeatures.ExternalService = svc
-		}
-		if fkTable, ok := idData["fk_target_table"].(string); ok {
-			features.IdentifierFeatures.FKTargetTable = fkTable
-		}
-		if fkCol, ok := idData["fk_target_column"].(string); ok {
-			features.IdentifierFeatures.FKTargetColumn = fkCol
-		}
-		if fkConf, ok := idData["fk_confidence"].(float64); ok {
-			features.IdentifierFeatures.FKConfidence = fkConf
-		}
-		if entityRef, ok := idData["entity_referenced"].(string); ok {
-			features.IdentifierFeatures.EntityReferenced = entityRef
-		}
-	}
-
-	// Extract boolean features if present
-	if boolData, ok := featuresMap["boolean_features"].(map[string]any); ok {
-		features.BooleanFeatures = &BooleanFeatures{}
-		if trueMeaning, ok := boolData["true_meaning"].(string); ok {
-			features.BooleanFeatures.TrueMeaning = trueMeaning
-		}
-		if falseMeaning, ok := boolData["false_meaning"].(string); ok {
-			features.BooleanFeatures.FalseMeaning = falseMeaning
-		}
-		if boolType, ok := boolData["boolean_type"].(string); ok {
-			features.BooleanFeatures.BooleanType = boolType
-		}
-		if truePct, ok := boolData["true_percentage"].(float64); ok {
-			features.BooleanFeatures.TruePercentage = truePct
-		}
-		if falsePct, ok := boolData["false_percentage"].(float64); ok {
-			features.BooleanFeatures.FalsePercentage = falsePct
-		}
-	}
-
-	// Extract enum features if present
-	if enumData, ok := featuresMap["enum_features"].(map[string]any); ok {
-		features.EnumFeatures = &EnumFeatures{}
-		if isStateMachine, ok := enumData["is_state_machine"].(bool); ok {
-			features.EnumFeatures.IsStateMachine = isStateMachine
-		}
-		if stateDesc, ok := enumData["state_description"].(string); ok {
-			features.EnumFeatures.StateDescription = stateDesc
-		}
-		// Extract enum values array
-		if valuesData, ok := enumData["values"].([]any); ok {
-			for _, v := range valuesData {
-				if valMap, ok := v.(map[string]any); ok {
-					enumValue := ColumnEnumValue{}
-					if value, ok := valMap["value"].(string); ok {
-						enumValue.Value = value
-					}
-					if label, ok := valMap["label"].(string); ok {
-						enumValue.Label = label
-					}
-					if category, ok := valMap["category"].(string); ok {
-						enumValue.Category = category
-					}
-					if count, ok := valMap["count"].(float64); ok {
-						enumValue.Count = int64(count)
-					}
-					if pct, ok := valMap["percentage"].(float64); ok {
-						enumValue.Percentage = pct
-					}
-					features.EnumFeatures.Values = append(features.EnumFeatures.Values, enumValue)
-				}
-			}
-		}
-	}
-
-	return features
 }
 
 // SchemaRelationship represents a relationship between two columns.
@@ -325,21 +165,24 @@ const (
 // Inference methods for discovered relationships.
 // Some methods are reserved for future inference algorithms.
 const (
-	InferenceMethodNamingPattern = "naming_pattern" // Reserved: column name pattern matching (e.g., user_id -> users.id)
-	InferenceMethodValueOverlap  = "value_overlap"  // Active: statistical value overlap analysis
-	InferenceMethodTypeMatch     = "type_match"     // Reserved: type-compatible column matching
-	InferenceMethodForeignKey    = "foreign_key"    // Active: imported from database FK constraints
+	InferenceMethodNamingPattern  = "naming_pattern"  // Reserved: column name pattern matching (e.g., user_id -> users.id)
+	InferenceMethodValueOverlap   = "value_overlap"   // Active: statistical value overlap analysis
+	InferenceMethodTypeMatch      = "type_match"      // Reserved: type-compatible column matching
+	InferenceMethodForeignKey     = "foreign_key"     // Active: imported from database FK constraints
+	InferenceMethodColumnFeatures = "column_features" // Active: FK derived from ColumnFeatureExtraction Phase 4
+	InferenceMethodPKMatch        = "pk_match"        // Active: FK inferred from PK-match discovery
 )
 
 // Rejection reasons for relationship candidates
 const (
-	RejectionLowMatchRate    = "low_match_rate"
-	RejectionHighOrphanRate  = "high_orphan_rate"
-	RejectionJoinFailed      = "join_failed"
-	RejectionTypeMismatch    = "type_mismatch"
-	RejectionAlreadyExists   = "already_exists"
-	RejectionWrongDirection  = "wrong_direction"  // Source has more distinct values than target (reversed FK)
-	RejectionOrphanIntegrity = "orphan_integrity" // More than 5% orphan values (FK integrity violation)
+	RejectionLowMatchRate      = "low_match_rate"
+	RejectionHighOrphanRate    = "high_orphan_rate"
+	RejectionJoinFailed        = "join_failed"
+	RejectionTypeMismatch      = "type_mismatch"
+	RejectionAlreadyExists     = "already_exists"
+	RejectionWrongDirection    = "wrong_direction"     // Source has more distinct values than target (reversed FK)
+	RejectionOrphanIntegrity   = "orphan_integrity"    // More than 5% orphan values (FK integrity violation)
+	RejectionReverseOrphanHigh = "reverse_orphan_high" // >50% of target values don't exist in source (coincidental overlap)
 )
 
 // Joinability classification reasons
@@ -397,18 +240,18 @@ type DatasourceSchema struct {
 }
 
 // DatasourceTable represents a table in the customer's datasource.
+// Note: business_name and description are now in engine_ontology_table_metadata, not engine_schema_tables.
 type DatasourceTable struct {
-	ID           uuid.UUID
-	SchemaName   string
-	TableName    string
-	BusinessName string
-	Description  string
-	RowCount     int64
-	IsSelected   bool
-	Columns      []*DatasourceColumn
+	ID         uuid.UUID
+	SchemaName string
+	TableName  string
+	RowCount   int64
+	IsSelected bool
+	Columns    []*DatasourceColumn
 }
 
 // DatasourceColumn represents a column in the customer's datasource.
+// Note: business_name and description are now in engine_ontology_column_metadata, not engine_schema_columns.
 type DatasourceColumn struct {
 	ID              uuid.UUID
 	ColumnName      string
@@ -419,8 +262,6 @@ type DatasourceColumn struct {
 	IsSelected      bool
 	OrdinalPosition int
 	DefaultValue    *string
-	BusinessName    string
-	Description     string
 	DistinctCount   *int64
 	NullCount       *int64
 }

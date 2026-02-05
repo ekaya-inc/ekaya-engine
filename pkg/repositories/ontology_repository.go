@@ -18,8 +18,6 @@ type OntologyRepository interface {
 	Create(ctx context.Context, ontology *models.TieredOntology) error
 	GetActive(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error)
 	UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error
-	UpdateEntitySummary(ctx context.Context, projectID uuid.UUID, tableName string, summary *models.EntitySummary) error
-	UpdateEntitySummaries(ctx context.Context, projectID uuid.UUID, summaries map[string]*models.EntitySummary) error
 	UpdateColumnDetails(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error
 	GetNextVersion(ctx context.Context, projectID uuid.UUID) (int, error)
 	DeleteByProject(ctx context.Context, projectID uuid.UUID) error
@@ -51,14 +49,6 @@ func (r *ontologyRepository) Create(ctx context.Context, ontology *models.Tiered
 	}
 	if ontology.DomainSummary == nil {
 		domainJSON = nil
-	}
-
-	entitiesJSON, err := json.Marshal(ontology.EntitySummaries)
-	if err != nil {
-		return fmt.Errorf("failed to marshal entity_summaries: %w", err)
-	}
-	if ontology.EntitySummaries == nil {
-		entitiesJSON = nil
 	}
 
 	columnsJSON, err := json.Marshal(ontology.ColumnDetails)
@@ -99,12 +89,12 @@ func (r *ontologyRepository) Create(ctx context.Context, ontology *models.Tiered
 	query := `
 		INSERT INTO engine_ontologies (
 			id, project_id, version, is_active, domain_summary,
-			entity_summaries, column_details, metadata, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+			column_details, metadata, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
 
 	_, err = tx.Exec(ctx, query,
 		ontology.ID, ontology.ProjectID, ontology.Version, ontology.IsActive,
-		domainJSON, entitiesJSON, columnsJSON, metadataJSON, ontology.CreatedAt, ontology.UpdatedAt,
+		domainJSON, columnsJSON, metadataJSON, ontology.CreatedAt, ontology.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create ontology: %w", err)
@@ -125,7 +115,7 @@ func (r *ontologyRepository) GetActive(ctx context.Context, projectID uuid.UUID)
 
 	query := `
 		SELECT id, project_id, version, is_active,
-		       domain_summary, entity_summaries, column_details, metadata, created_at, updated_at
+		       domain_summary, column_details, metadata, created_at, updated_at
 		FROM engine_ontologies
 		WHERE project_id = $1 AND is_active = true
 		ORDER BY version DESC
@@ -161,64 +151,6 @@ func (r *ontologyRepository) UpdateDomainSummary(ctx context.Context, projectID 
 	result, err := scope.Conn.Exec(ctx, query, projectID, domainJSON)
 	if err != nil {
 		return fmt.Errorf("failed to update domain summary: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return fmt.Errorf("no active ontology found")
-	}
-
-	return nil
-}
-
-func (r *ontologyRepository) UpdateEntitySummary(ctx context.Context, projectID uuid.UUID, tableName string, summary *models.EntitySummary) error {
-	scope, ok := database.GetTenantScope(ctx)
-	if !ok {
-		return fmt.Errorf("no tenant scope in context")
-	}
-
-	summaryJSON, err := json.Marshal(summary)
-	if err != nil {
-		return fmt.Errorf("failed to marshal entity summary: %w", err)
-	}
-
-	// Use JSONB set to update a single entity
-	query := `
-		UPDATE engine_ontologies
-		SET entity_summaries = COALESCE(entity_summaries, '{}'::jsonb) || jsonb_build_object($2::text, $3::jsonb)
-		WHERE project_id = $1 AND is_active = true`
-
-	result, err := scope.Conn.Exec(ctx, query, projectID, tableName, summaryJSON)
-	if err != nil {
-		return fmt.Errorf("failed to update entity summary: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return fmt.Errorf("no active ontology found")
-	}
-
-	return nil
-}
-
-func (r *ontologyRepository) UpdateEntitySummaries(ctx context.Context, projectID uuid.UUID, summaries map[string]*models.EntitySummary) error {
-	scope, ok := database.GetTenantScope(ctx)
-	if !ok {
-		return fmt.Errorf("no tenant scope in context")
-	}
-
-	summariesJSON, err := json.Marshal(summaries)
-	if err != nil {
-		return fmt.Errorf("failed to marshal entity summaries: %w", err)
-	}
-
-	// Merge new summaries with existing ones
-	query := `
-		UPDATE engine_ontologies
-		SET entity_summaries = COALESCE(entity_summaries, '{}'::jsonb) || $2::jsonb
-		WHERE project_id = $1 AND is_active = true`
-
-	result, err := scope.Conn.Exec(ctx, query, projectID, summariesJSON)
-	if err != nil {
-		return fmt.Errorf("failed to update entity summaries: %w", err)
 	}
 
 	if result.RowsAffected() == 0 {
@@ -318,11 +250,11 @@ func (r *ontologyRepository) DeleteByProject(ctx context.Context, projectID uuid
 
 func scanOntologyRow(row pgx.Row) (*models.TieredOntology, error) {
 	var o models.TieredOntology
-	var domainJSON, entitiesJSON, columnsJSON, metadataJSON []byte
+	var domainJSON, columnsJSON, metadataJSON []byte
 
 	err := row.Scan(
 		&o.ID, &o.ProjectID, &o.Version, &o.IsActive,
-		&domainJSON, &entitiesJSON, &columnsJSON, &metadataJSON, &o.CreatedAt, &o.UpdatedAt,
+		&domainJSON, &columnsJSON, &metadataJSON, &o.CreatedAt, &o.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -335,13 +267,6 @@ func scanOntologyRow(row pgx.Row) (*models.TieredOntology, error) {
 		o.DomainSummary = &models.DomainSummary{}
 		if err := json.Unmarshal(domainJSON, o.DomainSummary); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal domain_summary: %w", err)
-		}
-	}
-
-	if len(entitiesJSON) > 0 {
-		o.EntitySummaries = make(map[string]*models.EntitySummary)
-		if err := json.Unmarshal(entitiesJSON, &o.EntitySummaries); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal entity_summaries: %w", err)
 		}
 	}
 

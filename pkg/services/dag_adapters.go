@@ -5,67 +5,12 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/ekaya-inc/ekaya-engine/pkg/models"
-	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services/dag"
 )
 
 // These adapters convert between the services package types and the dag package types.
 // This allows the dag package to remain independent of the services package,
 // avoiding import cycles.
-
-// EntityDiscoveryAdapter adapts EntityDiscoveryService for the dag package.
-type EntityDiscoveryAdapter struct {
-	svc EntityDiscoveryService
-}
-
-// NewEntityDiscoveryAdapter creates a new adapter.
-func NewEntityDiscoveryAdapter(svc EntityDiscoveryService) dag.EntityDiscoveryMethods {
-	return &EntityDiscoveryAdapter{svc: svc}
-}
-
-func (a *EntityDiscoveryAdapter) IdentifyEntitiesFromDDL(ctx context.Context, projectID, ontologyID, datasourceID uuid.UUID) (int, []*models.SchemaTable, []*models.SchemaColumn, error) {
-	return a.svc.IdentifyEntitiesFromDDL(ctx, projectID, ontologyID, datasourceID)
-}
-
-// EntityEnrichmentAdapter adapts EntityDiscoveryService for entity enrichment.
-type EntityEnrichmentAdapter struct {
-	svc        EntityDiscoveryService
-	schemaRepo repositories.SchemaRepository
-	getTenant  TenantContextFunc
-}
-
-// NewEntityEnrichmentAdapter creates a new adapter.
-func NewEntityEnrichmentAdapter(svc EntityDiscoveryService, schemaRepo repositories.SchemaRepository, getTenant TenantContextFunc) dag.EntityEnrichmentMethods {
-	return &EntityEnrichmentAdapter{svc: svc, schemaRepo: schemaRepo, getTenant: getTenant}
-}
-
-func (a *EntityEnrichmentAdapter) EnrichEntitiesWithLLM(ctx context.Context, projectID, ontologyID, datasourceID uuid.UUID, progressCallback dag.ProgressCallback) error {
-	// Get tables and columns for enrichment context
-	tenantCtx, cleanup, err := a.getTenant(ctx, projectID)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-
-	tables, err := a.schemaRepo.ListTablesByDatasource(tenantCtx, projectID, datasourceID, true)
-	if err != nil {
-		return err
-	}
-
-	columns, err := a.schemaRepo.ListColumnsByDatasource(tenantCtx, projectID, datasourceID)
-	if err != nil {
-		return err
-	}
-
-	// Convert dag.ProgressCallback to services.EntityEnrichmentProgressCallback
-	var svcCallback EntityEnrichmentProgressCallback
-	if progressCallback != nil {
-		svcCallback = EntityEnrichmentProgressCallback(progressCallback)
-	}
-
-	return a.svc.EnrichEntitiesWithLLM(ctx, projectID, ontologyID, datasourceID, tables, columns, svcCallback)
-}
 
 // FKDiscoveryAdapter adapts DeterministicRelationshipService for FK discovery.
 type FKDiscoveryAdapter struct {
@@ -117,24 +62,28 @@ func (a *PKMatchDiscoveryAdapter) DiscoverPKMatchRelationships(ctx context.Conte
 	}, nil
 }
 
-// RelationshipEnrichmentAdapter adapts RelationshipEnrichmentService for the dag package.
-type RelationshipEnrichmentAdapter struct {
-	svc RelationshipEnrichmentService
+// LLMRelationshipDiscoveryAdapter adapts LLMRelationshipDiscoveryService for the dag package.
+// This is the new LLM-validated relationship discovery that replaces the threshold-based approach.
+type LLMRelationshipDiscoveryAdapter struct {
+	svc LLMRelationshipDiscoveryService
 }
 
-// NewRelationshipEnrichmentAdapter creates a new adapter.
-func NewRelationshipEnrichmentAdapter(svc RelationshipEnrichmentService) dag.RelationshipEnrichmentMethods {
-	return &RelationshipEnrichmentAdapter{svc: svc}
+// NewLLMRelationshipDiscoveryAdapter creates a new adapter.
+func NewLLMRelationshipDiscoveryAdapter(svc LLMRelationshipDiscoveryService) dag.LLMRelationshipDiscoveryMethods {
+	return &LLMRelationshipDiscoveryAdapter{svc: svc}
 }
 
-func (a *RelationshipEnrichmentAdapter) EnrichProject(ctx context.Context, projectID uuid.UUID, progressCallback dag.ProgressCallback) (*dag.RelationshipEnrichmentResult, error) {
-	result, err := a.svc.EnrichProject(ctx, projectID, progressCallback)
+func (a *LLMRelationshipDiscoveryAdapter) DiscoverRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback dag.ProgressCallback) (*dag.LLMRelationshipDiscoveryResult, error) {
+	result, err := a.svc.DiscoverRelationships(ctx, projectID, datasourceID, progressCallback)
 	if err != nil {
 		return nil, err
 	}
-	return &dag.RelationshipEnrichmentResult{
-		RelationshipsEnriched: result.RelationshipsEnriched,
-		RelationshipsFailed:   result.RelationshipsFailed,
+	return &dag.LLMRelationshipDiscoveryResult{
+		CandidatesEvaluated:   result.CandidatesEvaluated,
+		RelationshipsCreated:  result.RelationshipsCreated,
+		RelationshipsRejected: result.RelationshipsRejected,
+		PreservedDBFKs:        result.PreservedDBFKs,
+		PreservedColumnFKs:    result.PreservedColumnFKs,
 		DurationMs:            result.DurationMs,
 	}, nil
 }
@@ -201,18 +150,4 @@ func NewGlossaryEnrichmentAdapter(svc GlossaryService) dag.GlossaryEnrichmentMet
 
 func (a *GlossaryEnrichmentAdapter) EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error {
 	return a.svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
-}
-
-// EntityPromotionAdapter adapts EntityPromotionService for the dag package.
-type EntityPromotionAdapter struct {
-	svc EntityPromotionService
-}
-
-// NewEntityPromotionAdapter creates a new adapter.
-func NewEntityPromotionAdapter(svc EntityPromotionService) dag.EntityPromotionMethods {
-	return &EntityPromotionAdapter{svc: svc}
-}
-
-func (a *EntityPromotionAdapter) ScoreAndPromoteEntities(ctx context.Context, projectID uuid.UUID) (promoted int, demoted int, err error) {
-	return a.svc.ScoreAndPromoteEntities(ctx, projectID)
 }

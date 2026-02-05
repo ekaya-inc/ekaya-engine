@@ -66,10 +66,11 @@ export interface ExtractOntologyResponse {
 }
 
 /**
- * Entity progress in the work queue (from backend) - LEGACY
+ * Table progress in the work queue (from backend) - LEGACY
+ * Note: "entity" in this context means database table, not the removed domain Entity concept
  */
 export interface EntityProgressResponse {
-  entity_name: string;
+  entity_name: string;  // Table name
   status: 'queued' | 'processing' | 'complete' | 'updating' | 'schema-changed' | 'outdated' | 'failed';
   token_count?: number;
   last_updated?: string;
@@ -113,9 +114,9 @@ export interface WorkflowStatusResponse {
   status_type: 'success' | 'error' | 'warning' | 'info' | 'processing'; // For UI styling
   can_start_new: boolean; // Whether user can start a new workflow
   has_result: boolean;    // Whether there's a successful result to display
-  // Entity queue for work queue UI (LEGACY)
+  // Table queue for work queue UI (LEGACY)
   entity_queue?: EntityProgressResponse[];
-  completed_entities?: number;
+  completed_entities?: number;  // Actually completed tables
   // Task queue for work queue UI (NEW)
   task_queue?: TaskProgressResponse[];
   total_tasks?: number;
@@ -124,8 +125,8 @@ export interface WorkflowStatusResponse {
   pending_questions_count?: number;  // Questions awaiting user answers
   // UX improvement fields (NEW)
   ontology_ready?: boolean;     // True once Tier 0/1 building is complete
-  total_entities?: number;      // Total entities (tables) to process
-  current_entity?: number;      // Current entity progress count
+  total_entities?: number;      // Total tables to process
+  current_entity?: number;      // Current table progress count
   progress_message?: string;    // Human-readable progress message
 }
 
@@ -227,7 +228,8 @@ export interface RelationshipEdge {
 }
 
 /**
- * Entity-level summary (~75 tokens per entity)
+ * Table-level summary (~75 tokens per table)
+ * Note: "EntitySummary" name kept for backwards compatibility with tiered ontology API
  */
 export interface EntitySummary {
   table_name: string;
@@ -314,10 +316,11 @@ export interface SubmitAnswersResponse {
 // ===================================================================
 
 /**
- * Entity processing status in the work queue
+ * Table processing status in the work queue
+ * Note: "EntityStatus" name kept for backwards compatibility
  */
 export type EntityStatus =
-  | 'complete'       // ✓ - Entity fully processed
+  | 'complete'       // ✓ - Table fully processed
   | 'processing'     // ● - Currently being processed
   | 'queued'         // ○ - Waiting to be processed
   | 'updating'       // ⟳ - Being updated after user answer
@@ -326,10 +329,11 @@ export type EntityStatus =
   | 'failed';        // ✗ - Processing failed
 
 /**
- * Work item in the extraction queue (LEGACY - entity-based)
+ * Work item in the extraction queue (LEGACY - table-based)
+ * Note: "entityName" actually refers to table name
  */
 export interface WorkItem {
-  entityName: string;
+  entityName: string;        // Table name
   status: EntityStatus;
   tokenCount?: number;       // Token count during processing
   lastUpdated?: string;      // ISO timestamp
@@ -501,12 +505,10 @@ export type DAGNodeStatus = 'pending' | 'running' | 'completed' | 'failed' | 'sk
  */
 export type DAGNodeName =
   | 'KnowledgeSeeding'
-  | 'EntityDiscovery'
-  | 'EntityEnrichment'
   | 'FKDiscovery'
+  | 'TableFeatureExtraction'
   | 'PKMatchDiscovery'
   | 'RelationshipDiscovery'
-  | 'RelationshipEnrichment'
   | 'ColumnFeatureExtraction'
   | 'ColumnEnrichment'
   | 'OntologyFinalization'
@@ -636,17 +638,13 @@ export const DAGNodeDescriptions: Record<DAGNodeName, { title: string; descripti
     title: 'Seeding Knowledge',
     description: 'Initialize project knowledge from description and schema',
   },
-  EntityDiscovery: {
-    title: 'Discovering Entities',
-    description: 'Identifying entities from schema constraints',
-  },
-  EntityEnrichment: {
-    title: 'Enriching Entities',
-    description: 'Generating entity names and descriptions',
-  },
   FKDiscovery: {
     title: 'Discovering Foreign Keys',
     description: 'Discovering foreign key relationships',
+  },
+  TableFeatureExtraction: {
+    title: 'Extracting Table Features',
+    description: 'Analyzing table metadata and usage patterns',
   },
   PKMatchDiscovery: {
     title: 'Discovering Primary Key Matches',
@@ -655,10 +653,6 @@ export const DAGNodeDescriptions: Record<DAGNodeName, { title: string; descripti
   RelationshipDiscovery: {
     title: 'Discovering Relationships',
     description: 'Discovering foreign key relationships',
-  },
-  RelationshipEnrichment: {
-    title: 'Enriching Relationships',
-    description: 'Generating relationship descriptions',
   },
   ColumnFeatureExtraction: {
     title: 'Extracting Column Features',

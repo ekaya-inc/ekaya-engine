@@ -12,36 +12,34 @@ func TestSearchResult_Structure(t *testing.T) {
 		Query:      "user",
 		Tables:     []tableMatch{},
 		Columns:    []columnMatch{},
-		Entities:   []entityMatch{},
 		TotalCount: 0,
 	}
 
 	assert.Equal(t, "user", result.Query)
 	assert.NotNil(t, result.Tables)
 	assert.NotNil(t, result.Columns)
-	assert.NotNil(t, result.Entities)
 	assert.Equal(t, 0, result.TotalCount)
 }
 
 func TestTableMatch_Structure(t *testing.T) {
 	// Test that tableMatch has expected fields
-	businessName := "Users"
+	tableType := "transactional"
 	description := "User accounts table"
 	rowCount := int64(100)
 
 	match := tableMatch{
-		SchemaName:   "public",
-		TableName:    "users",
-		BusinessName: &businessName,
-		Description:  &description,
-		RowCount:     &rowCount,
-		MatchType:    "table_name",
-		Relevance:    1.0,
+		SchemaName:  "public",
+		TableName:   "users",
+		TableType:   &tableType,
+		Description: &description,
+		RowCount:    &rowCount,
+		MatchType:   "table_name",
+		Relevance:   1.0,
 	}
 
 	assert.Equal(t, "public", match.SchemaName)
 	assert.Equal(t, "users", match.TableName)
-	assert.Equal(t, "Users", *match.BusinessName)
+	assert.Equal(t, "transactional", *match.TableType)
 	assert.Equal(t, "User accounts table", *match.Description)
 	assert.Equal(t, int64(100), *match.RowCount)
 	assert.Equal(t, "table_name", match.MatchType)
@@ -50,54 +48,28 @@ func TestTableMatch_Structure(t *testing.T) {
 
 func TestColumnMatch_Structure(t *testing.T) {
 	// Test that columnMatch has expected fields
-	businessName := "User ID"
+	purpose := "identifier"
 	description := "Primary key for users"
 
 	match := columnMatch{
-		SchemaName:   "public",
-		TableName:    "users",
-		ColumnName:   "user_id",
-		DataType:     "uuid",
-		BusinessName: &businessName,
-		Description:  &description,
-		MatchType:    "column_name",
-		Relevance:    0.9,
+		SchemaName:  "public",
+		TableName:   "users",
+		ColumnName:  "user_id",
+		DataType:    "uuid",
+		Purpose:     &purpose,
+		Description: &description,
+		MatchType:   "column_name",
+		Relevance:   0.9,
 	}
 
 	assert.Equal(t, "public", match.SchemaName)
 	assert.Equal(t, "users", match.TableName)
 	assert.Equal(t, "user_id", match.ColumnName)
 	assert.Equal(t, "uuid", match.DataType)
-	assert.Equal(t, "User ID", *match.BusinessName)
+	assert.Equal(t, "identifier", *match.Purpose)
 	assert.Equal(t, "Primary key for users", *match.Description)
 	assert.Equal(t, "column_name", match.MatchType)
 	assert.Equal(t, 0.9, match.Relevance)
-}
-
-func TestEntityMatch_Structure(t *testing.T) {
-	// Test that entityMatch has expected fields
-	description := "Platform user"
-	domain := "user_management"
-
-	match := entityMatch{
-		Name:         "User",
-		Description:  &description,
-		PrimaryTable: "users",
-		Domain:       &domain,
-		Aliases:      []string{"creator", "host"},
-		MatchType:    "name",
-		Relevance:    1.0,
-	}
-
-	assert.Equal(t, "User", match.Name)
-	assert.Equal(t, "Platform user", *match.Description)
-	assert.Equal(t, "users", match.PrimaryTable)
-	assert.Equal(t, "user_management", *match.Domain)
-	assert.Len(t, match.Aliases, 2)
-	assert.Contains(t, match.Aliases, "creator")
-	assert.Contains(t, match.Aliases, "host")
-	assert.Equal(t, "name", match.MatchType)
-	assert.Equal(t, 1.0, match.Relevance)
 }
 
 func TestSearchResult_TotalCount(t *testing.T) {
@@ -111,31 +83,23 @@ func TestSearchResult_TotalCount(t *testing.T) {
 			{ColumnName: "transaction_id"},
 			{ColumnName: "transaction_state"},
 		},
-		Entities: []entityMatch{
-			{Name: "Transaction"},
-		},
-		TotalCount: 4,
+		TotalCount: 3,
 	}
 
 	assert.Equal(t, 1, len(result.Tables))
 	assert.Equal(t, 2, len(result.Columns))
-	assert.Equal(t, 1, len(result.Entities))
-	assert.Equal(t, 4, result.TotalCount)
+	assert.Equal(t, 3, result.TotalCount)
 }
 
 func TestMatchTypes(t *testing.T) {
 	// Test that all match types are string constants
-	validTableMatchTypes := []string{"table_name", "business_name", "description"}
-	validColumnMatchTypes := []string{"column_name", "business_name", "description"}
-	validEntityMatchTypes := []string{"name", "alias", "description"}
+	validTableMatchTypes := []string{"table_name", "description"}
+	validColumnMatchTypes := []string{"column_name", "purpose", "description"}
 
 	for _, mt := range validTableMatchTypes {
 		assert.NotEmpty(t, mt)
 	}
 	for _, mt := range validColumnMatchTypes {
-		assert.NotEmpty(t, mt)
-	}
-	for _, mt := range validEntityMatchTypes {
 		assert.NotEmpty(t, mt)
 	}
 }
@@ -149,8 +113,7 @@ func TestRelevanceScoring(t *testing.T) {
 	}{
 		{"exact match", 1.0, true},
 		{"prefix match", 0.9, true},
-		{"business name exact", 0.95, true},
-		{"business name partial", 0.8, true},
+		{"purpose match", 0.7, true},
 		{"description match", 0.6, true},
 		{"fallback", 0.5, true},
 		{"invalid negative", -0.1, false},

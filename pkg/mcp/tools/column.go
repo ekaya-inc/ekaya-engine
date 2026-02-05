@@ -132,66 +132,46 @@ func registerGetColumnMetadataTool(s *server.MCPServer, deps *ColumnToolDeps) {
 			},
 		}
 
-		// Get ontology metadata if available
-		ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)
-		if err != nil {
-			deps.Logger.Warn("Failed to get active ontology for column metadata",
-				zap.String("project_id", projectID.String()),
-				zap.Error(err))
-		}
-
-		if ontology != nil {
-			// Get column details from ontology
-			columnDetails := ontology.GetColumnDetails(table)
-			for _, colDetail := range columnDetails {
-				if colDetail.Name == column {
-					response.Metadata = &columnMetadataInfo{
-						Description:  colDetail.Description,
-						SemanticType: colDetail.SemanticType,
-						Entity:       colDetail.SemanticType, // Entity is stored in SemanticType
-						Role:         colDetail.Role,
-					}
-
-					// Format enum values
-					if len(colDetail.EnumValues) > 0 {
-						response.Metadata.EnumValues = formatEnumValues(colDetail.EnumValues)
-					}
-					break
-				}
+		// Primary source: read typed columns from engine_ontology_column_metadata
+		// This is the authoritative source for column semantic enrichment
+		if deps.ColumnMetadataRepo != nil {
+			columnMeta, err := deps.ColumnMetadataRepo.GetBySchemaColumnID(tenantCtx, schemaColumn.ID)
+			if err != nil {
+				deps.Logger.Warn("Failed to get column metadata",
+					zap.String("project_id", projectID.String()),
+					zap.String("schema_column_id", schemaColumn.ID.String()),
+					zap.Error(err))
+			} else if columnMeta != nil {
+				response.Metadata = buildColumnMetadataInfo(columnMeta)
 			}
 		}
 
-		// Fallback: check engine_column_metadata for additional metadata
-		if deps.ColumnMetadataRepo != nil {
-			columnMeta, err := deps.ColumnMetadataRepo.GetByTableColumn(tenantCtx, projectID, table, column)
+		// Fallback: check ontology JSONB for legacy data (if no metadata found)
+		// This provides backwards compatibility during migration
+		if response.Metadata == nil {
+			ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)
 			if err != nil {
-				deps.Logger.Warn("Failed to get column metadata fallback",
+				deps.Logger.Warn("Failed to get active ontology for column metadata",
 					zap.String("project_id", projectID.String()),
-					zap.String("table", table),
-					zap.String("column", column),
 					zap.Error(err))
-			} else if columnMeta != nil {
-				// Initialize metadata section if not already present
-				if response.Metadata == nil {
-					response.Metadata = &columnMetadataInfo{}
-				}
+			}
 
-				// Merge in column_metadata values if not already set from ontology
-				if columnMeta.Description != nil && *columnMeta.Description != "" && response.Metadata.Description == "" {
-					response.Metadata.Description = *columnMeta.Description
-				}
-				if columnMeta.Entity != nil && *columnMeta.Entity != "" && response.Metadata.Entity == "" {
-					response.Metadata.Entity = *columnMeta.Entity
-				}
-				if columnMeta.Role != nil && *columnMeta.Role != "" && response.Metadata.Role == "" {
-					response.Metadata.Role = *columnMeta.Role
-				}
-				if len(columnMeta.EnumValues) > 0 && len(response.Metadata.EnumValues) == 0 {
-					response.Metadata.EnumValues = columnMeta.EnumValues
-				}
-				// Always include is_sensitive if set (it's a manual override)
-				if columnMeta.IsSensitive != nil {
-					response.Metadata.IsSensitive = columnMeta.IsSensitive
+			if ontology != nil {
+				columnDetails := ontology.GetColumnDetails(table)
+				for _, colDetail := range columnDetails {
+					if colDetail.Name == column {
+						response.Metadata = &columnMetadataInfo{
+							Description:  colDetail.Description,
+							SemanticType: colDetail.SemanticType,
+							Entity:       colDetail.SemanticType,
+							Role:         colDetail.Role,
+						}
+
+						if len(colDetail.EnumValues) > 0 {
+							response.Metadata.EnumValues = formatEnumValues(colDetail.EnumValues)
+						}
+						break
+					}
 				}
 			}
 		}
@@ -222,12 +202,61 @@ type columnSchemaInfo struct {
 
 // columnMetadataInfo contains ontology metadata for a column.
 type columnMetadataInfo struct {
-	Description  string   `json:"description,omitempty"`
-	SemanticType string   `json:"semantic_type,omitempty"`
-	EnumValues   []string `json:"enum_values,omitempty"`
-	Entity       string   `json:"entity,omitempty"`
-	Role         string   `json:"role,omitempty"`
-	IsSensitive  *bool    `json:"is_sensitive,omitempty"` // nil=auto-detect, true=always sensitive, false=never sensitive
+	// Core classification fields
+	Description        string   `json:"description,omitempty"`
+	ClassificationPath string   `json:"classification_path,omitempty"` // timestamp, boolean, enum, uuid, external_id, numeric, text, json, unknown
+	Purpose            string   `json:"purpose,omitempty"`             // identifier, timestamp, flag, measure, enum, text, json
+	SemanticType       string   `json:"semantic_type,omitempty"`       // soft_delete_timestamp, currency_cents, etc.
+	Role               string   `json:"role,omitempty"`                // primary_key, foreign_key, attribute, measure, dimension, identifier
+	Confidence         *float64 `json:"confidence,omitempty"`          // Classification confidence (0.0 - 1.0)
+
+	// Type-specific features (populated based on classification_path)
+	EnumValues         []string            `json:"enum_values,omitempty"`
+	Entity             string              `json:"entity,omitempty"`              // Entity this column references (from IdentifierFeatures)
+	TimestampFeatures  *timestampFeatures  `json:"timestamp_features,omitempty"`  // Populated for timestamp columns
+	BooleanFeatures    *booleanFeatures    `json:"boolean_features,omitempty"`    // Populated for boolean columns
+	IdentifierFeatures *identifierFeatures `json:"identifier_features,omitempty"` // Populated for identifier columns
+	MonetaryFeatures   *monetaryFeatures   `json:"monetary_features,omitempty"`   // Populated for monetary columns
+
+	// User overrides
+	IsSensitive *bool `json:"is_sensitive,omitempty"` // nil=auto-detect, true=always sensitive, false=never sensitive
+
+	// Provenance
+	Source         string `json:"source,omitempty"`           // 'inferred', 'mcp', 'manual'
+	LastEditSource string `json:"last_edit_source,omitempty"` // How last modified
+}
+
+// timestampFeatures holds timestamp-specific classification data.
+type timestampFeatures struct {
+	TimestampPurpose string `json:"timestamp_purpose,omitempty"` // audit_created, audit_updated, soft_delete, event_time, etc.
+	TimestampScale   string `json:"timestamp_scale,omitempty"`   // seconds, milliseconds, microseconds, nanoseconds
+	IsSoftDelete     bool   `json:"is_soft_delete,omitempty"`
+	IsAuditField     bool   `json:"is_audit_field,omitempty"`
+}
+
+// booleanFeatures holds boolean-specific classification data.
+type booleanFeatures struct {
+	TrueMeaning  string `json:"true_meaning,omitempty"`
+	FalseMeaning string `json:"false_meaning,omitempty"`
+	BooleanType  string `json:"boolean_type,omitempty"` // feature_flag, status_indicator, permission, preference, state
+}
+
+// identifierFeatures holds identifier-specific classification data.
+type identifierFeatures struct {
+	IdentifierType   string  `json:"identifier_type,omitempty"`   // internal_uuid, external_uuid, primary_key, foreign_key, external_service_id
+	ExternalService  string  `json:"external_service,omitempty"`  // stripe, twilio, aws_ses
+	FKTargetTable    string  `json:"fk_target_table,omitempty"`   // Target table for FK
+	FKTargetColumn   string  `json:"fk_target_column,omitempty"`  // Target column for FK
+	FKConfidence     float64 `json:"fk_confidence,omitempty"`     // Confidence in FK target (0.0 - 1.0)
+	EntityReferenced string  `json:"entity_referenced,omitempty"` // Entity this identifier refers to
+}
+
+// monetaryFeatures holds monetary-specific classification data.
+type monetaryFeatures struct {
+	IsMonetary           bool   `json:"is_monetary,omitempty"`
+	CurrencyUnit         string `json:"currency_unit,omitempty"`          // cents, dollars, basis_points, or currency code
+	PairedCurrencyColumn string `json:"paired_currency_column,omitempty"` // Column containing currency code
+	AmountDescription    string `json:"amount_description,omitempty"`     // What this amount represents
 }
 
 // registerUpdateColumnTool adds the update_column tool for adding or updating column semantic information.
@@ -455,9 +484,10 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 		}
 
 		// Also track provenance in column_metadata table if available
-		if deps.ColumnMetadataRepo != nil {
+		// Column metadata is now keyed by schema_column_id (FK to engine_schema_columns)
+		if deps.ColumnMetadataRepo != nil && schemaColumn != nil {
 			// Check if existing metadata exists and verify precedence
-			existing, err := deps.ColumnMetadataRepo.GetByTableColumn(tenantCtx, projectID, table, column)
+			existing, err := deps.ColumnMetadataRepo.GetBySchemaColumnID(tenantCtx, schemaColumn.ID)
 			if err != nil {
 				return nil, fmt.Errorf("failed to check existing column metadata: %w", err)
 			}
@@ -479,22 +509,35 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 			lastEditSource := models.ProvenanceMCP
 			colMeta := &models.ColumnMetadata{
 				ProjectID:      projectID,
-				TableName:      table,
-				ColumnName:     column,
+				SchemaColumnID: schemaColumn.ID,
 				Source:         models.ProvenanceMCP,
 				LastEditSource: &lastEditSource,
 			}
 			if description != "" {
 				colMeta.Description = &description
 			}
+			// Entity is stored in Features.IdentifierFeatures.EntityReferenced
 			if entity != "" {
-				colMeta.Entity = &entity
+				if colMeta.Features.IdentifierFeatures == nil {
+					colMeta.Features.IdentifierFeatures = &models.IdentifierFeatures{}
+				}
+				colMeta.Features.IdentifierFeatures.EntityReferenced = entity
 			}
 			if role != "" {
 				colMeta.Role = &role
 			}
+			// Enum values are stored in Features.EnumFeatures with Value/Label separation
 			if enumValues != nil {
-				colMeta.EnumValues = enumValues
+				parsedEnums := parseEnumValues(enumValues)
+				colMeta.Features.EnumFeatures = &models.EnumFeatures{
+					Values: make([]models.ColumnEnumValue, len(parsedEnums)),
+				}
+				for i, ev := range parsedEnums {
+					colMeta.Features.EnumFeatures.Values[i] = models.ColumnEnumValue{
+						Value: ev.Value,
+						Label: ev.Description, // EnumValue.Description maps to ColumnEnumValue.Label
+					}
+				}
 			}
 			if isSensitive != nil {
 				colMeta.IsSensitive = isSensitive
@@ -635,6 +678,111 @@ func registerDeleteColumnMetadataTool(s *server.MCPServer, deps *ColumnToolDeps)
 
 		return mcp.NewToolResultText(string(jsonResult)), nil
 	})
+}
+
+// buildColumnMetadataInfo constructs a columnMetadataInfo response from ColumnMetadata.
+// This reads from the typed columns in engine_ontology_column_metadata.
+func buildColumnMetadataInfo(meta *models.ColumnMetadata) *columnMetadataInfo {
+	if meta == nil {
+		return nil
+	}
+
+	info := &columnMetadataInfo{}
+
+	// Core classification fields
+	if meta.Description != nil {
+		info.Description = *meta.Description
+	}
+	if meta.ClassificationPath != nil {
+		info.ClassificationPath = *meta.ClassificationPath
+	}
+	if meta.Purpose != nil {
+		info.Purpose = *meta.Purpose
+	}
+	if meta.SemanticType != nil {
+		info.SemanticType = *meta.SemanticType
+	}
+	if meta.Role != nil {
+		info.Role = *meta.Role
+	}
+	if meta.Confidence != nil {
+		info.Confidence = meta.Confidence
+	}
+
+	// User overrides
+	if meta.IsSensitive != nil {
+		info.IsSensitive = meta.IsSensitive
+	}
+
+	// Provenance
+	if meta.Source != "" {
+		info.Source = meta.Source
+	}
+	if meta.LastEditSource != nil {
+		info.LastEditSource = *meta.LastEditSource
+	}
+
+	// Type-specific features
+
+	// Enum values from EnumFeatures
+	if enumFeatures := meta.GetEnumFeatures(); enumFeatures != nil && len(enumFeatures.Values) > 0 {
+		enumStrings := make([]string, len(enumFeatures.Values))
+		for i, ev := range enumFeatures.Values {
+			if ev.Label != "" {
+				enumStrings[i] = ev.Value + " - " + ev.Label
+			} else {
+				enumStrings[i] = ev.Value
+			}
+		}
+		info.EnumValues = enumStrings
+	}
+
+	// Entity from IdentifierFeatures
+	if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil {
+		if idFeatures.EntityReferenced != "" {
+			info.Entity = idFeatures.EntityReferenced
+		}
+		// Also populate the full identifier features struct
+		info.IdentifierFeatures = &identifierFeatures{
+			IdentifierType:   idFeatures.IdentifierType,
+			ExternalService:  idFeatures.ExternalService,
+			FKTargetTable:    idFeatures.FKTargetTable,
+			FKTargetColumn:   idFeatures.FKTargetColumn,
+			FKConfidence:     idFeatures.FKConfidence,
+			EntityReferenced: idFeatures.EntityReferenced,
+		}
+	}
+
+	// Timestamp features
+	if tsFeatures := meta.GetTimestampFeatures(); tsFeatures != nil {
+		info.TimestampFeatures = &timestampFeatures{
+			TimestampPurpose: tsFeatures.TimestampPurpose,
+			TimestampScale:   tsFeatures.TimestampScale,
+			IsSoftDelete:     tsFeatures.IsSoftDelete,
+			IsAuditField:     tsFeatures.IsAuditField,
+		}
+	}
+
+	// Boolean features
+	if boolFeatures := meta.GetBooleanFeatures(); boolFeatures != nil {
+		info.BooleanFeatures = &booleanFeatures{
+			TrueMeaning:  boolFeatures.TrueMeaning,
+			FalseMeaning: boolFeatures.FalseMeaning,
+			BooleanType:  boolFeatures.BooleanType,
+		}
+	}
+
+	// Monetary features
+	if moneyFeatures := meta.GetMonetaryFeatures(); moneyFeatures != nil {
+		info.MonetaryFeatures = &monetaryFeatures{
+			IsMonetary:           moneyFeatures.IsMonetary,
+			CurrencyUnit:         moneyFeatures.CurrencyUnit,
+			PairedCurrencyColumn: moneyFeatures.PairedCurrencyColumn,
+			AmountDescription:    moneyFeatures.AmountDescription,
+		}
+	}
+
+	return info
 }
 
 // parseEnumValues converts string array to EnumValue structs.

@@ -14,10 +14,21 @@ This is **ekaya-engine** - a clean architecture rebuild of the Ekaya regional co
 
 ## Current State
 
-The project has full operational infrastructure but a minimal Go backend:
-- **Working:** Build system, CI/CD, Docker, frontend (React/TypeScript/Vite)
-- **Shell only:** `main.go` with just `/health`, `/ping`, and static file serving
-- **Empty scaffold:** `pkg/` directories ready for implementation
+The project has full operational infrastructure with a complete Go backend:
+- **Infrastructure:** Build system, CI/CD, Docker, frontend (React/TypeScript/Vite)
+- **Backend:** Full ontology extraction DAG, MCP server, schema discovery, relationship inference
+- **MCP Tools:** Developer tools for database context, queries, and ontology management
+
+## Greenfield Project: No Backward Compatibility
+
+**This is a pre-launch project with no users and no external developers.** Assume:
+
+- **No backward compatibility required** - APIs, schemas, and interfaces can change freely
+- **No data migrations needed** - The database can be dropped and recreated at will
+- **No legacy code concerns** - Delete and rewrite code without preserving old behavior
+- **No deprecation periods** - Remove features immediately without warnings or shims
+
+When making changes, prefer clean solutions over compatibility hacks. If a refactor requires dropping the database, that's acceptable.
 
 ## Critical: Server Management
 
@@ -151,7 +162,27 @@ type GoodHandler struct {
 
 If a handler needs data, add a method to the appropriate service.
 
-### 2. Customer Datasource Access Must Use Adapters
+### 2. Services Must Not Contain SQL
+
+Services must access the engine database through repositories, never with raw SQL. This maintains the layering: **Handlers → Services → Repositories**.
+
+```go
+// WRONG - service executing raw SQL
+func (s *myService) Delete(ctx context.Context, projectID uuid.UUID) error {
+    scope, _ := database.GetTenantScope(ctx)
+    _, err := scope.Conn.Exec(ctx, "DELETE FROM engine_foo WHERE project_id = $1", projectID)
+    return err
+}
+
+// CORRECT - service delegates to repository
+func (s *myService) Delete(ctx context.Context, projectID uuid.UUID) error {
+    return s.fooRepo.DeleteByProject(ctx, projectID)
+}
+```
+
+If a service needs a new database operation, add a method to the appropriate repository.
+
+### 3. Customer Datasource Access Must Use Adapters
 
 There are two databases in this system:
 - **Engine metadata database** (`ekaya_engine`) - Always PostgreSQL, accessed via `pkg/repositories/` using pgx directly. This is correct.
@@ -172,7 +203,7 @@ Key interfaces in `pkg/adapters/datasource/interfaces.go`:
 - `QueryExecutor` - Query execution, validation, explain plans
 - `ConnectionTester` - Connection testing
 
-### 3. DAG Nodes Must Follow Consistent Patterns
+### 4. DAG Nodes Must Follow Consistent Patterns
 
 All DAG nodes in `pkg/services/dag/` must:
 - Inherit from `BaseNode` (use `*BaseNode` embedding)
@@ -201,7 +232,7 @@ func (n *MyNode) Execute(ctx context.Context, dag *models.OntologyDAG) error {
 }
 ```
 
-### 4. Never Classify Columns by Name Patterns
+### 5. Never Classify Columns by Name Patterns
 
 Do NOT use column/table name patterns (suffixes, prefixes, substrings) to classify or make decisions. This is fragile and breaks across different naming conventions.
 
@@ -214,19 +245,44 @@ if strings.Contains(columnName, "amount") {
     // Assume it's currency
 }
 
-// CORRECT - use ColumnFeatures from feature extraction pipeline
-features := column.GetColumnFeatures()
-if features != nil && features.Role == "foreign_key" {
+// CORRECT - use ColumnMetadata from ontology table
+metadata, err := columnMetadataRepo.GetBySchemaColumnID(ctx, column.ID)
+if err == nil && metadata != nil && metadata.Role != nil && *metadata.Role == "foreign_key" {
     // Confirmed FK from analysis
 }
 ```
 
-The `column_feature_extraction` service analyzes columns using data sampling and LLM classification. Use `ColumnFeatures` data instead of name heuristics:
-- `features.Role` - "primary_key", "foreign_key", "attribute", etc.
-- `features.SemanticType` - "currency", "timestamp", "identifier", etc.
-- `features.Purpose` - Business purpose description
+The `column_feature_extraction` service analyzes columns using data sampling and LLM classification. Column metadata is stored in `engine_ontology_column_metadata` (linked via `schema_column_id`). Use `ColumnMetadata` fields instead of name heuristics:
+- `metadata.Role` - "primary_key", "foreign_key", "attribute", etc.
+- `metadata.SemanticType` - "currency", "timestamp", "identifier", etc.
+- `metadata.Purpose` - Business purpose description
+- `metadata.GetTimestampFeatures()`, `GetBooleanFeatures()`, etc. - Type-specific features
 
-If `ColumnFeatures` is not available at a given pipeline stage, document why heuristics are necessary and centralize them.
+If `ColumnMetadata` is not available at a given pipeline stage, document why heuristics are necessary and centralize them.
+
+### 6. MCP Tool Errors Must Return JSON Success Responses
+
+MCP tool validation errors must be returned as **successful MCP responses containing JSON error objects**, not as Go errors that become MCP protocol errors (e.g., `-32603`).
+
+**Why:** Some MCP clients do not pass protocol-level errors to the LLM—they may flash an error on screen or swallow it entirely. This makes Ekaya appear broken when the tool simply received invalid input. The LLM needs to see the error message to correct its approach.
+
+```go
+// WRONG - returns MCP protocol error, may not reach the LLM
+if query == "" {
+    return nil, fmt.Errorf("query parameter cannot be empty")
+}
+
+// CORRECT - returns successful MCP response with JSON error body
+if query == "" {
+    return NewErrorResult("invalid_parameters", "query parameter cannot be empty"), nil
+}
+```
+
+**Error types:**
+- **Actionable errors** (validation, invalid params, not found) → Use `NewErrorResult()` or `NewErrorResultWithDetails()`
+- **System errors** (DB failures, connection errors) → Return Go errors (these are genuine failures)
+
+See `pkg/mcp/tools/errors.go` for the `NewErrorResult()` helper and error code conventions.
 
 ## Error Handling Philosophy: Fail Fast
 
@@ -370,12 +426,9 @@ When manually testing the ontology extraction workflow, use Chrome browser integ
 |-------|---------|
 | `engine_ontology_dag` | DAG workflow state, status, current_node |
 | `engine_dag_nodes` | Individual DAG node states (one per step) |
-| `engine_ontologies` | Tiered ontology storage (domain_summary, entity_summaries, column_details) |
-| `engine_ontology_entities` | Discovered domain entities (user, account, order, etc.) with descriptions |
-| `engine_ontology_entity_occurrences` | Where entities appear across schema with role semantics (visitor, host, etc.) |
-| `engine_ontology_entity_aliases` | Alternative names for entities (for query matching) |
-| `engine_ontology_entity_key_columns` | Important business columns per entity with synonyms |
-| `engine_entity_relationships` | Entity-to-entity relationships from FK constraints or inference |
+| `engine_ontologies` | Tiered ontology storage (domain_summary, column_details) |
+| `engine_ontology_column_metadata` | Column semantic annotations with provenance (linked via schema_column_id) |
+| `engine_ontology_table_metadata` | Table semantic annotations with provenance (linked via schema_table_id) |
 | `engine_ontology_questions` | Questions generated during analysis for user clarification |
 | `engine_ontology_chat_messages` | Ontology refinement chat history |
 | `engine_llm_conversations` | Verbatim LLM request/response logs for debugging and analytics |
@@ -385,7 +438,7 @@ When manually testing the ontology extraction workflow, use Chrome browser integ
 
 ```sql
 -- Clear ALL projects (use only when single project or full reset needed)
-TRUNCATE engine_ontology_dag, engine_dag_nodes, engine_ontologies, engine_ontology_entities, engine_ontology_entity_occurrences, engine_ontology_entity_aliases, engine_ontology_entity_key_columns, engine_entity_relationships, engine_ontology_questions, engine_ontology_chat_messages, engine_llm_conversations, engine_project_knowledge CASCADE;
+TRUNCATE engine_ontology_dag, engine_dag_nodes, engine_ontologies, engine_ontology_column_metadata, engine_ontology_table_metadata, engine_ontology_questions, engine_ontology_chat_messages, engine_llm_conversations, engine_project_knowledge CASCADE;
 ```
 
 **Note:** When multiple projects exist in different states, scope deletes to a specific project:
@@ -410,28 +463,6 @@ SELECT node_name, status, started_at, completed_at
 FROM engine_dag_nodes ORDER BY node_order;
 ```
 
-### Monitor Entities and Relationships
-
-```sql
--- Entity count and enrichment status
-SELECT COUNT(*) as total,
-       COUNT(*) FILTER (WHERE description IS NOT NULL) as enriched
-FROM engine_ontology_entities;
-
--- Relationship count and enrichment status
-SELECT COUNT(*) as total,
-       COUNT(*) FILTER (WHERE description IS NOT NULL) as enriched
-FROM engine_entity_relationships;
-```
-
-### Check Entity Summaries Written
-
-```sql
--- Count entity summaries in ontology
-SELECT jsonb_object_keys(entity_summaries) as entity
-FROM engine_ontologies WHERE is_active = true;
-```
-
 ### Monitor LLM Conversations
 
 ```sql
@@ -450,9 +481,9 @@ FROM engine_llm_conversations GROUP BY model;
 
 ### What to Watch For
 
-1. **DAG state progression** - Should move through steps: EntityDiscovery → EntityEnrichment → FKDiscovery → ColumnEnrichment → PKMatchDiscovery → RelationshipEnrichment → OntologyFinalization
+1. **DAG state progression** - Should move through steps: KnowledgeSeeding → ColumnFeatureExtraction → FKDiscovery → TableFeatureExtraction → PKMatchDiscovery → ColumnEnrichment → OntologyFinalization → GlossaryDiscovery → GlossaryEnrichment
 2. **Parallel execution** - Multiple LLM calls processed concurrently within each step
-3. **Entity/relationship counts** - Should match expected schema size
+3. **Column/table metadata counts** - Check `engine_ontology_column_metadata` and `engine_ontology_table_metadata` are populated
 4. **Token limit errors** - Large tables may exceed LLM context limits
 5. **LLM conversation logging** - Check `engine_llm_conversations` for failed calls, high latency, or token spikes
 
