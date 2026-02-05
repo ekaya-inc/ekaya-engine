@@ -1,4 +1,3 @@
-//go:build ignore
 // +build ignore
 
 // TODO: This test uses SchemaColumn.Metadata which no longer exists.

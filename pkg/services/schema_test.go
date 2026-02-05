@@ -1,4 +1,3 @@
-//go:build ignore
 
 package services
 
@@ -66,7 +65,6 @@ type mockSchemaRepository struct {
 	getRelationshipByColsErr   error
 	updateApprovalErr          error
 	relationshipByColsResponse *models.SchemaRelationship
-	updateTableMetadataErr     error
 	updateColumnMetadataErr    error
 	updateTableSelectionErr    error
 	updateColumnSelectionErr   error
@@ -155,13 +153,6 @@ func (m *mockSchemaRepository) SoftDeleteRemovedTables(ctx context.Context, proj
 func (m *mockSchemaRepository) UpdateTableSelection(ctx context.Context, projectID, tableID uuid.UUID, isSelected bool) error {
 	if m.updateTableSelectionErr != nil {
 		return m.updateTableSelectionErr
-	}
-	return nil
-}
-
-func (m *mockSchemaRepository) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
-	if m.updateTableMetadataErr != nil {
-		return m.updateTableMetadataErr
 	}
 	return nil
 }
@@ -1490,61 +1481,10 @@ func TestSchemaService_GetRelationshipsForDatasource_Error(t *testing.T) {
 // Phase 8: Selection & Metadata Tests
 // ============================================================================
 
-func TestSchemaService_UpdateTableMetadata_Success(t *testing.T) {
-	projectID := uuid.New()
-	tableID := uuid.New()
-
-	repo := &mockSchemaRepository{}
-	dsSvc := &mockDatasourceService{}
-	factory := &mockSchemaAdapterFactory{}
-
-	service := newTestSchemaService(repo, dsSvc, factory)
-
-	businessName := "Users Table"
-	description := "Contains user accounts"
-
-	err := service.UpdateTableMetadata(context.Background(), projectID, tableID, &businessName, &description)
-	if err != nil {
-		t.Fatalf("UpdateTableMetadata failed: %v", err)
-	}
-}
-
-func TestSchemaService_UpdateTableMetadata_PartialUpdate(t *testing.T) {
-	projectID := uuid.New()
-	tableID := uuid.New()
-
-	repo := &mockSchemaRepository{}
-	dsSvc := &mockDatasourceService{}
-	factory := &mockSchemaAdapterFactory{}
-
-	service := newTestSchemaService(repo, dsSvc, factory)
-
-	// Update only business name
-	businessName := "Users"
-	err := service.UpdateTableMetadata(context.Background(), projectID, tableID, &businessName, nil)
-	if err != nil {
-		t.Fatalf("UpdateTableMetadata with partial update failed: %v", err)
-	}
-}
-
-func TestSchemaService_UpdateTableMetadata_NotFound(t *testing.T) {
-	projectID := uuid.New()
-	tableID := uuid.New()
-
-	repo := &mockSchemaRepository{
-		updateTableMetadataErr: errors.New("table not found"),
-	}
-	dsSvc := &mockDatasourceService{}
-	factory := &mockSchemaAdapterFactory{}
-
-	service := newTestSchemaService(repo, dsSvc, factory)
-
-	businessName := "Users"
-	err := service.UpdateTableMetadata(context.Background(), projectID, tableID, &businessName, nil)
-	if err == nil {
-		t.Fatal("expected error for table not found")
-	}
-}
+// Note: TestSchemaService_UpdateTableMetadata tests removed because
+// table metadata is now managed through MCP tools (update_table) and stored
+// in engine_ontology_table_metadata. The UpdateTableMetadata method has been
+// removed from SchemaService.
 
 func TestSchemaService_UpdateColumnMetadata_Success(t *testing.T) {
 	// TODO: Re-enable when UpdateColumnMetadata is implemented for ColumnMetadataRepository.

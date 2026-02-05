@@ -247,19 +247,8 @@ func TestSchemaRepository_UpsertTable_Update(t *testing.T) {
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
 
-	// Create initial table with business_name
+	// Create initial table
 	table := tc.createTestTable(ctx, "public", "products")
-	businessName := "Product Catalog"
-	table.BusinessName = &businessName
-
-	// Update business_name via direct SQL to simulate user modification
-	scope, _ := database.GetTenantScope(ctx)
-	_, err := scope.Conn.Exec(ctx, `
-		UPDATE engine_schema_tables SET business_name = $1 WHERE id = $2
-	`, businessName, table.ID)
-	if err != nil {
-		t.Fatalf("Failed to set business_name: %v", err)
-	}
 
 	originalID := table.ID
 	originalCreatedAt := table.CreatedAt
@@ -268,7 +257,7 @@ func TestSchemaRepository_UpsertTable_Update(t *testing.T) {
 	table.RowCount = ptr(int64(500))
 	table.ID = uuid.Nil // Clear ID to test upsert behavior
 
-	err = tc.repo.UpsertTable(ctx, table)
+	err := tc.repo.UpsertTable(ctx, table)
 	if err != nil {
 		t.Fatalf("UpsertTable failed: %v", err)
 	}
@@ -281,11 +270,6 @@ func TestSchemaRepository_UpsertTable_Update(t *testing.T) {
 	// Verify CreatedAt was preserved
 	if !table.CreatedAt.Equal(originalCreatedAt) {
 		t.Errorf("expected CreatedAt to be preserved")
-	}
-
-	// Verify business_name was preserved
-	if table.BusinessName == nil || *table.BusinessName != businessName {
-		t.Errorf("expected business_name to be preserved, got %v", table.BusinessName)
 	}
 
 	// Verify row_count was updated
@@ -308,19 +292,10 @@ func TestSchemaRepository_UpsertTable_ReactivateSoftDeleted(t *testing.T) {
 
 	// Create and soft-delete a table
 	table := tc.createTestTable(ctx, "public", "archived_table")
-	businessName := "Important Table"
-	description := "This table has important data"
-
-	// Set business metadata
-	err := tc.repo.UpdateTableMetadata(ctx, tc.projectID, table.ID, &businessName, &description)
-	if err != nil {
-		t.Fatalf("UpdateTableMetadata failed: %v", err)
-	}
-
 	originalID := table.ID
 
 	// Soft-delete the table
-	_, err = tc.repo.SoftDeleteRemovedTables(ctx, tc.projectID, tc.dsID, []TableKey{})
+	_, err := tc.repo.SoftDeleteRemovedTables(ctx, tc.projectID, tc.dsID, []TableKey{})
 	if err != nil {
 		t.Fatalf("SoftDeleteRemovedTables failed: %v", err)
 	}
@@ -348,14 +323,6 @@ func TestSchemaRepository_UpsertTable_ReactivateSoftDeleted(t *testing.T) {
 	// Verify original ID was preserved
 	if newTable.ID != originalID {
 		t.Errorf("expected ID to be preserved (%s), got %s", originalID, newTable.ID)
-	}
-
-	// Verify business metadata was preserved
-	if newTable.BusinessName == nil || *newTable.BusinessName != businessName {
-		t.Errorf("expected BusinessName to be preserved, got %v", newTable.BusinessName)
-	}
-	if newTable.Description == nil || *newTable.Description != description {
-		t.Errorf("expected Description to be preserved, got %v", newTable.Description)
 	}
 
 	// Verify row_count was updated
