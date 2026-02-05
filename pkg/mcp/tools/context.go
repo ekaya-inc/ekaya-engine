@@ -377,20 +377,21 @@ func buildTablesFromSchema(
 		filteredTables = filterDatasourceTables(schema.Tables, tableFilter)
 	}
 
-	// Fetch table metadata for all tables in one batch
+	// Fetch table metadata for all filtered tables
+	// TableMetadata uses schema_table_id FK; ListByTableNames does the join
 	var tableMetadataMap map[string]*models.TableMetadata
-	if deps.TableMetadataRepo != nil {
-		metaList, err := deps.TableMetadataRepo.List(ctx, projectID, dsID)
+	if deps.TableMetadataRepo != nil && len(filteredTables) > 0 {
+		tableNames := make([]string, len(filteredTables))
+		for i, t := range filteredTables {
+			tableNames[i] = t.TableName
+		}
+		var err error
+		tableMetadataMap, err = deps.TableMetadataRepo.ListByTableNames(ctx, projectID, tableNames)
 		if err != nil {
 			deps.Logger.Warn("Failed to get table metadata",
 				zap.String("project_id", projectID.String()),
 				zap.Error(err))
 			// Continue without table metadata - not a fatal error
-		} else if len(metaList) > 0 {
-			tableMetadataMap = make(map[string]*models.TableMetadata, len(metaList))
-			for _, meta := range metaList {
-				tableMetadataMap[meta.TableName] = meta
-			}
 		}
 	}
 
@@ -406,6 +407,9 @@ func buildTablesFromSchema(
 		// Merge table metadata if available (omit null/empty fields)
 		if tableMetadataMap != nil {
 			if meta, ok := tableMetadataMap[table.TableName]; ok {
+				if meta.TableType != nil && *meta.TableType != "" {
+					tableDetail["table_type"] = *meta.TableType
+				}
 				if meta.Description != nil && *meta.Description != "" {
 					tableDetail["description"] = *meta.Description
 				}

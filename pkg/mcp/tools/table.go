@@ -74,6 +74,10 @@ func registerUpdateTableTool(s *server.MCPServer, deps *TableToolDeps) {
 			"preferred_alternative",
 			mcp.Description("Optional - Table to use instead if this one is ephemeral or deprecated"),
 		),
+		mcp.WithString(
+			"table_type",
+			mcp.Description("Optional - Table classification: 'transactional' (event/action tables), 'reference' (lookup tables), 'logging' (audit/history), 'ephemeral' (temporary), 'junction' (many-to-many)"),
+		),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
@@ -101,6 +105,20 @@ func registerUpdateTableTool(s *server.MCPServer, deps *TableToolDeps) {
 		description := getOptionalString(req, "description")
 		usageNotes := getOptionalString(req, "usage_notes")
 		preferredAlternative := getOptionalString(req, "preferred_alternative")
+		tableType := getOptionalString(req, "table_type")
+
+		// Validate table_type if provided
+		validTableTypes := map[string]bool{
+			"transactional": true,
+			"reference":     true,
+			"logging":       true,
+			"ephemeral":     true,
+			"junction":      true,
+		}
+		if tableType != "" && !validTableTypes[tableType] {
+			return NewErrorResult("invalid_parameters",
+				"invalid table_type: must be one of 'transactional', 'reference', 'logging', 'ephemeral', 'junction'"), nil
+		}
 
 		// Extract optional is_ephemeral flag
 		var isEphemeral *bool
@@ -141,7 +159,7 @@ func registerUpdateTableTool(s *server.MCPServer, deps *TableToolDeps) {
 		}
 
 		// Check existing metadata for precedence
-		existing, err := deps.TableMetadataRepo.Get(tenantCtx, projectID, datasourceID, table)
+		existing, err := deps.TableMetadataRepo.GetBySchemaTableID(tenantCtx, schemaTable.ID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check existing table metadata: %w", err)
 		}
@@ -162,10 +180,9 @@ func registerUpdateTableTool(s *server.MCPServer, deps *TableToolDeps) {
 
 		// Build metadata for upsert
 		meta := &models.TableMetadata{
-			ProjectID:    projectID,
-			DatasourceID: datasourceID,
-			TableName:    table,
-			Source:       models.ProvenanceMCP,
+			ProjectID:     projectID,
+			SchemaTableID: schemaTable.ID,
+			Source:        models.ProvenanceMCP,
 		}
 
 		// Set optional fields if provided
@@ -181,6 +198,9 @@ func registerUpdateTableTool(s *server.MCPServer, deps *TableToolDeps) {
 		if preferredAlternative != "" {
 			meta.PreferredAlternative = &preferredAlternative
 		}
+		if tableType != "" {
+			meta.TableType = &tableType
+		}
 
 		// Upsert metadata
 		if err := deps.TableMetadataRepo.Upsert(tenantCtx, meta); err != nil {
@@ -191,6 +211,7 @@ func registerUpdateTableTool(s *server.MCPServer, deps *TableToolDeps) {
 		isNew := existing == nil
 		response := updateTableResponse{
 			Table:                table,
+			TableType:            ptrToString(meta.TableType),
 			Description:          ptrToString(meta.Description),
 			UsageNotes:           ptrToString(meta.UsageNotes),
 			IsEphemeral:          meta.IsEphemeral,
@@ -210,6 +231,7 @@ func registerUpdateTableTool(s *server.MCPServer, deps *TableToolDeps) {
 // updateTableResponse is the response format for update_table tool.
 type updateTableResponse struct {
 	Table                string `json:"table"`
+	TableType            string `json:"table_type,omitempty"`
 	Description          string `json:"description,omitempty"`
 	UsageNotes           string `json:"usage_notes,omitempty"`
 	IsEphemeral          bool   `json:"is_ephemeral"`
@@ -262,14 +284,32 @@ func registerDeleteTableMetadataTool(s *server.MCPServer, deps *TableToolDeps) {
 			return NewErrorResult("invalid_parameters", "parameter 'table' cannot be empty"), nil
 		}
 
-		// Get datasource ID
+		// Get datasource ID and look up the schema table
 		datasourceID, err := deps.ProjectService.GetDefaultDatasourceID(tenantCtx, projectID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get datasource: %w", err)
 		}
 
+		// Look up schema table to get its ID
+		schemaTable, err := deps.SchemaRepo.FindTableByName(tenantCtx, projectID, datasourceID, table)
+		if err != nil {
+			return nil, fmt.Errorf("failed to lookup table: %w", err)
+		}
+		if schemaTable == nil {
+			// Table doesn't exist in schema, so no metadata to delete
+			result := deleteTableMetadataResponse{
+				Table:   table,
+				Deleted: false,
+			}
+			jsonResult, err := json.Marshal(result)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal result: %w", err)
+			}
+			return mcp.NewToolResultText(string(jsonResult)), nil
+		}
+
 		// Check if metadata exists before deleting
-		existing, err := deps.TableMetadataRepo.Get(tenantCtx, projectID, datasourceID, table)
+		existing, err := deps.TableMetadataRepo.GetBySchemaTableID(tenantCtx, schemaTable.ID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check existing table metadata: %w", err)
 		}
@@ -288,7 +328,7 @@ func registerDeleteTableMetadataTool(s *server.MCPServer, deps *TableToolDeps) {
 		}
 
 		// Delete the metadata
-		if err := deps.TableMetadataRepo.Delete(tenantCtx, projectID, datasourceID, table); err != nil {
+		if err := deps.TableMetadataRepo.Delete(tenantCtx, schemaTable.ID); err != nil {
 			return nil, fmt.Errorf("failed to delete table metadata: %w", err)
 		}
 

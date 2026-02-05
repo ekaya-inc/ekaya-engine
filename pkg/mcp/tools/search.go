@@ -46,7 +46,7 @@ func registerSearchSchemaTool(s *server.MCPServer, deps *SearchToolDeps) {
 		mcp.WithDescription(
 			"Full-text search across tables and columns using pattern matching. "+
 				"Returns matching items ranked by relevance. Searches table names, column names, "+
-				"business names, and descriptions. "+
+				"and semantic descriptions from ontology metadata. "+
 				"Example: search_schema(query='user') returns all tables and columns "+
 				"related to users, ordered by relevance.",
 		),
@@ -122,25 +122,25 @@ type searchResult struct {
 
 // tableMatch represents a matched table.
 type tableMatch struct {
-	SchemaName   string  `json:"schema_name"`
-	TableName    string  `json:"table_name"`
-	BusinessName *string `json:"business_name,omitempty"`
-	Description  *string `json:"description,omitempty"`
-	RowCount     *int64  `json:"row_count,omitempty"`
-	MatchType    string  `json:"match_type"` // "table_name", "business_name", "description"
-	Relevance    float64 `json:"relevance"`
+	SchemaName  string  `json:"schema_name"`
+	TableName   string  `json:"table_name"`
+	TableType   *string `json:"table_type,omitempty"`
+	Description *string `json:"description,omitempty"`
+	RowCount    *int64  `json:"row_count,omitempty"`
+	MatchType   string  `json:"match_type"` // "table_name", "description"
+	Relevance   float64 `json:"relevance"`
 }
 
 // columnMatch represents a matched column.
 type columnMatch struct {
-	SchemaName   string  `json:"schema_name"`
-	TableName    string  `json:"table_name"`
-	ColumnName   string  `json:"column_name"`
-	DataType     string  `json:"data_type"`
-	BusinessName *string `json:"business_name,omitempty"`
-	Description  *string `json:"description,omitempty"`
-	MatchType    string  `json:"match_type"` // "column_name", "business_name", "description"
-	Relevance    float64 `json:"relevance"`
+	SchemaName  string  `json:"schema_name"`
+	TableName   string  `json:"table_name"`
+	ColumnName  string  `json:"column_name"`
+	DataType    string  `json:"data_type"`
+	Purpose     *string `json:"purpose,omitempty"`
+	Description *string `json:"description,omitempty"`
+	MatchType   string  `json:"match_type"` // "column_name", "description"
+	Relevance   float64 `json:"relevance"`
 }
 
 // searchSchema performs the full-text search across schema.
@@ -180,35 +180,35 @@ func searchSchema(ctx context.Context, deps *SearchToolDeps, projectID uuid.UUID
 }
 
 // searchTables searches for matching tables.
-func searchTables(ctx context.Context, deps *SearchToolDeps, projectID uuid.UUID, query string, limit int) ([]tableMatch, error) {
+// Searches table_name in engine_schema_tables and description in engine_ontology_table_metadata.
+func searchTables(ctx context.Context, _ *SearchToolDeps, projectID uuid.UUID, query string, limit int) ([]tableMatch, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, fmt.Errorf("tenant scope not found in context")
 	}
 
 	// Query to search tables using ILIKE for pattern matching
+	// Join with ontology table metadata to search descriptions
 	q := `
 		SELECT DISTINCT
 			st.schema_name,
 			st.table_name,
-			st.business_name,
-			st.description,
+			tm.table_type,
+			tm.description,
 			st.row_count,
 			CASE
 				WHEN LOWER(st.table_name) = $1 THEN 1.0
 				WHEN LOWER(st.table_name) LIKE $1 || '%' THEN 0.9
-				WHEN LOWER(st.business_name) = $1 THEN 0.95
-				WHEN LOWER(st.business_name) LIKE '%' || $1 || '%' THEN 0.8
-				WHEN LOWER(st.description) LIKE '%' || $1 || '%' THEN 0.6
+				WHEN LOWER(tm.description) LIKE '%' || $1 || '%' THEN 0.6
 				ELSE 0.5
 			END as relevance
 		FROM engine_schema_tables st
+		LEFT JOIN engine_ontology_table_metadata tm ON tm.schema_table_id = st.id
 		WHERE st.project_id = $2
 			AND st.deleted_at IS NULL
 			AND (
 				LOWER(st.table_name) LIKE '%' || $1 || '%'
-				OR LOWER(st.business_name) LIKE '%' || $1 || '%'
-				OR LOWER(st.description) LIKE '%' || $1 || '%'
+				OR LOWER(tm.description) LIKE '%' || $1 || '%'
 			)
 		ORDER BY relevance DESC, st.table_name ASC
 		LIMIT $3
@@ -226,7 +226,7 @@ func searchTables(ctx context.Context, deps *SearchToolDeps, projectID uuid.UUID
 		if err := rows.Scan(
 			&m.SchemaName,
 			&m.TableName,
-			&m.BusinessName,
+			&m.TableType,
 			&m.Description,
 			&m.RowCount,
 			&m.Relevance,
@@ -237,8 +237,6 @@ func searchTables(ctx context.Context, deps *SearchToolDeps, projectID uuid.UUID
 		// Determine match type
 		if strings.Contains(strings.ToLower(m.TableName), query) {
 			m.MatchType = "table_name"
-		} else if m.BusinessName != nil && strings.Contains(strings.ToLower(*m.BusinessName), query) {
-			m.MatchType = "business_name"
 		} else if m.Description != nil && strings.Contains(strings.ToLower(*m.Description), query) {
 			m.MatchType = "description"
 		}
@@ -254,38 +252,40 @@ func searchTables(ctx context.Context, deps *SearchToolDeps, projectID uuid.UUID
 }
 
 // searchColumns searches for matching columns.
-func searchColumns(ctx context.Context, deps *SearchToolDeps, projectID uuid.UUID, query string, limit int) ([]columnMatch, error) {
+// Searches column_name in engine_schema_columns and description/purpose in engine_ontology_column_metadata.
+func searchColumns(ctx context.Context, _ *SearchToolDeps, projectID uuid.UUID, query string, limit int) ([]columnMatch, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, fmt.Errorf("tenant scope not found in context")
 	}
 
 	// Query to search columns using ILIKE for pattern matching
+	// Join with ontology column metadata to search descriptions and purpose
 	q := `
 		SELECT DISTINCT
 			st.schema_name,
 			st.table_name,
 			sc.column_name,
 			sc.data_type,
-			sc.business_name,
-			sc.description,
+			cm.purpose,
+			cm.description,
 			CASE
 				WHEN LOWER(sc.column_name) = $1 THEN 1.0
 				WHEN LOWER(sc.column_name) LIKE $1 || '%' THEN 0.9
-				WHEN LOWER(sc.business_name) = $1 THEN 0.95
-				WHEN LOWER(sc.business_name) LIKE '%' || $1 || '%' THEN 0.8
-				WHEN LOWER(sc.description) LIKE '%' || $1 || '%' THEN 0.6
+				WHEN LOWER(cm.purpose) LIKE '%' || $1 || '%' THEN 0.7
+				WHEN LOWER(cm.description) LIKE '%' || $1 || '%' THEN 0.6
 				ELSE 0.5
 			END as relevance
 		FROM engine_schema_columns sc
 		JOIN engine_schema_tables st ON st.id = sc.schema_table_id
+		LEFT JOIN engine_ontology_column_metadata cm ON cm.schema_column_id = sc.id
 		WHERE sc.project_id = $2
 			AND sc.deleted_at IS NULL
 			AND st.deleted_at IS NULL
 			AND (
 				LOWER(sc.column_name) LIKE '%' || $1 || '%'
-				OR LOWER(sc.business_name) LIKE '%' || $1 || '%'
-				OR LOWER(sc.description) LIKE '%' || $1 || '%'
+				OR LOWER(cm.purpose) LIKE '%' || $1 || '%'
+				OR LOWER(cm.description) LIKE '%' || $1 || '%'
 			)
 		ORDER BY relevance DESC, st.table_name ASC, sc.column_name ASC
 		LIMIT $3
@@ -305,7 +305,7 @@ func searchColumns(ctx context.Context, deps *SearchToolDeps, projectID uuid.UUI
 			&m.TableName,
 			&m.ColumnName,
 			&m.DataType,
-			&m.BusinessName,
+			&m.Purpose,
 			&m.Description,
 			&m.Relevance,
 		); err != nil {
@@ -315,8 +315,8 @@ func searchColumns(ctx context.Context, deps *SearchToolDeps, projectID uuid.UUI
 		// Determine match type
 		if strings.Contains(strings.ToLower(m.ColumnName), query) {
 			m.MatchType = "column_name"
-		} else if m.BusinessName != nil && strings.Contains(strings.ToLower(*m.BusinessName), query) {
-			m.MatchType = "business_name"
+		} else if m.Purpose != nil && strings.Contains(strings.ToLower(*m.Purpose), query) {
+			m.MatchType = "purpose"
 		} else if m.Description != nil && strings.Contains(strings.ToLower(*m.Description), query) {
 			m.MatchType = "description"
 		}

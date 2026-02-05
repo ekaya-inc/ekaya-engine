@@ -146,14 +146,14 @@ CREATE TABLE engine_ontology_table_metadata (
 
 ### Phase 5: MCP Tool Updates
 
-- [ ] 5.1 Update `update_table` tool in `pkg/mcp/tools/table.go`:
+- [x] 5.1 Update `update_table` tool in `pkg/mcp/tools/table.go`:
   - Use `schema_table_id` instead of `table_name` for lookup
   - Write typed columns including `table_type`
 
-- [ ] 5.2 Update `get_context` tool in `pkg/mcp/tools/context.go`:
+- [x] 5.2 Update `get_context` tool in `pkg/mcp/tools/context.go`:
   - Fetch table metadata from ontology table using `schema_table_id`
 
-- [ ] 5.3 Update `search_schema` tool in `pkg/mcp/tools/search.go`:
+- [x] 5.3 Update `search_schema` tool in `pkg/mcp/tools/search.go`:
   - Remove dropped column references (`business_name`, `description`, `metadata`)
 
 ### Phase 6: Handler Updates
