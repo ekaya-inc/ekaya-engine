@@ -239,6 +239,9 @@ func main() {
 	ontologyDAGService.SetColumnEnrichmentMethods(services.NewColumnEnrichmentAdapter(columnEnrichmentService))
 	ontologyDAGService.SetGlossaryDiscoveryMethods(services.NewGlossaryDiscoveryAdapter(glossaryService))
 	ontologyDAGService.SetGlossaryEnrichmentMethods(services.NewGlossaryEnrichmentAdapter(glossaryService))
+	tableFeatureExtractionSvc := services.NewTableFeatureExtractionService(
+		schemaRepo, columnMetadataRepo, tableMetadataRepo, llmFactory, llmWorkerPool, getTenantCtx, logger)
+	ontologyDAGService.SetTableFeatureExtractionMethods(tableFeatureExtractionSvc)
 
 	// Incremental DAG service for targeted LLM enrichment after changes
 	// Created first without ChangeReviewService due to circular dependency
