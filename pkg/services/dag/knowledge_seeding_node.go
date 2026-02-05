@@ -43,6 +43,10 @@ func NewKnowledgeSeedingNode(
 
 // Execute runs the knowledge seeding phase.
 // It extracts domain knowledge facts from the project overview using LLM.
+//
+// Note: This node does not require dag.OntologyID. Knowledge seeding operates at
+// the project/datasource level, extracting domain facts from the project overview
+// before any ontology-specific processing occurs.
 func (n *KnowledgeSeedingNode) Execute(ctx context.Context, dag *models.OntologyDAG) error {
 	n.Logger().Info("Starting knowledge seeding",
 		zap.String("project_id", dag.ProjectID.String()),

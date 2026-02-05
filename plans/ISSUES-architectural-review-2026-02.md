@@ -221,6 +221,7 @@ Keep Go errors only for system failures (DB connection errors, internal errors).
 
 **Severity:** Low
 **Location:** `pkg/services/dag/`
+**Status:** RESOLVED - OntologyID requirements documented per node
 
 ### Problem
 
@@ -240,15 +241,23 @@ The following do NOT validate it:
 - `pk_match_discovery_node.go`
 - `relationship_discovery_node.go`
 
-### Note
+### Resolution
 
-Some nodes may not require `OntologyID` if they operate only on schema data. The issue is the inconsistency - there should be a documented decision about which nodes require which fields.
+Analysis determined that only the glossary nodes actually require `dag.OntologyID`:
 
-### Fix
+**Nodes requiring OntologyID (already have validation):**
+- `glossary_discovery_node.go` - Passes `OntologyID` to `DiscoverGlossaryTerms()`
+- `glossary_enrichment_node.go` - Passes `OntologyID` to `EnrichGlossaryTerms()`
 
-1. Document which DAG nodes require `dag.OntologyID`
-2. Add validation to those that need it
-3. For nodes that don't need it, add a comment explaining why
+**Nodes NOT requiring OntologyID (comments added explaining why):**
+- `knowledge_seeding_node.go` - Operates at project/datasource level before ontology processing
+- `column_feature_extraction_node.go` - Extracts raw schema features from datasource
+- `fk_discovery_node.go` - Reads FK constraints directly from database schema
+- `table_feature_extraction_node.go` - Generates descriptions from column features
+- `pk_match_discovery_node.go` - Uses SQL join analysis on datasource
+- `column_enrichment_node.go` - Stores in `engine_ontology_column_metadata` via `schema_column_id`
+- `relationship_discovery_node.go` - Uses LLM validation on schema data
+- `ontology_finalization_node.go` - Service looks up ontology by `projectID` internally
 
 ---
 
@@ -318,7 +327,7 @@ func (d *QueryToolDeps) GetMCPConfigService() services.MCPConfigService { return
 | 2 | Deps structs duplication | Medium | DRY | [x] **Resolved** |
 | 3 | Column name pattern heuristics | High | Rule #5 | [x] **Resolved** (via architecture transition) |
 | 4 | MCP validation errors as Go errors | Medium | Rule #6 | [x] **Resolved** |
-| 5 | DAG node validation inconsistency | Low | Rule #4 | Open |
+| 5 | DAG node validation inconsistency | Low | Rule #4 | [x] **Resolved** |
 | 6 | Logger.Warn for errors | Low | Fail-fast philosophy | Open |
 | 7 | QueryToolDeps missing interface method | Low | Code consistency | Open |
 

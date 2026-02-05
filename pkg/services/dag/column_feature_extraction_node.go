@@ -50,6 +50,10 @@ func NewColumnFeatureExtractionNode(
 }
 
 // Execute runs the column feature extraction phase.
+//
+// Note: This node does not require dag.OntologyID. Column feature extraction operates
+// on raw schema data from the datasource, extracting deterministic features (data types,
+// sample values, patterns) before any ontology-specific processing.
 func (n *ColumnFeatureExtractionNode) Execute(ctx context.Context, dag *models.OntologyDAG) error {
 	n.Logger().Info("Starting column feature extraction",
 		zap.String("project_id", dag.ProjectID.String()),
