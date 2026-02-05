@@ -12,33 +12,15 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
-	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 // DevQueryToolDeps defines dependencies for dev query MCP tools.
 type DevQueryToolDeps struct {
-	DB               *database.DB
-	MCPConfigService services.MCPConfigService
-	ProjectService   services.ProjectService
-	QueryService     services.QueryService
-	Logger           *zap.Logger
-}
-
-// GetDB returns the database connection.
-func (d *DevQueryToolDeps) GetDB() *database.DB {
-	return d.DB
-}
-
-// GetMCPConfigService returns the MCP config service.
-func (d *DevQueryToolDeps) GetMCPConfigService() services.MCPConfigService {
-	return d.MCPConfigService
-}
-
-// GetLogger returns the logger.
-func (d *DevQueryToolDeps) GetLogger() *zap.Logger {
-	return d.Logger
+	BaseMCPToolDeps
+	ProjectService services.ProjectService
+	QueryService   services.QueryService
 }
 
 // RegisterDevQueryTools registers the dev query management tools with the MCP server.

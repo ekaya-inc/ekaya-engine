@@ -9,34 +9,18 @@ import (
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
-	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
-	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 // KnowledgeToolDeps contains dependencies for project knowledge tools.
 type KnowledgeToolDeps struct {
-	DB                  *database.DB
-	MCPConfigService    services.MCPConfigService
+	BaseMCPToolDeps
 	KnowledgeRepository repositories.KnowledgeRepository
 	OntologyRepository  repositories.OntologyRepository
-	Logger              *zap.Logger
 }
-
-// GetDB implements ToolAccessDeps.
-func (d *KnowledgeToolDeps) GetDB() *database.DB { return d.DB }
-
-// GetMCPConfigService implements ToolAccessDeps.
-func (d *KnowledgeToolDeps) GetMCPConfigService() services.MCPConfigService {
-	return d.MCPConfigService
-}
-
-// GetLogger implements ToolAccessDeps.
-func (d *KnowledgeToolDeps) GetLogger() *zap.Logger { return d.Logger }
 
 // RegisterKnowledgeTools registers project knowledge MCP tools.
 func RegisterKnowledgeTools(s *server.MCPServer, deps *KnowledgeToolDeps) {

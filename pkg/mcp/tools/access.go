@@ -23,6 +23,24 @@ type ToolAccessDeps interface {
 	GetLogger() *zap.Logger
 }
 
+// BaseMCPToolDeps provides the common dependencies that all MCP tools need.
+// Tool-specific *Deps structs should embed this to avoid repeating the
+// GetDB/GetMCPConfigService/GetLogger method implementations.
+type BaseMCPToolDeps struct {
+	DB               *database.DB
+	MCPConfigService services.MCPConfigService
+	Logger           *zap.Logger
+}
+
+// GetDB implements ToolAccessDeps.
+func (d *BaseMCPToolDeps) GetDB() *database.DB { return d.DB }
+
+// GetMCPConfigService implements ToolAccessDeps.
+func (d *BaseMCPToolDeps) GetMCPConfigService() services.MCPConfigService { return d.MCPConfigService }
+
+// GetLogger implements ToolAccessDeps.
+func (d *BaseMCPToolDeps) GetLogger() *zap.Logger { return d.Logger }
+
 // ToolAccessResult contains the result of a successful access check.
 type ToolAccessResult struct {
 	ProjectID uuid.UUID

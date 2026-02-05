@@ -21,7 +21,9 @@ func TestRegisterTableTools(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &TableToolDeps{
-		Logger: zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			Logger: zap.NewNop(),
+		},
 	}
 
 	RegisterTableTools(mcpServer, deps)
@@ -60,7 +62,9 @@ func TestUpdateTableTool_Structure(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &TableToolDeps{
-		Logger: zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			Logger: zap.NewNop(),
+		},
 	}
 
 	RegisterTableTools(mcpServer, deps)
@@ -235,7 +239,9 @@ func TestDeleteTableMetadataTool_Structure(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &TableToolDeps{
-		Logger: zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			Logger: zap.NewNop(),
+		},
 	}
 
 	RegisterTableTools(mcpServer, deps)

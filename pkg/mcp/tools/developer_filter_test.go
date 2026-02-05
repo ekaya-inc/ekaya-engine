@@ -65,7 +65,9 @@ func mockProjectServiceWithDatasource() *mockProjectService {
 func TestNewToolFilter_NoAuth(t *testing.T) {
 	// No DB needed - filter should return early without auth
 	deps := &MCPToolDeps{
-		Logger: zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			Logger: zap.NewNop(),
+		},
 	}
 
 	filter := NewToolFilter(deps)
@@ -92,10 +94,12 @@ func TestNewToolFilter_DeveloperDisabled(t *testing.T) {
 	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: false})
 
 	deps := &MCPToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
-		ProjectService:   mockProjectServiceWithDatasource(),
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
 	}
 
 	filter := NewToolFilter(deps)
@@ -125,10 +129,12 @@ func TestNewToolFilter_DeveloperEnabled_AllToolsAvailable(t *testing.T) {
 	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true, AddQueryTools: true})
 
 	deps := &MCPToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
-		ProjectService:   mockProjectServiceWithDatasource(),
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
 	}
 
 	filter := NewToolFilter(deps)
@@ -175,10 +181,12 @@ func TestNewToolFilter_DeveloperEnabled_VerifyAllTools(t *testing.T) {
 	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true, AddQueryTools: true})
 
 	deps := &MCPToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
-		ProjectService:   mockProjectServiceWithDatasource(),
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
 	}
 
 	filter := NewToolFilter(deps)
@@ -208,10 +216,12 @@ func TestNewToolFilter_NilConfig(t *testing.T) {
 	// Don't create any config - should use defaults (all tools ON)
 
 	deps := &MCPToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
-		ProjectService:   mockProjectServiceWithDatasource(),
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
 	}
 
 	filter := NewToolFilter(deps)
@@ -375,10 +385,12 @@ func TestNewToolFilter_DeveloperEnabled_ApprovedQueriesOff(t *testing.T) {
 	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true, AddQueryTools: true})
 
 	deps := &MCPToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
-		ProjectService:   mockProjectServiceWithDatasource(),
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
 	}
 
 	filter := NewToolFilter(deps)
@@ -417,10 +429,12 @@ func TestNewToolFilter_ApprovedQueriesOnly_NoQueriesExist(t *testing.T) {
 	// Mock with no queries - query count doesn't affect tool filtering
 	testProjectService := &mockProjectService{defaultDatasourceID: uuid.New()}
 	deps := &MCPToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: nil}, testProjectService, nil, "http://localhost", zap.NewNop()),
-		ProjectService:   testProjectService,
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: nil}, testProjectService, nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: testProjectService,
 	}
 
 	filter := NewToolFilter(deps)
@@ -464,10 +478,12 @@ func TestNewToolFilter_ApprovedQueriesEnabledWithQueries(t *testing.T) {
 	mockQueries := []*models.Query{{ID: uuid.New(), NaturalLanguagePrompt: "Test query"}}
 	testProjectService := &mockProjectService{defaultDatasourceID: uuid.New()}
 	deps := &MCPToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, testProjectService, nil, "http://localhost", zap.NewNop()),
-		ProjectService:   testProjectService,
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, testProjectService, nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: testProjectService,
 	}
 
 	filter := NewToolFilter(deps)
@@ -578,10 +594,12 @@ func TestNewToolFilter_ForceModeOnlyShowsApprovedQueriesTools(t *testing.T) {
 	mockQueries := []*models.Query{{ID: uuid.New(), NaturalLanguagePrompt: "Test query"}}
 	testProjectService := &mockProjectService{defaultDatasourceID: uuid.New()}
 	deps := &MCPToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, testProjectService, nil, "http://localhost", zap.NewNop()),
-		ProjectService:   testProjectService,
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, testProjectService, nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: testProjectService,
 	}
 
 	filter := NewToolFilter(deps)
@@ -619,10 +637,12 @@ func TestNewToolFilter_ForceModeOffAllowsDeveloperTools(t *testing.T) {
 	mockQueries := []*models.Query{{ID: uuid.New(), NaturalLanguagePrompt: "Test query"}}
 	testProjectService := &mockProjectService{defaultDatasourceID: uuid.New()}
 	deps := &MCPToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, testProjectService, nil, "http://localhost", zap.NewNop()),
-		ProjectService:   testProjectService,
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, testProjectService, nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: testProjectService,
 	}
 
 	filter := NewToolFilter(deps)
@@ -661,10 +681,12 @@ func TestNewToolFilter_ApprovedQueriesOn_DeveloperOff(t *testing.T) {
 	mockQueries := []*models.Query{{ID: uuid.New(), NaturalLanguagePrompt: "Test query"}}
 	testProjectService := &mockProjectService{defaultDatasourceID: uuid.New()}
 	deps := &MCPToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, testProjectService, nil, "http://localhost", zap.NewNop()),
-		ProjectService:   testProjectService,
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, testProjectService, nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: testProjectService,
 	}
 
 	filter := NewToolFilter(deps)
@@ -697,10 +719,12 @@ func TestNewToolFilter_DeveloperEnabled_ExecuteAlwaysAvailable(t *testing.T) {
 	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true, AddQueryTools: true})
 
 	deps := &MCPToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
-		ProjectService:   mockProjectServiceWithDatasource(),
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
 	}
 
 	filter := NewToolFilter(deps)
@@ -738,10 +762,12 @@ func TestNewToolFilter_DeveloperOnly_CoreToolsOnly(t *testing.T) {
 	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true})
 
 	deps := &MCPToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
-		ProjectService:   mockProjectServiceWithDatasource(),
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
 	}
 
 	filter := NewToolFilter(deps)
@@ -917,10 +943,12 @@ func TestNewToolFilter_AgentAuth_AgentToolsEnabled(t *testing.T) {
 	setupTestConfigWithAgentTools(t, engineDB.DB, projectID, true)
 
 	deps := &MCPToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
-		ProjectService:   mockProjectServiceWithDatasource(),
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
 	}
 
 	filter := NewToolFilter(deps)
@@ -966,10 +994,12 @@ func TestNewToolFilter_AgentAuth_AgentToolsDisabled(t *testing.T) {
 	setupTestConfigWithAgentTools(t, engineDB.DB, projectID, false)
 
 	deps := &MCPToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
-		ProjectService:   mockProjectServiceWithDatasource(),
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
 	}
 
 	filter := NewToolFilter(deps)
@@ -1022,10 +1052,12 @@ func TestNewToolFilter_AgentAuth_NoConfig(t *testing.T) {
 	})
 
 	deps := &MCPToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
-		ProjectService:   mockProjectServiceWithDatasource(),
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
 	}
 
 	filter := NewToolFilter(deps)
@@ -1096,10 +1128,12 @@ func TestNewToolFilter_UserAuth_DeveloperMode_AllTools(t *testing.T) {
 	})
 
 	deps := &MCPToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
-		ProjectService:   mockProjectServiceWithDatasource(),
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
 	}
 
 	filter := NewToolFilter(deps)
@@ -1242,11 +1276,13 @@ func TestNewToolFilter_DataLiaisonNotInstalled_BusinessTools(t *testing.T) {
 
 	// AI Data Liaison NOT installed
 	deps := &MCPToolDeps{
-		DB:                  engineDB.DB,
-		MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
 		ProjectService:      mockProjectServiceWithDatasource(),
 		InstalledAppService: newMockInstalledAppService(), // No AI Data Liaison
-		Logger:              zap.NewNop(),
 	}
 
 	filter := NewToolFilter(deps)
@@ -1320,11 +1356,13 @@ func TestNewToolFilter_DataLiaisonInstalled_BusinessTools(t *testing.T) {
 
 	// AI Data Liaison IS installed
 	deps := &MCPToolDeps{
-		DB:                  engineDB.DB,
-		MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
 		ProjectService:      mockProjectServiceWithDatasource(),
 		InstalledAppService: newMockInstalledAppService(models.AppIDAIDataLiaison), // AI Data Liaison installed
-		Logger:              zap.NewNop(),
 	}
 
 	filter := NewToolFilter(deps)
@@ -1391,11 +1429,13 @@ func TestNewToolFilter_DataLiaisonNotInstalled_DeveloperTools(t *testing.T) {
 
 	// AI Data Liaison NOT installed
 	deps := &MCPToolDeps{
-		DB:                  engineDB.DB,
-		MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
 		ProjectService:      mockProjectServiceWithDatasource(),
 		InstalledAppService: newMockInstalledAppService(), // No AI Data Liaison
-		Logger:              zap.NewNop(),
 	}
 
 	filter := NewToolFilter(deps)
@@ -1477,11 +1517,13 @@ func TestNewToolFilter_DataLiaisonInstalled_DeveloperTools(t *testing.T) {
 
 	// AI Data Liaison IS installed
 	deps := &MCPToolDeps{
-		DB:                  engineDB.DB,
-		MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
 		ProjectService:      mockProjectServiceWithDatasource(),
 		InstalledAppService: newMockInstalledAppService(models.AppIDAIDataLiaison), // AI Data Liaison installed
-		Logger:              zap.NewNop(),
 	}
 
 	filter := NewToolFilter(deps)
@@ -1555,11 +1597,13 @@ func TestNewToolFilter_DataLiaisonNotInstalled_NilService_FallbackToHidden(t *te
 
 	// InstalledAppService is nil - should default to hiding data liaison tools
 	deps := &MCPToolDeps{
-		DB:                  engineDB.DB,
-		MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:           zap.NewNop(),
+		},
 		ProjectService:      mockProjectServiceWithDatasource(),
 		InstalledAppService: nil, // Nil service - fallback to not installed
-		Logger:              zap.NewNop(),
 	}
 
 	filter := NewToolFilter(deps)

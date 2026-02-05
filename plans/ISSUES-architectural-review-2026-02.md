@@ -47,6 +47,7 @@ Meanwhile, `dev_queries.go` correctly uses the shared `AcquireToolAccess()` func
 
 **Severity:** Medium
 **Location:** All files in `pkg/mcp/tools/`
+**Status:** RESOLVED - `BaseMCPToolDeps` created and embedded by 13 structs
 
 ### Problem
 
@@ -100,6 +101,16 @@ type TableToolDeps struct {
     // ...
 }
 ```
+
+### Resolution
+
+`BaseMCPToolDeps` was created in `pkg/mcp/tools/access.go` with the three common interface methods. The following 13 structs now embed it:
+
+- TableToolDeps, MCPToolDeps, KnowledgeToolDeps, ColumnToolDeps, GlossaryToolDeps
+- SchemaToolDeps, OntologyToolDeps, QueryToolDeps, DevQueryToolDeps, ProbeToolDeps
+- SearchToolDeps, ContextToolDeps, QuestionToolDeps
+
+**Note:** `HealthToolDeps` was excluded because it doesn't implement `ToolAccessDeps` - it lacks `MCPConfigService` since the health tool is always available without access control.
 
 ---
 
@@ -304,7 +315,7 @@ func (d *QueryToolDeps) GetMCPConfigService() services.MCPConfigService { return
 | # | Issue | Severity | Principle Violated | Status |
 |---|-------|----------|-------------------|--------|
 | 1 | Tool access control duplication | Medium | DRY | Open |
-| 2 | Deps structs duplication | Medium | DRY | Open |
+| 2 | Deps structs duplication | Medium | DRY | [x] **Resolved** |
 | 3 | Column name pattern heuristics | High | Rule #5 | [x] **Resolved** (via architecture transition) |
 | 4 | MCP validation errors as Go errors | Medium | Rule #6 | Open |
 | 5 | DAG node validation inconsistency | Low | Rule #4 | Open |

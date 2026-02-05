@@ -46,13 +46,15 @@ func TestOntologyToolDeps_Initialization(t *testing.T) {
 
 	// Verify struct can be initialized with all dependencies
 	deps := &OntologyToolDeps{
-		DB:                     db,
-		MCPConfigService:       mcpConfigService,
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               db,
+			MCPConfigService: mcpConfigService,
+			Logger:           logger,
+		},
 		ProjectService:         projectService,
 		OntologyContextService: ontologyContextService,
 		OntologyRepo:           ontologyRepo,
 		SchemaRepo:             schemaRepo,
-		Logger:                 logger,
 	}
 
 	assert.NotNil(t, deps, "OntologyToolDeps should be initialized")
@@ -64,7 +66,9 @@ func TestRegisterOntologyTools(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &OntologyToolDeps{
-		Logger: zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			Logger: zap.NewNop(),
+		},
 	}
 
 	RegisterOntologyTools(mcpServer, deps)
@@ -136,7 +140,9 @@ func TestCheckOntologyToolsEnabled(t *testing.T) {
 
 			// Create mock dependencies (minimal for error path testing)
 			deps := &OntologyToolDeps{
-				Logger: zap.NewNop(),
+				BaseMCPToolDeps: BaseMCPToolDeps{
+					Logger: zap.NewNop(),
+				},
 			}
 
 			// Call AcquireToolAccess

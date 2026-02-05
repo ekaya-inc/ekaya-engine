@@ -98,10 +98,12 @@ func TestAgentToolsEnabled_ListAndCallConsistency(t *testing.T) {
 
 	// Part 1: Verify tool LISTING shows approved queries tools for agent auth
 	filterDeps := &MCPToolDeps{
-		ProjectService:   consistencyMockProjectService(),
-		DB:               engineDB.DB,
-		MCPConfigService: mcpConfigService,
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: mcpConfigService,
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: consistencyMockProjectService(),
 	}
 
 	filter := NewToolFilter(filterDeps)
@@ -126,11 +128,13 @@ func TestAgentToolsEnabled_ListAndCallConsistency(t *testing.T) {
 
 	// Part 2: Verify tool CALLING works (this is where the bug was)
 	queryDeps := &QueryToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: mcpConfigService,
-		ProjectService:   &mockProjectService{defaultDatasourceID: uuid.New()},
-		QueryService:     &mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: mcpConfigService,
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: &mockProjectService{defaultDatasourceID: uuid.New()},
+		QueryService:   &mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
 	}
 
 	// checkApprovedQueriesEnabled is called when executing list_approved_queries or execute_approved_query
@@ -173,10 +177,12 @@ func TestApprovedQueriesEnabled_ListAndCallConsistency(t *testing.T) {
 
 	// Part 1: Verify tool LISTING shows approved queries tools
 	filterDeps := &MCPToolDeps{
-		ProjectService:   consistencyMockProjectService(),
-		DB:               engineDB.DB,
-		MCPConfigService: mcpConfigService,
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: mcpConfigService,
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: consistencyMockProjectService(),
 	}
 
 	filter := NewToolFilter(filterDeps)
@@ -197,11 +203,13 @@ func TestApprovedQueriesEnabled_ListAndCallConsistency(t *testing.T) {
 
 	// Part 2: Verify tool CALLING works
 	queryDeps := &QueryToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: mcpConfigService,
-		ProjectService:   &mockProjectService{defaultDatasourceID: uuid.New()},
-		QueryService:     &mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: mcpConfigService,
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: &mockProjectService{defaultDatasourceID: uuid.New()},
+		QueryService:   &mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
 	}
 
 	_, tenantCtx, cleanup, err := checkApprovedQueriesEnabled(ctx, queryDeps, "list_approved_queries")
@@ -241,10 +249,12 @@ func TestNeitherEnabled_QueryToolsNotListed(t *testing.T) {
 
 	// Part 1: Verify tool LISTING does NOT show Query loadout tools
 	filterDeps := &MCPToolDeps{
-		ProjectService:   consistencyMockProjectService(),
-		DB:               engineDB.DB,
-		MCPConfigService: mcpConfigService,
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: mcpConfigService,
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: consistencyMockProjectService(),
 	}
 
 	filter := NewToolFilter(filterDeps)
@@ -283,11 +293,13 @@ func TestNeitherEnabled_QueryToolsNotListed(t *testing.T) {
 
 	// Part 2: Verify Query tool CALLING fails (since not in loadout)
 	queryDeps := &QueryToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: mcpConfigService,
-		ProjectService:   &mockProjectService{},
-		QueryService:     &mockQueryService{},
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: mcpConfigService,
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: &mockProjectService{},
+		QueryService:   &mockQueryService{},
 	}
 
 	_, _, cleanup, err := checkApprovedQueriesEnabled(ctx, queryDeps, "list_approved_queries")
@@ -326,10 +338,12 @@ func TestAgentAuth_AgentToolsDisabled(t *testing.T) {
 
 	// Part 1: Verify tool LISTING does NOT show tools for agent
 	filterDeps := &MCPToolDeps{
-		ProjectService:   consistencyMockProjectService(),
-		DB:               engineDB.DB,
-		MCPConfigService: mcpConfigService,
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: mcpConfigService,
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: consistencyMockProjectService(),
 	}
 
 	filter := NewToolFilter(filterDeps)
@@ -378,10 +392,12 @@ func TestBothEnabled_UserSeesApprovedQueries(t *testing.T) {
 
 	// Part 1: Verify user sees approved queries tools
 	filterDeps := &MCPToolDeps{
-		ProjectService:   consistencyMockProjectService(),
-		DB:               engineDB.DB,
-		MCPConfigService: mcpConfigService,
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: mcpConfigService,
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: consistencyMockProjectService(),
 	}
 
 	filter := NewToolFilter(filterDeps)
@@ -402,11 +418,13 @@ func TestBothEnabled_UserSeesApprovedQueries(t *testing.T) {
 
 	// Part 2: Verify calling works for user
 	queryDeps := &QueryToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: mcpConfigService,
-		ProjectService:   &mockProjectService{defaultDatasourceID: uuid.New()},
-		QueryService:     &mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: mcpConfigService,
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: &mockProjectService{defaultDatasourceID: uuid.New()},
+		QueryService:   &mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
 	}
 
 	_, tenantCtx, cleanup, err := checkApprovedQueriesEnabled(ctx, queryDeps, "list_approved_queries")
@@ -447,10 +465,12 @@ func TestAgentToolsEnabled_LimitedQueryToolsConsistency(t *testing.T) {
 	)
 
 	filterDeps := &MCPToolDeps{
-		ProjectService:   consistencyMockProjectService(),
-		DB:               engineDB.DB,
-		MCPConfigService: mcpConfigService,
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: mcpConfigService,
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: consistencyMockProjectService(),
 	}
 
 	filter := NewToolFilter(filterDeps)
@@ -483,10 +503,12 @@ func TestAgentToolsEnabled_LimitedQueryToolsConsistency(t *testing.T) {
 
 	// Verify tool CALLING consistency for list_approved_queries
 	devDeps := &MCPToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: mcpConfigService,
-		ProjectService:   &mockProjectService{defaultDatasourceID: uuid.New()},
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: mcpConfigService,
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: &mockProjectService{defaultDatasourceID: uuid.New()},
 	}
 
 	_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, devDeps, "list_approved_queries")

@@ -9,32 +9,19 @@ import (
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"go.uber.org/zap"
 
-	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 // OntologyToolDeps contains dependencies for ontology tools.
 type OntologyToolDeps struct {
-	DB                     *database.DB
-	MCPConfigService       services.MCPConfigService
+	BaseMCPToolDeps
 	ProjectService         services.ProjectService
 	OntologyContextService services.OntologyContextService
 	OntologyRepo           repositories.OntologyRepository
 	SchemaRepo             repositories.SchemaRepository
-	Logger                 *zap.Logger
 }
-
-// GetDB implements ToolAccessDeps.
-func (d *OntologyToolDeps) GetDB() *database.DB { return d.DB }
-
-// GetMCPConfigService implements ToolAccessDeps.
-func (d *OntologyToolDeps) GetMCPConfigService() services.MCPConfigService { return d.MCPConfigService }
-
-// GetLogger implements ToolAccessDeps.
-func (d *OntologyToolDeps) GetLogger() *zap.Logger { return d.Logger }
 
 // RegisterOntologyTools registers ontology-related MCP tools.
 func RegisterOntologyTools(s *server.MCPServer, deps *OntologyToolDeps) {

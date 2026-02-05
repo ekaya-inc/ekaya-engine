@@ -99,9 +99,11 @@ func TestGlossaryToolDeps_Initialization(t *testing.T) {
 	mcpConfigService := &mockMCPConfigService{}
 
 	deps := &GlossaryToolDeps{
-		MCPConfigService: mcpConfigService,
-		GlossaryService:  glossaryService,
-		Logger:           logger,
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			MCPConfigService: mcpConfigService,
+			Logger:           logger,
+		},
+		GlossaryService: glossaryService,
 	}
 
 	assert.NotNil(t, deps, "GlossaryToolDeps should be initialized")
@@ -114,7 +116,9 @@ func TestRegisterGlossaryTools(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &GlossaryToolDeps{
-		Logger: zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			Logger: zap.NewNop(),
+		},
 	}
 
 	RegisterGlossaryTools(mcpServer, deps)
@@ -182,7 +186,9 @@ func TestCheckGlossaryToolsEnabled(t *testing.T) {
 			}
 
 			deps := &GlossaryToolDeps{
-				Logger: zap.NewNop(),
+				BaseMCPToolDeps: BaseMCPToolDeps{
+					Logger: zap.NewNop(),
+				},
 			}
 
 			projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "list_glossary")
@@ -385,8 +391,10 @@ func TestListGlossaryTool_Integration(t *testing.T) {
 	}
 
 	deps := &GlossaryToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			Logger: zap.NewNop(),
+		},
 		GlossaryService: mockService,
-		Logger:          zap.NewNop(),
 	}
 
 	// Register tools
@@ -439,8 +447,10 @@ WHERE transaction_state = 'completed'`,
 	}
 
 	deps := &GlossaryToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			Logger: zap.NewNop(),
+		},
 		GlossaryService: mockService,
-		Logger:          zap.NewNop(),
 	}
 
 	// Register tools
@@ -480,7 +490,9 @@ func TestUpdateGlossaryTermTool_ToolStructure(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &GlossaryToolDeps{
-		Logger: zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			Logger: zap.NewNop(),
+		},
 	}
 
 	RegisterGlossaryTools(mcpServer, deps)
@@ -581,7 +593,9 @@ func TestDeleteGlossaryTermTool_ToolStructure(t *testing.T) {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
 	deps := &GlossaryToolDeps{
-		Logger: zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			Logger: zap.NewNop(),
+		},
 	}
 
 	RegisterGlossaryTools(mcpServer, deps)

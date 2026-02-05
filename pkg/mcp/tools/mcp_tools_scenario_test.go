@@ -164,10 +164,12 @@ func newMCPScenarioTest(t *testing.T) *mcpScenarioTest {
 
 	// Create tool filter with real dependencies and configurable project service
 	deps := &MCPToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: mcpConfigService,
-		ProjectService:   projectService,
-		Logger:           zap.NewNop(),
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:               engineDB.DB,
+			MCPConfigService: mcpConfigService,
+			Logger:           zap.NewNop(),
+		},
+		ProjectService: projectService,
 	}
 
 	st := &mcpScenarioTest{

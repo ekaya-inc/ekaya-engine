@@ -12,7 +12,6 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 
-	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
@@ -20,23 +19,12 @@ import (
 
 // ProbeToolDeps contains dependencies for probe tools.
 type ProbeToolDeps struct {
-	DB                 *database.DB
-	MCPConfigService   services.MCPConfigService
+	BaseMCPToolDeps
 	SchemaRepo         repositories.SchemaRepository
 	OntologyRepo       repositories.OntologyRepository
 	ColumnMetadataRepo repositories.ColumnMetadataRepository
 	ProjectService     services.ProjectService
-	Logger             *zap.Logger
 }
-
-// GetDB implements ToolAccessDeps.
-func (d *ProbeToolDeps) GetDB() *database.DB { return d.DB }
-
-// GetMCPConfigService implements ToolAccessDeps.
-func (d *ProbeToolDeps) GetMCPConfigService() services.MCPConfigService { return d.MCPConfigService }
-
-// GetLogger implements ToolAccessDeps.
-func (d *ProbeToolDeps) GetLogger() *zap.Logger { return d.Logger }
 
 // RegisterProbeTools registers probe MCP tools.
 func RegisterProbeTools(s *server.MCPServer, deps *ProbeToolDeps) {

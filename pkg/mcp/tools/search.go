@@ -14,25 +14,13 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
-	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 // SearchToolDeps contains dependencies for search tools.
 type SearchToolDeps struct {
-	DB               *database.DB
-	MCPConfigService services.MCPConfigService
-	SchemaRepo       repositories.SchemaRepository
-	Logger           *zap.Logger
+	BaseMCPToolDeps
+	SchemaRepo repositories.SchemaRepository
 }
-
-// GetDB implements ToolAccessDeps.
-func (d *SearchToolDeps) GetDB() *database.DB { return d.DB }
-
-// GetMCPConfigService implements ToolAccessDeps.
-func (d *SearchToolDeps) GetMCPConfigService() services.MCPConfigService { return d.MCPConfigService }
-
-// GetLogger implements ToolAccessDeps.
-func (d *SearchToolDeps) GetLogger() *zap.Logger { return d.Logger }
 
 // RegisterSearchTools registers search MCP tools.
 func RegisterSearchTools(s *server.MCPServer, deps *SearchToolDeps) {

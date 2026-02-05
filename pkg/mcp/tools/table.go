@@ -8,9 +8,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"go.uber.org/zap"
 
-	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
@@ -18,22 +16,11 @@ import (
 
 // TableToolDeps contains dependencies for table metadata tools.
 type TableToolDeps struct {
-	DB                *database.DB
-	MCPConfigService  services.MCPConfigService
+	BaseMCPToolDeps
 	SchemaRepo        repositories.SchemaRepository
 	TableMetadataRepo repositories.TableMetadataRepository
 	ProjectService    services.ProjectService
-	Logger            *zap.Logger
 }
-
-// GetDB implements ToolAccessDeps.
-func (d *TableToolDeps) GetDB() *database.DB { return d.DB }
-
-// GetMCPConfigService implements ToolAccessDeps.
-func (d *TableToolDeps) GetMCPConfigService() services.MCPConfigService { return d.MCPConfigService }
-
-// GetLogger implements ToolAccessDeps.
-func (d *TableToolDeps) GetLogger() *zap.Logger { return d.Logger }
 
 // RegisterTableTools registers table metadata MCP tools.
 func RegisterTableTools(s *server.MCPServer, deps *TableToolDeps) {

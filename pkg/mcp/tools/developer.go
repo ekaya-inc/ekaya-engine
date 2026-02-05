@@ -25,8 +25,7 @@ import (
 // MCPToolDeps contains dependencies for MCP tools.
 // This includes developer tools, business user tools, and approved query tools.
 type MCPToolDeps struct {
-	DB                           *database.DB
-	MCPConfigService             services.MCPConfigService
+	BaseMCPToolDeps
 	DatasourceService            services.DatasourceService
 	SchemaService                services.SchemaService
 	ProjectService               services.ProjectService
@@ -37,21 +36,11 @@ type MCPToolDeps struct {
 	PendingChangeRepo            repositories.PendingChangeRepository
 	InstalledAppService          services.InstalledAppService
 	Auditor                      *audit.SecurityAuditor // Optional: for modifying query SIEM logging
-	Logger                       *zap.Logger
 }
 
 // dataLiaisonTools is a reference to the shared list in services.DataLiaisonTools.
 // These tools require the AI Data Liaison app to be installed.
 var dataLiaisonTools = services.DataLiaisonTools
-
-// GetDB implements ToolAccessDeps.
-func (d *MCPToolDeps) GetDB() *database.DB { return d.DB }
-
-// GetMCPConfigService implements ToolAccessDeps.
-func (d *MCPToolDeps) GetMCPConfigService() services.MCPConfigService { return d.MCPConfigService }
-
-// GetLogger implements ToolAccessDeps.
-func (d *MCPToolDeps) GetLogger() *zap.Logger { return d.Logger }
 
 // GetAuditor implements QueryLoggingDeps.
 func (d *MCPToolDeps) GetAuditor() *audit.SecurityAuditor { return d.Auditor }

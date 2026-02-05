@@ -13,28 +13,15 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 
-	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
-	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 // QuestionToolDeps contains dependencies for ontology question tools.
 type QuestionToolDeps struct {
-	DB               *database.DB
-	MCPConfigService services.MCPConfigService
-	QuestionRepo     repositories.OntologyQuestionRepository
-	Logger           *zap.Logger
+	BaseMCPToolDeps
+	QuestionRepo repositories.OntologyQuestionRepository
 }
-
-// GetDB implements ToolAccessDeps.
-func (d *QuestionToolDeps) GetDB() *database.DB { return d.DB }
-
-// GetMCPConfigService implements ToolAccessDeps.
-func (d *QuestionToolDeps) GetMCPConfigService() services.MCPConfigService { return d.MCPConfigService }
-
-// GetLogger implements ToolAccessDeps.
-func (d *QuestionToolDeps) GetLogger() *zap.Logger { return d.Logger }
 
 // RegisterQuestionTools registers ontology question MCP tools.
 func RegisterQuestionTools(s *server.MCPServer, deps *QuestionToolDeps) {

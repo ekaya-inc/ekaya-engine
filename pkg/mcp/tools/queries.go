@@ -21,12 +21,10 @@ import (
 
 // QueryToolDeps contains dependencies for approved queries tools.
 type QueryToolDeps struct {
-	DB               *database.DB
-	MCPConfigService services.MCPConfigService
-	ProjectService   services.ProjectService
-	QueryService     services.QueryService
-	Auditor          *audit.SecurityAuditor
-	Logger           *zap.Logger
+	BaseMCPToolDeps
+	ProjectService services.ProjectService
+	QueryService   services.QueryService
+	Auditor        *audit.SecurityAuditor
 }
 
 // QueryLoggingDeps defines the interface for dependencies needed to log query executions.
@@ -37,14 +35,8 @@ type QueryLoggingDeps interface {
 	GetDB() *database.DB
 }
 
-// GetLogger implements QueryLoggingDeps.
-func (d *QueryToolDeps) GetLogger() *zap.Logger { return d.Logger }
-
 // GetAuditor implements QueryLoggingDeps.
 func (d *QueryToolDeps) GetAuditor() *audit.SecurityAuditor { return d.Auditor }
-
-// GetDB implements QueryLoggingDeps.
-func (d *QueryToolDeps) GetDB() *database.DB { return d.DB }
 
 const approvedQueriesToolGroup = "approved_queries"
 

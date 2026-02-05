@@ -186,11 +186,13 @@ func TestRefreshSchema_AutoSelectApplied_ReflectsNewTables_Integration(t *testin
 			}
 
 			deps := &MCPToolDeps{
-				DB:               tc.engineDB.DB,
-				MCPConfigService: mockMCPConfig,
-				SchemaService:    mockSchema,
-				ProjectService:   mockProject,
-				Logger:           zap.NewNop(),
+				BaseMCPToolDeps: BaseMCPToolDeps{
+					DB:               tc.engineDB.DB,
+					MCPConfigService: mockMCPConfig,
+					Logger:           zap.NewNop(),
+				},
+				SchemaService:  mockSchema,
+				ProjectService: mockProject,
 			}
 			registerRefreshSchemaTool(mcpServer, deps)
 
@@ -300,11 +302,13 @@ func TestRefreshSchema_ColumnsAdded_ReportsOnlyNewColumns_Integration(t *testing
 			}
 
 			deps := &MCPToolDeps{
-				DB:               tc.engineDB.DB,
-				MCPConfigService: mockMCPConfig,
-				SchemaService:    mockSchema,
-				ProjectService:   mockProject,
-				Logger:           zap.NewNop(),
+				BaseMCPToolDeps: BaseMCPToolDeps{
+					DB:               tc.engineDB.DB,
+					MCPConfigService: mockMCPConfig,
+					Logger:           zap.NewNop(),
+				},
+				SchemaService:  mockSchema,
+				ProjectService: mockProject,
 			}
 			registerRefreshSchemaTool(mcpServer, deps)
 

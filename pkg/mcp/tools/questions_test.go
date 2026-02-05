@@ -276,7 +276,9 @@ func TestQuestionToolDeps_Initialization(t *testing.T) {
 	repo := &mockQuestionRepository{}
 
 	deps := &QuestionToolDeps{
-		Logger:       logger,
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			Logger: logger,
+		},
 		QuestionRepo: repo,
 	}
 
@@ -291,8 +293,10 @@ func TestListOntologyQuestionsTool_Registration(t *testing.T) {
 	logger := zap.NewNop()
 
 	deps := &QuestionToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			Logger: logger,
+		},
 		QuestionRepo: repo,
-		Logger:       logger,
 	}
 
 	// Should not panic
@@ -373,8 +377,10 @@ func TestResolveOntologyQuestionTool_Registration(t *testing.T) {
 	logger := zap.NewNop()
 
 	deps := &QuestionToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			Logger: logger,
+		},
 		QuestionRepo: repo,
-		Logger:       logger,
 	}
 
 	// Should not panic
@@ -463,8 +469,10 @@ func TestSkipOntologyQuestion_ToolRegistration(t *testing.T) {
 	s := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 	repo := &mockQuestionRepository{}
 	deps := &QuestionToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			Logger: zap.NewNop(),
+		},
 		QuestionRepo: repo,
-		Logger:       zap.NewNop(),
 	}
 
 	registerSkipOntologyQuestionTool(s, deps)
@@ -507,8 +515,10 @@ func TestEscalateOntologyQuestion_ToolRegistration(t *testing.T) {
 	s := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 	repo := &mockQuestionRepository{}
 	deps := &QuestionToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			Logger: zap.NewNop(),
+		},
 		QuestionRepo: repo,
-		Logger:       zap.NewNop(),
 	}
 
 	registerEscalateOntologyQuestionTool(s, deps)
@@ -551,8 +561,10 @@ func TestDismissOntologyQuestion_ToolRegistration(t *testing.T) {
 	s := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 	repo := &mockQuestionRepository{}
 	deps := &QuestionToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			Logger: zap.NewNop(),
+		},
 		QuestionRepo: repo,
-		Logger:       zap.NewNop(),
 	}
 
 	registerDismissOntologyQuestionTool(s, deps)
@@ -1247,8 +1259,10 @@ func TestListOntologyQuestionsTool_ErrorResults(t *testing.T) {
 			s := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 			repo := &mockQuestionRepository{}
 			deps := &QuestionToolDeps{
+				BaseMCPToolDeps: BaseMCPToolDeps{
+					Logger: zap.NewNop(),
+				},
 				QuestionRepo: repo,
-				Logger:       zap.NewNop(),
 			}
 
 			registerListOntologyQuestionsTool(s, deps)
