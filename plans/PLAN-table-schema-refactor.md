@@ -105,7 +105,7 @@ CREATE TABLE engine_ontology_table_metadata (
 
 ### Phase 2: Model Updates
 
-- [ ] 2.1 Update `models.SchemaTable` in `pkg/models/schema.go`:
+- [x] 2.1 Update `models.SchemaTable` in `pkg/models/schema.go`:
   - Remove `BusinessName`, `Description`, `Metadata` fields
 
 - [ ] 2.2 Update `models.TableMetadata` in `pkg/models/table_metadata.go`:

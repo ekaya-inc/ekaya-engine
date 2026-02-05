@@ -7,6 +7,7 @@ import (
 )
 
 // SchemaTable represents a discovered database table from a datasource.
+// Note: BusinessName, Description, and Metadata are now stored in engine_ontology_table_metadata.
 type SchemaTable struct {
 	ID           uuid.UUID      `json:"id"`
 	ProjectID    uuid.UUID      `json:"project_id"`
@@ -15,9 +16,6 @@ type SchemaTable struct {
 	TableName    string         `json:"table_name"`
 	IsSelected   bool           `json:"is_selected"`
 	RowCount     *int64         `json:"row_count,omitempty"`
-	BusinessName *string        `json:"business_name,omitempty"`
-	Description  *string        `json:"description,omitempty"`
-	Metadata     map[string]any `json:"metadata,omitempty"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 	Columns      []SchemaColumn `json:"columns,omitempty"` // populated on demand
