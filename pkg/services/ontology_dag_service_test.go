@@ -24,23 +24,17 @@ func TestDAGNodes_AllNodesHaveCorrectOrder(t *testing.T) {
 	allNodes := models.AllDAGNodes()
 
 	// NOTE: The current DAG order is designed for schema-first extraction.
-	// FKDiscovery and TableFeatureExtraction run BEFORE entity discovery.
-	// Many nodes are commented out in AllDAGNodes() for testing.
+	// FKDiscovery and TableFeatureExtraction run BEFORE column enrichment.
 	expectedOrder := []models.DAGNodeName{
 		models.DAGNodeKnowledgeSeeding,
 		models.DAGNodeColumnFeatureExtraction,
 		models.DAGNodeFKDiscovery,
 		models.DAGNodeTableFeatureExtraction,
 		models.DAGNodePKMatchDiscovery,
-		// TEMPORARILY DISABLED - uncomment after relationship discovery is validated
-		// models.DAGNodeKnowledgeSeeding,
-		// models.DAGNodeColumnFeatureExtraction,
-		// models.DAGNodeColumnEnrichment,
-		// models.DAGNodeRelationshipEnrichment,
-		// models.DAGNodeEntityPromotion,
-		// models.DAGNodeOntologyFinalization,
-		// models.DAGNodeGlossaryDiscovery,
-		// models.DAGNodeGlossaryEnrichment,
+		models.DAGNodeColumnEnrichment,
+		models.DAGNodeOntologyFinalization,
+		models.DAGNodeGlossaryDiscovery,
+		models.DAGNodeGlossaryEnrichment,
 	}
 
 	assert.Equal(t, len(expectedOrder), len(allNodes))

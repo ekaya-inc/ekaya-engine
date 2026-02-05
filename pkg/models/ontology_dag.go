@@ -109,22 +109,19 @@ const (
 )
 
 // DAGNodeOrder defines the execution order for each node.
-// Steps after PKMatchDiscovery are commented out for manual testing.
 var DAGNodeOrder = map[DAGNodeName]int{
 	DAGNodeKnowledgeSeeding:        1,
 	DAGNodeColumnFeatureExtraction: 2,
 	DAGNodeFKDiscovery:             3,
 	DAGNodeTableFeatureExtraction:  4,
 	DAGNodePKMatchDiscovery:        5,
-	// TEMPORARILY DISABLED - uncomment after relationship discovery is validated
-	// DAGNodeColumnEnrichment:        6,
-	// DAGNodeOntologyFinalization:    7,
-	// DAGNodeGlossaryDiscovery:       8,
-	// DAGNodeGlossaryEnrichment:      9,
+	DAGNodeColumnEnrichment:        6,
+	DAGNodeOntologyFinalization:    7,
+	DAGNodeGlossaryDiscovery:       8,
+	DAGNodeGlossaryEnrichment:      9,
 }
 
 // AllDAGNodes returns all DAG node names in execution order.
-// Steps after PKMatchDiscovery are commented out for manual testing.
 func AllDAGNodes() []DAGNodeName {
 	return []DAGNodeName{
 		DAGNodeKnowledgeSeeding,
@@ -132,11 +129,10 @@ func AllDAGNodes() []DAGNodeName {
 		DAGNodeFKDiscovery,
 		DAGNodeTableFeatureExtraction,
 		DAGNodePKMatchDiscovery,
-		// TEMPORARILY DISABLED - uncomment after relationship discovery is validated
-		// DAGNodeColumnEnrichment,
-		// DAGNodeOntologyFinalization,
-		// DAGNodeGlossaryDiscovery,
-		// DAGNodeGlossaryEnrichment,
+		DAGNodeColumnEnrichment,
+		DAGNodeOntologyFinalization,
+		DAGNodeGlossaryDiscovery,
+		DAGNodeGlossaryEnrichment,
 	}
 }
 
