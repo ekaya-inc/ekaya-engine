@@ -1,5 +1,7 @@
 # ISSUES: Ontology Enrichment MCP Tools - 2026-01-31
 
+**Status:** MOSTLY COMPLETE (2026-02-05) - Most issues fixed or N/A due to entity removal. Only low-priority items remain.
+
 Issues observed during comprehensive MCP tool testing on tikr_production.
 
 ---
@@ -33,66 +35,33 @@ Issues observed during comprehensive MCP tool testing on tikr_production.
 ## Issue 2: `get_context` Returns Only 2 Promoted Entities
 
 **Severity:** Medium
-**Observed:** `get_context(depth='entities')` returns only 2 entities
+**Status:** N/A - Entities Removed
 
-**What Happened:**
-```json
-get_context(depth='entities')
-→ entities: {"Account Authentication": {...}, "Invitation": {...}}
-```
+**What Happened:** Entity promotion logic was too conservative.
 
-But `get_schema` shows 38+ entity descriptions, and `search_schema(query='user')` finds User, Account, User Follow, etc.
-
-**Expected:**
-- Core business entities (User, Account, Engagement, Channel, Media) should be promoted
-- Entity promotion logic appears too conservative
-
-**Impact:**
-- AI agents using get_context miss important entities
-- Must use search_schema to discover entities
+**Resolution:** Entities have been removed from the ontology model. `get_context(depth='entities')` now returns tables directly from the schema, not promoted entities. This issue is no longer applicable.
 
 ---
 
 ## Issue 3: `table_count` Wrong in Domain Context
 
 **Severity:** Low
-**Observed:** `get_context(depth='domain')` shows `table_count: 2`
+**Status:** FIXED (entity removal)
 
-**What Happened:**
-```json
-get_context(depth='domain')
-→ "table_count": 2, "column_count": 634
-```
+**What Happened:** `table_count` showed 2 instead of 38+ tables.
 
-There are 38+ tables in the database, not 2. The 634 columns is correct.
-
-**Expected:**
-- table_count should reflect actual selected tables (~38)
+**Resolution:** This was caused by the ontology entity promotion logic only showing 2 "promoted" entities. With entities removed, `table_count` now correctly uses `len(schema.Tables)` which returns all selected tables. See `pkg/mcp/tools/context.go:289`.
 
 ---
 
 ## Issue 4: `relationships` Always Null in get_context
 
 **Severity:** Medium
-**Observed:** `include_relationships=true` returns `"relationships": null`
+**Status:** N/A - Entity-based relationships removed
 
-**What Happened:**
-```
-get_context(depth='entities', include_relationships=true)
-→ "relationships": null
-```
+**What Happened:** `include_relationships=true` returned null in get_context.
 
-But `get_ontology(depth='domain')` DOES return relationships:
-```json
-"relationships": [
-  {"from": "Account Authentication", "to": "Invitation", ...},
-  {"from": "Invitation", "to": "Account Authentication", ...}
-]
-```
-
-**Expected:**
-- get_context with include_relationships=true should include relationships
-- Inconsistent behavior between get_context and get_ontology
+**Resolution:** Entity-to-entity relationships have been removed. FK relationships are now part of the schema model and surfaced through `get_schema` and column metadata. The `include_relationships` parameter behavior changed with the entity removal.
 
 ---
 
@@ -118,18 +87,11 @@ Both calculate the same thing with nearly identical SQL.
 ## Issue 6: `probe_relationship` Returns Empty for Valid Entity
 
 **Severity:** Medium
-**Observed:** `probe_relationship(from_entity='User')` returns empty
+**Status:** N/A - Tool Removed
 
-**What Happened:**
-```
-probe_relationship(from_entity='User')
-→ {"relationships": []}
-```
+**What Happened:** `probe_relationship(from_entity='User')` returned empty.
 
-User entity exists and has foreign keys to other tables.
-
-**Expected:**
-- Should return User's relationships to Account, Engagement, etc.
+**Resolution:** The `probe_relationship` tool was removed as part of the entity removal refactor. FK relationships are now discovered through the schema introspection pipeline and available via `get_schema` and column metadata.
 
 ---
 
@@ -412,21 +374,11 @@ The tool requires `output_column_descriptions` even though it's marked as option
 ## Issue 15: `update_relationship` Requires Pre-existing Entities
 
 **Severity:** Low (Documentation)
-**Observed:** 2026-01-31 on test_data
+**Status:** N/A - Tool Removed
 
-**What Happened:**
-```
-update_relationship(from_entity="User", to_entity="Account", ...)
-→ {"error": "from_entity \"User\" not found"}
-```
+**What Happened:** `update_relationship` required entities to exist first.
 
-Cannot create relationships between entities that don't exist yet. Must create entities first.
-
-**Expected:**
-- This is likely correct behavior, but should be documented
-- Error message is clear
-
-**Workaround:** Create entities first with `update_entity`, then create relationships.
+**Resolution:** The `update_relationship` tool was removed as part of the entity removal refactor. Relationships are now discovered automatically through FK introspection.
 
 ---
 
@@ -473,67 +425,45 @@ All write operations now tested on test_data database:
 ## Issue 16: Entity Enrichment Fails on Name Collision
 
 **Severity:** High
-**Observed:** 2026-01-31 on test_data
+**Status:** N/A - Entities Removed
 
-**What Happened:**
-Entity enrichment fails when LLM tries to rename an entity to a name that already exists.
+**What Happened:** Entity enrichment failed when LLM tried to rename an entity to a name that already existed.
 
-**Error:**
-```
-Failed to update entity with enrichment
-  {"entity_id": "ab2635a1-62ee-4498-a448-9b1f050c702d",
-   "error": "failed to update entity: ERROR: duplicate key value violates unique constraint
-   \"engine_ontology_entities_ontology_id_name_key\" (SQLSTATE 23505)"}
-```
-
-**Sequence:**
-1. Entity discovery creates `accounts` entity (id: ab2635a1, primary_table: accounts, source: inferred)
-2. MCP tool previously created `Account` entity (id: da60b85d, no primary_table, source: mcp)
-3. LLM enrichment tries to rename `accounts` → `Account`
-4. Update fails because `Account` name already exists
-
-**Data State Showing Conflict:**
-```
-| Name     | Primary Table | Source   |
-|----------|---------------|----------|
-| Account  | (none)        | mcp      |
-| accounts | accounts      | inferred |
-| User     | (none)        | mcp      |
-| users    | users         | inferred |
-```
-
-**Root Cause:**
-- `Create()` uses `ON CONFLICT (ontology_id, name) DO UPDATE` - handles duplicates
-- `Update()` uses plain `UPDATE ... WHERE id = $1` - **no conflict handling for name changes**
-
-**Key Files:**
-- `pkg/repositories/ontology_entity_repository.go:485` - `Update()` method
-- `pkg/services/entity_discovery_service.go:577-584` - sets name and calls Update
-
-**Potential Fixes:**
-1. **Check before rename:** In enrichment, check if target name exists, skip rename or merge
-2. **Merge entities:** If names collide, merge the inferred entity into the MCP one (preserving primary_table)
-3. **Prevent MCP duplicates:** MCP `update_entity` should check for existing inferred entities by table
-
-**Recommended:** Option 2 (merge entities) - the MCP-created `Account` and inferred `accounts` represent the same business concept. Merging preserves user intent while maintaining schema linkage.
+**Resolution:** Entities have been completely removed from the ontology model. There is no longer entity discovery, entity enrichment, or entity naming. This issue is no longer applicable.
 
 ---
 
-## Summary
+## Summary (Updated 2026-02-05)
 
 | Severity | Count | Status |
 |----------|-------|--------|
 | Critical | 2 | 2 FIXED (sample crash, approve_all_changes crash) |
-| High | 1 | Open (entity name collision) |
-| Medium | 4 | Open |
-| Low | 10 | Open (3 new from write tests) |
+| High | 1 | N/A (entity name collision - entities removed) |
+| Medium | 4 | 3 N/A (entity-related), 1 OPEN (bulk question resolution) |
+| Low | 10 | Mixed - see below |
 
-**Key Issues to Address:**
-1. ~~Server crash on sample~~ **FIXED**
-2. ~~Server crash on approve_all_changes~~ **FIXED** - Issue 13
-3. **Entity enrichment fails on name collision** - Issue 16
-4. Only 2 entities promoted (should be more)
-5. relationships null in get_context
-6. table_count wrong in domain context
-7. No bulk question resolution
-8. create_approved_query output_column_descriptions should be optional or documented as required
+**Status by Issue:**
+
+| Issue | Status |
+|-------|--------|
+| 1. sample crash | ✅ FIXED |
+| 2. Only 2 entities promoted | N/A (entities removed) |
+| 3. table_count wrong | ✅ FIXED (entities removed) |
+| 4. relationships null | N/A (entities removed) |
+| 5. Duplicate glossary terms | Low priority (data issue) |
+| 6. probe_relationship empty | N/A (tool removed) |
+| 7. probe_column wrong purpose | Low (column classification) |
+| 8. marker_at semantic role | Low (column classification) |
+| 9. Project knowledge duplicates | Low (data issue) |
+| 10. No bulk question resolution | **OPEN** (feature request) |
+| 11. Question priority filter | Low (UX) |
+| 12. deleted_at semantic type | May be fixed (timestamp work) |
+| 13. approve_all_changes crash | ✅ FIXED |
+| 14a. create_glossary_term rejects test names | Design choice |
+| 14b. output_column_descriptions | Documented behavior |
+| 15. update_relationship entities | N/A (tool removed) |
+| 16. Entity name collision | N/A (entities removed) |
+
+**Remaining Open Issues:**
+- Issue 10: No bulk `resolve_ontology_questions` (feature request)
+- Issues 5, 7-9, 11-12: Low priority metadata/classification issues

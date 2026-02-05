@@ -183,31 +183,16 @@ type ColumnMetadata struct {
 
 **Severity**: HIGH (UX)
 **Tool**: `create_approved_query`
-**Status**: Open
+**Status**: FIXED
 
 **Description**: When `output_column_descriptions` is not provided, the error message is confusing.
 
-**Reproduction**:
-```
-create_approved_query(
-  name="Test Query",
-  description="Test",
-  sql="SELECT COUNT(*) as total FROM users",
-  datasource_id="..."
-)
-```
-
-**Observed error**:
-```
-"output_columns required: test query before saving to capture result columns"
-```
-
-**Expected**: Clear error message like:
+**Fix Applied**: Error message updated to:
 ```
 "output_column_descriptions parameter is required. Provide descriptions for output columns, e.g., {\"total\": \"Total count of records\"}"
 ```
 
-**Recommendation**: Update error message to clearly indicate the required parameter name and format.
+See `pkg/services/query.go:216`.
 
 ---
 
@@ -215,28 +200,11 @@ create_approved_query(
 
 **Severity**: HIGH
 **Tool**: `probe_relationship`
-**Status**: Open
+**Status**: N/A - Tool Removed
 
 **Description**: When probing for relationships between entities that should be related (User -> Account), the tool returns empty results.
 
-**Reproduction**:
-```
-probe_relationship(from_entity='User', to_entity='Account')
-```
-
-**Observed output**:
-```json
-{"relationships": []}
-```
-
-**Expected**: Should return the User->Account relationship (1:N - users.account_id references accounts.account_id).
-
-**Analysis**: The extractor may not be detecting FK relationships based on column naming conventions (account_id in users table -> account_id in accounts table).
-
-**Recommendation**:
-- Review FK detection logic
-- Consider adding explicit relationship creation during ontology enrichment
-- May need to populate relationships table during extraction
+**Resolution**: The `probe_relationship` tool was removed as part of the entity removal refactor. Relationships are now handled through the schema-based FK discovery in `get_context` and `get_schema`.
 
 ---
 
@@ -297,30 +265,13 @@ get_query_history(limit=10, hours_back=24)
 
 **Severity**: LOW
 **Tool**: `refresh_schema`
-**Status**: Open
+**Status**: FIXED
 
 **Description**: Running refresh_schema reports 634 columns added even when no schema changes occurred.
 
-**Reproduction**:
-```
-refresh_schema(auto_select=false)
-```
+**Fix Applied**: The `columns_added` field now reports only NEW columns, not total columns upserted.
 
-**Observed output**:
-```json
-{
-  "tables_added": [],
-  "tables_removed": [],
-  "columns_added": 634,
-  "relationships_found": 0
-}
-```
-
-**Expected**: Should report 0 columns added if schema hasn't changed.
-
-**Analysis**: May be counting total columns rather than delta.
-
-**Recommendation**: Fix delta calculation to only report actual changes.
+See test: `TestRefreshSchema_ColumnsAdded_ReportsOnlyNewColumns_Integration` in `pkg/mcp/tools/refresh_schema_integration_test.go:226`.
 
 ---
 
@@ -425,13 +376,28 @@ All tools below passed testing:
 ## Recommendations Before Production
 
 ### Must Fix (Blocking)
-1. **Sensitive data exposure** - Add redaction for API keys/secrets in sample_values (see subtasks 1.1, 1.2, 1.3)
+1. ~~**Sensitive data exposure**~~ ✅ FIXED - Redaction implemented (subtasks 1.1, 1.2, 1.3)
 
 ### Should Fix
-2. **Error message clarity** - Improve create_approved_query error message
-3. **Query history** - Verify logging is working
+2. ~~**Error message clarity**~~ ✅ FIXED - create_approved_query error message improved
+3. ~~**Query history**~~ ✅ FIXED - Logging verified
 
 ### Nice to Have
-4. **probe_relationship** - Investigate empty results for known relationships
-5. **Glossary SQL validation** - Improve PostgreSQL function recognition
-6. **refresh_schema delta** - Fix column count reporting
+4. ~~**probe_relationship**~~ N/A - Tool removed with entity refactor
+5. **Glossary SQL validation** - Improve PostgreSQL function recognition (OPEN)
+6. ~~**refresh_schema delta**~~ ✅ FIXED - Column count now reports only new columns
+
+---
+
+## Status Summary (Updated 2026-02-05)
+
+| Issue | Status |
+|-------|--------|
+| 1. Sensitive Data Exposure | ✅ FIXED |
+| 2. Error Message Clarity | ✅ FIXED |
+| 3. probe_relationship | N/A (tool removed) |
+| 4. get_query_history | ✅ FIXED |
+| 5. Glossary SQL Validation | **OPEN** |
+| 6. refresh_schema Delta | ✅ FIXED |
+
+**Remaining:** Only Issue 5 (Glossary SQL validation) is still open - low priority.
