@@ -165,7 +165,7 @@ const AIDataLiaisonPage = () => {
         ? `Connected to ${datasource.name} (${datasource.type})`
         : 'Connect a database to enable AI Data Liaison',
       status: loading ? 'loading' : datasource ? 'complete' : 'pending',
-      link: `/projects/${pid}/datasources`,
+      link: `/projects/${pid}/datasource`,
       linkText: datasource ? 'Manage' : 'Configure',
     });
 
