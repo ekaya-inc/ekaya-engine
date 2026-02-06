@@ -155,11 +155,11 @@ Returns aggregate counts for a dashboard header:
 
 ### 1.4 Backend Files to Create/Modify
 
-- [ ] `pkg/handlers/audit_handler.go` -- New handler with all audit endpoints
-- [ ] `pkg/services/audit_service.go` -- New service aggregating queries across repositories
-- [ ] `pkg/repositories/audit_repository.go` -- Already exists (for `engine_audit_log`). Add methods for summary queries.
-- [ ] `pkg/repositories/query_execution_repository.go` -- New repository (or add to existing `query_repository.go`) for paginated execution queries with filters
-- [ ] `pkg/server/routes.go` -- Register new audit routes under `/api/projects/{pid}/audit/`
+- [x] `pkg/handlers/audit_handler.go` -- New handler with all audit endpoints
+- [x] `pkg/services/audit_service.go` -- New service aggregating queries across repositories
+- [x] `pkg/repositories/audit_repository.go` -- Already exists (for `engine_audit_log`). Add methods for summary queries.
+- [x] `pkg/repositories/query_execution_repository.go` -- New repository (or add to existing `query_repository.go`) for paginated execution queries with filters
+- [x] `pkg/server/routes.go` -- Register new audit routes under `/api/projects/{pid}/audit/`
 
 ### 1.5 Frontend Files to Create/Modify
 
