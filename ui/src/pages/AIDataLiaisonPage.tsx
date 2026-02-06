@@ -31,7 +31,7 @@ import {
 import { Input } from '../components/ui/Input';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
-import type { DAGStatusResponse, Datasource, MCPConfigResponse } from '../types';
+import type { AIConfigResponse, DAGStatusResponse, Datasource, MCPConfigResponse } from '../types';
 
 // Tools enabled by AI Data Liaison installation
 const DATA_LIAISON_USER_TOOLS = [
@@ -73,6 +73,7 @@ const AIDataLiaisonPage = () => {
   const [hasSelectedTables, setHasSelectedTables] = useState(false);
   const [dagStatus, setDagStatus] = useState<DAGStatusResponse | null>(null);
   const [mcpConfig, setMcpConfig] = useState<MCPConfigResponse | null>(null);
+  const [aiConfig, setAiConfig] = useState<AIConfigResponse | null>(null);
   const [copied, setCopied] = useState(false);
 
   const fetchChecklistData = useCallback(async () => {
@@ -81,15 +82,17 @@ const AIDataLiaisonPage = () => {
     setLoading(true);
     try {
       // Fetch all data in parallel
-      const [datasourcesRes, mcpConfigRes] = await Promise.all([
+      const [datasourcesRes, mcpConfigRes, aiConfigRes] = await Promise.all([
         engineApi.listDataSources(pid),
         engineApi.getMCPConfig(pid),
+        engineApi.getAIConfig(pid),
       ]);
 
       // Get first datasource (if any)
       const ds = datasourcesRes.data?.datasources?.[0] ?? null;
       setDatasource(ds);
       setMcpConfig(mcpConfigRes.data ?? null);
+      setAiConfig(aiConfigRes.data ?? null);
 
       // If datasource exists, fetch schema selections and DAG status
       if (ds) {
@@ -195,7 +198,22 @@ const AIDataLiaisonPage = () => {
     }
     items.push(schemaItem);
 
-    // 3. Ontology extracted
+    // 3. AI configured
+    const isAIConfigured = !!aiConfig?.config_type && aiConfig.config_type !== 'none';
+    items.push({
+      id: 'ai-config',
+      title: 'AI configured',
+      description: isAIConfigured
+        ? 'AI model configured'
+        : hasSelectedTables
+          ? 'Configure an AI model for ontology extraction'
+          : 'Configure datasource and select schema first',
+      status: loading ? 'loading' : isAIConfigured ? 'complete' : 'pending',
+      link: `/projects/${pid}/ai-config`,
+      linkText: isAIConfigured ? 'Manage' : 'Configure',
+    });
+
+    // 4. Ontology extracted
     const ontologyComplete = dagStatus?.status === 'completed';
     const ontologyRunning = dagStatus?.status === 'running';
     const ontologyFailed = dagStatus?.status === 'failed';
@@ -226,7 +244,7 @@ const AIDataLiaisonPage = () => {
     }
     items.push(ontologyItem);
 
-    // 4. MCP Server URL available
+    // 5. MCP Server URL available
     items.push({
       id: 'mcp-url',
       title: 'MCP Server URL ready',
@@ -238,7 +256,7 @@ const AIDataLiaisonPage = () => {
       linkText: 'Configure',
     });
 
-    // 5. AI Data Liaison installed (always complete on this page)
+    // 6. AI Data Liaison installed (always complete on this page)
     items.push({
       id: 'installed',
       title: 'AI Data Liaison installed',

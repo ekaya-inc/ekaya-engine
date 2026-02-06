@@ -181,17 +181,24 @@ func TestAIConfigHandler_GetDefault(t *testing.T) {
 		t.Fatalf("Get failed with status %d: %s", rec.Code, rec.Body.String())
 	}
 
-	var resp AIConfigResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+	var apiResp struct {
+		Success bool             `json:"success"`
+		Data    AIConfigResponse `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &apiResp); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
 
-	if resp.ConfigType != "none" {
-		t.Errorf("Expected config_type 'none', got %q", resp.ConfigType)
+	if !apiResp.Success {
+		t.Fatal("Expected success to be true")
 	}
 
-	if resp.ProjectID != tc.projectID.String() {
-		t.Errorf("Expected project_id %q, got %q", tc.projectID.String(), resp.ProjectID)
+	if apiResp.Data.ConfigType != "none" {
+		t.Errorf("Expected config_type 'none', got %q", apiResp.Data.ConfigType)
+	}
+
+	if apiResp.Data.ProjectID != tc.projectID.String() {
+		t.Errorf("Expected project_id %q, got %q", tc.projectID.String(), apiResp.Data.ProjectID)
 	}
 }
 
@@ -219,22 +226,29 @@ func TestAIConfigHandler_UpsertBYOK(t *testing.T) {
 		t.Fatalf("Upsert failed with status %d: %s", rec.Code, rec.Body.String())
 	}
 
-	var resp AIConfigResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+	var apiResp struct {
+		Success bool             `json:"success"`
+		Data    AIConfigResponse `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &apiResp); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
 
-	if resp.ConfigType != "byok" {
-		t.Errorf("Expected config_type 'byok', got %q", resp.ConfigType)
+	if !apiResp.Success {
+		t.Fatal("Expected success to be true")
 	}
 
-	if resp.LLMBaseURL != "https://api.openai.com/v1" {
-		t.Errorf("Expected llm_base_url, got %q", resp.LLMBaseURL)
+	if apiResp.Data.ConfigType != "byok" {
+		t.Errorf("Expected config_type 'byok', got %q", apiResp.Data.ConfigType)
+	}
+
+	if apiResp.Data.LLMBaseURL != "https://api.openai.com/v1" {
+		t.Errorf("Expected llm_base_url, got %q", apiResp.Data.LLMBaseURL)
 	}
 
 	// API key should be masked in response
-	if resp.LLMAPIKey != "sk-t...cdef" {
-		t.Errorf("Expected masked API key 'sk-t...cdef', got %q", resp.LLMAPIKey)
+	if apiResp.Data.LLMAPIKey != "sk-t...cdef" {
+		t.Errorf("Expected masked API key 'sk-t...cdef', got %q", apiResp.Data.LLMAPIKey)
 	}
 }
 
@@ -284,13 +298,16 @@ func TestAIConfigHandler_Delete(t *testing.T) {
 	getRec := httptest.NewRecorder()
 	tc.handler.Get(getRec, getReq)
 
-	var resp AIConfigResponse
-	if err := json.Unmarshal(getRec.Body.Bytes(), &resp); err != nil {
+	var apiResp struct {
+		Success bool             `json:"success"`
+		Data    AIConfigResponse `json:"data"`
+	}
+	if err := json.Unmarshal(getRec.Body.Bytes(), &apiResp); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
 
-	if resp.ConfigType != "none" {
-		t.Errorf("Expected config_type 'none' after delete, got %q", resp.ConfigType)
+	if apiResp.Data.ConfigType != "none" {
+		t.Errorf("Expected config_type 'none' after delete, got %q", apiResp.Data.ConfigType)
 	}
 }
 
@@ -331,21 +348,28 @@ func TestAIConfigHandler_TestConnection(t *testing.T) {
 		t.Fatalf("TestConnection failed with status %d: %s", rec.Code, rec.Body.String())
 	}
 
-	var result llm.TestResult
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+	var apiResp struct {
+		Success bool           `json:"success"`
+		Data    llm.TestResult `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &apiResp); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
 
-	if !result.Success {
-		t.Errorf("Expected success, got failure: %s", result.Message)
+	if !apiResp.Success {
+		t.Fatal("Expected API success to be true")
 	}
 
-	if !result.LLMSuccess {
+	if !apiResp.Data.Success {
+		t.Errorf("Expected success, got failure: %s", apiResp.Data.Message)
+	}
+
+	if !apiResp.Data.LLMSuccess {
 		t.Errorf("Expected LLM success")
 	}
 
-	if result.LLMResponseTimeMs != 150 {
-		t.Errorf("Expected response time 150ms, got %d", result.LLMResponseTimeMs)
+	if apiResp.Data.LLMResponseTimeMs != 150 {
+		t.Errorf("Expected response time 150ms, got %d", apiResp.Data.LLMResponseTimeMs)
 	}
 }
 
@@ -385,17 +409,24 @@ func TestAIConfigHandler_TestConnection_Failure(t *testing.T) {
 		t.Fatalf("TestConnection failed with status %d: %s", rec.Code, rec.Body.String())
 	}
 
-	var result llm.TestResult
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+	var apiResp struct {
+		Success bool           `json:"success"`
+		Data    llm.TestResult `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &apiResp); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
 
-	if result.Success {
+	if !apiResp.Success {
+		t.Fatal("Expected API success to be true")
+	}
+
+	if apiResp.Data.Success {
 		t.Error("Expected failure")
 	}
 
-	if result.LLMErrorType != llm.ErrorTypeAuth {
-		t.Errorf("Expected error type 'auth', got %q", result.LLMErrorType)
+	if apiResp.Data.LLMErrorType != llm.ErrorTypeAuth {
+		t.Errorf("Expected error type 'auth', got %q", apiResp.Data.LLMErrorType)
 	}
 }
 

@@ -114,7 +114,7 @@ func (h *AIConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
 }
@@ -235,7 +235,7 @@ func (h *AIConfigHandler) TestConnection(w http.ResponseWriter, r *http.Request)
 		_ = h.service.UpdateTestResult(r.Context(), projectID, result.Success)
 	}
 
-	if err := WriteJSON(w, http.StatusOK, result); err != nil {
+	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: result}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
 }

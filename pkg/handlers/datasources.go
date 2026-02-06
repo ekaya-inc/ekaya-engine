@@ -514,7 +514,7 @@ func (h *DatasourcesHandler) TestConnection(w http.ResponseWriter, r *http.Reque
 			Success: false,
 			Message: err.Error(),
 		}
-		if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {
 			h.logger.Error("Failed to write response", zap.Error(err))
 		}
 		return
@@ -525,7 +525,7 @@ func (h *DatasourcesHandler) TestConnection(w http.ResponseWriter, r *http.Reque
 		Message: "Connection successful",
 	}
 
-	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
 }

@@ -40,3 +40,37 @@ export interface AIOptionsResponse {
   community: AIOptionConfig;
   embedded: AIOptionConfig;
 }
+
+export interface AIConfigResponse {
+  project_id: string;
+  config_type: string;
+  llm_base_url?: string;
+  llm_api_key?: string;
+  llm_model?: string;
+  embedding_base_url?: string;
+  embedding_api_key?: string;
+  embedding_model?: string;
+  last_tested_at?: string;
+  last_test_success?: boolean;
+}
+
+export interface AIConfigSaveRequest {
+  config_type: string;
+  llm_base_url?: string;
+  llm_api_key?: string;
+  llm_model?: string;
+  embedding_base_url?: string;
+  embedding_api_key?: string;
+  embedding_model?: string;
+}
+
+export interface AIConfigTestRequest {
+  config_type?: string;
+  llm_base_url?: string;
+  llm_api_key?: string;
+  llm_model?: string;
+  embedding_base_url?: string;
+  embedding_api_key?: string;
+  embedding_model?: string;
+}
+
