@@ -41,6 +41,8 @@ func (h *AuditPageHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *au
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.ListQueryApprovals)))
 	mux.HandleFunc("GET "+base+"/summary",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetSummary)))
+	mux.HandleFunc("GET "+base+"/mcp-events",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.ListMCPEvents)))
 }
 
 // PaginatedResponse wraps paginated results with metadata.
@@ -247,6 +249,47 @@ func (h *AuditPageHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: summary}); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// ListMCPEvents handles GET /api/projects/{pid}/audit/mcp-events
+func (h *AuditPageHandler) ListMCPEvents(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	filters := models.MCPAuditEventFilters{
+		AuditPageFilters: parsePageFilters(r),
+		UserID:           r.URL.Query().Get("user_id"),
+		EventType:        r.URL.Query().Get("event_type"),
+		ToolName:         r.URL.Query().Get("tool_name"),
+		SecurityLevel:    r.URL.Query().Get("security_level"),
+	}
+
+	results, total, err := h.auditPageService.ListMCPEvents(r.Context(), projectID, filters)
+	if err != nil {
+		h.logger.Error("Failed to list MCP events", zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "list_mcp_events_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if results == nil {
+		results = make([]*models.MCPAuditEvent, 0)
+	}
+
+	if err := WriteJSON(w, http.StatusOK, ApiResponse{
+		Success: true,
+		Data: PaginatedResponse{
+			Items:  results,
+			Total:  total,
+			Limit:  filters.Limit,
+			Offset: filters.Offset,
+		},
+	}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
 }

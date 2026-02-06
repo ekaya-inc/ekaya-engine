@@ -36,6 +36,7 @@ import type {
   ListDatasourcesResponse,
   ListPendingQueriesResponse,
   ListQueriesResponse,
+  MCPAuditEvent,
   MCPConfigResponse,
   OntologyChange,
   PaginatedResponse,
@@ -1088,6 +1089,20 @@ class EngineApiService {
     const query = params ? '?' + new URLSearchParams(params).toString() : '';
     return this.makeRequest<PaginatedResponse<QueryApproval>>(
       `/${projectId}/audit/query-approvals${query}`
+    );
+  }
+
+  /**
+   * List MCP audit events with filters
+   * GET /api/projects/{projectId}/audit/mcp-events
+   */
+  async listAuditMCPEvents(
+    projectId: string,
+    params?: Record<string, string>
+  ): Promise<ApiResponse<PaginatedResponse<MCPAuditEvent>>> {
+    const query = params ? '?' + new URLSearchParams(params).toString() : '';
+    return this.makeRequest<PaginatedResponse<MCPAuditEvent>>(
+      `/${projectId}/audit/mcp-events${query}`
     );
   }
 

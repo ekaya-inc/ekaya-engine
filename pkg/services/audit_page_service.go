@@ -17,17 +17,20 @@ type AuditPageService interface {
 	ListSchemaChanges(ctx context.Context, projectID uuid.UUID, filters models.SchemaChangeFilters) ([]*models.PendingChange, int, error)
 	ListQueryApprovals(ctx context.Context, projectID uuid.UUID, filters models.QueryApprovalFilters) ([]*models.Query, int, error)
 	GetSummary(ctx context.Context, projectID uuid.UUID) (*models.AuditSummary, error)
+	ListMCPEvents(ctx context.Context, projectID uuid.UUID, filters models.MCPAuditEventFilters) ([]*models.MCPAuditEvent, int, error)
 }
 
 type auditPageService struct {
-	repo   repositories.AuditPageRepository
-	logger *zap.Logger
+	repo         repositories.AuditPageRepository
+	mcpAuditRepo repositories.MCPAuditRepository
+	logger       *zap.Logger
 }
 
-func NewAuditPageService(repo repositories.AuditPageRepository, logger *zap.Logger) AuditPageService {
+func NewAuditPageService(repo repositories.AuditPageRepository, mcpAuditRepo repositories.MCPAuditRepository, logger *zap.Logger) AuditPageService {
 	return &auditPageService{
-		repo:   repo,
-		logger: logger.Named("audit-page-service"),
+		repo:         repo,
+		mcpAuditRepo: mcpAuditRepo,
+		logger:       logger.Named("audit-page-service"),
 	}
 }
 
@@ -86,4 +89,15 @@ func (s *auditPageService) GetSummary(ctx context.Context, projectID uuid.UUID) 
 		return nil, err
 	}
 	return summary, nil
+}
+
+func (s *auditPageService) ListMCPEvents(ctx context.Context, projectID uuid.UUID, filters models.MCPAuditEventFilters) ([]*models.MCPAuditEvent, int, error) {
+	events, total, err := s.mcpAuditRepo.List(ctx, projectID, filters)
+	if err != nil {
+		s.logger.Error("Failed to list MCP events",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		return nil, 0, err
+	}
+	return events, total, nil
 }

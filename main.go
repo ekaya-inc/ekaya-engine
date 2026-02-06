@@ -309,8 +309,10 @@ func main() {
 		InstalledAppService:          installedAppService,
 		Auditor:                      securityAuditor, // For SIEM logging of modifying queries
 	}
+	mcpAuditLogger := mcp.NewAuditLogger(db, logger)
 	mcpServer := mcp.NewServer("ekaya-engine", cfg.Version, logger,
 		mcp.WithToolFilter(mcptools.NewToolFilter(mcpToolDeps)),
+		mcp.WithHooks(mcpAuditLogger.Hooks()),
 	)
 	mcptools.RegisterHealthTool(mcpServer.MCP(), cfg.Version, &mcptools.HealthToolDeps{
 		DB:                db,
@@ -448,7 +450,8 @@ func main() {
 
 	// Register audit page handler (protected) - audit visibility UI
 	auditPageRepo := repositories.NewAuditPageRepository()
-	auditPageService := services.NewAuditPageService(auditPageRepo, logger)
+	mcpAuditRepo := repositories.NewMCPAuditRepository()
+	auditPageService := services.NewAuditPageService(auditPageRepo, mcpAuditRepo, logger)
 	auditPageHandler := handlers.NewAuditPageHandler(auditPageService, logger)
 	auditPageHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 

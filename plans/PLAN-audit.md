@@ -194,7 +194,7 @@ Add a new card to `ui/src/pages/AIDataLiaisonPage.tsx` (between "Enabled Tools" 
 
 ---
 
-## Phase 2: MCP Event Capture
+## Phase 2: MCP Event Capture ✅
 
 Adds comprehensive MCP-specific event logging via middleware. Captures tool invocations, session events, and security-relevant activity that isn't covered by existing tables.
 

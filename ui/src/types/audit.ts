@@ -117,6 +117,39 @@ export interface QueryApprovalFilters {
   offset?: number;
 }
 
+// MCP Events tab
+export interface MCPAuditEvent {
+  id: string;
+  project_id: string;
+  user_id: string;
+  user_email?: string;
+  session_id?: string;
+  event_type: string;
+  tool_name?: string;
+  request_params?: Record<string, unknown>;
+  natural_language?: string;
+  sql_query?: string;
+  was_successful: boolean;
+  error_message?: string;
+  result_summary?: Record<string, unknown>;
+  duration_ms?: number;
+  security_level: string;
+  security_flags?: string[];
+  client_info?: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface MCPAuditEventFilters {
+  user_id?: string;
+  since?: string;
+  until?: string;
+  event_type?: string;
+  tool_name?: string;
+  security_level?: string;
+  limit?: number;
+  offset?: number;
+}
+
 // Audit Summary
 export interface AuditSummary {
   total_query_executions: number;
