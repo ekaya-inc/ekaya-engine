@@ -230,7 +230,7 @@ Adds comprehensive MCP-specific event logging via middleware. Captures tool invo
 | `unauthorized_table_access` | Table name, user, query |
 | `sensitive_data_access` | Column flagged as sensitive, query context |
 
-### 2.2 New Table: `engine_mcp_audit_log`
+### 2.2 New Table: `engine_mcp_audit_log` ✅
 
 ```sql
 CREATE TABLE engine_mcp_audit_log (
