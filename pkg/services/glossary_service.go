@@ -1760,48 +1760,33 @@ func containsTableByName(tables []*models.SchemaTable, keywords ...string) bool 
 	return false
 }
 
-// hasRoleDistinctingColumns checks if the ontology contains columns that indicate
-// distinct user roles (e.g., host_id, visitor_id, creator_id, buyer_id).
-// These columns suggest the platform has different participant types with potentially
-// different metrics for each role.
+// hasRoleDistinctingColumns checks if the ontology contains FK columns that indicate
+// distinct user roles (e.g., host vs visitor, buyer vs seller).
+// Detected by finding 2+ FK columns pointing to the same table with different
+// FKAssociation values — set by the ColumnEnrichment DAG step from
+// ColumnMetadata.IdentifierFeatures.EntityReferenced.
 func hasRoleDistinctingColumns(ontology *models.TieredOntology) bool {
 	if ontology == nil || ontology.ColumnDetails == nil {
 		return false
 	}
 
-	// Role-indicating column patterns (beyond simple user_id)
-	rolePatterns := []string{
-		"host_id", "visitor_id", "creator_id", "viewer_id",
-		"buyer_id", "seller_id", "sender_id", "receiver_id",
-		"payer_id", "payee_id", "owner_id", "member_id",
-		"author_id", "performer_id", "attendee_id", "participant_id",
-	}
-
-	roleCount := 0
+	// Group FK columns by their target table, collecting distinct associations
+	fkAssociationsByTarget := map[string]map[string]bool{}
 	for _, columns := range ontology.ColumnDetails {
 		for _, col := range columns {
-			colLower := strings.ToLower(col.Name)
-			for _, pattern := range rolePatterns {
-				if colLower == pattern {
-					roleCount++
-					if roleCount >= 2 {
-						// Need at least 2 distinct role columns to indicate role-based business
-						return true
-					}
+			if col.IsForeignKey && col.ForeignTable != "" && col.FKAssociation != "" {
+				if fkAssociationsByTarget[col.ForeignTable] == nil {
+					fkAssociationsByTarget[col.ForeignTable] = map[string]bool{}
 				}
+				fkAssociationsByTarget[col.ForeignTable][col.FKAssociation] = true
 			}
-			// Also check FKAssociation for role semantics
-			if col.FKAssociation != "" {
-				assocLower := strings.ToLower(col.FKAssociation)
-				if strings.Contains(assocLower, "host") || strings.Contains(assocLower, "visitor") ||
-					strings.Contains(assocLower, "buyer") || strings.Contains(assocLower, "seller") ||
-					strings.Contains(assocLower, "payer") || strings.Contains(assocLower, "payee") {
-					roleCount++
-					if roleCount >= 2 {
-						return true
-					}
-				}
-			}
+		}
+	}
+
+	// If any target table has 2+ distinct FK associations, roles are differentiated
+	for _, associations := range fkAssociationsByTarget {
+		if len(associations) >= 2 {
+			return true
 		}
 	}
 	return false
