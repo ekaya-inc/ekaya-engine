@@ -115,7 +115,7 @@ Source: `engine_queries` where `suggested_by IS NOT NULL`
 - Suggested by
 - Reviewed by
 
-### 1.3 Backend API Endpoints
+### 1.3 Backend API Endpoints ✅
 
 All endpoints scoped to project via `{pid}` path param and RLS.
 
