@@ -70,6 +70,7 @@ const AIDataLiaisonPage = () => {
   // Checklist state
   const [loading, setLoading] = useState(true);
   const [datasource, setDatasource] = useState<Datasource | null>(null);
+  const [hasSelectedTables, setHasSelectedTables] = useState(false);
   const [dagStatus, setDagStatus] = useState<DAGStatusResponse | null>(null);
   const [mcpConfig, setMcpConfig] = useState<MCPConfigResponse | null>(null);
   const [copied, setCopied] = useState(false);
@@ -90,8 +91,16 @@ const AIDataLiaisonPage = () => {
       setDatasource(ds);
       setMcpConfig(mcpConfigRes.data ?? null);
 
-      // If datasource exists, fetch DAG status
+      // If datasource exists, fetch schema selections and DAG status
       if (ds) {
+        try {
+          const schemaRes = await engineApi.getSchema(pid, ds.datasource_id);
+          const hasSelections = schemaRes.data?.tables?.some((t) => t.is_selected === true) ?? false;
+          setHasSelectedTables(hasSelections);
+        } catch {
+          setHasSelectedTables(false);
+        }
+
         try {
           const dagRes = await engineApi.getOntologyDAGStatus(pid, ds.datasource_id);
           setDagStatus(dagRes.data ?? null);
@@ -169,7 +178,24 @@ const AIDataLiaisonPage = () => {
       linkText: datasource ? 'Manage' : 'Configure',
     });
 
-    // 2. Ontology extracted
+    // 2. Schema selected
+    const schemaItem: ChecklistItem = {
+      id: 'schema',
+      title: 'Schema selected',
+      description: hasSelectedTables
+        ? 'Tables and columns selected for analysis'
+        : datasource
+          ? 'Select which tables and columns to include'
+          : 'Configure datasource first',
+      status: loading ? 'loading' : hasSelectedTables ? 'complete' : 'pending',
+      linkText: hasSelectedTables ? 'Manage' : 'Configure',
+    };
+    if (datasource) {
+      schemaItem.link = `/projects/${pid}/schema`;
+    }
+    items.push(schemaItem);
+
+    // 3. Ontology extracted
     const ontologyComplete = dagStatus?.status === 'completed';
     const ontologyRunning = dagStatus?.status === 'running';
     const ontologyFailed = dagStatus?.status === 'failed';
@@ -200,7 +226,7 @@ const AIDataLiaisonPage = () => {
     }
     items.push(ontologyItem);
 
-    // 3. MCP Server URL available
+    // 4. MCP Server URL available
     items.push({
       id: 'mcp-url',
       title: 'MCP Server URL ready',
@@ -212,7 +238,7 @@ const AIDataLiaisonPage = () => {
       linkText: 'Configure',
     });
 
-    // 4. AI Data Liaison installed (always complete on this page)
+    // 5. AI Data Liaison installed (always complete on this page)
     items.push({
       id: 'installed',
       title: 'AI Data Liaison installed',
@@ -249,7 +275,7 @@ const AIDataLiaisonPage = () => {
         <div>
           <h1 className="text-2xl font-bold">AI Data Liaison</h1>
           <p className="text-text-secondary">
-            Enable business users to query data through natural language
+            Ekaya acts as a data liaison between you and your business users. This application extends the Ekaya Engine with MCP tools that enable usage to enhance and extend the ontology and UI for you to manage queries suggested by users.
           </p>
         </div>
       </div>
