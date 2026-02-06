@@ -143,6 +143,10 @@ SELECT set_config('app.current_project_id', 'uuid-here', false);
 SELECT COUNT(*) FROM engine_project_knowledge;  -- Still returns ALL rows
 ```
 
+## Partial Mitigation
+
+A WARN-level log was added at server startup (commit `4dba72e`) that detects superuser or bypassrls privileges on the engine database connection and alerts the operator. This makes the risk visible but does not enforce RLS — the substantive fixes (FORCE ROW LEVEL SECURITY migration, explicit `project_id` filtering) are still required.
+
 ## Priority
 
 **HIGH** - This is a multi-tenant data isolation issue. If any customer uses superuser credentials, they could potentially access other customers' data through API calls that use the vulnerable GetByID methods.

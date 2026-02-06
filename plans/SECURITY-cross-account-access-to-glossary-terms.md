@@ -67,6 +67,10 @@ For all operations (SELECT, INSERT, UPDATE, DELETE).
 - **Business Terms Exposure**: Glossary terms may contain sensitive business logic, calculations, or SQL
 - **Compliance Risk**: Multi-tenant isolation is a fundamental security requirement
 
+## Partial Mitigation
+
+A WARN-level log was added at server startup (commit `4dba72e`) that detects superuser or bypassrls privileges on the engine database connection and alerts the operator. This makes the risk visible but does not fix the underlying RLS policy misconfiguration.
+
 ## Mitigation
 
 1. Fix the RLS policy immediately
