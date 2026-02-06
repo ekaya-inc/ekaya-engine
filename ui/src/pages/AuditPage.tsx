@@ -725,7 +725,27 @@ function QueryApprovalsTab({ projectId }: { projectId: string }) {
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<TimeRange>('30d');
   const [statusFilter, setStatusFilter] = useState('');
+  const [suggestedByInput, setSuggestedByInput] = useState('');
+  const [suggestedByFilter, setSuggestedByFilter] = useState('');
+  const [reviewedByInput, setReviewedByInput] = useState('');
+  const [reviewedByFilter, setReviewedByFilter] = useState('');
   const [offset, setOffset] = useState(0);
+  const suggestedByDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reviewedByDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debounce suggested by input
+  useEffect(() => {
+    if (suggestedByDebounceRef.current) clearTimeout(suggestedByDebounceRef.current);
+    suggestedByDebounceRef.current = setTimeout(() => { setSuggestedByFilter(suggestedByInput); }, 300);
+    return () => { if (suggestedByDebounceRef.current) clearTimeout(suggestedByDebounceRef.current); };
+  }, [suggestedByInput]);
+
+  // Debounce reviewed by input
+  useEffect(() => {
+    if (reviewedByDebounceRef.current) clearTimeout(reviewedByDebounceRef.current);
+    reviewedByDebounceRef.current = setTimeout(() => { setReviewedByFilter(reviewedByInput); }, 300);
+    return () => { if (reviewedByDebounceRef.current) clearTimeout(reviewedByDebounceRef.current); };
+  }, [reviewedByInput]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -734,6 +754,8 @@ function QueryApprovalsTab({ projectId }: { projectId: string }) {
       const since = getTimeRangeSince(timeRange);
       if (since) params.since = since;
       if (statusFilter) params.status = statusFilter;
+      if (suggestedByFilter) params.suggested_by = suggestedByFilter;
+      if (reviewedByFilter) params.reviewed_by = reviewedByFilter;
 
       const response = await engineApi.listAuditQueryApprovals(projectId, params);
       if (response.success && response.data) {
@@ -744,10 +766,10 @@ function QueryApprovalsTab({ projectId }: { projectId: string }) {
     } finally {
       setLoading(false);
     }
-  }, [projectId, timeRange, statusFilter, offset]);
+  }, [projectId, timeRange, statusFilter, suggestedByFilter, reviewedByFilter, offset]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-  useEffect(() => { setOffset(0); }, [timeRange, statusFilter]);
+  useEffect(() => { setOffset(0); }, [timeRange, statusFilter, suggestedByFilter, reviewedByFilter]);
 
   const statusColor = (status: string) => {
     switch (status) {
@@ -772,6 +794,20 @@ function QueryApprovalsTab({ projectId }: { projectId: string }) {
           <option value="approved">Approved</option>
           <option value="rejected">Rejected</option>
         </select>
+        <input
+          type="text"
+          placeholder="Suggested by..."
+          value={suggestedByInput}
+          onChange={e => setSuggestedByInput(e.target.value)}
+          className="text-xs px-2 py-1 rounded border border-border-light bg-surface-primary text-text-primary w-36"
+        />
+        <input
+          type="text"
+          placeholder="Reviewed by..."
+          value={reviewedByInput}
+          onChange={e => setReviewedByInput(e.target.value)}
+          className="text-xs px-2 py-1 rounded border border-border-light bg-surface-primary text-text-primary w-36"
+        />
       </div>
 
       {loading ? (

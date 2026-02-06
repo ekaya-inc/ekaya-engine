@@ -184,7 +184,7 @@ Create `ui/src/types/audit.ts` with TypeScript types matching all backend audit 
 
 Implement the Query Executions tab in `AuditPage.tsx` showing data from `GET /api/projects/{pid}/audit/query-executions`. Columns: Time, User, Query Name, SQL (truncated), Duration, Rows, Success, Destructive. Include filters: user dropdown, time range presets (24h, 7d, 30d, custom), success/failure, destructive only, source, query ID. Highlight destructive queries with warning indicator and failed queries with error styling. Then implement the Ontology Changes tab sourcing from `GET /api/projects/{pid}/audit/ontology-changes`. Columns: Time, User, Entity Type, Action, Source, Changed Fields summary. Filters: user, time range, entity type, action, source. Include expandable row detail showing full changed_fields JSON diff.
 
-#### 1.6.4 [ ] Schema Changes, Query Approvals tabs, and Summary header
+#### 1.6.4 [x] Schema Changes, Query Approvals tabs, and Summary header
 
 Implement the Schema Changes tab sourcing from `GET /api/projects/{pid}/audit/schema-changes`. Columns: Time, Change Type, Table, Column, Status, Reviewed By. Filters: time range, change type, status, table name. Implement the Query Approvals tab sourcing from `GET /api/projects/{pid}/audit/query-approvals`. Columns: Time, Suggested By, Query Name, SQL (truncated), Status, Reviewed By, Reviewed At, Rejection Reason. Filters: time range, status, suggested by, reviewed by. Add the Summary header at the top of the audit page using `GET /api/projects/{pid}/audit/summary` showing: total query executions (30d), failed query count, destructive query count, ontology changes count, pending schema changes, pending query approvals.
 
