@@ -275,6 +275,7 @@ const (
 	TimestampPurposeScheduled    = "scheduled_time"
 	TimestampPurposeExpiration   = "expiration"
 	TimestampPurposeCursor       = "cursor"
+	TimestampPurposeCompletion   = "completion"
 )
 
 // Timestamp scale constants.
