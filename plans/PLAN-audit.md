@@ -176,7 +176,7 @@ Returns aggregate counts for a dashboard header:
 
 Create the backend audit infrastructure: `pkg/handlers/audit_handler.go` (thin HTTP handler with endpoints for query-executions, ontology-changes, schema-changes, query-approvals, and summary), `pkg/services/audit_service.go` (business logic aggregating across repositories), repository methods in `pkg/repositories/audit_repository.go` (add summary query methods) and `pkg/repositories/query_execution_repository.go` (paginated execution queries with filters). Register all routes in `pkg/server/routes.go` under `/api/projects/{pid}/audit/`. Each endpoint accepts pagination (limit, offset) and filter query params as described in plan section 1.3. All endpoints are scoped to project via `{pid}` path param and RLS. Follow the project's clean architecture: handlers → services → repositories. No raw SQL in services.
 
-#### 1.6.2 [ ] Frontend types, API client, and audit page shell
+#### 1.6.2 [x] Frontend types, API client, and audit page shell
 
 Create `ui/src/types/audit.ts` with TypeScript types matching all backend audit API responses (query executions, ontology changes, schema changes, query approvals, summary). Add audit API methods to `ui/src/services/engineApi.ts` for all five endpoints. Create `ui/src/pages/AuditPage.tsx` as a new page with tabbed interface (Query Executions, Ontology Changes, Schema Changes, Query Approvals tabs — content can be placeholder initially). Register the route `/projects/:pid/audit` in `ui/src/App.tsx`. The page should include tab navigation using the project's existing UI patterns (React Router, TailwindCSS, Radix UI).
 
