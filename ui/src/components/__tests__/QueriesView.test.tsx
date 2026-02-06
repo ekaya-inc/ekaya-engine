@@ -254,7 +254,8 @@ describe('QueriesView', () => {
     const addButton = addButtons.find((btn) => btn.querySelector('svg.lucide-plus'));
     expect(addButton).toBeInTheDocument();
 
-    fireEvent.click(addButton!);
+    if (!addButton) throw new Error('Expected to find add button with plus icon');
+    fireEvent.click(addButton);
 
     expect(screen.getByText('Create New Query')).toBeInTheDocument();
   });

@@ -5,6 +5,11 @@
 
 import { fetchWithAuth } from '../lib/api';
 import type {
+  AIConfigResponse,
+  AIConfigSaveRequest,
+  AIConfigTestRequest,
+  AIOptionsResponse,
+  AITestResult,
   ApiResponse,
   ApproveQueryResponse,
   ConnectionDetails,
@@ -886,6 +891,68 @@ class EngineApiService {
       method: 'PATCH',
       body: JSON.stringify({ settings }),
     });
+  }
+
+  // --- AI Configuration Methods ---
+
+  /**
+   * Get AI configuration for a project
+   * GET /api/projects/{projectId}/ai-config
+   */
+  async getAIConfig(projectId: string): Promise<ApiResponse<AIConfigResponse>> {
+    return this.makeRequest<AIConfigResponse>(`/${projectId}/ai-config`);
+  }
+
+  /**
+   * Save AI configuration for a project
+   * PUT /api/projects/{projectId}/ai-config
+   */
+  async saveAIConfig(projectId: string, config: AIConfigSaveRequest): Promise<ApiResponse<AIConfigResponse>> {
+    return this.makeRequest<AIConfigResponse>(`/${projectId}/ai-config`, {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    });
+  }
+
+  /**
+   * Delete AI configuration for a project
+   * DELETE /api/projects/{projectId}/ai-config
+   */
+  async deleteAIConfig(projectId: string): Promise<ApiResponse<void>> {
+    return this.makeRequest<void>(`/${projectId}/ai-config`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
+   * Test AI connection (with current form values or saved config)
+   * POST /api/projects/{projectId}/ai-config/test
+   */
+  async testAIConnection(
+    projectId: string,
+    body: AIConfigTestRequest
+  ): Promise<ApiResponse<AITestResult>> {
+    return this.makeRequest<AITestResult>(`/${projectId}/ai-config/test`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * Get project-level config including AI options
+   * GET /api/config/project
+   * Note: Not project-scoped, uses /api/config/project directly
+   */
+  async getProjectConfig(): Promise<{ ai_options: AIOptionsResponse } | null> {
+    try {
+      const response = await fetchWithAuth('/api/config/project');
+      if (!response.ok) return null;
+      const apiResp = await response.json() as ApiResponse<{ ai_options: AIOptionsResponse }>;
+      return apiResp.data ?? null;
+    } catch (error) {
+      console.error('Engine API Error (project config):', error);
+      return null;
+    }
   }
 
   // --- Ontology DAG Methods ---

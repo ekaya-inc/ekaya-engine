@@ -244,7 +244,9 @@ describe('GlossaryPage', () => {
 
       await waitFor(() => {
         const detailsButtons = screen.getAllByText('SQL Details');
-        fireEvent.click(detailsButtons[0]!);
+        const firstButton = detailsButtons[0];
+        if (!firstButton) throw new Error('Expected SQL Details button');
+        fireEvent.click(firstButton);
       });
 
       await waitFor(() => {
@@ -258,7 +260,9 @@ describe('GlossaryPage', () => {
 
       await waitFor(() => {
         const detailsButtons = screen.getAllByText('SQL Details');
-        fireEvent.click(detailsButtons[0]!);
+        const firstButton = detailsButtons[0];
+        if (!firstButton) throw new Error('Expected SQL Details button');
+        fireEvent.click(firstButton);
       });
 
       await waitFor(() => {
@@ -272,7 +276,9 @@ describe('GlossaryPage', () => {
 
       await waitFor(() => {
         const detailsButtons = screen.getAllByText('SQL Details');
-        fireEvent.click(detailsButtons[0]!);
+        const firstButton = detailsButtons[0];
+        if (!firstButton) throw new Error('Expected SQL Details button');
+        fireEvent.click(firstButton);
       });
 
       await waitFor(() => {
@@ -287,7 +293,9 @@ describe('GlossaryPage', () => {
 
       await waitFor(() => {
         const detailsButtons = screen.getAllByText('SQL Details');
-        fireEvent.click(detailsButtons[0]!);
+        const firstButton = detailsButtons[0];
+        if (!firstButton) throw new Error('Expected SQL Details button');
+        fireEvent.click(firstButton);
       });
 
       await waitFor(() => {
@@ -302,7 +310,9 @@ describe('GlossaryPage', () => {
 
       await waitFor(() => {
         const detailsButtons = screen.getAllByText('SQL Details');
-        fireEvent.click(detailsButtons[0]!);
+        const firstButton = detailsButtons[0];
+        if (!firstButton) throw new Error('Expected SQL Details button');
+        fireEvent.click(firstButton);
       });
 
       await waitFor(() => {
@@ -310,7 +320,9 @@ describe('GlossaryPage', () => {
       });
 
       const detailsButtons = screen.getAllByText('SQL Details');
-      fireEvent.click(detailsButtons[0]!);
+      const firstButton = detailsButtons[0];
+      if (!firstButton) throw new Error('Expected SQL Details button');
+      fireEvent.click(firstButton);
 
       await waitFor(() => {
         expect(screen.queryByText('Defining SQL')).not.toBeInTheDocument();

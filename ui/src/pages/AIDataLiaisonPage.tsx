@@ -31,7 +31,7 @@ import {
 import { Input } from '../components/ui/Input';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
-import type { DAGStatusResponse, Datasource, MCPConfigResponse } from '../types';
+import type { AIConfigResponse, DAGStatusResponse, Datasource, MCPConfigResponse } from '../types';
 
 // Tools enabled by AI Data Liaison installation
 const DATA_LIAISON_USER_TOOLS = [
@@ -70,8 +70,10 @@ const AIDataLiaisonPage = () => {
   // Checklist state
   const [loading, setLoading] = useState(true);
   const [datasource, setDatasource] = useState<Datasource | null>(null);
+  const [hasSelectedTables, setHasSelectedTables] = useState(false);
   const [dagStatus, setDagStatus] = useState<DAGStatusResponse | null>(null);
   const [mcpConfig, setMcpConfig] = useState<MCPConfigResponse | null>(null);
+  const [aiConfig, setAiConfig] = useState<AIConfigResponse | null>(null);
   const [copied, setCopied] = useState(false);
 
   const fetchChecklistData = useCallback(async () => {
@@ -80,18 +82,28 @@ const AIDataLiaisonPage = () => {
     setLoading(true);
     try {
       // Fetch all data in parallel
-      const [datasourcesRes, mcpConfigRes] = await Promise.all([
+      const [datasourcesRes, mcpConfigRes, aiConfigRes] = await Promise.all([
         engineApi.listDataSources(pid),
         engineApi.getMCPConfig(pid),
+        engineApi.getAIConfig(pid),
       ]);
 
       // Get first datasource (if any)
       const ds = datasourcesRes.data?.datasources?.[0] ?? null;
       setDatasource(ds);
       setMcpConfig(mcpConfigRes.data ?? null);
+      setAiConfig(aiConfigRes.data ?? null);
 
-      // If datasource exists, fetch DAG status
+      // If datasource exists, fetch schema selections and DAG status
       if (ds) {
+        try {
+          const schemaRes = await engineApi.getSchema(pid, ds.datasource_id);
+          const hasSelections = schemaRes.data?.tables?.some((t) => t.is_selected === true) ?? false;
+          setHasSelectedTables(hasSelections);
+        } catch {
+          setHasSelectedTables(false);
+        }
+
         try {
           const dagRes = await engineApi.getOntologyDAGStatus(pid, ds.datasource_id);
           setDagStatus(dagRes.data ?? null);
@@ -165,11 +177,43 @@ const AIDataLiaisonPage = () => {
         ? `Connected to ${datasource.name} (${datasource.type})`
         : 'Connect a database to enable AI Data Liaison',
       status: loading ? 'loading' : datasource ? 'complete' : 'pending',
-      link: `/projects/${pid}/datasources`,
+      link: `/projects/${pid}/datasource`,
       linkText: datasource ? 'Manage' : 'Configure',
     });
 
-    // 2. Ontology extracted
+    // 2. Schema selected
+    const schemaItem: ChecklistItem = {
+      id: 'schema',
+      title: 'Schema selected',
+      description: hasSelectedTables
+        ? 'Tables and columns selected for analysis'
+        : datasource
+          ? 'Select which tables and columns to include'
+          : 'Configure datasource first',
+      status: loading ? 'loading' : hasSelectedTables ? 'complete' : 'pending',
+      linkText: hasSelectedTables ? 'Manage' : 'Configure',
+    };
+    if (datasource) {
+      schemaItem.link = `/projects/${pid}/schema`;
+    }
+    items.push(schemaItem);
+
+    // 3. AI configured
+    const isAIConfigured = !!aiConfig?.config_type && aiConfig.config_type !== 'none';
+    items.push({
+      id: 'ai-config',
+      title: 'AI configured',
+      description: isAIConfigured
+        ? 'AI model configured'
+        : hasSelectedTables
+          ? 'Configure an AI model for ontology extraction'
+          : 'Configure datasource and select schema first',
+      status: loading ? 'loading' : isAIConfigured ? 'complete' : 'pending',
+      link: `/projects/${pid}/ai-config`,
+      linkText: isAIConfigured ? 'Manage' : 'Configure',
+    });
+
+    // 4. Ontology extracted
     const ontologyComplete = dagStatus?.status === 'completed';
     const ontologyRunning = dagStatus?.status === 'running';
     const ontologyFailed = dagStatus?.status === 'failed';
@@ -193,14 +237,14 @@ const AIDataLiaisonPage = () => {
           : ontologyFailed
             ? 'error'
             : 'pending',
-      linkText: ontologyComplete ? 'View' : ontologyFailed ? 'Retry' : 'Extract',
+      linkText: ontologyComplete ? 'Manage' : ontologyFailed ? 'Retry' : 'Configure',
     };
     if (datasource) {
       ontologyItem.link = `/projects/${pid}/ontology`;
     }
     items.push(ontologyItem);
 
-    // 3. MCP Server URL available
+    // 5. MCP Server URL available
     items.push({
       id: 'mcp-url',
       title: 'MCP Server URL ready',
@@ -209,15 +253,18 @@ const AIDataLiaisonPage = () => {
         : 'MCP Server URL will be available after setup',
       status: loading ? 'loading' : mcpConfig?.serverUrl ? 'complete' : 'pending',
       link: `/projects/${pid}/mcp-server`,
-      linkText: 'Configure',
+      linkText: mcpConfig?.serverUrl ? 'Manage' : 'Configure',
     });
 
-    // 4. AI Data Liaison installed (always complete on this page)
+    // 6. AI Data Liaison installed (only complete when all prior steps are done)
+    const allPriorComplete = items.every((item) => item.status === 'complete');
     items.push({
       id: 'installed',
-      title: 'AI Data Liaison installed',
-      description: 'Query suggestion workflow enabled',
-      status: 'complete',
+      title: 'AI Data Liaison ready',
+      description: allPriorComplete
+        ? 'Query suggestion workflow enabled'
+        : 'Complete all steps above to enable',
+      status: allPriorComplete ? 'complete' : 'pending',
     });
 
     return items;
@@ -249,7 +296,7 @@ const AIDataLiaisonPage = () => {
         <div>
           <h1 className="text-2xl font-bold">AI Data Liaison</h1>
           <p className="text-text-secondary">
-            Enable business users to query data through natural language
+            Ekaya acts as a data liaison between you and your business users. This application extends the Ekaya Engine with MCP tools that enable usage to enhance and extend the ontology and UI for you to manage queries suggested by users.
           </p>
         </div>
       </div>

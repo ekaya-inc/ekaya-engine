@@ -8,6 +8,7 @@ import { ConfigProvider } from './contexts/ConfigContext';
 import { DatasourceConnectionProvider } from './contexts/DatasourceConnectionContext';
 import { ProjectProvider } from './contexts/ProjectContext';
 import { ToastProviderComponent } from './hooks/useToast';
+import AIConfigPage from './pages/AIConfigPage';
 import AIDataLiaisonPage from './pages/AIDataLiaisonPage';
 import ApplicationsPage from './pages/ApplicationsPage';
 import DatasourcePage from './pages/DatasourcePage';
@@ -42,6 +43,7 @@ const App = (): JSX.Element => {
                 <Route path="/projects/:pid" element={<ProjectProvider><ProjectDataLoader><Layout /></ProjectDataLoader></ProjectProvider>}>
                   <Route index element={<ProjectDashboard />} />
                   <Route path="applications" element={<ApplicationsPage />} />
+                  <Route path="ai-config" element={<AIConfigPage />} />
                   <Route path="ai-data-liaison" element={<AIDataLiaisonPage />} />
                   <Route path="datasource" element={<DatasourcePage />} />
                   <Route path="schema" element={<SchemaPage />} />

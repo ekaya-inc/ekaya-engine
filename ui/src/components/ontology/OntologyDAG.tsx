@@ -407,17 +407,11 @@ export const OntologyDAG = ({
       );
     }
 
-    if (isComplete || isFailed) {
+    if (isFailed) {
       return (
         <Button
           onClick={() => {
-            if (isComplete) {
-              // Show confirmation dialog for re-extraction
-              setShowReextractDialog(true);
-            } else {
-              // Failed extraction - retry without confirmation
-              void handleStart();
-            }
+            void handleStart();
           }}
           disabled={isStarting}
           className="bg-purple-600 hover:bg-purple-700 text-white"
@@ -430,7 +424,7 @@ export const OntologyDAG = ({
           ) : (
             <>
               <RefreshCw className="h-4 w-4 mr-2" />
-              {isFailed ? 'Retry Extraction' : 'Re-extract Ontology'}
+              Retry Extraction
             </>
           )}
         </Button>

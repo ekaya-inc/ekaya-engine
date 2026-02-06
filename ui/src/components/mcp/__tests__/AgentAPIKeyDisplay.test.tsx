@@ -319,7 +319,7 @@ describe('AgentAPIKeyDisplay', () => {
 
   it('shows spinning icon while regenerating', async () => {
     // Create a promise that we can control
-    let resolveRegenerate: (value: unknown) => void;
+    let resolveRegenerate: (value: unknown) => void = () => { /* no-op */ };
     const regeneratePromise = new Promise((resolve) => {
       resolveRegenerate = resolve;
     });
@@ -355,7 +355,7 @@ describe('AgentAPIKeyDisplay', () => {
     expect(regenerateButton).toBeDisabled();
 
     // Resolve the promise
-    resolveRegenerate!({ success: true, data: { key: 'newkey' } });
+    resolveRegenerate({ success: true, data: { key: 'newkey' } });
   });
 
   it('displays helper text', async () => {

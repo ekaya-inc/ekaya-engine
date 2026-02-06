@@ -510,22 +510,13 @@ func (h *DatasourcesHandler) TestConnection(w http.ResponseWriter, r *http.Reque
 			zap.String("type", req.Type),
 			zap.String("host", req.Host),
 			zap.Error(err))
-		response := TestConnectionResponse{
-			Success: false,
-			Message: err.Error(),
-		}
-		if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: false, Error: err.Error()}); err != nil {
 			h.logger.Error("Failed to write response", zap.Error(err))
 		}
 		return
 	}
 
-	response := TestConnectionResponse{
-		Success: true,
-		Message: "Connection successful",
-	}
-
-	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Message: "Connection successful"}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
 }

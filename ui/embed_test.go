@@ -9,7 +9,7 @@ import (
 // TestDistFSEmbedded verifies that the UI dist directory is properly embedded
 func TestDistFSEmbedded(t *testing.T) {
 	// Test that we can access the dist subdirectory
-	distFS, err := fs.Sub(DistFS, "dist")
+	distFS, err := fs.Sub(DistFS(), "dist")
 	if err != nil {
 		t.Fatalf("Failed to access dist subdirectory: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestDistFSEmbedded(t *testing.T) {
 
 // TestAssetsDirectoryEmbedded verifies that the assets subdirectory is embedded
 func TestAssetsDirectoryEmbedded(t *testing.T) {
-	distFS, err := fs.Sub(DistFS, "dist")
+	distFS, err := fs.Sub(DistFS(), "dist")
 	if err != nil {
 		t.Fatalf("Failed to access dist subdirectory: %v", err)
 	}

@@ -146,7 +146,7 @@ const GlossaryPage = () => {
       } else {
         toast({
           title: 'Failed to delete term',
-          description: response.error || 'An error occurred while deleting the term.',
+          description: response.error ?? 'An error occurred while deleting the term.',
           variant: 'destructive',
         });
       }
@@ -332,7 +332,7 @@ const GlossaryPage = () => {
         <CardContent>
           <div className="space-y-4">
             {terms.map((term) => {
-              const hasSqlDetails = term.defining_sql || term.base_table || (term.output_columns && term.output_columns.length > 0) || (term.aliases && term.aliases.length > 0);
+              const hasSqlDetails = !!term.defining_sql || !!term.base_table || (term.output_columns != null && term.output_columns.length > 0) || (term.aliases != null && term.aliases.length > 0);
 
               return (
                 <div key={term.id} className="border border-border-light rounded-lg">

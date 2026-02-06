@@ -62,12 +62,12 @@ export function GlossaryTermEditor({
         setTermName(term.term);
         setDefinition(term.definition);
         setDefiningSql(term.defining_sql);
-        setBaseTable(term.base_table || '');
-        setAliases(term.aliases || []);
+        setBaseTable(term.base_table ?? '');
+        setAliases(term.aliases ?? []);
         setSqlTested(true); // Existing terms already have tested SQL
         setTestResult({
           valid: true,
-          output_columns: term.output_columns || [],
+          output_columns: term.output_columns ?? [],
         });
       } else {
         // Reset for new term
@@ -118,7 +118,7 @@ export function GlossaryTermEditor({
       } else {
         setTestResult({
           valid: false,
-          error: response.error || 'Failed to test SQL',
+          error: response.error ?? 'Failed to test SQL',
         });
         setSqlTested(false);
       }
@@ -202,7 +202,7 @@ export function GlossaryTermEditor({
         const response = await engineApi.updateGlossaryTerm(projectId, term.id, updateRequest);
 
         if (!response.success) {
-          setSaveError(response.error || 'Failed to update term');
+          setSaveError(response.error ?? 'Failed to update term');
           return;
         }
       } else {
@@ -229,7 +229,7 @@ export function GlossaryTermEditor({
         const response = await engineApi.createGlossaryTerm(projectId, createRequest);
 
         if (!response.success) {
-          setSaveError(response.error || 'Failed to create term');
+          setSaveError(response.error ?? 'Failed to create term');
           return;
         }
       }
@@ -348,7 +348,7 @@ export function GlossaryTermEditor({
                     <>
                       <AlertCircle className="h-4 w-4 text-red-500" />
                       <span className="text-sm text-red-600 dark:text-red-400">
-                        {testResult.error || 'SQL is invalid'}
+                        {testResult.error ?? 'SQL is invalid'}
                       </span>
                     </>
                   )}

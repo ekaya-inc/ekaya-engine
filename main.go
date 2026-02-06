@@ -552,18 +552,14 @@ func main() {
 	}
 	mcptools.RegisterQuestionTools(mcpServer.MCP(), questionToolDeps)
 
-	// Serve static UI files from embedded filesystem with SPA routing
-	uiFS, err := fs.Sub(ui.DistFS, "dist")
+	// Serve static UI files with SPA routing.
+	// In debug mode DistFS() returns os.DirFS("ui") (live disk reads),
+	// in production it returns the compile-time embedded filesystem.
+	uiFS, err := fs.Sub(ui.DistFS(), "dist")
 	if err != nil {
 		logger.Fatal("Failed to create UI filesystem", zap.Error(err))
 	}
 	fileServer := http.FileServer(http.FS(uiFS))
-
-	// Read index.html once at startup for SPA fallback
-	indexHTML, err := fs.ReadFile(uiFS, "index.html")
-	if err != nil {
-		logger.Fatal("Failed to read index.html from embedded filesystem", zap.Error(err))
-	}
 
 	// Handle SPA routing - serve index.html for non-API routes when file doesn't exist
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -573,7 +569,7 @@ func main() {
 			return
 		}
 
-		// Check if the file exists in embedded filesystem
+		// Check if the file exists in the UI filesystem
 		path := strings.TrimPrefix(r.URL.Path, "/")
 		if path == "" {
 			path = "index.html"
@@ -586,6 +582,12 @@ func main() {
 		}
 
 		// File doesn't exist, serve index.html for SPA routing
+		// Read fresh each time so debug mode picks up changes from disk
+		indexHTML, err := fs.ReadFile(uiFS, "index.html")
+		if err != nil {
+			http.Error(w, "index.html not found", http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(indexHTML)
 	})
