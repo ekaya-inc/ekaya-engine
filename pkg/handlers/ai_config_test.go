@@ -411,18 +411,19 @@ func TestAIConfigHandler_TestConnection_Failure(t *testing.T) {
 
 	var apiResp struct {
 		Success bool           `json:"success"`
+		Error   string         `json:"error"`
 		Data    llm.TestResult `json:"data"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &apiResp); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
 
-	if !apiResp.Success {
-		t.Fatal("Expected API success to be true")
+	if apiResp.Success {
+		t.Fatal("Expected API success to be false")
 	}
 
-	if apiResp.Data.Success {
-		t.Error("Expected failure")
+	if apiResp.Error != "LLM: Invalid API key" {
+		t.Errorf("Expected error 'LLM: Invalid API key', got %q", apiResp.Error)
 	}
 
 	if apiResp.Data.LLMErrorType != llm.ErrorTypeAuth {

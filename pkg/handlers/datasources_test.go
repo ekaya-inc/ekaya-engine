@@ -550,22 +550,16 @@ func TestDatasourcesHandler_TestConnection_Success(t *testing.T) {
 		t.Errorf("expected status 200, got %d", rec.Code)
 	}
 
-	var apiResp struct {
-		Success bool                   `json:"success"`
-		Data    TestConnectionResponse `json:"data"`
-	}
+	var apiResp ApiResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &apiResp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
 
 	if !apiResp.Success {
-		t.Fatal("expected API success to be true")
-	}
-	if !apiResp.Data.Success {
 		t.Error("expected success to be true")
 	}
-	if apiResp.Data.Message != "Connection successful" {
-		t.Errorf("expected message 'Connection successful', got %q", apiResp.Data.Message)
+	if apiResp.Message != "Connection successful" {
+		t.Errorf("expected message 'Connection successful', got %q", apiResp.Message)
 	}
 }
 
@@ -596,22 +590,16 @@ func TestDatasourcesHandler_TestConnection_Failure(t *testing.T) {
 		t.Errorf("expected status 200, got %d", rec.Code)
 	}
 
-	var apiResp struct {
-		Success bool                   `json:"success"`
-		Data    TestConnectionResponse `json:"data"`
-	}
+	var apiResp ApiResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &apiResp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
 
-	if !apiResp.Success {
-		t.Fatal("expected API success to be true")
-	}
-	if apiResp.Data.Success {
+	if apiResp.Success {
 		t.Error("expected success to be false")
 	}
-	if apiResp.Data.Message != "connection refused" {
-		t.Errorf("expected error message 'connection refused', got %q", apiResp.Data.Message)
+	if apiResp.Error != "connection refused" {
+		t.Errorf("expected error 'connection refused', got %q", apiResp.Error)
 	}
 }
 

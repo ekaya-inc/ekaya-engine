@@ -244,7 +244,9 @@ export const DatasourceConnectionProvider = ({
 
       setConnectionStatus({
         success: result.success,
-        message: result.message ?? 'Connection test completed',
+        message: result.success
+          ? result.message ?? 'Connection successful'
+          : result.error ?? 'Connection test failed',
         timestamp: new Date().toISOString(),
       });
 
