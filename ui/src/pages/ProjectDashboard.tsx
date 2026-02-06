@@ -620,7 +620,7 @@ const ProjectDashboard = () => {
       <section>
         <h1 className="text-2xl font-semibold mb-2">Data</h1>
         <p className="text-text-secondary mb-4">
-          Enable data access safely and securely. Choose the tables and columns that are exposed. Add Pre-Approved Queries that your users can run.
+          Enable data access safely and securely. Choose the datasource and the tables and columns to bring into your ontology. Create and Manage Pre-Approved Queries to enable your users to run reports, insert data from forms, or execute stored procedures.
         </p>
         <div className="grid gap-6 md:grid-cols-3">
           {dataTiles.map(renderTile)}
