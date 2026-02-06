@@ -237,7 +237,7 @@ const AIDataLiaisonPage = () => {
           : ontologyFailed
             ? 'error'
             : 'pending',
-      linkText: ontologyComplete ? 'View' : ontologyFailed ? 'Retry' : 'Extract',
+      linkText: ontologyComplete ? 'Manage' : ontologyFailed ? 'Retry' : 'Configure',
     };
     if (datasource) {
       ontologyItem.link = `/projects/${pid}/ontology`;
@@ -253,15 +253,18 @@ const AIDataLiaisonPage = () => {
         : 'MCP Server URL will be available after setup',
       status: loading ? 'loading' : mcpConfig?.serverUrl ? 'complete' : 'pending',
       link: `/projects/${pid}/mcp-server`,
-      linkText: 'Configure',
+      linkText: mcpConfig?.serverUrl ? 'Manage' : 'Configure',
     });
 
-    // 6. AI Data Liaison installed (always complete on this page)
+    // 6. AI Data Liaison installed (only complete when all prior steps are done)
+    const allPriorComplete = items.every((item) => item.status === 'complete');
     items.push({
       id: 'installed',
-      title: 'AI Data Liaison installed',
-      description: 'Query suggestion workflow enabled',
-      status: 'complete',
+      title: 'AI Data Liaison ready',
+      description: allPriorComplete
+        ? 'Query suggestion workflow enabled'
+        : 'Complete all steps above to enable',
+      status: allPriorComplete ? 'complete' : 'pending',
     });
 
     return items;

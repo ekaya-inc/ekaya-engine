@@ -180,10 +180,10 @@ describe('AIDataLiaisonPage', () => {
       expect(screen.getByText(/Connect a database to enable AI Data Liaison/)).toBeInTheDocument();
     });
 
-    it('shows AI Data Liaison installed status', async () => {
+    it('shows AI Data Liaison as pending when prior steps incomplete', async () => {
       await renderAIDataLiaisonPage();
-      expect(screen.getByText('6. AI Data Liaison installed')).toBeInTheDocument();
-      expect(screen.getByText('Query suggestion workflow enabled')).toBeInTheDocument();
+      expect(screen.getByText('6. AI Data Liaison ready')).toBeInTheDocument();
+      expect(screen.getByText('Complete all steps above to enable')).toBeInTheDocument();
     });
   });
 
