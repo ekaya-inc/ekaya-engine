@@ -12,83 +12,13 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
 
-// AuditPageFilters contains common pagination and time-range filters.
-type AuditPageFilters struct {
-	Since  *time.Time
-	Until  *time.Time
-	Limit  int
-	Offset int
-}
-
-// QueryExecutionFilters contains filters for the query executions tab.
-type QueryExecutionFilters struct {
-	AuditPageFilters
-	UserID      string
-	Success     *bool
-	IsModifying *bool
-	Source      string
-	QueryID     *uuid.UUID
-}
-
-// OntologyChangeFilters contains filters for the ontology changes tab.
-type OntologyChangeFilters struct {
-	AuditPageFilters
-	UserID     string
-	EntityType string
-	Action     string
-	Source     string
-}
-
-// SchemaChangeFilters contains filters for the schema changes tab.
-type SchemaChangeFilters struct {
-	AuditPageFilters
-	ChangeType string
-	Status     string
-	TableName  string
-}
-
-// QueryApprovalFilters contains filters for the query approvals tab.
-type QueryApprovalFilters struct {
-	AuditPageFilters
-	Status     string
-	SuggestedBy string
-	ReviewedBy  string
-}
-
-// AuditSummary contains aggregate counts for the audit dashboard header.
-type AuditSummary struct {
-	TotalQueryExecutions  int `json:"total_query_executions"`
-	FailedQueryCount      int `json:"failed_query_count"`
-	DestructiveQueryCount int `json:"destructive_query_count"`
-	OntologyChangesCount  int `json:"ontology_changes_count"`
-	PendingSchemaChanges  int `json:"pending_schema_changes"`
-	PendingQueryApprovals int `json:"pending_query_approvals"`
-}
-
-// QueryExecutionRow represents a row from the query executions audit view.
-type QueryExecutionRow struct {
-	ID              uuid.UUID  `json:"id"`
-	ProjectID       uuid.UUID  `json:"project_id"`
-	QueryID         uuid.UUID  `json:"query_id"`
-	SQL             string     `json:"sql"`
-	ExecutedAt      time.Time  `json:"executed_at"`
-	RowCount        int        `json:"row_count"`
-	ExecutionTimeMs int        `json:"execution_time_ms"`
-	UserID          *string    `json:"user_id,omitempty"`
-	Source          string     `json:"source"`
-	IsModifying     bool       `json:"is_modifying"`
-	Success         bool       `json:"success"`
-	ErrorMessage    *string    `json:"error_message,omitempty"`
-	QueryName       *string    `json:"query_name,omitempty"` // Joined from engine_queries
-}
-
 // AuditPageRepository provides data access for the audit page.
 type AuditPageRepository interface {
-	ListQueryExecutions(ctx context.Context, projectID uuid.UUID, filters QueryExecutionFilters) ([]*QueryExecutionRow, int, error)
-	ListOntologyChanges(ctx context.Context, projectID uuid.UUID, filters OntologyChangeFilters) ([]*models.AuditLogEntry, int, error)
-	ListSchemaChanges(ctx context.Context, projectID uuid.UUID, filters SchemaChangeFilters) ([]*models.PendingChange, int, error)
-	ListQueryApprovals(ctx context.Context, projectID uuid.UUID, filters QueryApprovalFilters) ([]*models.Query, int, error)
-	GetSummary(ctx context.Context, projectID uuid.UUID) (*AuditSummary, error)
+	ListQueryExecutions(ctx context.Context, projectID uuid.UUID, filters models.QueryExecutionFilters) ([]*models.QueryExecutionRow, int, error)
+	ListOntologyChanges(ctx context.Context, projectID uuid.UUID, filters models.OntologyChangeFilters) ([]*models.AuditLogEntry, int, error)
+	ListSchemaChanges(ctx context.Context, projectID uuid.UUID, filters models.SchemaChangeFilters) ([]*models.PendingChange, int, error)
+	ListQueryApprovals(ctx context.Context, projectID uuid.UUID, filters models.QueryApprovalFilters) ([]*models.Query, int, error)
+	GetSummary(ctx context.Context, projectID uuid.UUID) (*models.AuditSummary, error)
 }
 
 type auditPageRepository struct{}
@@ -99,7 +29,7 @@ func NewAuditPageRepository() AuditPageRepository {
 
 var _ AuditPageRepository = (*auditPageRepository)(nil)
 
-func (r *auditPageRepository) ListQueryExecutions(ctx context.Context, projectID uuid.UUID, filters QueryExecutionFilters) ([]*QueryExecutionRow, int, error) {
+func (r *auditPageRepository) ListQueryExecutions(ctx context.Context, projectID uuid.UUID, filters models.QueryExecutionFilters) ([]*models.QueryExecutionRow, int, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, 0, fmt.Errorf("no tenant scope in context")
@@ -176,9 +106,9 @@ func (r *auditPageRepository) ListQueryExecutions(ctx context.Context, projectID
 	}
 	defer rows.Close()
 
-	var results []*QueryExecutionRow
+	var results []*models.QueryExecutionRow
 	for rows.Next() {
-		row := &QueryExecutionRow{}
+		row := &models.QueryExecutionRow{}
 		if err := rows.Scan(
 			&row.ID, &row.ProjectID, &row.QueryID, &row.SQL, &row.ExecutedAt,
 			&row.RowCount, &row.ExecutionTimeMs, &row.UserID, &row.Source,
@@ -196,7 +126,7 @@ func (r *auditPageRepository) ListQueryExecutions(ctx context.Context, projectID
 	return results, total, nil
 }
 
-func (r *auditPageRepository) ListOntologyChanges(ctx context.Context, projectID uuid.UUID, filters OntologyChangeFilters) ([]*models.AuditLogEntry, int, error) {
+func (r *auditPageRepository) ListOntologyChanges(ctx context.Context, projectID uuid.UUID, filters models.OntologyChangeFilters) ([]*models.AuditLogEntry, int, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, 0, fmt.Errorf("no tenant scope in context")
@@ -284,7 +214,7 @@ func (r *auditPageRepository) ListOntologyChanges(ctx context.Context, projectID
 	return entries, total, nil
 }
 
-func (r *auditPageRepository) ListSchemaChanges(ctx context.Context, projectID uuid.UUID, filters SchemaChangeFilters) ([]*models.PendingChange, int, error) {
+func (r *auditPageRepository) ListSchemaChanges(ctx context.Context, projectID uuid.UUID, filters models.SchemaChangeFilters) ([]*models.PendingChange, int, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, 0, fmt.Errorf("no tenant scope in context")
@@ -356,7 +286,7 @@ func (r *auditPageRepository) ListSchemaChanges(ctx context.Context, projectID u
 	return changes, total, nil
 }
 
-func (r *auditPageRepository) ListQueryApprovals(ctx context.Context, projectID uuid.UUID, filters QueryApprovalFilters) ([]*models.Query, int, error) {
+func (r *auditPageRepository) ListQueryApprovals(ctx context.Context, projectID uuid.UUID, filters models.QueryApprovalFilters) ([]*models.Query, int, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, 0, fmt.Errorf("no tenant scope in context")
@@ -434,13 +364,13 @@ func (r *auditPageRepository) ListQueryApprovals(ctx context.Context, projectID 
 	return queries, total, nil
 }
 
-func (r *auditPageRepository) GetSummary(ctx context.Context, projectID uuid.UUID) (*AuditSummary, error) {
+func (r *auditPageRepository) GetSummary(ctx context.Context, projectID uuid.UUID) (*models.AuditSummary, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, fmt.Errorf("no tenant scope in context")
 	}
 
-	summary := &AuditSummary{}
+	summary := &models.AuditSummary{}
 	thirtyDaysAgo := time.Now().AddDate(0, 0, -30)
 
 	// Total query executions (last 30d)

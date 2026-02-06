@@ -12,11 +12,11 @@ import (
 
 // AuditPageService provides operations for the audit page.
 type AuditPageService interface {
-	ListQueryExecutions(ctx context.Context, projectID uuid.UUID, filters repositories.QueryExecutionFilters) ([]*repositories.QueryExecutionRow, int, error)
-	ListOntologyChanges(ctx context.Context, projectID uuid.UUID, filters repositories.OntologyChangeFilters) ([]*models.AuditLogEntry, int, error)
-	ListSchemaChanges(ctx context.Context, projectID uuid.UUID, filters repositories.SchemaChangeFilters) ([]*models.PendingChange, int, error)
-	ListQueryApprovals(ctx context.Context, projectID uuid.UUID, filters repositories.QueryApprovalFilters) ([]*models.Query, int, error)
-	GetSummary(ctx context.Context, projectID uuid.UUID) (*repositories.AuditSummary, error)
+	ListQueryExecutions(ctx context.Context, projectID uuid.UUID, filters models.QueryExecutionFilters) ([]*models.QueryExecutionRow, int, error)
+	ListOntologyChanges(ctx context.Context, projectID uuid.UUID, filters models.OntologyChangeFilters) ([]*models.AuditLogEntry, int, error)
+	ListSchemaChanges(ctx context.Context, projectID uuid.UUID, filters models.SchemaChangeFilters) ([]*models.PendingChange, int, error)
+	ListQueryApprovals(ctx context.Context, projectID uuid.UUID, filters models.QueryApprovalFilters) ([]*models.Query, int, error)
+	GetSummary(ctx context.Context, projectID uuid.UUID) (*models.AuditSummary, error)
 }
 
 type auditPageService struct {
@@ -33,7 +33,7 @@ func NewAuditPageService(repo repositories.AuditPageRepository, logger *zap.Logg
 
 var _ AuditPageService = (*auditPageService)(nil)
 
-func (s *auditPageService) ListQueryExecutions(ctx context.Context, projectID uuid.UUID, filters repositories.QueryExecutionFilters) ([]*repositories.QueryExecutionRow, int, error) {
+func (s *auditPageService) ListQueryExecutions(ctx context.Context, projectID uuid.UUID, filters models.QueryExecutionFilters) ([]*models.QueryExecutionRow, int, error) {
 	results, total, err := s.repo.ListQueryExecutions(ctx, projectID, filters)
 	if err != nil {
 		s.logger.Error("Failed to list query executions",
@@ -44,7 +44,7 @@ func (s *auditPageService) ListQueryExecutions(ctx context.Context, projectID uu
 	return results, total, nil
 }
 
-func (s *auditPageService) ListOntologyChanges(ctx context.Context, projectID uuid.UUID, filters repositories.OntologyChangeFilters) ([]*models.AuditLogEntry, int, error) {
+func (s *auditPageService) ListOntologyChanges(ctx context.Context, projectID uuid.UUID, filters models.OntologyChangeFilters) ([]*models.AuditLogEntry, int, error) {
 	results, total, err := s.repo.ListOntologyChanges(ctx, projectID, filters)
 	if err != nil {
 		s.logger.Error("Failed to list ontology changes",
@@ -55,7 +55,7 @@ func (s *auditPageService) ListOntologyChanges(ctx context.Context, projectID uu
 	return results, total, nil
 }
 
-func (s *auditPageService) ListSchemaChanges(ctx context.Context, projectID uuid.UUID, filters repositories.SchemaChangeFilters) ([]*models.PendingChange, int, error) {
+func (s *auditPageService) ListSchemaChanges(ctx context.Context, projectID uuid.UUID, filters models.SchemaChangeFilters) ([]*models.PendingChange, int, error) {
 	results, total, err := s.repo.ListSchemaChanges(ctx, projectID, filters)
 	if err != nil {
 		s.logger.Error("Failed to list schema changes",
@@ -66,7 +66,7 @@ func (s *auditPageService) ListSchemaChanges(ctx context.Context, projectID uuid
 	return results, total, nil
 }
 
-func (s *auditPageService) ListQueryApprovals(ctx context.Context, projectID uuid.UUID, filters repositories.QueryApprovalFilters) ([]*models.Query, int, error) {
+func (s *auditPageService) ListQueryApprovals(ctx context.Context, projectID uuid.UUID, filters models.QueryApprovalFilters) ([]*models.Query, int, error) {
 	results, total, err := s.repo.ListQueryApprovals(ctx, projectID, filters)
 	if err != nil {
 		s.logger.Error("Failed to list query approvals",
@@ -77,7 +77,7 @@ func (s *auditPageService) ListQueryApprovals(ctx context.Context, projectID uui
 	return results, total, nil
 }
 
-func (s *auditPageService) GetSummary(ctx context.Context, projectID uuid.UUID) (*repositories.AuditSummary, error) {
+func (s *auditPageService) GetSummary(ctx context.Context, projectID uuid.UUID) (*models.AuditSummary, error) {
 	summary, err := s.repo.GetSummary(ctx, projectID)
 	if err != nil {
 		s.logger.Error("Failed to get audit summary",

@@ -20,7 +20,7 @@ import {
   FileEdit,
   GitPullRequest,
 } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
+import { Fragment, useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import { Button } from '../components/ui/Button';
@@ -453,9 +453,8 @@ function OntologyChangesTab({ projectId }: { projectId: string }) {
                   const isExpanded = expandedRow === row.id;
                   const hasChanges = row.changed_fields && Object.keys(row.changed_fields).length > 0;
                   return (
-                    <>
+                    <Fragment key={row.id}>
                       <tr
-                        key={row.id}
                         className={`border-b border-border-light/50 ${hasChanges ? 'cursor-pointer hover:bg-surface-secondary/50' : ''}`}
                         onClick={() => hasChanges && setExpandedRow(isExpanded ? null : row.id)}
                       >
@@ -484,7 +483,7 @@ function OntologyChangesTab({ projectId }: { projectId: string }) {
                         </td>
                       </tr>
                       {isExpanded && hasChanges && (
-                        <tr key={`${row.id}-detail`}>
+                        <tr>
                           <td colSpan={7} className="py-2 px-4 bg-surface-secondary/30">
                             <div className="font-mono text-xs space-y-1 max-h-60 overflow-y-auto">
                               {Object.entries(row.changed_fields!).map(([field, change]) => (
@@ -499,7 +498,7 @@ function OntologyChangesTab({ projectId }: { projectId: string }) {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -522,8 +521,21 @@ function SchemaChangesTab({ projectId }: { projectId: string }) {
   const [timeRange, setTimeRange] = useState<TimeRange>('30d');
   const [changeTypeFilter, setChangeTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [tableNameInput, setTableNameInput] = useState('');
   const [tableNameFilter, setTableNameFilter] = useState('');
   const [offset, setOffset] = useState(0);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debounce table name input
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setTableNameFilter(tableNameInput);
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [tableNameInput]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -592,8 +604,8 @@ function SchemaChangesTab({ projectId }: { projectId: string }) {
         <input
           type="text"
           placeholder="Filter by table name..."
-          value={tableNameFilter}
-          onChange={e => setTableNameFilter(e.target.value)}
+          value={tableNameInput}
+          onChange={e => setTableNameInput(e.target.value)}
           className="text-xs px-2 py-1 rounded border border-border-light bg-surface-primary text-text-primary w-40"
         />
       </div>

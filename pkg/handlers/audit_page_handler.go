@@ -10,7 +10,6 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
-	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
@@ -59,7 +58,7 @@ func (h *AuditPageHandler) ListQueryExecutions(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	filters := repositories.QueryExecutionFilters{
+	filters := models.QueryExecutionFilters{
 		AuditPageFilters: parsePageFilters(r),
 		UserID:           r.URL.Query().Get("user_id"),
 		Source:           r.URL.Query().Get("source"),
@@ -94,7 +93,7 @@ func (h *AuditPageHandler) ListQueryExecutions(w http.ResponseWriter, r *http.Re
 	}
 
 	if results == nil {
-		results = make([]*repositories.QueryExecutionRow, 0)
+		results = make([]*models.QueryExecutionRow, 0)
 	}
 
 	if err := WriteJSON(w, http.StatusOK, ApiResponse{
@@ -117,7 +116,7 @@ func (h *AuditPageHandler) ListOntologyChanges(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	filters := repositories.OntologyChangeFilters{
+	filters := models.OntologyChangeFilters{
 		AuditPageFilters: parsePageFilters(r),
 		UserID:           r.URL.Query().Get("user_id"),
 		EntityType:       r.URL.Query().Get("entity_type"),
@@ -158,7 +157,7 @@ func (h *AuditPageHandler) ListSchemaChanges(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	filters := repositories.SchemaChangeFilters{
+	filters := models.SchemaChangeFilters{
 		AuditPageFilters: parsePageFilters(r),
 		ChangeType:       r.URL.Query().Get("change_type"),
 		Status:           r.URL.Query().Get("status"),
@@ -198,7 +197,7 @@ func (h *AuditPageHandler) ListQueryApprovals(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	filters := repositories.QueryApprovalFilters{
+	filters := models.QueryApprovalFilters{
 		AuditPageFilters: parsePageFilters(r),
 		Status:           r.URL.Query().Get("status"),
 		SuggestedBy:      r.URL.Query().Get("suggested_by"),
@@ -253,8 +252,8 @@ func (h *AuditPageHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 // parsePageFilters extracts common pagination and time-range filters from query params.
-func parsePageFilters(r *http.Request) repositories.AuditPageFilters {
-	filters := repositories.AuditPageFilters{
+func parsePageFilters(r *http.Request) models.AuditPageFilters {
+	filters := models.AuditPageFilters{
 		Limit:  50,
 		Offset: 0,
 	}

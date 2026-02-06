@@ -163,16 +163,12 @@ Returns aggregate counts for a dashboard header:
 
 ### 1.5 Frontend Files to Create/Modify
 
-- [ ] `ui/src/pages/AuditPage.tsx` -- New page with tabbed interface
-- [ ] `ui/src/components/audit/QueryExecutionsTab.tsx` -- Query executions table with filters
-- [ ] `ui/src/components/audit/OntologyChangesTab.tsx` -- Ontology audit log table
-- [ ] `ui/src/components/audit/SchemaChangesTab.tsx` -- Schema changes table
-- [ ] `ui/src/components/audit/QueryApprovalsTab.tsx` -- Query approval workflow table
-- [ ] `ui/src/components/audit/AuditSummaryHeader.tsx` -- Summary counts across tabs
-- [ ] `ui/src/types/audit.ts` -- TypeScript types for audit API responses
-- [ ] `ui/src/services/engineApi.ts` -- Add audit API methods
-- [ ] `ui/src/pages/AIDataLiaisonPage.tsx` -- Add Auditing tile/card
-- [ ] `ui/src/App.tsx` -- Register `/projects/:pid/audit` route
+- [x] `ui/src/pages/AuditPage.tsx` -- New page with tabbed interface
+- [x] Query Executions, Ontology Changes, Schema Changes, Query Approvals tabs and Summary Header -- implemented inline in AuditPage.tsx
+- [x] `ui/src/types/audit.ts` -- TypeScript types for audit API responses
+- [x] `ui/src/services/engineApi.ts` -- Add audit API methods
+- [x] `ui/src/pages/AIDataLiaisonPage.tsx` -- Add Auditing tile/card
+- [x] `ui/src/App.tsx` -- Register `/projects/:pid/audit` route
 
 ### 1.6 Implementation Order
 
