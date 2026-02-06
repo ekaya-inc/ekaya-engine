@@ -626,6 +626,8 @@ func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntolog
 		if conv.Currency != nil {
 			if conv.Currency.Format == "cents" {
 				sb.WriteString("- Currency: Stored in cents, divide by 100 for display\n")
+			} else if conv.Currency.Format == "basis_points" {
+				sb.WriteString("- Currency: Stored in basis points, divide by 10000 for display\n")
 			} else {
 				sb.WriteString("- Currency: Stored as dollars/decimal\n")
 			}
@@ -1241,6 +1243,8 @@ func (s *glossaryService) buildEnrichTermPrompt(
 		if conv.Currency != nil {
 			if conv.Currency.Format == "cents" {
 				sb.WriteString("- Currency: Stored in cents, divide by 100 for display\n")
+			} else if conv.Currency.Format == "basis_points" {
+				sb.WriteString("- Currency: Stored in basis points, divide by 10000 for display\n")
 			} else {
 				sb.WriteString("- Currency: Stored as dollars/decimal\n")
 			}
@@ -1390,6 +1394,8 @@ func (s *glossaryService) buildEnhancedEnrichTermPrompt(
 		if conv.Currency != nil {
 			if conv.Currency.Format == "cents" {
 				sb.WriteString("- Currency: Stored in cents, divide by 100 for display\n")
+			} else if conv.Currency.Format == "basis_points" {
+				sb.WriteString("- Currency: Stored in basis points, divide by 10000 for display\n")
 			} else {
 				sb.WriteString("- Currency: Stored as dollars/decimal\n")
 			}
