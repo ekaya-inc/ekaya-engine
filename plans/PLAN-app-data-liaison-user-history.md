@@ -303,6 +303,79 @@ If provided, automatically creates a history entry.
 
 ---
 
+## Admin Audit Screen
+
+### Overview
+
+An **Audit** tile/screen appears in the **Intelligence** section of the UI for users with Admin role when the AI Data Liaison app is installed. This gives admins visibility into all MCP query activity across the project.
+
+### Purpose
+
+Admins need to understand how the AI Data Liaison is being used: who is querying what, how often, whether queries are succeeding, and what data is being accessed or modified. This is essential for governance, compliance, and understanding usage patterns.
+
+### Location
+
+- **Navigation:** Intelligence section (alongside existing tiles like Ontology)
+- **Visibility:** Admin role only
+- **Prerequisite:** AI Data Liaison app must be installed for the project
+
+### Features
+
+#### Search & Filter
+
+Admins can search and filter the query history by:
+
+- **User** - Filter by specific user or view all users
+- **Time range** - Date picker for start/end, plus presets (today, last 7 days, last 30 days, custom)
+- **Data modification** - Filter to show only queries that modified data (INSERT, UPDATE, DELETE) vs read-only (SELECT)
+- **Tables/columns** - Filter by specific tables or columns referenced in the SQL (uses `tables_used` from history, plus parsed column references)
+- **Success/failure** - Filter by execution outcome
+- **Query type** - Filter by classification (aggregation, lookup, report, exploration)
+
+#### Display
+
+Each query entry shows:
+- User who executed it
+- Natural language question
+- Generated SQL (expandable)
+- Final SQL if edited (expandable, with diff highlighting)
+- Execution timestamp
+- Duration and row count
+- Success/failure status with error details
+- Tables and columns accessed
+- Whether the query modified data
+
+#### Export
+
+- Export filtered results as CSV for compliance reporting
+
+### Data Access
+
+The audit screen queries the same `engine_mcp_query_history` table but without the `user_id` filter — admins see all users' queries within their project. Access is still scoped by `project_id`.
+
+### API Endpoint
+
+```
+GET /api/projects/{project_id}/mcp/query-audit
+
+Query params:
+  user_id       - Filter by user (optional)
+  from          - Start timestamp (optional)
+  to            - End timestamp (optional)
+  tables        - Comma-separated table names (optional)
+  columns       - Comma-separated column names (optional)
+  has_mutations - Boolean, filter to data-modifying queries (optional)
+  status        - "successful", "failed", "all" (default: "all")
+  query_type    - Filter by classification (optional)
+  search        - Full-text search across natural_language and SQL (optional)
+  limit         - Default 50, max 500
+  offset        - For pagination
+
+Requires: Admin role
+```
+
+---
+
 ## UI Considerations (Future)
 
 While this PLAN focuses on the MCP interface, the history data enables:
@@ -326,7 +399,13 @@ While this PLAN focuses on the MCP interface, the history data enables:
 - Add `record_query_feedback` tool
 - Parse and store query metadata (tables, aggregations)
 
-### Phase 3: Advanced Matching
+### Phase 3: Admin Audit Screen
+- Add `/mcp/query-audit` API endpoint (admin-only, cross-user query access)
+- Build Audit tile in Intelligence section (admin visibility, requires AI Data Liaison app)
+- Implement search/filter UI (user, time range, tables/columns, mutations, status)
+- Add CSV export for compliance reporting
+
+### Phase 4: Advanced Matching
 - Add vector embeddings for semantic similarity
 - Implement `get_query_patterns`
 - Add pattern detection algorithms

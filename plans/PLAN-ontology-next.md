@@ -1,129 +1,84 @@
 # PLAN: Ontology System - Next Phase
 
-**Date:** 2026-01-25
-**Status:** Planning
+**Date:** 2026-01-25 (updated 2026-02-06)
+**Status:** In Progress
 
 ## Overview
 
-This plan consolidates remaining ontology work from previous FIX/DESIGN/PLAN documents into actionable tasks. The ontology system has made significant progress but several items need completion.
+Remaining ontology work after consolidation and triage. Items completed since original plan: glossary SQL validation (BUG-10), `create_glossary_term` MCP tool.
 
-## Current State Analysis
+## Remaining Tasks
 
-### Already Implemented
-- **Probe tools:** `probe_column`, `probe_columns`, `probe_relationship` - fully functional
-- **Glossary read tools:** `list_glossary`, `get_glossary_sql` - working
-- **Glossary write tools:** `update_glossary_term`, `delete_glossary_term` - working
-- **Question MCP tools:** `list_ontology_questions`, `resolve_ontology_question`, etc. - working
-- **Question service:** `OntologyQuestionService.CreateQuestions` exists but not called during extraction
+### 1. Stats Collection Bug (BUG-9) - NEEDS VERIFICATION
 
-### Needs Work
+**Problem:** 32.8% of joinable columns had NULL `distinct_count` despite `row_count` and `non_null_count` being populated correctly. Primarily affected `text` (60% null) and `integer` (50% null) columns.
 
-#### 1. Stats Collection Bug (BUG-9) - HIGH PRIORITY
-**Problem:** 32.8% of joinable columns have NULL `distinct_count` despite code fixes being applied.
+**Current state:** Code fixes have been applied in `deterministic_relationship_service.go` and `schema_repository.go` — the persistence path looks correct. However, no columns currently have non-null `distinct_count` in the database, so the fix has not been verified by a fresh extraction.
 
-**Symptoms:**
-- `row_count` and `non_null_count` are populated correctly
-- Only `distinct_count` is lost
-- Pattern: primarily `text` columns (60% null) and `integer` columns (50% null)
-- `timestamp` and `numeric` columns work correctly (0% null)
+**To verify:** Run a full extraction and check:
+```sql
+SELECT COUNT(*) AS total,
+       COUNT(distinct_count) AS has_distinct,
+       ROUND(100.0 * COUNT(distinct_count) / COUNT(*), 1) AS pct
+FROM engine_schema_columns
+WHERE is_joinable = true AND project_id = '<project-id>';
+```
 
-**Investigation needed:**
-- Runtime logging to trace values from `AnalyzeColumnStats` return through `UpdateColumnJoinability` persistence
-- Check for column name mismatch in statsMap lookup
-- Check for type conversion issues with pointer assignment
+**Files:** `pkg/services/deterministic_relationship_service.go`, `pkg/adapters/datasource/postgres/schema.go`, `pkg/repositories/schema_repository.go`
 
-**Files:** `pkg/services/deterministic_relationship_service.go`, `pkg/adapters/datasource/postgres/schema.go`
+### 2. Ontology Refresh (Incremental) - HIGH PRIORITY
 
-#### 2. Glossary SQL Validation (BUG-10) - MEDIUM PRIORITY
-**Problem:** 4/15 glossary terms have invalid SQL due to LLM hallucinations.
+**Problem:** "Re-extract Ontology" does a full wipe and rebuild, losing all user corrections and MCP feedback.
 
-**Failed terms:**
-- "Active Sessions" - column `started_at` doesn't exist
-- "Content Popularity Score" - column `cl.channel_likes_count` doesn't exist
-- "Offer Redemption Rate" - operator mismatch (bigint = text)
-- "Payout Conversion Rate" - operator mismatch (bigint = text)
+**What exists today:**
+- Provenance infrastructure in `pkg/models/provenance.go` (SourceInferred, SourceMCP, SourceManual)
+- Provenance fields on `engine_ontology_column_metadata` and `engine_ontology_table_metadata`
 
-**Root cause:** LLM generates SQL referencing non-existent columns or using wrong type comparisons.
-
-**Fix:** Improve LLM prompts with actual column names and type information.
-
-**Files:** `pkg/services/glossary_service.go`
-
-#### 3. Ontology Refresh - HIGH PRIORITY (DESIGN EXISTS)
-**Problem:** Current "Re-extract Ontology" does full wipe and rebuild, losing user corrections.
-
-**Design exists:** `DESIGN-ontology-refresh.md` describes incremental refresh with:
-- Change detection scan (schema fingerprint, pending queue items)
-- No-op when nothing changed
-- Event queue for schema changes, user answers, MCP feedback
-- Provenance tracking (source, confidence, verified_by_user)
+**What's missing:**
+1. Event queue table for schema changes, user answers, MCP feedback
+2. Schema fingerprinting and change detection (no-op when nothing changed)
+3. Selective enrichment (skip user-verified items during re-extraction)
+4. MCP `update_ontology` tool
 
 **Implementation phases:**
-1. Add provenance fields to entities/relationships
-2. Implement event queue table
-3. Schema fingerprinting and diffing
-4. Selective enrichment (skip user-verified items)
-5. MCP `update_ontology` tool
+1. Event queue table + schema fingerprinting
+2. Change detection scan (diff current schema against stored fingerprint)
+3. Selective DAG execution (only re-process changed/new items)
+4. MCP `update_ontology` tool for ad-hoc corrections
 
-**Files:** Many - see DESIGN-ontology-refresh.md for full list
+### 3. Question Generation During Extraction - MEDIUM PRIORITY
 
-#### 4. Question Generation During Extraction - MEDIUM PRIORITY
-**Problem:** DAG completes without generating any questions. The `engine_ontology_questions` table is always empty.
+**Problem:** DAG completes without generating any clarifying questions. `OntologyQuestionService.CreateQuestions` exists but is never called from any DAG step.
 
-**Design exists:** `PLAN-ontology-question-generation.md` describes:
-- Question categories: terminology, enumeration, relationship, business_rules, temporal, data_quality
-- Generation points in DAG steps
-- LLM prompt modifications to request questions
-- Deterministic question generation for data patterns (high NULL rates, cryptic enum values)
+**Question categories:** terminology, enumeration, relationship, business_rules, temporal, data_quality
 
-**Key change:** Add question extraction to LLM response parsing and call `CreateQuestions` after each DAG step.
+**What's needed:**
+- Add question extraction to LLM response parsing in DAG steps
+- Call `CreateQuestions` after relevant DAG steps (column feature extraction, relationship discovery, glossary)
+- Add deterministic question generation for data patterns (high NULL rates, cryptic enum values, ambiguous relationships)
 
-**Files:** DAG step services, LLM prompts, `OntologyQuestionService`
+**Files:** `pkg/services/dag/` (step implementations), LLM prompts, `pkg/services/ontology_question.go`
 
-#### 5. Missing create_glossary_term Tool - LOW PRIORITY
-**Problem:** Design exists for full CRUD but `create_glossary_term` not implemented.
+### 4. Column Types in Entity Relationships - LOW PRIORITY
 
-**Other tools work:** update_glossary_term, delete_glossary_term are functional.
+**Problem:** `SchemaRelationship` model has `SourceColumnID` and `TargetColumnID` but no denormalized column type fields. API consumers must join to `engine_schema_columns` to get types.
 
-**Files:** `pkg/mcp/tools/glossary.go`
+**Fix:** Add `source_column_type` and `target_column_type` to the relationship query/response by JOINing to `engine_schema_columns` in the repository layer.
 
-#### 6. Column Types in Entity Relationships - LOW PRIORITY
-**Problem:** API response has `source_column_type` and `target_column_type` fields but they're never populated.
-
-**Fix described in:** `FIX-add-column-type-to-entity-relationships.md`
-- Add `source_column_id`, `target_column_id` FKs to `engine_entity_relationships`
-- JOIN to `engine_schema_columns` to get types
-- Update model, repository, service, handler
-
-**Files:** Migration, `pkg/models/entity_relationship.go`, `pkg/repositories/entity_relationship_repository.go`
+**Files:** `pkg/models/schema.go` (SchemaRelationship), `pkg/repositories/` (relationship queries)
 
 ## Prioritized Task List
 
 | Priority | Task | Type | Est. Complexity |
 |----------|------|------|-----------------|
-| 1 | BUG-9: Debug stats collection flow | FIX | Medium |
-| 2 | Ontology refresh Phase 1: Provenance fields | TASK | Medium |
-| 3 | Question generation during extraction | TASK | Large |
-| 4 | BUG-10: Improve glossary SQL generation | FIX | Medium |
-| 5 | Ontology refresh Phase 2: Event queue | TASK | Large |
-| 6 | create_glossary_term MCP tool | TASK | Small |
-| 7 | Column types in relationships | FIX | Medium |
+| 1 | Verify BUG-9 stats collection fix | VERIFY | Small (just needs extraction run) |
+| 2 | Ontology refresh: event queue + fingerprinting | FEATURE | Large |
+| 3 | Question generation during extraction | FEATURE | Large |
+| 4 | Column types in relationship responses | ENHANCEMENT | Small |
 
 ## Success Criteria
 
-- [ ] Stats collection: <10% joinable columns with NULL distinct_count
-- [ ] Glossary: All terms have valid, executable SQL
+- [ ] Stats collection: <10% joinable columns with NULL distinct_count after fresh extraction
 - [ ] Refresh: Can refresh ontology without losing user corrections
-- [ ] Questions: DAG generates at least some clarifying questions
-- [ ] All MCP tools functional and tested
-
-## Archived Documents
-
-The following documents have been consolidated into this plan:
-- `plans/FIX-ontology-extraction-bug9.md` → Task: FIX-stats-collection-debug.md
-- `plans/FIX-ontology-extraction-bug10.md` → Task: FIX-glossary-sql-validation.md
-- `plans/DESIGN-ontology-refresh.md` → Task: TASK-ontology-refresh-phase1.md
-- `plans/PLAN-ontology-probe-tools.md` → Already implemented
-- `plans/PLAN-ontology-question-generation.md` → Task: TASK-question-generation.md
-- `plans/DESIGN-glossary-client-updates.md` → Task: TASK-create-glossary-term-tool.md
-- `plans/FIX-add-column-type-to-entity-relationships.md` → Task: FIX-relationship-column-types.md
+- [ ] Questions: DAG generates clarifying questions during extraction
+- [ ] Relationship API includes column types without extra lookups
