@@ -2,7 +2,11 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +18,7 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
+	"github.com/ekaya-inc/ekaya-engine/pkg/mcp/tools"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
 
@@ -185,8 +190,18 @@ func (a *AuditLogger) record(event *models.MCPAuditEvent) {
 	}
 }
 
-// sanitizeParams sanitizes request parameters before storing.
-// Truncates large string values and redacts potentially sensitive data.
+// maxSQLSize is the maximum size of SQL strings stored in audit logs.
+const maxSQLSize = 10240 // 10KB
+
+// sqlStringLiteralPattern matches SQL string literals: 'value', 'it''s escaped', etc.
+// Handles escaped single quotes within strings.
+var sqlStringLiteralPattern = regexp.MustCompile(`'(?:[^']*(?:'')?)*[^']*'`)
+
+// sensitiveParamDetector is used to identify sensitive parameter keys in audit logs.
+var sensitiveParamDetector = tools.DefaultSensitiveDetector
+
+// sanitizeParams sanitizes request parameters before storing in the audit log.
+// Applies: SQL truncation, string literal redaction, sensitive value hashing.
 func sanitizeParams(args any) map[string]any {
 	params, ok := args.(map[string]any)
 	if !ok || len(params) == 0 {
@@ -195,19 +210,77 @@ func sanitizeParams(args any) map[string]any {
 
 	sanitized := make(map[string]any, len(params))
 	for k, v := range params {
-		switch val := v.(type) {
-		case string:
-			// Truncate SQL > 10KB
-			if len(val) > 10240 {
-				sanitized[k] = val[:10240] + "...[truncated]"
-			} else {
-				sanitized[k] = val
-			}
-		default:
-			sanitized[k] = v
-		}
+		sanitized[k] = sanitizeValue(k, v)
 	}
 	return sanitized
+}
+
+// sanitizeValue applies the appropriate sanitization based on key name and value type.
+func sanitizeValue(key string, value any) any {
+	// Hash values for sensitive parameter keys (password, token, api_key, etc.)
+	if sensitiveParamDetector.IsSensitiveColumn(key) {
+		return hashSensitiveValue(value)
+	}
+
+	switch val := value.(type) {
+	case string:
+		return sanitizeStringParam(key, val)
+	case map[string]any:
+		return sanitizeNestedParams(val)
+	default:
+		return value
+	}
+}
+
+// sanitizeStringParam handles string values: truncates SQL and redacts string literals.
+func sanitizeStringParam(key string, val string) string {
+	// Truncate > 10KB
+	if len(val) > maxSQLSize {
+		val = val[:maxSQLSize] + "...[truncated]"
+	}
+
+	// Redact SQL string literals in SQL-like parameters
+	if isSQLParam(key) {
+		val = redactSQLStringLiterals(val)
+	}
+
+	return val
+}
+
+// sanitizeNestedParams recursively sanitizes nested map parameters,
+// preserving structure but hiding sensitive values.
+func sanitizeNestedParams(params map[string]any) map[string]any {
+	sanitized := make(map[string]any, len(params))
+	for k, v := range params {
+		sanitized[k] = sanitizeValue(k, v)
+	}
+	return sanitized
+}
+
+// isSQLParam returns true if a parameter key likely contains SQL.
+func isSQLParam(key string) bool {
+	lower := strings.ToLower(key)
+	return lower == "sql" || lower == "query" || strings.HasSuffix(lower, "_sql") || strings.HasSuffix(lower, "_query")
+}
+
+// redactSQLStringLiterals replaces string literal values in SQL with '***',
+// preserving the query structure for debugging while hiding user-provided values.
+func redactSQLStringLiterals(sql string) string {
+	return sqlStringLiteralPattern.ReplaceAllString(sql, "'***'")
+}
+
+// hashSensitiveValue returns a SHA-256 hash prefix for sensitive values,
+// allowing correlation across audit entries without storing the actual value.
+func hashSensitiveValue(value any) string {
+	var str string
+	switch v := value.(type) {
+	case string:
+		str = v
+	default:
+		str = fmt.Sprintf("%v", v)
+	}
+	hash := sha256.Sum256([]byte(str))
+	return "sha256:" + hex.EncodeToString(hash[:8]) // First 8 bytes = 16 hex chars
 }
 
 // summarizeResult creates a compact summary of the tool result.

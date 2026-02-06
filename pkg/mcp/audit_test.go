@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"strings"
 	"testing"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
@@ -180,6 +181,264 @@ func TestSanitizeParams_NilInput(t *testing.T) {
 	result := sanitizeParams(nil)
 	if result != nil {
 		t.Errorf("expected nil for nil input, got %v", result)
+	}
+}
+
+// --- SQL string literal redaction tests ---
+
+func TestSanitizeParams_RedactsSQLStringLiterals(t *testing.T) {
+	params := map[string]any{
+		"sql": "SELECT * FROM users WHERE name = 'John' AND city = 'New York'",
+	}
+
+	result := sanitizeParams(params)
+	sqlVal := result["sql"].(string)
+
+	expected := "SELECT * FROM users WHERE name = '***' AND city = '***'"
+	if sqlVal != expected {
+		t.Errorf("expected SQL %q, got %q", expected, sqlVal)
+	}
+}
+
+func TestSanitizeParams_RedactsSQLEscapedQuotes(t *testing.T) {
+	params := map[string]any{
+		"sql": "SELECT * FROM users WHERE name = 'O''Brien'",
+	}
+
+	result := sanitizeParams(params)
+	sqlVal := result["sql"].(string)
+
+	expected := "SELECT * FROM users WHERE name = '***'"
+	if sqlVal != expected {
+		t.Errorf("expected SQL %q, got %q", expected, sqlVal)
+	}
+}
+
+func TestSanitizeParams_PreservesSQLStructure(t *testing.T) {
+	params := map[string]any{
+		"sql": "SELECT id, name FROM users WHERE created_at > '2024-01-01' ORDER BY id LIMIT 10",
+	}
+
+	result := sanitizeParams(params)
+	sqlVal := result["sql"].(string)
+
+	// Structure should be preserved — keywords, columns, table names intact
+	if !strings.Contains(sqlVal, "SELECT id, name FROM users WHERE created_at >") {
+		t.Errorf("expected SQL structure to be preserved, got %q", sqlVal)
+	}
+	if !strings.Contains(sqlVal, "'***'") {
+		t.Errorf("expected string literal to be redacted, got %q", sqlVal)
+	}
+	if strings.Contains(sqlVal, "2024-01-01") {
+		t.Errorf("expected date literal to be redacted, got %q", sqlVal)
+	}
+}
+
+func TestSanitizeParams_SQLWithNoLiterals(t *testing.T) {
+	params := map[string]any{
+		"sql": "SELECT COUNT(*) FROM users WHERE id = 42",
+	}
+
+	result := sanitizeParams(params)
+	sqlVal := result["sql"].(string)
+
+	// Numeric literals are NOT redacted — only string literals
+	expected := "SELECT COUNT(*) FROM users WHERE id = 42"
+	if sqlVal != expected {
+		t.Errorf("expected SQL %q, got %q", expected, sqlVal)
+	}
+}
+
+func TestSanitizeParams_QueryKeyAlsoRedacted(t *testing.T) {
+	params := map[string]any{
+		"query": "SELECT * FROM logs WHERE message = 'error'",
+	}
+
+	result := sanitizeParams(params)
+	sqlVal := result["query"].(string)
+
+	if !strings.Contains(sqlVal, "'***'") {
+		t.Errorf("expected 'query' key to have SQL redaction, got %q", sqlVal)
+	}
+}
+
+func TestSanitizeParams_NonSQLStringPreserved(t *testing.T) {
+	params := map[string]any{
+		"table_name": "users",
+		"format":     "json",
+	}
+
+	result := sanitizeParams(params)
+
+	if result["table_name"] != "users" {
+		t.Errorf("expected table_name to be preserved, got %v", result["table_name"])
+	}
+	if result["format"] != "json" {
+		t.Errorf("expected format to be preserved, got %v", result["format"])
+	}
+}
+
+// --- Sensitive parameter hashing tests ---
+
+func TestSanitizeParams_HashesSensitiveKeys(t *testing.T) {
+	params := map[string]any{
+		"password":  "my-secret-password",
+		"api_key":   "sk-1234567890",
+		"table_name": "users",
+	}
+
+	result := sanitizeParams(params)
+
+	// Sensitive keys should be hashed
+	passwordVal, ok := result["password"].(string)
+	if !ok {
+		t.Fatal("expected password to be a string")
+	}
+	if !strings.HasPrefix(passwordVal, "sha256:") {
+		t.Errorf("expected password to be hashed, got %q", passwordVal)
+	}
+	if passwordVal == "my-secret-password" {
+		t.Error("expected password to NOT be plaintext")
+	}
+
+	apiKeyVal, ok := result["api_key"].(string)
+	if !ok {
+		t.Fatal("expected api_key to be a string")
+	}
+	if !strings.HasPrefix(apiKeyVal, "sha256:") {
+		t.Errorf("expected api_key to be hashed, got %q", apiKeyVal)
+	}
+
+	// Non-sensitive keys should be preserved
+	if result["table_name"] != "users" {
+		t.Errorf("expected table_name to be preserved, got %v", result["table_name"])
+	}
+}
+
+func TestSanitizeParams_HashIsDeterministic(t *testing.T) {
+	// Same value should produce the same hash for correlation
+	hash1 := hashSensitiveValue("my-secret")
+	hash2 := hashSensitiveValue("my-secret")
+
+	if hash1 != hash2 {
+		t.Errorf("expected deterministic hash, got %q and %q", hash1, hash2)
+	}
+
+	// Different values should produce different hashes
+	hash3 := hashSensitiveValue("different-secret")
+	if hash1 == hash3 {
+		t.Error("expected different hashes for different values")
+	}
+}
+
+func TestSanitizeParams_HashFormat(t *testing.T) {
+	result := hashSensitiveValue("test-value")
+
+	if !strings.HasPrefix(result, "sha256:") {
+		t.Errorf("expected sha256: prefix, got %q", result)
+	}
+	// sha256: (7 chars) + 16 hex chars = 23 chars
+	if len(result) != 23 {
+		t.Errorf("expected hash length 23, got %d", len(result))
+	}
+}
+
+// --- Nested parameter sanitization tests ---
+
+func TestSanitizeParams_SanitizesNestedMaps(t *testing.T) {
+	params := map[string]any{
+		"config": map[string]any{
+			"password":   "secret123",
+			"table_name": "users",
+		},
+	}
+
+	result := sanitizeParams(params)
+	nested, ok := result["config"].(map[string]any)
+	if !ok {
+		t.Fatal("expected config to be a map")
+	}
+
+	passwordVal, ok := nested["password"].(string)
+	if !ok {
+		t.Fatal("expected nested password to be a string")
+	}
+	if !strings.HasPrefix(passwordVal, "sha256:") {
+		t.Errorf("expected nested password to be hashed, got %q", passwordVal)
+	}
+	if nested["table_name"] != "users" {
+		t.Errorf("expected nested table_name to be preserved, got %v", nested["table_name"])
+	}
+}
+
+// --- Helper function tests ---
+
+func TestIsSQLParam(t *testing.T) {
+	tests := []struct {
+		key    string
+		expect bool
+	}{
+		{"sql", true},
+		{"SQL", true},
+		{"query", true},
+		{"QUERY", true},
+		{"raw_sql", true},
+		{"generated_query", true},
+		{"table_name", false},
+		{"limit", false},
+		{"format", false},
+		{"sql_mode", false}, // not a suffix match
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.key, func(t *testing.T) {
+			if got := isSQLParam(tc.key); got != tc.expect {
+				t.Errorf("isSQLParam(%q) = %v, want %v", tc.key, got, tc.expect)
+			}
+		})
+	}
+}
+
+func TestRedactSQLStringLiterals(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		expect string
+	}{
+		{
+			name:   "simple literal",
+			input:  "WHERE name = 'John'",
+			expect: "WHERE name = '***'",
+		},
+		{
+			name:   "multiple literals",
+			input:  "WHERE name = 'John' AND city = 'NYC'",
+			expect: "WHERE name = '***' AND city = '***'",
+		},
+		{
+			name:   "empty literal",
+			input:  "WHERE name = ''",
+			expect: "WHERE name = '***'",
+		},
+		{
+			name:   "no literals",
+			input:  "SELECT COUNT(*) FROM users",
+			expect: "SELECT COUNT(*) FROM users",
+		},
+		{
+			name:   "numeric not affected",
+			input:  "WHERE id = 42 AND name = 'test'",
+			expect: "WHERE id = 42 AND name = '***'",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := redactSQLStringLiterals(tc.input)
+			if got != tc.expect {
+				t.Errorf("redactSQLStringLiterals(%q) = %q, want %q", tc.input, got, tc.expect)
+			}
+		})
 	}
 }
 

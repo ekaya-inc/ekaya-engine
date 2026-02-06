@@ -309,7 +309,7 @@ func AuditMiddleware(next ToolHandler, logger AuditLogger) ToolHandler {
 }
 ```
 
-### 2.4 Sanitization Rules
+### 2.4 Sanitization Rules ✅
 
 Before storing in audit log:
 1. Truncate SQL > 10KB
