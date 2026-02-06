@@ -213,18 +213,8 @@ export interface EnumValue {
 export interface DomainSummary {
   domains: string[];                  // e.g., ["sales", "finance", "operations"]
   entity_names: string[];             // Table names only, no details
-  relationship_graph: RelationshipEdge[]; // Edges between entities
   description: string;                // 1-2 sentence business summary
   sample_questions: string[];         // 3-5 example questions
-}
-
-/**
- * Relationship edge in the graph
- */
-export interface RelationshipEdge {
-  from: string;    // Source entity name
-  to: string;      // Target entity name
-  type: string;    // one_to_many, many_to_one, etc.
 }
 
 /**
