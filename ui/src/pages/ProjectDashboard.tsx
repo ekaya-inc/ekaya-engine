@@ -350,7 +350,7 @@ const ProjectDashboard = () => {
         </p>
 
         <AIConfigWidget
-          projectId={pid!}
+          projectId={pid ?? ''}
           disabled={!hasSelectedTables}
           onConfigChange={setActiveAIConfig}
         />

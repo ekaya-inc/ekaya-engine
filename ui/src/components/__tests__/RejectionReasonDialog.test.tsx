@@ -135,7 +135,7 @@ describe('RejectionReasonDialog', () => {
   });
 
   it('shows loading state while rejecting', async () => {
-    let resolveReject: () => void;
+    let resolveReject: () => void = () => { /* no-op */ };
     const rejectPromise = new Promise<void>((resolve) => {
       resolveReject = resolve;
     });
@@ -164,7 +164,7 @@ describe('RejectionReasonDialog', () => {
     expect(screen.getByRole('button', { name: /rejecting/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /cancel/i })).toBeDisabled();
 
-    resolveReject!();
+    resolveReject();
   });
 
   it('calls onOpenChange when cancel is clicked', () => {

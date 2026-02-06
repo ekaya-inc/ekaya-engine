@@ -12,6 +12,8 @@ vi.mock('../../services/engineApi', () => ({
     uninstallApp: vi.fn(),
     listDataSources: vi.fn(),
     getMCPConfig: vi.fn(),
+    getAIConfig: vi.fn(),
+    getSchema: vi.fn(),
     getOntologyDAGStatus: vi.fn(),
   },
 }));
@@ -81,6 +83,15 @@ const setupMocks = (options: {
     });
   }
 
+  vi.mocked(engineApi.getAIConfig).mockResolvedValue({
+    success: true,
+  });
+
+  vi.mocked(engineApi.getSchema).mockResolvedValue({
+    success: true,
+    data: { tables: [], total_tables: 0, relationships: [] },
+  });
+
   if (hasOntology) {
     vi.mocked(engineApi.getOntologyDAGStatus).mockResolvedValue({
       success: true,
@@ -135,7 +146,7 @@ describe('AIDataLiaisonPage', () => {
 
     it('renders the page description', async () => {
       await renderAIDataLiaisonPage();
-      expect(screen.getByText('Enable business users to query data through natural language')).toBeInTheDocument();
+      expect(screen.getByText(/Ekaya acts as a data liaison between you and your business users/)).toBeInTheDocument();
     });
 
     it('renders back button', async () => {
@@ -171,7 +182,7 @@ describe('AIDataLiaisonPage', () => {
 
     it('shows AI Data Liaison installed status', async () => {
       await renderAIDataLiaisonPage();
-      expect(screen.getByText('4. AI Data Liaison installed')).toBeInTheDocument();
+      expect(screen.getByText('6. AI Data Liaison installed')).toBeInTheDocument();
       expect(screen.getByText('Query suggestion workflow enabled')).toBeInTheDocument();
     });
   });
@@ -374,7 +385,7 @@ describe('AIDataLiaisonPage', () => {
     });
 
     it('shows loading state while uninstalling', async () => {
-      let resolvePromise: (value: { success: boolean }) => void;
+      let resolvePromise: (value: { success: boolean }) => void = () => { /* no-op */ };
       vi.mocked(engineApi.uninstallApp).mockImplementation(
         () => new Promise((resolve) => { resolvePromise = resolve; })
       );
@@ -393,7 +404,7 @@ describe('AIDataLiaisonPage', () => {
       });
 
       // Resolve the promise to clean up
-      resolvePromise!({ success: true });
+      resolvePromise({ success: true });
     });
   });
 });

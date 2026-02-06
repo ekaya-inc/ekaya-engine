@@ -157,7 +157,11 @@ export function ProjectKnowledgeEditor({
             value: value.trim(),
           };
 
-      const response = await engineApi.updateProjectKnowledge(projectId, fact!.id, requestData);
+      if (!fact) {
+        setSaveError('No fact to update');
+        return;
+      }
+      const response = await engineApi.updateProjectKnowledge(projectId, fact.id, requestData);
 
       if (!response.success) {
         setSaveError(response.error ?? 'Failed to update fact');

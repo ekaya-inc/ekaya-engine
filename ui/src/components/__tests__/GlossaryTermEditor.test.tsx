@@ -311,7 +311,7 @@ describe('GlossaryTermEditor', () => {
     });
 
     it('shows loading state while testing SQL', async () => {
-      let resolveTest: (value: unknown) => void;
+      let resolveTest: (value: unknown) => void = () => { /* no-op */ };
       const testPromise = new Promise((resolve) => {
         resolveTest = resolve;
       });
@@ -337,7 +337,7 @@ describe('GlossaryTermEditor', () => {
         expect(screen.getByText('Testing...')).toBeInTheDocument();
       });
 
-      resolveTest!({
+      resolveTest({
         success: true,
         data: { valid: true, output_columns: [] },
       });
@@ -538,7 +538,9 @@ describe('GlossaryTermEditor', () => {
       );
 
       if (removeButtons.length > 0) {
-        fireEvent.click(removeButtons[0]!);
+        const firstRemoveButton = removeButtons[0];
+        if (!firstRemoveButton) throw new Error('Expected at least one remove button');
+        fireEvent.click(firstRemoveButton);
       }
 
       await waitFor(() => {
@@ -845,7 +847,7 @@ describe('GlossaryTermEditor', () => {
     });
 
     it('disables form controls while saving', async () => {
-      let resolveSave: (value: unknown) => void;
+      let resolveSave: (value: unknown) => void = () => { /* no-op */ };
       const savePromise = new Promise((resolve) => {
         resolveSave = resolve;
       });
@@ -876,7 +878,7 @@ describe('GlossaryTermEditor', () => {
         expect(screen.getByLabelText(/definition/i)).toBeDisabled();
       });
 
-      resolveSave!({ success: true, data: mockTerm });
+      resolveSave({ success: true, data: mockTerm });
     });
   });
 });

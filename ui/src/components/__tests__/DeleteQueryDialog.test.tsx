@@ -200,7 +200,7 @@ describe('DeleteQueryDialog', () => {
 
   it('shows loading state while deleting', async () => {
     // Create a promise that we can control
-    let resolveDelete: (value: unknown) => void;
+    let resolveDelete: (value: unknown) => void = () => { /* no-op */ };
     const deletePromise = new Promise((resolve) => {
       resolveDelete = resolve;
     });
@@ -231,7 +231,7 @@ describe('DeleteQueryDialog', () => {
     expect(screen.getByRole('button', { name: /cancel/i })).toBeDisabled();
 
     // Resolve the promise
-    resolveDelete!({ success: true, data: { success: true, message: 'Deleted' } });
+    resolveDelete({ success: true, data: { success: true, message: 'Deleted' } });
   });
 
   it('calls onOpenChange when cancel is clicked', () => {

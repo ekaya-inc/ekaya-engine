@@ -249,7 +249,7 @@ const MCPServerPage = () => {
 
             {/* User Tools Section */}
             <UserToolsSection
-              projectId={pid!}
+              projectId={pid ?? ''}
               allowOntologyMaintenance={allowOntologyMaintenance}
               onAllowOntologyMaintenanceChange={handleAllowOntologyMaintenanceChange}
               enabledTools={config.userTools}
@@ -268,7 +268,7 @@ const MCPServerPage = () => {
 
             {/* Agent Tools Section */}
             <AgentToolsSection
-              projectId={pid!}
+              projectId={pid ?? ''}
               serverUrl={config.serverUrl}
               agentApiKey={agentApiKey}
               onAgentApiKeyChange={setAgentApiKey}

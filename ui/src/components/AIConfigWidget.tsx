@@ -6,14 +6,6 @@ import {
 } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from './ui/Dialog';
 import engineApi from '../services/engineApi';
 import type {
   AIConfigForm,
@@ -22,6 +14,15 @@ import type {
   AIOptionsResponse,
   AITestResult,
 } from '../types';
+
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from './ui/Dialog';
 
 interface AIConfigWidgetProps {
   projectId: string;

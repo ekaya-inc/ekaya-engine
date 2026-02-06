@@ -74,13 +74,15 @@ export const ParameterEditor = ({
 
   // Expand all parameters by default - Description is an important field
   useEffect(() => {
-    const allIndices = new Set(parameters.map((_, i) => i));
-    // Only update if there are new indices to add
-    const hasNewIndices = [...allIndices].some((i) => !expandedRows.has(i));
-    if (hasNewIndices) {
-      setExpandedRows((prev) => new Set([...prev, ...allIndices]));
-    }
-  }, [parameters.length, expandedRows]);
+    setExpandedRows((prev) => {
+      const allIndices = new Set(parameters.map((_, i) => i));
+      const hasNewIndices = [...allIndices].some((i) => !prev.has(i));
+      if (hasNewIndices) {
+        return new Set([...prev, ...allIndices]);
+      }
+      return prev;
+    });
+  }, [parameters]);
 
   const handleAddParameter = (name?: string) => {
     const newParam: QueryParameter = {

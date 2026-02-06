@@ -18,8 +18,44 @@ import {
 import { useDatasourceConnection } from "../contexts/DatasourceConnectionContext";
 import { useToast } from "../hooks/useToast";
 import engineApi from "../services/engineApi";
-import type { DatasourceType, SSLMode } from "../types";
+import type {
+  ConnectionDetails,
+  DatasourceConfig,
+  DatasourceType,
+  MSSQLAuthMethod,
+  SSLMode,
+} from "../types";
 import { parsePostgresUrl } from "../utils/connectionString";
+
+/**
+ * ConnectionDetails extended with MSSQL-specific fields that may be spread
+ * from the API config map at runtime.
+ */
+type ConnectionDetailsWithMSSQL = ConnectionDetails & {
+  auth_method?: MSSQLAuthMethod;
+  tenant_id?: string;
+  client_id?: string;
+  client_secret?: string;
+  encrypt?: boolean;
+  trust_server_certificate?: boolean;
+  connection_timeout?: number | string;
+};
+
+/**
+ * Config payload sent to test/save/update API endpoints.
+ * Combines base DatasourceConfig fields with MSSQL-specific fields and type.
+ */
+type DatasourceApiConfig = DatasourceConfig & {
+  type: DatasourceType;
+  provider?: string;
+  auth_method?: MSSQLAuthMethod;
+  tenant_id?: string;
+  client_id?: string;
+  client_secret?: string;
+  encrypt?: boolean;
+  trust_server_certificate?: boolean;
+  connection_timeout?: number;
+};
 
 import { Button } from "./ui/Button";
 import { Card, CardContent } from "./ui/Card";
@@ -248,9 +284,9 @@ const DatasourceConfiguration = ({
       // Load MSSQL-specific fields from connectionDetails
       // These are stored in the config map and spread into connectionDetails
       if (selectedAdapter === "mssql") {
-        const mssqlConfig = connectionDetails as any;
+        const mssqlConfig = connectionDetails as ConnectionDetailsWithMSSQL;
         if (mssqlConfig.auth_method) {
-          formData.authMethod = mssqlConfig.auth_method as "sql" | "service_principal" | "user_delegation";
+          formData.authMethod = mssqlConfig.auth_method;
         }
         if (mssqlConfig.tenant_id) {
           formData.tenantId = mssqlConfig.tenant_id;
@@ -295,7 +331,7 @@ const DatasourceConfiguration = ({
   useEffect(() => {
     if (isEditingExisting) {
       // When editing, check if existing datasource uses user_delegation
-      const mssqlConfig = connectionDetails as any;
+      const mssqlConfig = connectionDetails as ConnectionDetailsWithMSSQL;
       const existingAuthMethod = mssqlConfig?.auth_method;
       if (existingAuthMethod === "user_delegation") {
         setHasAzureToken(true);
@@ -303,7 +339,7 @@ const DatasourceConfiguration = ({
         fetch("/api/auth/me")
           .then((res) => res.json())
           .then((data) => {
-            setUserEmail(data.email || "");
+            setUserEmail(data.email ?? "");
           })
           .catch((error) => {
             console.error("Failed to fetch user email:", error);
@@ -317,9 +353,9 @@ const DatasourceConfiguration = ({
       fetch("/api/auth/me")
         .then((res) => res.json())
         .then((data) => {
-          const tokenAvailable = data.hasAzureToken || false;
+          const tokenAvailable = data.hasAzureToken ?? false;
           setHasAzureToken(tokenAvailable);
-          setUserEmail(data.email || "");
+          setUserEmail(data.email ?? "");
 
           // Auto-select user delegation if token available
           // Only auto-select once on initial load (not when user changes selection)
@@ -336,7 +372,7 @@ const DatasourceConfiguration = ({
       // Reset the ref when switching away from MSSQL
       hasAutoSelectedAuthMethod.current = false;
     }
-  }, [selectedAdapter, connectionDetails?.type, isEditingExisting]);
+  }, [selectedAdapter, connectionDetails, isEditingExisting]);
 
   const isConnectionReadyToTest = (): boolean => {
     // Basic fields required for all adapters
@@ -375,24 +411,26 @@ const DatasourceConfiguration = ({
     setTestingConnection(true);
 
     try {
-      const testDetails: any = {
+      const testDetails: DatasourceApiConfig = {
         type: selectedAdapter as DatasourceType,
         host: config.host,
         port: parseInt(config.port),
         name: config.name,
+        ssl_mode: (config.useSSL ? "require" : "disable") as SSLMode,
       };
 
       // MSSQL-specific configuration
       if (selectedAdapter === "mssql") {
-        testDetails.auth_method = config.authMethod || "sql";
+        testDetails.auth_method = config.authMethod ?? "sql";
 
         if (config.authMethod === "sql") {
           testDetails.user = config.user;
           testDetails.password = config.password;
         } else if (config.authMethod === "service_principal") {
-          testDetails.tenant_id = config.tenantId;
-          testDetails.client_id = config.clientId;
-          testDetails.client_secret = config.clientSecret;
+          if (config.tenantId) testDetails.tenant_id = config.tenantId;
+          if (config.clientId) testDetails.client_id = config.clientId;
+          if (config.clientSecret)
+            testDetails.client_secret = config.clientSecret;
         }
         // user_delegation: no credentials needed (token from JWT)
         // Explicitly do NOT send user/password fields to avoid auto-detection issues
@@ -402,18 +440,12 @@ const DatasourceConfiguration = ({
         testDetails.trust_server_certificate =
           config.trustServerCertificate ?? false;
         testDetails.connection_timeout = parseInt(
-          config.connectionTimeout || "30"
+          config.connectionTimeout ?? "30"
         );
-        testDetails.ssl_mode = (
-          config.useSSL ? "require" : "disable"
-        ) as SSLMode;
       } else {
         // PostgreSQL and other adapters
         testDetails.user = config.user;
         testDetails.password = config.password;
-        testDetails.ssl_mode = (
-          config.useSSL ? "require" : "disable"
-        ) as SSLMode;
       }
 
       if (!pid) {
@@ -481,25 +513,27 @@ const DatasourceConfiguration = ({
       // Include provider for PostgreSQL-compatible variants (e.g., supabase, neon)
       const currentProvider = activeProvider ?? selectedProvider;
 
-      const apiConfig: any = {
+      const apiConfig: DatasourceApiConfig = {
         type: datasourceType,
         ...(currentProvider && { provider: currentProvider.id }),
         host: config.host,
         port: parseInt(config.port),
         name: config.name,
+        ssl_mode: (config.useSSL ? "require" : "disable") as SSLMode,
       };
 
       // MSSQL-specific configuration
       if (selectedAdapter === "mssql") {
-        apiConfig.auth_method = config.authMethod || "sql";
+        apiConfig.auth_method = config.authMethod ?? "sql";
 
         if (config.authMethod === "sql") {
           apiConfig.user = config.user;
           apiConfig.password = config.password;
         } else if (config.authMethod === "service_principal") {
-          apiConfig.tenant_id = config.tenantId;
-          apiConfig.client_id = config.clientId;
-          apiConfig.client_secret = config.clientSecret;
+          if (config.tenantId) apiConfig.tenant_id = config.tenantId;
+          if (config.clientId) apiConfig.client_id = config.clientId;
+          if (config.clientSecret)
+            apiConfig.client_secret = config.clientSecret;
         }
         // user_delegation: no credentials needed (token from JWT)
 
@@ -508,14 +542,12 @@ const DatasourceConfiguration = ({
         apiConfig.trust_server_certificate =
           config.trustServerCertificate ?? false;
         apiConfig.connection_timeout = parseInt(
-          config.connectionTimeout || "30"
+          config.connectionTimeout ?? "30"
         );
-        apiConfig.ssl_mode = (config.useSSL ? "require" : "disable") as SSLMode;
       } else {
         // PostgreSQL and other adapters
         apiConfig.user = config.user;
         apiConfig.password = config.password;
-        apiConfig.ssl_mode = (config.useSSL ? "require" : "disable") as SSLMode;
       }
 
       engineApi.validateConnectionDetails(apiConfig);
@@ -879,7 +911,7 @@ const DatasourceConfiguration = ({
             <Input
               id="tenantId"
               placeholder="00000000-0000-0000-0000-000000000000"
-              value={config.tenantId || ""}
+              value={config.tenantId ?? ""}
               onChange={(e) => handleConfigChange("tenantId", e.target.value)}
             />
             <p className="text-sm text-text-secondary">
@@ -894,7 +926,7 @@ const DatasourceConfiguration = ({
               <Input
                 id="clientId"
                 placeholder="00000000-0000-0000-0000-000000000000"
-                value={config.clientId || ""}
+                value={config.clientId ?? ""}
                 onChange={(e) => handleConfigChange("clientId", e.target.value)}
               />
               <p className="text-sm text-text-secondary">
@@ -909,7 +941,7 @@ const DatasourceConfiguration = ({
                 id="clientSecret"
                 type="password"
                 placeholder="Client secret value"
-                value={config.clientSecret || ""}
+                value={config.clientSecret ?? ""}
                 onChange={(e) =>
                   handleConfigChange("clientSecret", e.target.value)
                 }
@@ -991,7 +1023,7 @@ const DatasourceConfiguration = ({
                 id="connectionTimeout"
                 type="number"
                 placeholder="30"
-                value={config.connectionTimeout || "30"}
+                value={config.connectionTimeout ?? "30"}
                 onChange={(e) =>
                   handleConfigChange("connectionTimeout", e.target.value)
                 }

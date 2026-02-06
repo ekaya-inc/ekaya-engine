@@ -27,7 +27,7 @@ const AIConfigPage = () => {
         </div>
       </div>
 
-      <AIConfigWidget projectId={pid!} />
+      <AIConfigWidget projectId={pid ?? ''} />
     </div>
   );
 };
