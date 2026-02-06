@@ -317,7 +317,7 @@ Before storing in audit log:
 3. Preserve structure but hide values in parameters
 4. Hash user-provided values if sensitive
 
-### 2.5 Add MCP Events Tab to Audit Page
+### 2.5 Add MCP Events Tab to Audit Page ✅
 
 New tab on the existing audit page showing `engine_mcp_audit_log` events.
 
