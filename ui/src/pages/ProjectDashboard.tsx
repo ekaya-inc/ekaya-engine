@@ -50,6 +50,7 @@ type TileColor = 'blue' | 'green' | 'purple' | 'orange' | 'gray' | 'indigo' | 'c
 
 interface Tile {
   title: string;
+  description?: string;
   icon: LucideIcon;
   path: string;
   disabled: boolean;
@@ -385,6 +386,7 @@ const ProjectDashboard = () => {
   const dataTiles: Tile[] = [
     {
       title: 'Datasource',
+      description: 'Connect to your database and configure credentials.',
       icon: Database,
       path: `/projects/${pid}/datasource`,
       disabled: false, // Always enabled - needed to configure datasource
@@ -392,6 +394,7 @@ const ProjectDashboard = () => {
     },
     {
       title: 'Schema',
+      description: 'Select the tables and columns to include in your ontology.',
       icon: ListTree,
       path: `/projects/${pid}/schema`,
       disabled: !isConnected, // Disabled if no datasource configured
@@ -399,6 +402,7 @@ const ProjectDashboard = () => {
     },
     {
       title: 'Pre-Approved Queries',
+      description: 'Create safe, parameterized queries your users can execute.',
       icon: Search,
       path: `/projects/${pid}/queries`,
       disabled: !isConnected, // Disabled if no datasource configured
@@ -409,6 +413,7 @@ const ProjectDashboard = () => {
   const intelligenceTiles: Tile[] = [
     {
       title: 'Ontology Extraction',
+      description: 'Run AI analysis to understand your schema and data semantics.',
       icon: Layers,
       path: `/projects/${pid}/ontology`,
       disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
@@ -416,6 +421,7 @@ const ProjectDashboard = () => {
     },
     {
       title: 'Ontology Questions',
+      description: 'Review and answer questions the AI has about your data.',
       icon: MessageCircleQuestion,
       path: `/projects/${pid}/ontology-questions`,
       disabled: !isConnected || !hasSelectedTables, // Disabled if no datasource or no tables
@@ -423,6 +429,7 @@ const ProjectDashboard = () => {
     },
     {
       title: 'Project Knowledge',
+      description: 'Domain facts and business rules that guide AI understanding.',
       icon: Lightbulb,
       path: `/projects/${pid}/project-knowledge`,
       disabled: !isConnected || !hasSelectedTables, // Disabled if no datasource or no tables (domain facts can be added manually)
@@ -430,6 +437,7 @@ const ProjectDashboard = () => {
     },
     {
       title: 'Enrichment',
+      description: 'Review and refine AI-generated metadata for tables and columns.',
       icon: Sparkles,
       path: `/projects/${pid}/enrichment`,
       disabled: !isConnected || !hasSelectedTables, // Disabled if no datasource or no tables
@@ -437,6 +445,7 @@ const ProjectDashboard = () => {
     },
     {
       title: 'Relationships',
+      description: 'View discovered foreign key and entity relationships.',
       icon: Network,
       path: `/projects/${pid}/relationships`,
       disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
@@ -444,6 +453,7 @@ const ProjectDashboard = () => {
     },
     {
       title: 'Glossary',
+      description: 'Business terms and their SQL definitions for consistent reporting.',
       icon: BookOpen,
       path: `/projects/${pid}/glossary`,
       disabled: !isConnected || !hasSelectedTables, // Disabled if no datasource or no tables (glossary is database-derived, not AI-derived)
@@ -455,6 +465,7 @@ const ProjectDashboard = () => {
     const tiles: Tile[] = [
       {
         title: 'MCP Server',
+        description: 'Expose your data context to AI tools via Model Context Protocol.',
         icon: Server,
         path: `/projects/${pid}/mcp-server`,
         disabled: !isConnected, // Requires datasource
@@ -466,6 +477,7 @@ const ProjectDashboard = () => {
     if (installedApps.some((app) => app.app_id === APP_ID_AI_DATA_LIAISON)) {
       tiles.push({
         title: 'AI Data Liaison',
+        description: 'Conversational AI interface for your data — chat, query, and explore.',
         icon: BrainCircuit,
         path: `/projects/${pid}/ai-data-liaison`,
         disabled: false,
@@ -520,23 +532,26 @@ const ProjectDashboard = () => {
         onClick={() => handleTileClick(tile)}
       >
         <CardHeader className="pb-4">
-          <div className="relative">
-            <div
-              className={`mb-4 flex h-16 w-16 items-center justify-center rounded-lg ${colorClasses}`}
-            >
-              <Icon className="h-8 w-8" />
-            </div>
-            {/* Badge for pending questions (show on Ontology and Ontology Questions tiles) */}
-            {(isOntologyTile || isQuestionsTile) && pendingQuestions > 0 && !tile.disabled && (
-              <div className="absolute -top-1 -right-1 flex items-center gap-1 bg-amber-500 text-white text-xs font-medium px-2 py-0.5 rounded-full">
-                <MessageCircleQuestion className="h-3 w-3" />
-                {pendingQuestions}
+          <div className="flex items-center gap-5">
+            <div className="relative shrink-0">
+              <div
+                className={`flex h-16 w-16 items-center justify-center rounded-lg ${colorClasses}`}
+              >
+                <Icon className="h-8 w-8" />
               </div>
+              {/* Badge for pending questions (show on Ontology and Ontology Questions tiles) */}
+              {(isOntologyTile || isQuestionsTile) && pendingQuestions > 0 && !tile.disabled && (
+                <div className="absolute -top-1 -right-1 flex items-center gap-1 bg-amber-500 text-white text-xs font-medium px-2 py-0.5 rounded-full">
+                  <MessageCircleQuestion className="h-3 w-3" />
+                  {pendingQuestions}
+                </div>
+              )}
+            </div>
+            {tile.description && (
+              <p className="text-xs text-text-tertiary leading-relaxed">{tile.description}</p>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            <CardTitle className="text-xl">{tile.title}</CardTitle>
-          </div>
+          <CardTitle className="text-xl mt-3">{tile.title}</CardTitle>
           {/* Mini progress indicator for ontology */}
           {isOntologyTile && isBuilding && !tile.disabled && (
             <div className="mt-2">
@@ -573,16 +588,21 @@ const ProjectDashboard = () => {
         onClick={() => handleTileClick(tile)}
       >
         <CardHeader className="pb-6">
-          <div
-            className={`mb-6 flex h-24 w-24 items-center justify-center rounded-xl ${colorClasses}`}
-          >
-            {isMCPServerTile ? (
-              <MCPLogo size={48} />
-            ) : (
-              <Icon className="h-12 w-12" />
+          <div className="flex items-center gap-5">
+            <div
+              className={`shrink-0 flex h-24 w-24 items-center justify-center rounded-xl ${colorClasses}`}
+            >
+              {isMCPServerTile ? (
+                <MCPLogo size={48} />
+              ) : (
+                <Icon className="h-12 w-12" />
+              )}
+            </div>
+            {tile.description && (
+              <p className="text-sm text-text-tertiary leading-relaxed">{tile.description}</p>
             )}
           </div>
-          <CardTitle className="text-2xl">{tile.title}</CardTitle>
+          <CardTitle className="text-2xl mt-4">{tile.title}</CardTitle>
           {tile.disabled && (
             <p className="text-sm text-text-tertiary mt-2">
               Requires a datasource to be configured.
