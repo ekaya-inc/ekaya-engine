@@ -1,0 +1,128 @@
+/**
+ * Audit page type definitions
+ */
+
+// Common paginated response wrapper
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+// Query Executions tab
+export interface QueryExecution {
+  id: string;
+  project_id: string;
+  query_id: string;
+  sql: string;
+  executed_at: string;
+  row_count: number;
+  execution_time_ms: number;
+  user_id?: string;
+  source: string;
+  is_modifying: boolean;
+  success: boolean;
+  error_message?: string;
+  query_name?: string;
+}
+
+export interface QueryExecutionFilters {
+  user_id?: string;
+  since?: string;
+  until?: string;
+  success?: string;
+  is_modifying?: string;
+  source?: string;
+  query_id?: string;
+  limit?: number;
+  offset?: number;
+}
+
+// Ontology Changes tab
+export interface OntologyChange {
+  id: string;
+  project_id: string;
+  entity_type: string;
+  entity_id: string;
+  action: string;
+  source: string;
+  user_id?: string;
+  changed_fields?: Record<string, { old: unknown; new: unknown }>;
+  created_at: string;
+}
+
+export interface OntologyChangeFilters {
+  user_id?: string;
+  since?: string;
+  until?: string;
+  entity_type?: string;
+  action?: string;
+  source?: string;
+  limit?: number;
+  offset?: number;
+}
+
+// Schema Changes tab
+export interface SchemaChange {
+  id: string;
+  project_id: string;
+  change_type: string;
+  change_source: string;
+  table_name?: string;
+  column_name?: string;
+  old_value?: Record<string, unknown>;
+  new_value?: Record<string, unknown>;
+  suggested_action?: string;
+  suggested_payload?: Record<string, unknown>;
+  status: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
+  created_at: string;
+}
+
+export interface SchemaChangeFilters {
+  since?: string;
+  until?: string;
+  change_type?: string;
+  status?: string;
+  table_name?: string;
+  limit?: number;
+  offset?: number;
+}
+
+// Query Approvals tab
+export interface QueryApproval {
+  id: string;
+  project_id: string;
+  datasource_id: string;
+  natural_language_prompt: string;
+  sql_query: string;
+  status: string;
+  suggested_by?: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
+  rejection_reason?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface QueryApprovalFilters {
+  since?: string;
+  until?: string;
+  status?: string;
+  suggested_by?: string;
+  reviewed_by?: string;
+  limit?: number;
+  offset?: number;
+}
+
+// Audit Summary
+export interface AuditSummary {
+  total_query_executions: number;
+  failed_query_count: number;
+  destructive_query_count: number;
+  ontology_changes_count: number;
+  pending_schema_changes: number;
+  pending_query_approvals: number;
+}

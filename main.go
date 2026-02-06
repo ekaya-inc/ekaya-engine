@@ -446,6 +446,12 @@ func main() {
 	installedAppHandler := handlers.NewInstalledAppHandler(installedAppService, logger)
 	installedAppHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
+	// Register audit page handler (protected) - audit visibility UI
+	auditPageRepo := repositories.NewAuditPageRepository()
+	auditPageService := services.NewAuditPageService(auditPageRepo, logger)
+	auditPageHandler := handlers.NewAuditPageHandler(auditPageService, logger)
+	auditPageHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
 	// Register glossary MCP tools (uses glossaryService for get_glossary tool)
 	glossaryToolDeps := &mcptools.GlossaryToolDeps{
 		BaseMCPToolDeps: mcptools.BaseMCPToolDeps{

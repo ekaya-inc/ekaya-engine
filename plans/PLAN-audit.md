@@ -56,7 +56,7 @@ Surfaces existing audit data through a tabbed UI accessible from the AI Data Lia
 
 Add a new card to `AIDataLiaisonPage.tsx` (between "Enabled Tools" and "Danger Zone") linking to the auditing screen. Only visible when the setup checklist is complete.
 
-### 1.2 Auditing Page: `/projects/{pid}/audit`
+### 1.2 Auditing Page: `/projects/{pid}/audit` ✅
 
 A new page with a tabbed interface. Each tab shows a filtered, sortable, paginated table. Manual refresh only (no polling).
 

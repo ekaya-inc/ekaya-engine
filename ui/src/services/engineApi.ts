@@ -12,6 +12,7 @@ import type {
   AITestResult,
   ApiResponse,
   ApproveQueryResponse,
+  AuditSummary,
   ConnectionDetails,
   CreateDatasourceResponse,
   CreateGlossaryTermRequest,
@@ -36,14 +37,19 @@ import type {
   ListPendingQueriesResponse,
   ListQueriesResponse,
   MCPConfigResponse,
+  OntologyChange,
+  PaginatedResponse,
   ParseProjectKnowledgeResponse,
   ProjectKnowledge,
   ProjectKnowledgeListResponse,
   Query,
+  QueryApproval,
+  QueryExecution,
   RejectQueryResponse,
   RelationshipDetail,
   RelationshipsResponse,
   SaveSelectionsResponse,
+  SchemaChange,
   SchemaRefreshResponse,
   TestConnectionRequest,
   TestConnectionResponse,
@@ -1024,6 +1030,76 @@ class EngineApiService {
     return this.makeRequest<{ message: string }>(
       `/${projectId}/datasources/${datasourceId}/ontology`,
       { method: 'DELETE' }
+    );
+  }
+
+  // --- Audit Page Methods ---
+
+  /**
+   * List query executions with filters
+   * GET /api/projects/{projectId}/audit/query-executions
+   */
+  async listAuditQueryExecutions(
+    projectId: string,
+    params?: Record<string, string>
+  ): Promise<ApiResponse<PaginatedResponse<QueryExecution>>> {
+    const query = params ? '?' + new URLSearchParams(params).toString() : '';
+    return this.makeRequest<PaginatedResponse<QueryExecution>>(
+      `/${projectId}/audit/query-executions${query}`
+    );
+  }
+
+  /**
+   * List ontology changes with filters
+   * GET /api/projects/{projectId}/audit/ontology-changes
+   */
+  async listAuditOntologyChanges(
+    projectId: string,
+    params?: Record<string, string>
+  ): Promise<ApiResponse<PaginatedResponse<OntologyChange>>> {
+    const query = params ? '?' + new URLSearchParams(params).toString() : '';
+    return this.makeRequest<PaginatedResponse<OntologyChange>>(
+      `/${projectId}/audit/ontology-changes${query}`
+    );
+  }
+
+  /**
+   * List schema changes with filters
+   * GET /api/projects/{projectId}/audit/schema-changes
+   */
+  async listAuditSchemaChanges(
+    projectId: string,
+    params?: Record<string, string>
+  ): Promise<ApiResponse<PaginatedResponse<SchemaChange>>> {
+    const query = params ? '?' + new URLSearchParams(params).toString() : '';
+    return this.makeRequest<PaginatedResponse<SchemaChange>>(
+      `/${projectId}/audit/schema-changes${query}`
+    );
+  }
+
+  /**
+   * List query approvals with filters
+   * GET /api/projects/{projectId}/audit/query-approvals
+   */
+  async listAuditQueryApprovals(
+    projectId: string,
+    params?: Record<string, string>
+  ): Promise<ApiResponse<PaginatedResponse<QueryApproval>>> {
+    const query = params ? '?' + new URLSearchParams(params).toString() : '';
+    return this.makeRequest<PaginatedResponse<QueryApproval>>(
+      `/${projectId}/audit/query-approvals${query}`
+    );
+  }
+
+  /**
+   * Get audit summary counts
+   * GET /api/projects/{projectId}/audit/summary
+   */
+  async getAuditSummary(
+    projectId: string
+  ): Promise<ApiResponse<AuditSummary>> {
+    return this.makeRequest<AuditSummary>(
+      `/${projectId}/audit/summary`
     );
   }
 
