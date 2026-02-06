@@ -51,9 +51,9 @@ func main() {
 	// Initialize zap logger
 	var logger *zap.Logger
 	if cfg.Env == "local" {
-		logger, err = zap.NewDevelopment()
+		logger, err = zap.NewDevelopment(zap.AddStacktrace(zap.DPanicLevel))
 	} else {
-		logger, err = zap.NewProduction()
+		logger, err = zap.NewProduction(zap.AddStacktrace(zap.DPanicLevel))
 	}
 	if err != nil {
 		log.Fatalf("Failed to initialize logger: %v", err)
@@ -686,6 +686,16 @@ func setupDatabase(ctx context.Context, cfg *config.EngineDatabaseConfig, logger
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+
+	// Check if connection has superuser privileges (bypasses RLS)
+	var isSuperuser bool
+	err = db.QueryRow(ctx, "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user").Scan(&isSuperuser)
+	if err == nil && isSuperuser {
+		logger.Warn("Engine database connection has superuser or bypassrls privileges. " +
+			"Row-Level Security (RLS) policies will be bypassed, which means tenant isolation " +
+			"relies solely on application-level filtering. For production deployments, use a " +
+			"non-superuser database role to ensure RLS enforcement.")
 	}
 
 	return db, nil
