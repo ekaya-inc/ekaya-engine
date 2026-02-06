@@ -170,17 +170,27 @@ Returns aggregate counts for a dashboard header:
 - [x] `ui/src/pages/AIDataLiaisonPage.tsx` -- Add Auditing tile/card
 - [x] `ui/src/App.tsx` -- Register `/projects/:pid/audit` route
 
-### 1.6 Implementation Order
+### 1.6 Implementation Order (split into subtasks)
 
-1. Backend API: audit handler, service, repository methods
-2. Frontend types & API client
-3. Audit page shell: route, page layout, tab navigation
-4. Query Executions tab (most valuable -- shows who ran what)
-5. Ontology Changes tab
-6. Schema Changes tab
-7. Query Approvals tab
-8. Summary header
-9. AI Data Liaison tile
+#### 1.6.1 [x] Backend API: Audit handler, service, and repository methods
+
+Create the backend audit infrastructure: `pkg/handlers/audit_handler.go` (thin HTTP handler with endpoints for query-executions, ontology-changes, schema-changes, query-approvals, and summary), `pkg/services/audit_service.go` (business logic aggregating across repositories), repository methods in `pkg/repositories/audit_repository.go` (add summary query methods) and `pkg/repositories/query_execution_repository.go` (paginated execution queries with filters). Register all routes in `pkg/server/routes.go` under `/api/projects/{pid}/audit/`. Each endpoint accepts pagination (limit, offset) and filter query params as described in plan section 1.3. All endpoints are scoped to project via `{pid}` path param and RLS. Follow the project's clean architecture: handlers → services → repositories. No raw SQL in services.
+
+#### 1.6.2 [ ] Frontend types, API client, and audit page shell
+
+Create `ui/src/types/audit.ts` with TypeScript types matching all backend audit API responses (query executions, ontology changes, schema changes, query approvals, summary). Add audit API methods to `ui/src/services/engineApi.ts` for all five endpoints. Create `ui/src/pages/AuditPage.tsx` as a new page with tabbed interface (Query Executions, Ontology Changes, Schema Changes, Query Approvals tabs — content can be placeholder initially). Register the route `/projects/:pid/audit` in `ui/src/App.tsx`. The page should include tab navigation using the project's existing UI patterns (React Router, TailwindCSS, Radix UI).
+
+#### 1.6.3 [ ] Query Executions and Ontology Changes tabs
+
+Implement the Query Executions tab in `AuditPage.tsx` showing data from `GET /api/projects/{pid}/audit/query-executions`. Columns: Time, User, Query Name, SQL (truncated), Duration, Rows, Success, Destructive. Include filters: user dropdown, time range presets (24h, 7d, 30d, custom), success/failure, destructive only, source, query ID. Highlight destructive queries with warning indicator and failed queries with error styling. Then implement the Ontology Changes tab sourcing from `GET /api/projects/{pid}/audit/ontology-changes`. Columns: Time, User, Entity Type, Action, Source, Changed Fields summary. Filters: user, time range, entity type, action, source. Include expandable row detail showing full changed_fields JSON diff.
+
+#### 1.6.4 [ ] Schema Changes, Query Approvals tabs, and Summary header
+
+Implement the Schema Changes tab sourcing from `GET /api/projects/{pid}/audit/schema-changes`. Columns: Time, Change Type, Table, Column, Status, Reviewed By. Filters: time range, change type, status, table name. Implement the Query Approvals tab sourcing from `GET /api/projects/{pid}/audit/query-approvals`. Columns: Time, Suggested By, Query Name, SQL (truncated), Status, Reviewed By, Reviewed At, Rejection Reason. Filters: time range, status, suggested by, reviewed by. Add the Summary header at the top of the audit page using `GET /api/projects/{pid}/audit/summary` showing: total query executions (30d), failed query count, destructive query count, ontology changes count, pending schema changes, pending query approvals.
+
+#### 1.6.5 [ ] AI Data Liaison auditing tile
+
+Add a new card to `ui/src/pages/AIDataLiaisonPage.tsx` (between "Enabled Tools" and "Danger Zone") that links to `/projects/{pid}/audit`. The tile should only be visible when the setup checklist is complete. Use existing card patterns from the AI Data Liaison page (Lucide React icons, TailwindCSS styling consistent with other tiles).
 
 ---
 
