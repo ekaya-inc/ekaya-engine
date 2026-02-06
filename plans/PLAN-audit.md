@@ -1,14 +1,33 @@
-# PLAN: Unified Auditing & Governance
+# PLAN: Unified Auditing, Governance & Query Learning
 
 ## Purpose
 
-Provide administrators with complete visibility into all project activity: query executions, ontology changes, schema changes, query approvals, and MCP tool usage. This serves governance, compliance, and security needs by creating a comprehensive audit trail accessible from the AI Data Liaison page.
+Provide administrators with complete visibility into all project activity (query executions, ontology changes, schema changes, query approvals, MCP tool usage) while enabling the MCP client to learn from past queries — the user's own successful query history scoped to their account.
+
+**Core Insight:** The best query for a new question is often an adaptation of a query that worked before. Auditing gives visibility; query history creates a feedback loop where the system gets smarter over time.
 
 **Key Stakeholders:**
 - Data engineers: Visibility into what business users and AI are doing with their data
 - Security teams: Who accessed what data and when
 - Compliance officers: Audit trails for SOC2, HIPAA, etc.
 - Project admins: Understanding usage patterns and preventing abuse
+- MCP users: Better query suggestions from accumulated history
+
+---
+
+## Decisions
+
+These decisions were made upfront to keep the plan deterministic for automated implementation.
+
+| Decision | Answer |
+|----------|--------|
+| Export in Phase 1? | No. Defer all export to Phase 5. |
+| Retention policy? | Auto-prune at 90 days, settable by Admin. Applies to all audit/history tables. |
+| Real-time updates? | Manual refresh only. No polling. |
+| Record failed queries in history? | No. Only record successful queries. |
+| Store edited SQL? | No. Store final (executed) SQL only. Drop `generated_sql`/`final_sql` split — single `sql` column. |
+| Cross-user query visibility? | User's own history only. No cross-user similarity search. |
+| Similarity search approach? | Remove all embedding/vector features from this plan. No pgvector, no `question_embedding` column. Similarity search and pattern detection are post-launch features to be planned separately. |
 
 ---
 
@@ -39,7 +58,7 @@ Add a new card to `AIDataLiaisonPage.tsx` (between "Enabled Tools" and "Danger Z
 
 ### 1.2 Auditing Page: `/projects/{pid}/audit`
 
-A new page with a tabbed interface. Each tab shows a filtered, sortable, paginated table.
+A new page with a tabbed interface. Each tab shows a filtered, sortable, paginated table. Manual refresh only (no polling).
 
 #### Tab: Query Executions
 
@@ -302,9 +321,172 @@ Query params: `user_id`, `since`, `until`, `event_type`, `tool_name`, `security_
 
 ---
 
-## Phase 3: Alerts & Security
+## Phase 3: Query History & Learning
 
-### 3.1 New Table: `engine_mcp_audit_alerts`
+Enables the MCP client to learn from past successful queries. Each user's history is private to their account. Only successful queries are recorded.
+
+### 3.1 Use Cases
+
+**Query Reuse:**
+User asks: "Show me top customers by revenue"
+System finds: Previous query "top 10 customers by order value" in user's history
+LLM adapts: Reuses the query structure, adjusts column names if needed
+
+**Pattern Discovery:**
+User frequently queries: "X by month for last year"
+System learns: This user prefers monthly aggregations with 12-month lookback
+
+### 3.2 New Table: `engine_mcp_query_history`
+
+```sql
+CREATE TABLE engine_mcp_query_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES engine_projects(id),
+    user_id VARCHAR(255) NOT NULL,  -- From auth claims
+
+    -- The query itself
+    natural_language TEXT NOT NULL,
+    sql TEXT NOT NULL,  -- The SQL that was actually executed
+
+    -- Execution details
+    executed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    execution_duration_ms INTEGER,
+    row_count INTEGER,
+
+    -- Learning signals
+    user_feedback VARCHAR(20),  -- 'helpful', 'not_helpful', NULL
+    feedback_comment TEXT,
+
+    -- Query classification
+    query_type VARCHAR(50),  -- 'aggregation', 'lookup', 'report', 'exploration'
+    tables_used TEXT[],  -- ['users', 'orders']
+    aggregations_used TEXT[],  -- ['SUM', 'COUNT', 'AVG']
+    time_filters JSONB,  -- {"type": "relative", "period": "last_quarter"}
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT fk_project FOREIGN KEY (project_id) REFERENCES engine_projects(id)
+);
+
+-- Indexes
+CREATE INDEX idx_query_history_user ON engine_mcp_query_history(project_id, user_id, created_at DESC);
+CREATE INDEX idx_query_history_tables ON engine_mcp_query_history USING GIN(tables_used);
+```
+
+**Note:** Only successful queries are inserted. Failed queries are not recorded. The `was_successful` column is omitted since all rows are successful by definition.
+
+### 3.3 Query Recording Flow
+
+When a query is executed successfully via MCP tools, automatically record it:
+
+```
+1. User sends natural language question
+2. LLM generates SQL using ontology tools
+3. LLM calls query() or execute_approved_query()
+4. If execution succeeds, system records:
+   - Natural language (from explicit parameter)
+   - Final executed SQL
+   - Execution result metadata (duration, row count)
+   - Tables used (parsed from SQL)
+5. Query ID returned in response for later feedback
+```
+
+#### Recording Integration Point
+
+Modify the `query` tool to optionally accept natural language context:
+
+```go
+// query tool input
+{
+  "sql": "SELECT ...",
+  "limit": 100,
+  "natural_language_context": "top customers by revenue"  // Optional
+}
+```
+
+If provided and the query succeeds, automatically creates a history entry.
+
+### 3.4 MCP Tools
+
+#### Tool: get_query_history
+
+```
+Purpose: Retrieve the user's recent successful query history (user's own queries only)
+
+Input:
+{
+  "limit": 20,                    // Optional: default 20, max 100
+  "tables": ["orders"],           // Optional: filter by tables used
+  "since": "2024-01-01"           // Optional: filter by date
+}
+
+Output:
+{
+  "queries": [
+    {
+      "id": "uuid",
+      "natural_language": "Show me top 10 customers by total orders",
+      "sql": "SELECT u.name, COUNT(o.id) as order_count FROM users u JOIN orders o ON o.customer_id = u.id GROUP BY u.id, u.name ORDER BY order_count DESC LIMIT 10",
+      "executed_at": "2024-12-15T10:30:00Z",
+      "row_count": 10,
+      "execution_duration_ms": 145,
+      "tables_used": ["users", "orders"],
+      "query_type": "aggregation",
+      "user_feedback": "helpful"
+    }
+  ],
+  "total_count": 156,
+  "has_more": true
+}
+
+MCP Annotations:
+- read_only_hint: true
+- idempotent_hint: true
+```
+
+#### Tool: record_query_feedback
+
+```
+Purpose: Record whether a generated query was helpful
+
+Input:
+{
+  "query_id": "uuid",             // Required: from query history
+  "feedback": "helpful",          // Required: "helpful", "not_helpful"
+  "comment": "Had to add date filter"  // Optional
+}
+
+Output:
+{
+  "recorded": true,
+  "message": "Feedback recorded. Thank you for helping improve query suggestions."
+}
+
+MCP Annotations:
+- read_only_hint: false
+- destructive_hint: false
+- idempotent_hint: true
+```
+
+### 3.5 Privacy & Security
+
+- Query history is scoped by `project_id` AND `user_id` — users only see their own history
+- Admins see all users' query executions via the audit UI (Phase 1), not via MCP tools
+- Auto-prune records older than 90 days (admin-configurable)
+- SQL queries may contain literals (dates, IDs, etc.) — stored as-is for now
+
+### 3.6 Retention
+
+All audit and history tables share the same retention policy:
+- Default: 90 days
+- Admin-configurable per project
+- Implemented as a scheduled cleanup job
+
+---
+
+## Phase 4: Alerts & Security
+
+### 4.1 New Table: `engine_mcp_audit_alerts`
 
 ```sql
 CREATE TABLE engine_mcp_audit_alerts (
@@ -329,7 +511,7 @@ CREATE TABLE engine_mcp_audit_alerts (
 );
 ```
 
-### 3.2 Alert Types
+### 4.2 Alert Types
 
 | Alert Type | Trigger | Severity |
 |------------|---------|----------|
@@ -341,7 +523,7 @@ CREATE TABLE engine_mcp_audit_alerts (
 | `new_user_high_volume` | New user runs many queries quickly | Warning |
 | `repeated_errors` | Same error > 5 times in 10 min | Warning |
 
-### 3.3 Alert API Endpoints
+### 4.3 Alert API Endpoints
 
 #### `GET /api/projects/{pid}/audit/alerts`
 Query params: `status` (open, resolved, all), `severity`
@@ -349,24 +531,7 @@ Query params: `status` (open, resolved, all), `severity`
 #### `POST /api/projects/{pid}/audit/alerts/{alert_id}/resolve`
 Body: `{ "resolution": "dismissed|resolved", "notes": "..." }`
 
-### 3.4 Alert Configuration UI
+### 4.4 Alert Configuration UI
 
 Project settings page for configuring alert thresholds, which alerts are enabled, and email notification recipients.
 
----
-
-## Phase 4: Advanced Features
-
-- **Export:** CSV/JSON export for compliance reporting (`GET /api/projects/{pid}/audit/export`)
-- **Retention:** Hot storage (90 days queryable), cold storage (2 years archived), configurable per project
-- **GDPR:** User deletion anonymizes audit logs, right-to-access export endpoint
-- **Analytics:** Usage dashboards, anomaly detection
-- **Performance:** Batch inserts, partitioned tables, materialized views for dashboard summaries
-
----
-
-## Open Questions
-
-1. **Export in Phase 1?** Should any tab support CSV/JSON export immediately, or defer to Phase 4?
-2. **Retention policy?** Should old audit records be pruned, or kept indefinitely until Phase 4?
-3. **Real-time updates?** Should the audit page poll for new entries, or is manual refresh sufficient?
