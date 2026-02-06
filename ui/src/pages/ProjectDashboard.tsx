@@ -424,7 +424,7 @@ const ProjectDashboard = () => {
       description: 'Review and answer questions the AI has about your data.',
       icon: MessageCircleQuestion,
       path: `/projects/${pid}/ontology-questions`,
-      disabled: !isConnected || !hasSelectedTables, // Disabled if no datasource or no tables
+      disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
       color: 'amber',
     },
     {
@@ -432,7 +432,7 @@ const ProjectDashboard = () => {
       description: 'Domain facts and business rules that guide AI understanding.',
       icon: Lightbulb,
       path: `/projects/${pid}/project-knowledge`,
-      disabled: !isConnected || !hasSelectedTables, // Disabled if no datasource or no tables (domain facts can be added manually)
+      disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
       color: 'indigo',
     },
     {
@@ -440,7 +440,7 @@ const ProjectDashboard = () => {
       description: 'Review and refine AI-generated metadata for tables and columns.',
       icon: Sparkles,
       path: `/projects/${pid}/enrichment`,
-      disabled: !isConnected || !hasSelectedTables, // Disabled if no datasource or no tables
+      disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
       color: 'orange',
     },
     {
@@ -456,7 +456,7 @@ const ProjectDashboard = () => {
       description: 'Business terms and their SQL definitions for consistent reporting.',
       icon: BookOpen,
       path: `/projects/${pid}/glossary`,
-      disabled: !isConnected || !hasSelectedTables, // Disabled if no datasource or no tables (glossary is database-derived, not AI-derived)
+      disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
       color: 'cyan',
     },
   ];
@@ -465,7 +465,7 @@ const ProjectDashboard = () => {
     const tiles: Tile[] = [
       {
         title: 'MCP Server',
-        description: 'Expose your data context to AI tools via Model Context Protocol.',
+        description: 'Configure the tools AI can use to access your data via Model Context Protocol (MCP), the industry standard for integration.',
         icon: Server,
         path: `/projects/${pid}/mcp-server`,
         disabled: !isConnected, // Requires datasource
@@ -629,7 +629,7 @@ const ProjectDashboard = () => {
           </Button>
         </div>
         <p className="text-text-secondary mb-4">
-          Install applications that safely connect to your data through secure interfaces.
+          Install applications that safely connect to your data through secure interfaces accessed only by authenticated and authorized users.
         </p>
         <div className="grid gap-6 md:grid-cols-2">
           {applicationTiles.map(renderApplicationTile)}
@@ -640,7 +640,7 @@ const ProjectDashboard = () => {
       <section>
         <h1 className="text-2xl font-semibold mb-2">Data</h1>
         <p className="text-text-secondary mb-4">
-          Enable data access safely and securely. Choose the datasource and the tables and columns to bring into your ontology. Create and Manage Pre-Approved Queries to enable your users to run reports, insert data from forms, or execute stored procedures.
+          Enable data access safely and securely. The Data functionality is always available and does not require a Large Language Model (LLM).
         </p>
         <div className="grid gap-6 md:grid-cols-3">
           {dataTiles.map(renderTile)}
