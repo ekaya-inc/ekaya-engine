@@ -141,18 +141,3 @@ export interface CreateRelationshipRequest {
   target_column: string;
 }
 
-// --- Relationship Discovery Types ---
-
-/**
- * Results from relationship discovery
- * Response from POST /sdap/v1/{project_id}/schema/relationships/discover
- */
-export interface DiscoveryResults {
-  relationships_created: number;
-  tables_analyzed: number;
-  columns_analyzed: number;
-  tables_without_relationships: number;
-  empty_tables: number;
-  empty_table_names?: string[];
-  orphan_table_names?: string[];
-}

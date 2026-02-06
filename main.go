@@ -164,7 +164,6 @@ func main() {
 	schemaService := services.NewSchemaService(schemaRepo, ontologyRepo, columnMetadataRepo, datasourceService, adapterFactory, logger)
 	schemaChangeDetectionService := services.NewSchemaChangeDetectionService(pendingChangeRepo, logger)
 	dataChangeDetectionService := services.NewDataChangeDetectionService(schemaRepo, columnMetadataRepo, ontologyRepo, pendingChangeRepo, datasourceService, projectService, adapterFactory, logger)
-	discoveryService := services.NewRelationshipDiscoveryService(schemaRepo, datasourceService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, securityAuditor, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
 	installedAppService := services.NewInstalledAppService(installedAppRepo, logger)
@@ -403,8 +402,8 @@ func main() {
 	datasourcesHandler := handlers.NewDatasourcesHandler(datasourceService, logger)
 	datasourcesHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
-	// Register schema handler (protected, includes discovery)
-	schemaHandler := handlers.NewSchemaHandlerWithDiscovery(schemaService, discoveryService, logger)
+	// Register schema handler (protected)
+	schemaHandler := handlers.NewSchemaHandler(schemaService, logger)
 	schemaHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register queries handler (protected)

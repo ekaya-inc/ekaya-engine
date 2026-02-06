@@ -19,7 +19,7 @@ import type {
   DatasourceType,
   DeleteDatasourceResponse,
   DeleteQueryResponse,
-  DiscoveryResults,
+
   ExecuteQueryRequest,
   ExecuteQueryResponse,
   GetDatasourceResponse,
@@ -302,24 +302,6 @@ class EngineApiService {
   ): Promise<ApiResponse<SchemaRefreshResponse>> {
     return this.makeRequest<SchemaRefreshResponse>(
       `/${projectId}/datasources/${datasourceId}/schema/refresh`,
-      {
-        method: 'POST',
-      }
-    );
-  }
-
-  // --- Relationship Discovery Methods ---
-
-  /**
-   * Discover relationships for a datasource (synchronous)
-   * POST /api/projects/{projectId}/datasources/{datasourceId}/schema/relationships/discover
-   */
-  async discoverRelationships(
-    projectId: string,
-    datasourceId: string
-  ): Promise<ApiResponse<DiscoveryResults>> {
-    return this.makeRequest<DiscoveryResults>(
-      `/${projectId}/datasources/${datasourceId}/schema/relationships/discover`,
       {
         method: 'POST',
       }

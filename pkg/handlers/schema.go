@@ -116,24 +116,12 @@ type RelationshipDetailResponse struct {
 	UpdatedAt        string  `json:"updated_at"`
 }
 
-// DiscoverRelationshipsResponse contains results from relationship discovery.
-type DiscoverRelationshipsResponse struct {
-	RelationshipsCreated       int      `json:"relationships_created"`
-	TablesAnalyzed             int      `json:"tables_analyzed"`
-	ColumnsAnalyzed            int      `json:"columns_analyzed"`
-	TablesWithoutRelationships int      `json:"tables_without_relationships"`
-	EmptyTables                int      `json:"empty_tables"`
-	EmptyTableNames            []string `json:"empty_table_names,omitempty"`
-	OrphanTableNames           []string `json:"orphan_table_names,omitempty"`
-}
-
 // --- Handler ---
 
 // SchemaHandler handles schema-related HTTP requests.
 type SchemaHandler struct {
-	schemaService    services.SchemaService
-	discoveryService services.RelationshipDiscoveryService
-	logger           *zap.Logger
+	schemaService services.SchemaService
+	logger        *zap.Logger
 }
 
 // NewSchemaHandler creates a new schema handler.
@@ -141,15 +129,6 @@ func NewSchemaHandler(schemaService services.SchemaService, logger *zap.Logger) 
 	return &SchemaHandler{
 		schemaService: schemaService,
 		logger:        logger,
-	}
-}
-
-// NewSchemaHandlerWithDiscovery creates a schema handler with discovery support.
-func NewSchemaHandlerWithDiscovery(schemaService services.SchemaService, discoveryService services.RelationshipDiscoveryService, logger *zap.Logger) *SchemaHandler {
-	return &SchemaHandler{
-		schemaService:    schemaService,
-		discoveryService: discoveryService,
-		logger:           logger,
 	}
 }
 
@@ -188,10 +167,6 @@ func (h *SchemaHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.
 	// Project-level relationship operations (aggregates across all datasources)
 	mux.HandleFunc("GET /api/projects/{pid}/relationships",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetProjectRelationships)))
-
-	// Relationship discovery operations
-	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/schema/relationships/discover",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.DiscoverRelationships)))
 }
 
 // GetSchema handles GET /api/projects/{pid}/datasources/{dsid}/schema
@@ -557,50 +532,6 @@ func (h *SchemaHandler) RemoveRelationship(w http.ResponseWriter, r *http.Reques
 	}
 
 	response := ApiResponse{Success: true}
-	if err := WriteJSON(w, http.StatusOK, response); err != nil {
-		h.logger.Error("Failed to write response", zap.Error(err))
-	}
-}
-
-// DiscoverRelationships handles POST /api/projects/{pid}/datasources/{dsid}/schema/relationships/discover
-// Runs automated relationship discovery to infer relationships from data.
-func (h *SchemaHandler) DiscoverRelationships(w http.ResponseWriter, r *http.Request) {
-	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
-	if !ok {
-		return
-	}
-
-	// Check if discovery service is available
-	if h.discoveryService == nil {
-		if err := ErrorResponse(w, http.StatusServiceUnavailable, "discovery_not_available", "Relationship discovery service is not configured"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	results, err := h.discoveryService.DiscoverRelationships(r.Context(), projectID, datasourceID)
-	if err != nil {
-		h.logger.Error("Failed to discover relationships",
-			zap.String("project_id", projectID.String()),
-			zap.String("datasource_id", datasourceID.String()),
-			zap.Error(err))
-		if err := ErrorResponse(w, http.StatusInternalServerError, "discover_relationships_failed", "Failed to discover relationships"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	data := DiscoverRelationshipsResponse{
-		RelationshipsCreated:       results.RelationshipsCreated,
-		TablesAnalyzed:             results.TablesAnalyzed,
-		ColumnsAnalyzed:            results.ColumnsAnalyzed,
-		TablesWithoutRelationships: results.TablesWithoutRelationships,
-		EmptyTables:                results.EmptyTables,
-		EmptyTableNames:            results.EmptyTableNames,
-		OrphanTableNames:           results.OrphanTableNames,
-	}
-
-	response := ApiResponse{Success: true, Data: data}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
