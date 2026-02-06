@@ -52,7 +52,7 @@ Several audit data sources already exist. No new tables needed for Phase 1.
 
 Surfaces existing audit data through a tabbed UI accessible from the AI Data Liaison page. No new tables or middleware required.
 
-### 1.1 AI Data Liaison Page: Add Auditing Tile
+### 1.1 AI Data Liaison Page: Add Auditing Tile ✅
 
 Add a new card to `AIDataLiaisonPage.tsx` (between "Enabled Tools" and "Danger Zone") linking to the auditing screen. Only visible when the setup checklist is complete.
 
