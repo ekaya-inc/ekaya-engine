@@ -200,7 +200,27 @@ function QueryExecutionsTab({ projectId }: { projectId: string }) {
   const [sourceFilter, setSourceFilter] = useState('');
   const [successFilter, setSuccessFilter] = useState('');
   const [destructiveFilter, setDestructiveFilter] = useState(false);
+  const [userInput, setUserInput] = useState('');
+  const [userFilter, setUserFilter] = useState('');
+  const [queryIdInput, setQueryIdInput] = useState('');
+  const [queryIdFilter, setQueryIdFilter] = useState('');
   const [offset, setOffset] = useState(0);
+  const userDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const queryIdDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debounce user input
+  useEffect(() => {
+    if (userDebounceRef.current) clearTimeout(userDebounceRef.current);
+    userDebounceRef.current = setTimeout(() => { setUserFilter(userInput); }, 300);
+    return () => { if (userDebounceRef.current) clearTimeout(userDebounceRef.current); };
+  }, [userInput]);
+
+  // Debounce query ID input
+  useEffect(() => {
+    if (queryIdDebounceRef.current) clearTimeout(queryIdDebounceRef.current);
+    queryIdDebounceRef.current = setTimeout(() => { setQueryIdFilter(queryIdInput); }, 300);
+    return () => { if (queryIdDebounceRef.current) clearTimeout(queryIdDebounceRef.current); };
+  }, [queryIdInput]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -211,6 +231,8 @@ function QueryExecutionsTab({ projectId }: { projectId: string }) {
       if (sourceFilter) params.source = sourceFilter;
       if (successFilter) params.success = successFilter;
       if (destructiveFilter) params.is_modifying = 'true';
+      if (userFilter) params.user_id = userFilter;
+      if (queryIdFilter) params.query_id = queryIdFilter;
 
       const response = await engineApi.listAuditQueryExecutions(projectId, params);
       if (response.success && response.data) {
@@ -221,12 +243,12 @@ function QueryExecutionsTab({ projectId }: { projectId: string }) {
     } finally {
       setLoading(false);
     }
-  }, [projectId, timeRange, sourceFilter, successFilter, destructiveFilter, offset]);
+  }, [projectId, timeRange, sourceFilter, successFilter, destructiveFilter, userFilter, queryIdFilter, offset]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
   // Reset offset when filters change
-  useEffect(() => { setOffset(0); }, [timeRange, sourceFilter, successFilter, destructiveFilter]);
+  useEffect(() => { setOffset(0); }, [timeRange, sourceFilter, successFilter, destructiveFilter, userFilter, queryIdFilter]);
 
   return (
     <div>
@@ -261,6 +283,20 @@ function QueryExecutionsTab({ projectId }: { projectId: string }) {
           />
           Destructive only
         </label>
+        <input
+          type="text"
+          placeholder="Filter by user..."
+          value={userInput}
+          onChange={e => setUserInput(e.target.value)}
+          className="text-xs px-2 py-1 rounded border border-border-light bg-surface-primary text-text-primary w-36"
+        />
+        <input
+          type="text"
+          placeholder="Query ID..."
+          value={queryIdInput}
+          onChange={e => setQueryIdInput(e.target.value)}
+          className="text-xs px-2 py-1 rounded border border-border-light bg-surface-primary text-text-primary w-36"
+        />
       </div>
 
       {loading ? (
@@ -360,8 +396,18 @@ function OntologyChangesTab({ projectId }: { projectId: string }) {
   const [entityTypeFilter, setEntityTypeFilter] = useState('');
   const [actionFilter, setActionFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
+  const [userInput, setUserInput] = useState('');
+  const [userFilter, setUserFilter] = useState('');
   const [offset, setOffset] = useState(0);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const userDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debounce user input
+  useEffect(() => {
+    if (userDebounceRef.current) clearTimeout(userDebounceRef.current);
+    userDebounceRef.current = setTimeout(() => { setUserFilter(userInput); }, 300);
+    return () => { if (userDebounceRef.current) clearTimeout(userDebounceRef.current); };
+  }, [userInput]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -372,6 +418,7 @@ function OntologyChangesTab({ projectId }: { projectId: string }) {
       if (entityTypeFilter) params.entity_type = entityTypeFilter;
       if (actionFilter) params.action = actionFilter;
       if (sourceFilter) params.source = sourceFilter;
+      if (userFilter) params.user_id = userFilter;
 
       const response = await engineApi.listAuditOntologyChanges(projectId, params);
       if (response.success && response.data) {
@@ -382,10 +429,10 @@ function OntologyChangesTab({ projectId }: { projectId: string }) {
     } finally {
       setLoading(false);
     }
-  }, [projectId, timeRange, entityTypeFilter, actionFilter, sourceFilter, offset]);
+  }, [projectId, timeRange, entityTypeFilter, actionFilter, sourceFilter, userFilter, offset]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-  useEffect(() => { setOffset(0); }, [timeRange, entityTypeFilter, actionFilter, sourceFilter]);
+  useEffect(() => { setOffset(0); }, [timeRange, entityTypeFilter, actionFilter, sourceFilter, userFilter]);
 
   return (
     <div>
@@ -422,6 +469,13 @@ function OntologyChangesTab({ projectId }: { projectId: string }) {
           <option value="mcp">MCP</option>
           <option value="manual">Manual</option>
         </select>
+        <input
+          type="text"
+          placeholder="Filter by user..."
+          value={userInput}
+          onChange={e => setUserInput(e.target.value)}
+          className="text-xs px-2 py-1 rounded border border-border-light bg-surface-primary text-text-primary w-36"
+        />
       </div>
 
       {loading ? (

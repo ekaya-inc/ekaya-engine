@@ -180,7 +180,7 @@ Create the backend audit infrastructure: `pkg/handlers/audit_handler.go` (thin H
 
 Create `ui/src/types/audit.ts` with TypeScript types matching all backend audit API responses (query executions, ontology changes, schema changes, query approvals, summary). Add audit API methods to `ui/src/services/engineApi.ts` for all five endpoints. Create `ui/src/pages/AuditPage.tsx` as a new page with tabbed interface (Query Executions, Ontology Changes, Schema Changes, Query Approvals tabs — content can be placeholder initially). Register the route `/projects/:pid/audit` in `ui/src/App.tsx`. The page should include tab navigation using the project's existing UI patterns (React Router, TailwindCSS, Radix UI).
 
-#### 1.6.3 [ ] Query Executions and Ontology Changes tabs
+#### 1.6.3 [x] Query Executions and Ontology Changes tabs
 
 Implement the Query Executions tab in `AuditPage.tsx` showing data from `GET /api/projects/{pid}/audit/query-executions`. Columns: Time, User, Query Name, SQL (truncated), Duration, Rows, Success, Destructive. Include filters: user dropdown, time range presets (24h, 7d, 30d, custom), success/failure, destructive only, source, query ID. Highlight destructive queries with warning indicator and failed queries with error styling. Then implement the Ontology Changes tab sourcing from `GET /api/projects/{pid}/audit/ontology-changes`. Columns: Time, User, Entity Type, Action, Source, Changed Fields summary. Filters: user, time range, entity type, action, source. Include expandable row detail showing full changed_fields JSON diff.
 
