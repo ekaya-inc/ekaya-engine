@@ -258,7 +258,7 @@ The `column_feature_extraction` service analyzes columns using data sampling and
 - `metadata.Purpose` - Business purpose description
 - `metadata.GetTimestampFeatures()`, `GetBooleanFeatures()`, etc. - Type-specific features
 
-If `ColumnMetadata` is not available at a given pipeline stage, document why heuristics are necessary and centralize them.
+`ColumnMetadata` is populated by the `column_feature_extraction` DAG step and should be available to every DAG step that runs after it. Do not assume metadata is unavailable — verify by checking the code path. If a service fetches `ColumnMetadata` and a record exists for a column, use it instead of name heuristics. The `meta == nil` case should only occur for columns that were added to the schema after the last extraction run (e.g., in data change detection for newly discovered columns).
 
 ### 6. MCP Tool Errors Must Return JSON Success Responses
 
