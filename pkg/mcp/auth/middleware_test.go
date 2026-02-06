@@ -770,6 +770,181 @@ func TestIsJWT(t *testing.T) {
 	}
 }
 
+// mockAuditLogger records auth failure events for test verification.
+type mockAuditLogger struct {
+	events []authFailureEvent
+}
+
+type authFailureEvent struct {
+	ProjectID uuid.UUID
+	UserID    string
+	Reason    string
+	ClientIP  string
+}
+
+func (m *mockAuditLogger) RecordAuthFailure(projectID uuid.UUID, userID, reason, clientIP string) {
+	m.events = append(m.events, authFailureEvent{
+		ProjectID: projectID,
+		UserID:    userID,
+		Reason:    reason,
+		ClientIP:  clientIP,
+	})
+}
+
+func TestMiddleware_RequireAuth_AgentAPIKey_InvalidKey_AuditsFailure(t *testing.T) {
+	projectID := uuid.New()
+
+	agentKeyService := newMockAgentKeyService()
+	agentKeyService.validKeys[projectID] = "correct-key"
+	tenantProvider := &mockTenantScopeProvider{}
+	auditLog := &mockAuditLogger{}
+
+	middleware := NewMiddleware(nil, agentKeyService, tenantProvider, zap.NewNop(),
+		WithAuditLogger(auditLog),
+	)
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called")
+	})
+
+	wrappedHandler := middleware.RequireAuth("pid")(handler)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp/"+projectID.String(), nil)
+	req.SetPathValue("pid", projectID.String())
+	req.Header.Set("Authorization", "api-key:wrong-key")
+	rec := httptest.NewRecorder()
+
+	wrappedHandler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected status 401, got %d", rec.Code)
+	}
+
+	if len(auditLog.events) != 1 {
+		t.Fatalf("expected 1 audit event, got %d", len(auditLog.events))
+	}
+
+	event := auditLog.events[0]
+	if event.ProjectID != projectID {
+		t.Errorf("expected project ID %s, got %s", projectID, event.ProjectID)
+	}
+	if event.UserID != "agent" {
+		t.Errorf("expected user ID 'agent', got %q", event.UserID)
+	}
+	if event.Reason != "Invalid API key" {
+		t.Errorf("expected reason 'Invalid API key', got %q", event.Reason)
+	}
+}
+
+func TestMiddleware_RequireAuth_JWT_InvalidToken_AuditsFailure(t *testing.T) {
+	authService := &mockAuthService{validateErr: auth.ErrMissingAuthorization}
+	auditLog := &mockAuditLogger{}
+
+	middleware := NewMiddleware(authService, nil, nil, zap.NewNop(),
+		WithAuditLogger(auditLog),
+	)
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called")
+	})
+
+	wrappedHandler := middleware.RequireAuth("pid")(handler)
+
+	projectID := uuid.New()
+	req := httptest.NewRequest(http.MethodPost, "/mcp/"+projectID.String(), nil)
+	req.SetPathValue("pid", projectID.String())
+	rec := httptest.NewRecorder()
+
+	wrappedHandler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected status 401, got %d", rec.Code)
+	}
+
+	if len(auditLog.events) != 1 {
+		t.Fatalf("expected 1 audit event, got %d", len(auditLog.events))
+	}
+
+	event := auditLog.events[0]
+	if event.ProjectID != projectID {
+		t.Errorf("expected project ID %s, got %s", projectID, event.ProjectID)
+	}
+	if event.Reason != "Invalid or expired token" {
+		t.Errorf("expected reason 'Invalid or expired token', got %q", event.Reason)
+	}
+}
+
+func TestMiddleware_RequireAuth_ProjectMismatch_AuditsFailure(t *testing.T) {
+	claims := &auth.Claims{ProjectID: "project-123"}
+	claims.Subject = "user-456"
+	authService := &mockAuthService{
+		claims:           claims,
+		token:            "test-token",
+		validateMatchErr: auth.ErrProjectIDMismatch,
+	}
+	auditLog := &mockAuditLogger{}
+
+	middleware := NewMiddleware(authService, nil, nil, zap.NewNop(),
+		WithAuditLogger(auditLog),
+	)
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called")
+	})
+
+	wrappedHandler := middleware.RequireAuth("pid")(handler)
+
+	pid := uuid.New()
+	req := httptest.NewRequest(http.MethodPost, "/mcp/"+pid.String(), nil)
+	req.SetPathValue("pid", pid.String())
+	rec := httptest.NewRecorder()
+
+	wrappedHandler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected status 403, got %d", rec.Code)
+	}
+
+	if len(auditLog.events) != 1 {
+		t.Fatalf("expected 1 audit event, got %d", len(auditLog.events))
+	}
+
+	event := auditLog.events[0]
+	if event.ProjectID != pid {
+		t.Errorf("expected project ID %s, got %s", pid, event.ProjectID)
+	}
+	if event.UserID != "user-456" {
+		t.Errorf("expected user ID 'user-456', got %q", event.UserID)
+	}
+	if event.Reason != "Project ID mismatch" {
+		t.Errorf("expected reason 'Project ID mismatch', got %q", event.Reason)
+	}
+}
+
+func TestMiddleware_RequireAuth_NoAuditLogger_NoPanic(t *testing.T) {
+	// Verify that auth failures don't panic when no audit logger is configured
+	authService := &mockAuthService{validateErr: auth.ErrMissingAuthorization}
+	middleware := NewMiddleware(authService, nil, nil, zap.NewNop())
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called")
+	})
+
+	wrappedHandler := middleware.RequireAuth("pid")(handler)
+
+	projectID := uuid.New()
+	req := httptest.NewRequest(http.MethodPost, "/mcp/"+projectID.String(), nil)
+	req.SetPathValue("pid", projectID.String())
+	rec := httptest.NewRecorder()
+
+	// Should not panic
+	wrappedHandler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected status 401, got %d", rec.Code)
+	}
+}
+
 func TestExtractProjectIDFromPath(t *testing.T) {
 	testCases := []struct {
 		name        string

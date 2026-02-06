@@ -198,7 +198,7 @@ Add a new card to `ui/src/pages/AIDataLiaisonPage.tsx` (between "Enabled Tools" 
 
 Adds comprehensive MCP-specific event logging via middleware. Captures tool invocations, session events, and security-relevant activity that isn't covered by existing tables.
 
-### 2.1 Audit Events to Capture
+### 2.1 Audit Events to Capture ✅
 
 #### Connection Events
 | Event | Data Captured |

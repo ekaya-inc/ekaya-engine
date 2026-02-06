@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,10 +52,13 @@ func (a *AuditLogger) afterCallTool(ctx context.Context, id any, req *mcplib.Cal
 	durationMs := int(time.Since(startTime).Milliseconds())
 
 	event := a.buildEvent(ctx, req)
-	event.EventType = "tool_call"
+	event.EventType = models.MCPEventToolCall
 	event.WasSuccessful = true
 	event.DurationMs = &durationMs
 	event.ResultSummary = summarizeResult(result)
+
+	// Classify security level based on result content
+	classifyToolCallSecurity(event, result)
 
 	go a.record(event)
 }
@@ -73,12 +77,15 @@ func (a *AuditLogger) onError(ctx context.Context, id any, method mcplib.MCPMeth
 	durationMs := int(time.Since(startTime).Milliseconds())
 
 	event := a.buildEvent(ctx, req)
-	event.EventType = "tool_error"
+	event.EventType = models.MCPEventToolError
 	event.WasSuccessful = false
 	event.DurationMs = &durationMs
 
 	errMsg := err.Error()
 	event.ErrorMessage = &errMsg
+
+	// Classify security level based on error content
+	classifyErrorSecurity(event, errMsg)
 
 	go a.record(event)
 }
@@ -92,7 +99,7 @@ func (a *AuditLogger) loadAndDeleteStart(id any) (time.Time, bool) {
 
 func (a *AuditLogger) buildEvent(ctx context.Context, req *mcplib.CallToolRequest) *models.MCPAuditEvent {
 	event := &models.MCPAuditEvent{
-		SecurityLevel: "normal",
+		SecurityLevel: models.MCPSecurityNormal,
 	}
 
 	// Extract tool name
@@ -229,6 +236,73 @@ func summarizeResult(result *mcplib.CallToolResult) map[string]any {
 	}
 
 	return summary
+}
+
+// RecordAuthFailure logs a failed MCP authentication attempt.
+// Called from the MCP auth middleware when authentication fails.
+func (a *AuditLogger) RecordAuthFailure(projectID uuid.UUID, userID, reason, clientIP string) {
+	event := &models.MCPAuditEvent{
+		ProjectID:     projectID,
+		UserID:        userID,
+		EventType:     models.MCPEventAuthFailure,
+		WasSuccessful: false,
+		ErrorMessage:  &reason,
+		SecurityLevel: models.MCPSecurityWarning,
+		SecurityFlags: []string{"auth_failure"},
+		ClientInfo: map[string]any{
+			"client_ip": clientIP,
+		},
+	}
+
+	go a.record(event)
+}
+
+// classifyToolCallSecurity inspects a successful tool result to detect security-relevant
+// patterns (e.g., injection detection reported as a successful MCP response with error JSON).
+func classifyToolCallSecurity(event *models.MCPAuditEvent, result *mcplib.CallToolResult) {
+	if result == nil || !result.IsError {
+		return
+	}
+
+	// Check result content for security-relevant error codes
+	for _, c := range result.Content {
+		tc, ok := c.(mcplib.TextContent)
+		if !ok {
+			continue
+		}
+		text := strings.ToLower(tc.Text)
+
+		if strings.Contains(text, "security_violation") || strings.Contains(text, "injection") {
+			event.EventType = models.MCPEventSQLInjectionAttempt
+			event.SecurityLevel = models.MCPSecurityCritical
+			event.SecurityFlags = append(event.SecurityFlags, "sql_injection_attempt")
+			return
+		}
+		if strings.Contains(text, "tool_not_enabled") || strings.Contains(text, "authentication_required") {
+			event.SecurityLevel = models.MCPSecurityWarning
+			event.SecurityFlags = append(event.SecurityFlags, "unauthorized_access")
+			return
+		}
+	}
+}
+
+// classifyErrorSecurity inspects an error message to detect security-relevant patterns
+// and upgrades the event's security classification accordingly.
+func classifyErrorSecurity(event *models.MCPAuditEvent, errMsg string) {
+	lower := strings.ToLower(errMsg)
+
+	if strings.Contains(lower, "injection") || strings.Contains(lower, "sql injection") {
+		event.EventType = models.MCPEventSQLInjectionAttempt
+		event.SecurityLevel = models.MCPSecurityCritical
+		event.SecurityFlags = append(event.SecurityFlags, "sql_injection_attempt")
+	} else if strings.Contains(lower, "authentication") || strings.Contains(lower, "unauthorized") {
+		event.SecurityLevel = models.MCPSecurityWarning
+		event.SecurityFlags = append(event.SecurityFlags, "auth_failure")
+	} else if strings.Contains(lower, "rate limit") {
+		event.EventType = models.MCPEventRateLimitHit
+		event.SecurityLevel = models.MCPSecurityWarning
+		event.SecurityFlags = append(event.SecurityFlags, "rate_limit")
+	}
 }
 
 // marshalJSON converts a map to JSON bytes, returning nil for empty/nil maps.

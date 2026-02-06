@@ -6,6 +6,35 @@ import (
 	"github.com/google/uuid"
 )
 
+// MCP audit event types define the vocabulary of events captured in engine_mcp_audit_log.
+const (
+	// Tool invocation events
+	MCPEventToolCall    = "tool_call"    // Successful tool invocation (includes duration, result summary)
+	MCPEventToolError   = "tool_error"   // Tool invocation that returned an error
+	MCPEventToolSuccess = "tool_success" // Alias: successful tool call with detailed result
+
+	// Connection events
+	MCPEventAuthFailure = "mcp_auth_failure" // Authentication failure (JWT or API key)
+
+	// Query events
+	MCPEventQueryExecuted         = "query_executed"          // Query execution via MCP tool
+	MCPEventQueryBlocked          = "query_blocked"           // Query blocked by policy
+	MCPEventApprovedQueryExecuted = "approved_query_executed"  // Pre-approved query execution
+
+	// Security events
+	MCPEventSQLInjectionAttempt    = "sql_injection_attempt"     // SQL injection pattern detected
+	MCPEventRateLimitHit           = "rate_limit_hit"            // Rate limit exceeded
+	MCPEventUnauthorizedTableAccess = "unauthorized_table_access" // Access to restricted table
+	MCPEventSensitiveDataAccess    = "sensitive_data_access"     // Access to sensitive column
+)
+
+// MCP audit security levels classify the severity of audit events.
+const (
+	MCPSecurityNormal   = "normal"
+	MCPSecurityWarning  = "warning"
+	MCPSecurityCritical = "critical"
+)
+
 // MCPAuditEvent represents a single entry in the MCP audit log.
 type MCPAuditEvent struct {
 	ID        uuid.UUID `json:"id"`

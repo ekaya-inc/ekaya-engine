@@ -376,7 +376,9 @@ func main() {
 
 	mcpHandler := handlers.NewMCPHandler(mcpServer, logger, cfg.MCP)
 	tenantScopeProvider := database.NewTenantScopeProvider(db)
-	mcpAuthMiddleware := mcpauth.NewMiddleware(authService, agentAPIKeyService, tenantScopeProvider, logger)
+	mcpAuthMiddleware := mcpauth.NewMiddleware(authService, agentAPIKeyService, tenantScopeProvider, logger,
+		mcpauth.WithAuditLogger(mcpAuditLogger),
+	)
 	mcpHandler.RegisterRoutes(mux, mcpAuthMiddleware)
 
 	// Register MCP OAuth token endpoint (public - for MCP clients)
