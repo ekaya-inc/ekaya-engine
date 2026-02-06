@@ -1,6 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
 import {
-  BookOpen,
   BrainCircuit,
   Database,
   Layers,
@@ -138,14 +137,15 @@ const ProjectDashboard = () => {
       disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
       color: 'indigo',
     },
-    {
-      title: 'Glossary',
-      description: 'Business terms and their SQL definitions for consistent reporting.',
-      icon: BookOpen,
-      path: `/projects/${pid}/glossary`,
-      disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
-      color: 'cyan',
-    },
+    // Glossary tile hidden until quality is launch-ready
+    // {
+    //   title: 'Glossary',
+    //   description: 'Business terms and their SQL definitions for consistent reporting.',
+    //   icon: BookOpen,
+    //   path: `/projects/${pid}/glossary`,
+    //   disabled: !isConnected || !hasSelectedTables || !activeAIConfig,
+    //   color: 'cyan',
+    // },
   ];
 
   const applicationTiles: Tile[] = useMemo(() => {
