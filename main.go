@@ -51,9 +51,9 @@ func main() {
 	// Initialize zap logger
 	var logger *zap.Logger
 	if cfg.Env == "local" {
-		logger, err = zap.NewDevelopment()
+		logger, err = zap.NewDevelopment(zap.AddStacktrace(zap.DPanicLevel))
 	} else {
-		logger, err = zap.NewProduction()
+		logger, err = zap.NewProduction(zap.AddStacktrace(zap.DPanicLevel))
 	}
 	if err != nil {
 		log.Fatalf("Failed to initialize logger: %v", err)
@@ -161,10 +161,9 @@ func main() {
 	projectService := services.NewProjectService(db, projectRepo, userRepo, ontologyRepo, mcpConfigRepo, agentAPIKeyService, centralClient, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, ontologyRepo, credentialEncryptor, adapterFactory, projectService, logger)
-	schemaService := services.NewSchemaService(schemaRepo, ontologyRepo, datasourceService, adapterFactory, logger)
+	schemaService := services.NewSchemaService(schemaRepo, ontologyRepo, columnMetadataRepo, datasourceService, adapterFactory, logger)
 	schemaChangeDetectionService := services.NewSchemaChangeDetectionService(pendingChangeRepo, logger)
 	dataChangeDetectionService := services.NewDataChangeDetectionService(schemaRepo, columnMetadataRepo, ontologyRepo, pendingChangeRepo, datasourceService, projectService, adapterFactory, logger)
-	discoveryService := services.NewRelationshipDiscoveryService(schemaRepo, datasourceService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, securityAuditor, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
 	installedAppService := services.NewInstalledAppService(installedAppRepo, logger)
@@ -403,8 +402,8 @@ func main() {
 	datasourcesHandler := handlers.NewDatasourcesHandler(datasourceService, logger)
 	datasourcesHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
-	// Register schema handler (protected, includes discovery)
-	schemaHandler := handlers.NewSchemaHandlerWithDiscovery(schemaService, discoveryService, logger)
+	// Register schema handler (protected)
+	schemaHandler := handlers.NewSchemaHandler(schemaService, logger)
 	schemaHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register queries handler (protected)
@@ -431,7 +430,7 @@ func main() {
 	ontologyDAGHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register ontology enrichment handler (protected) - read-only tiered ontology for UI
-	ontologyEnrichmentHandler := handlers.NewOntologyEnrichmentHandler(ontologyRepo, schemaRepo, columnMetadataRepo, projectService, logger)
+	ontologyEnrichmentHandler := handlers.NewOntologyEnrichmentHandler(schemaService, projectService, logger)
 	ontologyEnrichmentHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register glossary handler (protected) - business glossary for MCP clients
@@ -689,6 +688,16 @@ func setupDatabase(ctx context.Context, cfg *config.EngineDatabaseConfig, logger
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+
+	// Check if connection has superuser privileges (bypasses RLS)
+	var isSuperuser bool
+	err = db.QueryRow(ctx, "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user").Scan(&isSuperuser)
+	if err == nil && isSuperuser {
+		logger.Warn("Engine database connection has superuser or bypassrls privileges. " +
+			"Row-Level Security (RLS) policies will be bypassed, which means tenant isolation " +
+			"relies solely on application-level filtering. For production deployments, use a " +
+			"non-superuser database role to ensure RLS enforcement.")
 	}
 
 	return db, nil

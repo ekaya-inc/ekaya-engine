@@ -973,6 +973,7 @@ func (c *timestampClassifier) buildPrompt(profile *models.ColumnDataProfile) str
 	sb.WriteString("- `scheduled_time`: Records when something is scheduled to happen\n")
 	sb.WriteString("- `expiration`: Records when something expires or becomes invalid\n")
 	sb.WriteString("- `cursor`: Used for pagination/ordering (typically high precision)\n")
+	sb.WriteString("- `completion`: Records when a process/task/order was completed or finished\n")
 
 	sb.WriteString("\n## Response Format\n\n")
 	sb.WriteString("```json\n")

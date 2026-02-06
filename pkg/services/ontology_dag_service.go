@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -581,6 +582,15 @@ func (s *ontologyDAGService) executeDAG(projectID, dagID, userID uuid.UUID) {
 
 		// Execute node
 		if err := s.executeNode(tenantCtx, dagRecord, &node); err != nil {
+			// If the context was cancelled (user-initiated), log at INFO and let
+			// the Cancel() method handle status updates — don't treat as failure.
+			if errors.Is(err, context.Canceled) {
+				s.logger.Info("DAG execution cancelled during node",
+					zap.String("dag_id", dagID.String()),
+					zap.String("node_name", node.NodeName))
+				return
+			}
+
 			s.logger.Error("Node execution failed",
 				zap.String("dag_id", dagID.String()),
 				zap.String("node_name", node.NodeName),

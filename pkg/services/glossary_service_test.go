@@ -2307,14 +2307,14 @@ func TestHasRoleDistinctingColumns_DetectsRoles(t *testing.T) {
 		ColumnDetails: map[string][]models.ColumnDetail{
 			"engagements": {
 				{Name: "id", Role: "identifier"},
-				{Name: "host_id", Role: "dimension"},
-				{Name: "visitor_id", Role: "dimension"},
+				{Name: "host_id", Role: "dimension", IsForeignKey: true, ForeignTable: "users", FKAssociation: "host"},
+				{Name: "visitor_id", Role: "dimension", IsForeignKey: true, ForeignTable: "users", FKAssociation: "visitor"},
 				{Name: "amount", Role: "measure"},
 			},
 		},
 	}
 
-	assert.True(t, hasRoleDistinctingColumns(ontology), "Should detect host_id and visitor_id as role columns")
+	assert.True(t, hasRoleDistinctingColumns(ontology), "Should detect host/visitor as role columns via FKAssociation")
 }
 
 func TestHasRoleDistinctingColumns_DetectsFromFKAssociation(t *testing.T) {
@@ -2324,14 +2324,14 @@ func TestHasRoleDistinctingColumns_DetectsFromFKAssociation(t *testing.T) {
 		ColumnDetails: map[string][]models.ColumnDetail{
 			"transactions": {
 				{Name: "id", Role: "identifier"},
-				{Name: "user_a_id", Role: "dimension", FKAssociation: "buyer"},
-				{Name: "user_b_id", Role: "dimension", FKAssociation: "seller"},
+				{Name: "user_a_id", Role: "dimension", IsForeignKey: true, ForeignTable: "users", FKAssociation: "buyer"},
+				{Name: "user_b_id", Role: "dimension", IsForeignKey: true, ForeignTable: "users", FKAssociation: "seller"},
 				{Name: "amount", Role: "measure"},
 			},
 		},
 	}
 
-	assert.True(t, hasRoleDistinctingColumns(ontology), "Should detect buyer/seller from FK associations")
+	assert.True(t, hasRoleDistinctingColumns(ontology), "Should detect buyer/seller from FK associations pointing to same table")
 }
 
 func TestHasRoleDistinctingColumns_NeedsAtLeastTwo(t *testing.T) {
@@ -2341,13 +2341,46 @@ func TestHasRoleDistinctingColumns_NeedsAtLeastTwo(t *testing.T) {
 		ColumnDetails: map[string][]models.ColumnDetail{
 			"engagements": {
 				{Name: "id", Role: "identifier"},
-				{Name: "host_id", Role: "dimension"}, // Only one role column
+				{Name: "host_id", Role: "dimension", IsForeignKey: true, ForeignTable: "users", FKAssociation: "host"},
 				{Name: "amount", Role: "measure"},
 			},
 		},
 	}
 
-	assert.False(t, hasRoleDistinctingColumns(ontology), "Should require at least 2 role columns")
+	assert.False(t, hasRoleDistinctingColumns(ontology), "Should require at least 2 FK associations to the same table")
+}
+
+func TestHasRoleDistinctingColumns_DifferentTargetTables(t *testing.T) {
+	ontology := &models.TieredOntology{
+		ID:       uuid.New(),
+		IsActive: true,
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"orders": {
+				{Name: "id", Role: "identifier"},
+				{Name: "user_id", Role: "dimension", IsForeignKey: true, ForeignTable: "users", FKAssociation: "buyer"},
+				{Name: "product_id", Role: "dimension", IsForeignKey: true, ForeignTable: "products", FKAssociation: "item"},
+			},
+		},
+	}
+
+	assert.False(t, hasRoleDistinctingColumns(ontology), "FKs to different tables are not role differentiation")
+}
+
+func TestHasRoleDistinctingColumns_RolesAcrossTables(t *testing.T) {
+	ontology := &models.TieredOntology{
+		ID:       uuid.New(),
+		IsActive: true,
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"engagements": {
+				{Name: "host_id", Role: "dimension", IsForeignKey: true, ForeignTable: "users", FKAssociation: "host"},
+			},
+			"messages": {
+				{Name: "sender_id", Role: "dimension", IsForeignKey: true, ForeignTable: "users", FKAssociation: "sender"},
+			},
+		},
+	}
+
+	assert.True(t, hasRoleDistinctingColumns(ontology), "Should detect roles across different tables pointing to same target")
 }
 
 func TestHasRoleDistinctingColumns_NilOntology(t *testing.T) {

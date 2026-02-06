@@ -8,7 +8,6 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
-	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
@@ -100,27 +99,21 @@ type EnumValueResponse struct {
 
 // OntologyEnrichmentHandler handles ontology enrichment HTTP requests.
 type OntologyEnrichmentHandler struct {
-	ontologyRepo       repositories.OntologyRepository
-	schemaRepo         repositories.SchemaRepository
-	columnMetadataRepo repositories.ColumnMetadataRepository
-	projectService     services.ProjectService
-	logger             *zap.Logger
+	schemaService  services.SchemaService
+	projectService services.ProjectService
+	logger         *zap.Logger
 }
 
 // NewOntologyEnrichmentHandler creates a new ontology enrichment handler.
 func NewOntologyEnrichmentHandler(
-	ontologyRepo repositories.OntologyRepository,
-	schemaRepo repositories.SchemaRepository,
-	columnMetadataRepo repositories.ColumnMetadataRepository,
+	schemaService services.SchemaService,
 	projectService services.ProjectService,
 	logger *zap.Logger,
 ) *OntologyEnrichmentHandler {
 	return &OntologyEnrichmentHandler{
-		ontologyRepo:       ontologyRepo,
-		schemaRepo:         schemaRepo,
-		columnMetadataRepo: columnMetadataRepo,
-		projectService:     projectService,
-		logger:             logger,
+		schemaService:  schemaService,
+		projectService: projectService,
+		logger:         logger,
 	}
 }
 
@@ -163,7 +156,7 @@ func (h *OntologyEnrichmentHandler) GetEnrichment(w http.ResponseWriter, r *http
 	}
 
 	// Get all tables for the datasource
-	tables, err := h.schemaRepo.ListTablesByDatasource(ctx, projectID, dsID, false)
+	tables, err := h.schemaService.ListTablesByDatasource(ctx, projectID, dsID, false)
 	if err != nil {
 		h.logger.Error("Failed to list tables", zap.Error(err))
 		_ = ErrorResponse(w, http.StatusInternalServerError, "list_tables_failed", err.Error())
@@ -171,7 +164,7 @@ func (h *OntologyEnrichmentHandler) GetEnrichment(w http.ResponseWriter, r *http
 	}
 
 	// Get all column metadata for the project
-	allMetadata, err := h.columnMetadataRepo.GetByProject(ctx, projectID)
+	allMetadata, err := h.schemaService.GetColumnMetadataByProject(ctx, projectID)
 	if err != nil {
 		h.logger.Error("Failed to get column metadata", zap.Error(err))
 		_ = ErrorResponse(w, http.StatusInternalServerError, "get_column_metadata_failed", err.Error())
@@ -188,7 +181,7 @@ func (h *OntologyEnrichmentHandler) GetEnrichment(w http.ResponseWriter, r *http
 	tableResponses := make([]TableColumnsResponse, 0, len(tables))
 	for _, table := range tables {
 		// Get columns for this table
-		columns, err := h.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID, false)
+		columns, err := h.schemaService.ListColumnsByTable(ctx, projectID, table.ID, false)
 		if err != nil {
 			h.logger.Warn("Failed to list columns for table",
 				zap.String("table_name", table.TableName),
@@ -313,60 +306,6 @@ func (h *OntologyEnrichmentHandler) toColumnFeaturesResponseFromMetadata(meta *m
 			IsMonetary:           meta.Features.MonetaryFeatures.IsMonetary,
 			CurrencyUnit:         meta.Features.MonetaryFeatures.CurrencyUnit,
 			PairedCurrencyColumn: meta.Features.MonetaryFeatures.PairedCurrencyColumn,
-		}
-	}
-
-	return resp
-}
-
-// toColumnFeaturesResponse converts ColumnFeatures to the API response format.
-// Deprecated: Use toColumnFeaturesResponseFromMetadata instead.
-func (h *OntologyEnrichmentHandler) toColumnFeaturesResponse(features *models.ColumnFeatures) *ColumnFeaturesResponse {
-	if features == nil {
-		return nil
-	}
-
-	resp := &ColumnFeaturesResponse{
-		Purpose:            features.Purpose,
-		SemanticType:       features.SemanticType,
-		Role:               features.Role,
-		Description:        features.Description,
-		ClassificationPath: string(features.ClassificationPath),
-		Confidence:         features.Confidence,
-	}
-
-	if features.TimestampFeatures != nil {
-		resp.TimestampFeatures = &TimestampFeaturesResponse{
-			TimestampPurpose: features.TimestampFeatures.TimestampPurpose,
-			IsSoftDelete:     features.TimestampFeatures.IsSoftDelete,
-			IsAuditField:     features.TimestampFeatures.IsAuditField,
-		}
-	}
-
-	if features.BooleanFeatures != nil {
-		resp.BooleanFeatures = &BooleanFeaturesResponse{
-			TrueMeaning:  features.BooleanFeatures.TrueMeaning,
-			FalseMeaning: features.BooleanFeatures.FalseMeaning,
-			BooleanType:  features.BooleanFeatures.BooleanType,
-		}
-	}
-
-	if features.IdentifierFeatures != nil {
-		resp.IdentifierFeatures = &IdentifierFeaturesResponse{
-			IdentifierType:   features.IdentifierFeatures.IdentifierType,
-			ExternalService:  features.IdentifierFeatures.ExternalService,
-			FKTargetTable:    features.IdentifierFeatures.FKTargetTable,
-			FKTargetColumn:   features.IdentifierFeatures.FKTargetColumn,
-			FKConfidence:     features.IdentifierFeatures.FKConfidence,
-			EntityReferenced: features.IdentifierFeatures.EntityReferenced,
-		}
-	}
-
-	if features.MonetaryFeatures != nil {
-		resp.MonetaryFeatures = &MonetaryFeaturesResponse{
-			IsMonetary:           features.MonetaryFeatures.IsMonetary,
-			CurrencyUnit:         features.MonetaryFeatures.CurrencyUnit,
-			PairedCurrencyColumn: features.MonetaryFeatures.PairedCurrencyColumn,
 		}
 	}
 

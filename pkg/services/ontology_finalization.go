@@ -329,6 +329,8 @@ type columnFeatureInsights struct {
 	// Monetary columns with paired currency codes
 	monetaryWithCurrency int
 	monetaryTotal        int
+	monetaryColumnNames  []string       // actual column names where IsMonetary=true
+	currencyUnitCounts   map[string]int // CurrencyUnit -> count ("cents": 5, "dollars": 1)
 
 	// External service integrations
 	externalServices map[string]int // service -> count of columns
@@ -368,8 +370,14 @@ func (s *ontologyFinalizationService) discoverConventionsWithInsights(
 		conventions.SoftDelete = s.detectSoftDelete(columnsByTable, totalTables)
 	}
 
-	// Detect currency convention
-	conventions.Currency = s.detectCurrency(columnsByTable)
+	// Detect currency convention (prefer ColumnFeatures if available)
+	if insights.monetaryTotal > 0 {
+		conventions.Currency = s.buildCurrencyFromInsights(insights)
+	}
+	// Fall back to pattern-based detection if ColumnFeatures didn't find currency convention
+	if conventions.Currency == nil {
+		conventions.Currency = s.detectCurrency(columnsByTable)
+	}
 
 	// Detect audit columns (prefer ColumnFeatures if available)
 	if len(insights.auditCreatedTables) > 0 || len(insights.auditUpdatedTables) > 0 {
@@ -394,7 +402,8 @@ func (s *ontologyFinalizationService) extractColumnFeatureInsights(
 	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata,
 ) *columnFeatureInsights {
 	insights := &columnFeatureInsights{
-		externalServices: make(map[string]int),
+		externalServices:   make(map[string]int),
+		currencyUnitCounts: make(map[string]int),
 	}
 
 	softDeleteByColumn := make(map[string][]string) // column name -> table names
@@ -425,6 +434,10 @@ func (s *ontologyFinalizationService) extractColumnFeatureInsights(
 			// Check for monetary columns using MonetaryFeatures
 			if monFeatures := meta.GetMonetaryFeatures(); monFeatures != nil && monFeatures.IsMonetary {
 				insights.monetaryTotal++
+				insights.monetaryColumnNames = append(insights.monetaryColumnNames, col.ColumnName)
+				if monFeatures.CurrencyUnit != "" {
+					insights.currencyUnitCounts[monFeatures.CurrencyUnit]++
+				}
 				if monFeatures.PairedCurrencyColumn != "" {
 					insights.monetaryWithCurrency++
 				}
@@ -478,6 +491,73 @@ func (s *ontologyFinalizationService) buildAuditColumnsFromInsights(
 	}
 
 	return result
+}
+
+// buildCurrencyFromInsights creates a CurrencyConvention from LLM-derived MonetaryFeatures.
+func (s *ontologyFinalizationService) buildCurrencyFromInsights(
+	insights *columnFeatureInsights,
+) *models.CurrencyConvention {
+	if insights.monetaryTotal < 2 {
+		return nil
+	}
+
+	// Find the dominant CurrencyUnit
+	if len(insights.currencyUnitCounts) == 0 {
+		return nil
+	}
+
+	var dominantUnit string
+	var maxCount int
+	for unit, count := range insights.currencyUnitCounts {
+		if count > maxCount {
+			maxCount = count
+			dominantUnit = unit
+		}
+	}
+
+	// Map CurrencyUnit to Format/Transform
+	var format, transform string
+	switch dominantUnit {
+	case models.CurrencyUnitCents:
+		format = "cents"
+		transform = "divide_by_100"
+	case models.CurrencyUnitBasisPoints:
+		format = "basis_points"
+		transform = "divide_by_10000"
+	case models.CurrencyUnitDollars:
+		format = "dollars"
+		transform = "none"
+	default:
+		// Unknown unit (e.g., a raw currency code like "USD") — treat as dollars
+		format = "dollars"
+		transform = "none"
+	}
+
+	return &models.CurrencyConvention{
+		DefaultCurrency: "USD",
+		Format:          format,
+		ColumnPatterns:  deriveColumnPatterns(insights.monetaryColumnNames),
+		Transform:       transform,
+	}
+}
+
+// deriveColumnPatterns extracts wildcard suffix patterns from column names.
+// e.g., ["total_amount", "fee_amount", "unit_price"] → ["*_amount", "*_price"]
+func deriveColumnPatterns(columnNames []string) []string {
+	patternSet := make(map[string]struct{})
+	for _, name := range columnNames {
+		idx := strings.LastIndex(name, "_")
+		if idx >= 0 {
+			patternSet["*"+name[idx:]] = struct{}{}
+		}
+	}
+
+	patterns := make([]string, 0, len(patternSet))
+	for p := range patternSet {
+		patterns = append(patterns, p)
+	}
+	sort.Strings(patterns)
+	return patterns
 }
 
 // detectSoftDelete looks for soft-delete patterns across tables.

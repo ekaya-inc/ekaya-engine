@@ -322,18 +322,6 @@ type RelationshipsResponse struct {
 	OrphanTables  []string              `json:"orphan_tables,omitempty"` // Tables with data but no relationships
 }
 
-// DiscoveryResults contains statistics from a relationship discovery operation.
-type DiscoveryResults struct {
-	RelationshipsCreated       int      `json:"relationships_created"`
-	ReviewCandidatesCreated    int      `json:"review_candidates_created"` // Review candidates for orphan tables
-	TablesAnalyzed             int      `json:"tables_analyzed"`
-	ColumnsAnalyzed            int      `json:"columns_analyzed"`
-	TablesWithoutRelationships int      `json:"tables_without_relationships"`
-	EmptyTables                int      `json:"empty_tables"`
-	EmptyTableNames            []string `json:"empty_table_names,omitempty"`
-	OrphanTableNames           []string `json:"orphan_table_names,omitempty"`
-}
-
 // DiscoveryMetrics captures metrics during relationship discovery for storage.
 type DiscoveryMetrics struct {
 	MatchRate      float64

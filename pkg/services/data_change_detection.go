@@ -376,20 +376,33 @@ func (s *dataChangeDetectionService) detectPotentialFKs(
 			continue
 		}
 
-		// Extract potential table name from column name
-		// For _id columns, strip the suffix; otherwise try the full column name
-		var potentialTableBase string
-		if strings.HasSuffix(col.ColumnName, "_id") {
-			potentialTableBase = strings.TrimSuffix(col.ColumnName, "_id")
-		} else {
-			potentialTableBase = col.ColumnName
+		// Derive target table: prefer metadata FK target, fall back to name heuristic for new columns
+		var targetTable *models.SchemaTable
+		if meta != nil {
+			if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil && idFeatures.FKTargetTable != "" {
+				targetTableKey := idFeatures.FKTargetTable
+				// FKTargetTable may be schema-qualified; strip schema prefix for name-only lookup
+				if strings.Contains(targetTableKey, ".") {
+					parts := strings.SplitN(targetTableKey, ".", 2)
+					targetTableKey = parts[1]
+				}
+				targetTable = tableByName[targetTableKey]
+			}
 		}
-		targetTable, ok := tableByName[potentialTableBase]
-		if !ok {
-			// Try pluralized version
-			targetTable, ok = tableByName[potentialTableBase+"s"]
+		if targetTable == nil {
+			// Fallback for columns without metadata (newly added columns)
+			var potentialTableBase string
+			if strings.HasSuffix(col.ColumnName, "_id") {
+				potentialTableBase = strings.TrimSuffix(col.ColumnName, "_id")
+			} else {
+				potentialTableBase = col.ColumnName
+			}
+			targetTable = tableByName[potentialTableBase]
+			if targetTable == nil {
+				targetTable = tableByName[potentialTableBase+"s"]
+			}
 		}
-		if !ok {
+		if targetTable == nil {
 			continue
 		}
 
@@ -398,17 +411,29 @@ func (s *dataChangeDetectionService) detectPotentialFKs(
 			continue
 		}
 
-		// Find target table's primary key column
+		// Find target column: prefer metadata FKTargetColumn, fall back to PK scan
 		targetColumns, err := s.schemaRepo.ListColumnsByTable(ctx, targetTable.ProjectID, targetTable.ID, true)
 		if err != nil {
 			continue
 		}
 
 		var targetPKColumn *models.SchemaColumn
-		for _, tc := range targetColumns {
-			if tc.IsPrimaryKey {
-				targetPKColumn = tc
-				break
+		if meta != nil {
+			if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil && idFeatures.FKTargetColumn != "" {
+				for _, tc := range targetColumns {
+					if tc.ColumnName == idFeatures.FKTargetColumn {
+						targetPKColumn = tc
+						break
+					}
+				}
+			}
+		}
+		if targetPKColumn == nil {
+			for _, tc := range targetColumns {
+				if tc.IsPrimaryKey {
+					targetPKColumn = tc
+					break
+				}
 			}
 		}
 		if targetPKColumn == nil {

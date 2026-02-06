@@ -232,10 +232,10 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 	}
 
 	// Identify enum candidates
-	enumCandidates := s.identifyEnumCandidates(columns)
+	enumCandidates := s.identifyEnumCandidates(columns, metadataByColumnID)
 
 	// Sample enum values for likely enum columns
-	enumSamples, err := s.sampleEnumValues(ctx, projectID, tableCtx, columns)
+	enumSamples, err := s.sampleEnumValues(ctx, projectID, tableCtx, columns, metadataByColumnID)
 	if err != nil {
 		s.logger.Warn("Failed to sample enum values, continuing without",
 			zap.String("table", tableName),
@@ -244,7 +244,7 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 	}
 
 	// Analyze enum value distributions (count, percentage, state semantics)
-	enumDistributions, err := s.analyzeEnumDistributions(ctx, projectID, tableCtx, columns, enumCandidates)
+	enumDistributions, err := s.analyzeEnumDistributions(ctx, projectID, tableCtx, columns, enumCandidates, metadataByColumnID)
 	if err != nil {
 		s.logger.Warn("Failed to analyze enum distributions, continuing without",
 			zap.String("table", tableName),
@@ -372,11 +372,12 @@ func (s *columnEnrichmentService) sampleEnumValues(
 	projectID uuid.UUID,
 	tableCtx *TableContext,
 	columns []*models.SchemaColumn,
+	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata,
 ) (map[string][]string, error) {
 	result := make(map[string][]string)
 
 	// Identify columns likely to be enums
-	enumCandidates := s.identifyEnumCandidates(columns)
+	enumCandidates := s.identifyEnumCandidates(columns, metadataByColumnID)
 	if len(enumCandidates) == 0 {
 		return result, nil
 	}
@@ -487,41 +488,36 @@ func (s *columnEnrichmentService) filterColumnsForLLM(columns []*models.SchemaCo
 	return columnsNeedingLLM, syntheticEnrichments
 }
 
-// identifyEnumCandidates identifies columns likely to contain enum values.
-func (s *columnEnrichmentService) identifyEnumCandidates(columns []*models.SchemaColumn) []*models.SchemaColumn {
+// identifyEnumCandidates identifies columns likely to contain enum values using ColumnMetadata
+// from the feature extraction pipeline (DAG step 2). Falls back to low-cardinality text heuristic
+// when metadata is not available for a column.
+func (s *columnEnrichmentService) identifyEnumCandidates(columns []*models.SchemaColumn, metadataByColumnID map[uuid.UUID]*models.ColumnMetadata) []*models.SchemaColumn {
 	var candidates []*models.SchemaColumn
-
-	enumPatterns := []string{"status", "state", "type", "kind", "category", "_code", "level", "tier", "role"}
+	seen := make(map[uuid.UUID]bool)
 
 	for _, col := range columns {
-		colNameLower := strings.ToLower(col.ColumnName)
-		dataTypeLower := strings.ToLower(col.DataType)
+		if seen[col.ID] {
+			continue
+		}
 
-		// Check column name patterns
-		for _, pattern := range enumPatterns {
-			if strings.Contains(colNameLower, pattern) {
+		// Primary: use ColumnMetadata from feature extraction
+		if meta, ok := metadataByColumnID[col.ID]; ok {
+			if meta.ClassificationPath != nil && models.ClassificationPath(*meta.ClassificationPath) == models.ClassificationPathEnum {
 				candidates = append(candidates, col)
-				break
+				seen[col.ID] = true
+				continue
+			}
+			if meta.NeedsEnumAnalysis {
+				candidates = append(candidates, col)
+				seen[col.ID] = true
+				continue
 			}
 		}
 
-		// Also check data type + distinct count (low cardinality text columns)
-		if col.DistinctCount != nil && *col.DistinctCount < 50 {
-			if strings.Contains(dataTypeLower, "char") ||
-				strings.Contains(dataTypeLower, "text") ||
-				strings.Contains(dataTypeLower, "varchar") {
-				// Avoid duplicates
-				found := false
-				for _, c := range candidates {
-					if c.ColumnName == col.ColumnName {
-						found = true
-						break
-					}
-				}
-				if !found {
-					candidates = append(candidates, col)
-				}
-			}
+		// Backstop: low cardinality text columns (data-driven, not name-based)
+		if col.DistinctCount != nil && *col.DistinctCount < 50 && isTextType(col.DataType) {
+			candidates = append(candidates, col)
+			seen[col.ID] = true
 		}
 	}
 
@@ -536,6 +532,7 @@ func (s *columnEnrichmentService) analyzeEnumDistributions(
 	tableCtx *TableContext,
 	columns []*models.SchemaColumn,
 	enumCandidates []*models.SchemaColumn,
+	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata,
 ) (map[string]*datasource.EnumDistributionResult, error) {
 	result := make(map[string]*datasource.EnumDistributionResult)
 
@@ -557,8 +554,7 @@ func (s *columnEnrichmentService) analyzeEnumDistributions(
 	defer adapter.Close()
 
 	// Find a completion timestamp column if one exists (for state machine detection)
-	// Common patterns: completed_at, finished_at, ended_at, closed_at
-	completionCol := findCompletionTimestampColumn(columns)
+	completionCol := findCompletionTimestampColumn(columns, metadataByColumnID)
 
 	// Analyze distribution for each enum candidate
 	for _, col := range enumCandidates {
@@ -579,48 +575,21 @@ func (s *columnEnrichmentService) analyzeEnumDistributions(
 	return result, nil
 }
 
-// findCompletionTimestampColumn finds a column that likely represents completion time.
-// Returns empty string if no such column is found.
-func findCompletionTimestampColumn(columns []*models.SchemaColumn) string {
-	// Priority order for completion timestamp columns
-	completionPatterns := []string{
-		"completed_at", "finished_at", "ended_at", "closed_at",
-		"done_at", "resolved_at", "fulfilled_at", "success_at",
-	}
-
-	columnMap := make(map[string]*models.SchemaColumn)
+// findCompletionTimestampColumn finds a column whose ColumnMetadata indicates a "completion"
+// timestamp purpose (set by the column_feature_extraction LLM in DAG step 2).
+// Returns empty string if no such column is found — the adapter gracefully skips
+// completion-rate calculation in that case.
+func findCompletionTimestampColumn(columns []*models.SchemaColumn, metadataByColumnID map[uuid.UUID]*models.ColumnMetadata) string {
 	for _, col := range columns {
-		columnMap[strings.ToLower(col.ColumnName)] = col
-	}
-
-	// Look for exact matches first
-	for _, pattern := range completionPatterns {
-		if col, ok := columnMap[pattern]; ok {
-			if isTimestampType(col.DataType) {
-				return col.ColumnName
+		if meta, ok := metadataByColumnID[col.ID]; ok {
+			if tsFeatures := meta.GetTimestampFeatures(); tsFeatures != nil {
+				if tsFeatures.TimestampPurpose == models.TimestampPurposeCompletion {
+					return col.ColumnName
+				}
 			}
 		}
 	}
-
-	// Fallback: look for any timestamp column containing "complet" or "finish"
-	for _, col := range columns {
-		nameLower := strings.ToLower(col.ColumnName)
-		if isTimestampType(col.DataType) {
-			if strings.Contains(nameLower, "complet") || strings.Contains(nameLower, "finish") {
-				return col.ColumnName
-			}
-		}
-	}
-
 	return ""
-}
-
-// isTimestampType checks if a column data type is a timestamp/datetime type.
-func isTimestampType(dataType string) bool {
-	dataTypeLower := strings.ToLower(dataType)
-	return strings.Contains(dataTypeLower, "timestamp") ||
-		strings.Contains(dataTypeLower, "datetime") ||
-		strings.Contains(dataTypeLower, "date")
 }
 
 // NOTE: detectSoftDeletePattern, monetaryColumnPatterns, and detectMonetaryColumnPattern
@@ -632,6 +601,15 @@ func isTimestampType(dataType string) bool {
 // TimestampScaleDescription, detectTimestampScalePattern, isBigintType, inferTimestampScale,
 // countDigits, and generateTimestampScaleDescription have been removed.
 // Column classification is now handled by the column_feature_extraction service.
+
+// isTimestampType checks if a column data type is a timestamp/datetime type.
+// This helper is used by column_feature_extraction.go for classification path routing.
+func isTimestampType(dataType string) bool {
+	dataTypeLower := strings.ToLower(dataType)
+	return strings.Contains(dataTypeLower, "timestamp") ||
+		strings.Contains(dataTypeLower, "datetime") ||
+		strings.Contains(dataTypeLower, "date")
+}
 
 // isTextType checks if a column data type is a text/varchar/char type.
 // This helper is still used by column_feature_extraction.go for classification path routing.

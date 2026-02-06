@@ -371,3 +371,15 @@ func (m *mockSchemaService) GetRelationshipsResponse(ctx context.Context, projec
 func (m *mockSchemaService) SelectAllTables(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return m.err
 }
+
+func (m *mockSchemaService) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+	return nil, m.err
+}
+
+func (m *mockSchemaService) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
+	return nil, m.err
+}
+
+func (m *mockSchemaService) GetColumnMetadataByProject(ctx context.Context, projectID uuid.UUID) ([]*models.ColumnMetadata, error) {
+	return nil, m.err
+}

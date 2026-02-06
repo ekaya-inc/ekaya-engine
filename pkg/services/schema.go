@@ -64,30 +64,44 @@ type SchemaService interface {
 	// SelectAllTables marks all tables and columns for this datasource as selected.
 	// Used after schema refresh to auto-select newly discovered tables.
 	SelectAllTables(ctx context.Context, projectID, datasourceID uuid.UUID) error
+
+	// ListTablesByDatasource returns tables for a datasource.
+	// If selectedOnly is true, only tables with is_selected=true are returned.
+	ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error)
+
+	// ListColumnsByTable returns columns for a specific table.
+	// If selectedOnly is true, only columns with is_selected=true are returned.
+	ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error)
+
+	// GetColumnMetadataByProject retrieves all column metadata for a project.
+	GetColumnMetadataByProject(ctx context.Context, projectID uuid.UUID) ([]*models.ColumnMetadata, error)
 }
 
 type schemaService struct {
-	schemaRepo     repositories.SchemaRepository
-	ontologyRepo   repositories.OntologyRepository
-	datasourceSvc  DatasourceService
-	adapterFactory datasource.DatasourceAdapterFactory
-	logger         *zap.Logger
+	schemaRepo         repositories.SchemaRepository
+	ontologyRepo       repositories.OntologyRepository
+	columnMetadataRepo repositories.ColumnMetadataRepository
+	datasourceSvc      DatasourceService
+	adapterFactory     datasource.DatasourceAdapterFactory
+	logger             *zap.Logger
 }
 
 // NewSchemaService creates a new schema service with dependencies.
 func NewSchemaService(
 	schemaRepo repositories.SchemaRepository,
 	ontologyRepo repositories.OntologyRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
 	datasourceSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	logger *zap.Logger,
 ) SchemaService {
 	return &schemaService{
-		schemaRepo:     schemaRepo,
-		ontologyRepo:   ontologyRepo,
-		datasourceSvc:  datasourceSvc,
-		adapterFactory: adapterFactory,
-		logger:         logger,
+		schemaRepo:         schemaRepo,
+		ontologyRepo:       ontologyRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		datasourceSvc:      datasourceSvc,
+		adapterFactory:     adapterFactory,
+		logger:             logger,
 	}
 }
 
@@ -964,6 +978,21 @@ func (s *schemaService) SelectAllTables(ctx context.Context, projectID, datasour
 		return fmt.Errorf("failed to select all tables: %w", err)
 	}
 	return nil
+}
+
+// ListTablesByDatasource delegates to the schema repository.
+func (s *schemaService) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+	return s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, selectedOnly)
+}
+
+// ListColumnsByTable delegates to the schema repository.
+func (s *schemaService) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
+	return s.schemaRepo.ListColumnsByTable(ctx, projectID, tableID, selectedOnly)
+}
+
+// GetColumnMetadataByProject delegates to the column metadata repository.
+func (s *schemaService) GetColumnMetadataByProject(ctx context.Context, projectID uuid.UUID) ([]*models.ColumnMetadata, error) {
+	return s.columnMetadataRepo.GetByProject(ctx, projectID)
 }
 
 // Ensure schemaService implements SchemaService at compile time.
