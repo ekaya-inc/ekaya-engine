@@ -188,7 +188,7 @@ Implement the Query Executions tab in `AuditPage.tsx` showing data from `GET /ap
 
 Implement the Schema Changes tab sourcing from `GET /api/projects/{pid}/audit/schema-changes`. Columns: Time, Change Type, Table, Column, Status, Reviewed By. Filters: time range, change type, status, table name. Implement the Query Approvals tab sourcing from `GET /api/projects/{pid}/audit/query-approvals`. Columns: Time, Suggested By, Query Name, SQL (truncated), Status, Reviewed By, Reviewed At, Rejection Reason. Filters: time range, status, suggested by, reviewed by. Add the Summary header at the top of the audit page using `GET /api/projects/{pid}/audit/summary` showing: total query executions (30d), failed query count, destructive query count, ontology changes count, pending schema changes, pending query approvals.
 
-#### 1.6.5 [ ] AI Data Liaison auditing tile
+#### 1.6.5 [x] AI Data Liaison auditing tile
 
 Add a new card to `ui/src/pages/AIDataLiaisonPage.tsx` (between "Enabled Tools" and "Danger Zone") that links to `/projects/{pid}/audit`. The tile should only be visible when the setup checklist is complete. Use existing card patterns from the AI Data Liaison page (Lucide React icons, TailwindCSS styling consistent with other tiles).
 
