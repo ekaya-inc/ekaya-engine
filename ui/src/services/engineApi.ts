@@ -28,6 +28,7 @@ import type {
   ExecuteQueryRequest,
   ExecuteQueryResponse,
   GetDatasourceResponse,
+  GlossaryGenerationStatus,
   GlossaryListResponse,
   GlossaryTerm,
   InstalledApp,
@@ -596,6 +597,20 @@ class EngineApiService {
     return this.makeRequest<void>(`/${projectId}/glossary/${termId}`, {
       method: 'DELETE',
     });
+  }
+
+  /**
+   * Trigger async glossary auto-generation
+   * POST /api/projects/{projectId}/glossary/auto-generate
+   * Returns 202 on success, 409 if required questions are pending or generation is already running
+   */
+  async autoGenerateGlossary(
+    projectId: string
+  ): Promise<ApiResponse<GlossaryGenerationStatus>> {
+    return this.makeRequest<GlossaryGenerationStatus>(
+      `/${projectId}/glossary/auto-generate`,
+      { method: 'POST' }
+    );
   }
 
   // --- Project Knowledge Methods ---
