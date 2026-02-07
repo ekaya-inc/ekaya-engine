@@ -53,10 +53,10 @@ type QueryApprovalFilters struct {
 type AuditSummary struct {
 	TotalQueryExecutions  int `json:"total_query_executions"`
 	FailedQueryCount      int `json:"failed_query_count"`
-	DestructiveQueryCount int `json:"destructive_query_count"`
 	OntologyChangesCount  int `json:"ontology_changes_count"`
 	PendingSchemaChanges  int `json:"pending_schema_changes"`
 	PendingQueryApprovals int `json:"pending_query_approvals"`
+	MCPEventsCount        int `json:"mcp_events_count"`
 	OpenAlertsCritical    int `json:"open_alerts_critical"`
 	OpenAlertsWarning     int `json:"open_alerts_warning"`
 	OpenAlertsInfo        int `json:"open_alerts_info"`

@@ -196,10 +196,10 @@ export interface AlertConfig {
 export interface AuditSummary {
   total_query_executions: number;
   failed_query_count: number;
-  destructive_query_count: number;
   ontology_changes_count: number;
   pending_schema_changes: number;
   pending_query_approvals: number;
+  mcp_events_count: number;
   open_alerts_critical: number;
   open_alerts_warning: number;
   open_alerts_info: number;

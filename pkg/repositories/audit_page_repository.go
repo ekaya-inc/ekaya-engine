@@ -389,14 +389,6 @@ func (r *auditPageRepository) GetSummary(ctx context.Context, projectID uuid.UUI
 		return nil, fmt.Errorf("failed to count failed queries: %w", err)
 	}
 
-	// Destructive queries (last 30d)
-	err = scope.Conn.QueryRow(ctx,
-		`SELECT COUNT(*) FROM engine_query_executions WHERE project_id = $1 AND executed_at >= $2 AND is_modifying = true`,
-		projectID, thirtyDaysAgo).Scan(&summary.DestructiveQueryCount)
-	if err != nil {
-		return nil, fmt.Errorf("failed to count destructive queries: %w", err)
-	}
-
 	// Ontology changes (last 30d)
 	err = scope.Conn.QueryRow(ctx,
 		`SELECT COUNT(*) FROM engine_audit_log WHERE project_id = $1 AND created_at >= $2`,
@@ -419,6 +411,14 @@ func (r *auditPageRepository) GetSummary(ctx context.Context, projectID uuid.UUI
 		projectID).Scan(&summary.PendingQueryApprovals)
 	if err != nil {
 		return nil, fmt.Errorf("failed to count pending query approvals: %w", err)
+	}
+
+	// MCP events (last 30d)
+	err = scope.Conn.QueryRow(ctx,
+		`SELECT COUNT(*) FROM engine_mcp_audit_log WHERE project_id = $1 AND created_at >= $2`,
+		projectID, thirtyDaysAgo).Scan(&summary.MCPEventsCount)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count MCP events: %w", err)
 	}
 
 	// Open alerts by severity

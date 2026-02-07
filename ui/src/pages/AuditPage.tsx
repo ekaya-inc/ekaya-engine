@@ -43,14 +43,10 @@ import type {
 
 type AuditTab = 'query-executions' | 'ontology-changes' | 'schema-changes' | 'query-approvals' | 'mcp-events' | 'alerts';
 
-const TAB_CONFIG: { key: AuditTab; label: string; icon: typeof Database }[] = [
-  { key: 'query-executions', label: 'Query Executions', icon: Database },
-  { key: 'ontology-changes', label: 'Ontology Changes', icon: FileEdit },
-  { key: 'schema-changes', label: 'Schema Changes', icon: GitPullRequest },
-  { key: 'query-approvals', label: 'Query Approvals', icon: Shield },
-  { key: 'mcp-events', label: 'MCP Events', icon: Terminal },
-  { key: 'alerts', label: 'Alerts', icon: Bell },
-];
+// Each summary card maps to a tab (and optionally a filter preset)
+type SummaryCardAction =
+  | { tab: AuditTab; filter?: undefined }
+  | { tab: 'query-executions'; filter: 'failed' };
 
 // Time range presets
 type TimeRange = '24h' | '7d' | '30d' | 'all';
@@ -89,55 +85,90 @@ function truncateSQL(sql: string, maxLen = 80): string {
 // Audit Summary Header
 // ============================================================================
 
-function AuditSummaryHeader({ summary }: { summary: AuditSummary | null }) {
+function AuditSummaryHeader({
+  summary,
+  activeTab,
+  activeFilter,
+  onCardClick,
+}: {
+  summary: AuditSummary | null;
+  activeTab: AuditTab;
+  activeFilter?: 'failed';
+  onCardClick: (action: SummaryCardAction) => void;
+}) {
   if (!summary) return null;
 
   const totalOpenAlerts = summary.open_alerts_critical + summary.open_alerts_warning + summary.open_alerts_info;
 
-  const stats = [
-    { label: 'Query Executions (30d)', value: summary.total_query_executions, icon: Database },
-    { label: 'Failed Queries', value: summary.failed_query_count, icon: XCircle, warn: summary.failed_query_count > 0 },
-    { label: 'Destructive Queries', value: summary.destructive_query_count, icon: AlertTriangle, warn: summary.destructive_query_count > 0 },
-    { label: 'Ontology Changes', value: summary.ontology_changes_count, icon: FileEdit },
-    { label: 'Pending Schema', value: summary.pending_schema_changes, icon: GitPullRequest, warn: summary.pending_schema_changes > 0 },
-    { label: 'Pending Approvals', value: summary.pending_query_approvals, icon: Shield, warn: summary.pending_query_approvals > 0 },
-    { label: 'Open Alerts', value: totalOpenAlerts, icon: Bell, warn: summary.open_alerts_critical > 0, critical: summary.open_alerts_critical > 0 },
+  const stats: {
+    label: string;
+    value: number;
+    icon: typeof Database;
+    warn?: boolean;
+    critical?: boolean;
+    action: SummaryCardAction;
+  }[] = [
+    { label: 'Query Executions (30d)', value: summary.total_query_executions, icon: Database, action: { tab: 'query-executions' } },
+    { label: 'Failed Queries', value: summary.failed_query_count, icon: XCircle, warn: summary.failed_query_count > 0, action: { tab: 'query-executions', filter: 'failed' } },
+    { label: 'Ontology Changes', value: summary.ontology_changes_count, icon: FileEdit, action: { tab: 'ontology-changes' } },
+    { label: 'Pending Schema', value: summary.pending_schema_changes, icon: GitPullRequest, warn: summary.pending_schema_changes > 0, action: { tab: 'schema-changes' } },
+    { label: 'Pending Approvals', value: summary.pending_query_approvals, icon: Shield, warn: summary.pending_query_approvals > 0, action: { tab: 'query-approvals' } },
+    { label: 'MCP Events', value: summary.mcp_events_count, icon: Terminal, action: { tab: 'mcp-events' } },
+    { label: 'Open Alerts', value: totalOpenAlerts, icon: Bell, warn: summary.open_alerts_critical > 0, critical: summary.open_alerts_critical > 0, action: { tab: 'alerts' } },
   ];
+
+  const isCardActive = (action: SummaryCardAction): boolean => {
+    if (action.tab !== activeTab) return false;
+    // For query-executions tab, distinguish between "all" and "failed" cards
+    if (action.tab === 'query-executions') {
+      return (action.filter ?? undefined) === activeFilter;
+    }
+    return true;
+  };
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7 mb-6">
-      {stats.map(({ label, value, icon: Icon, warn, critical }) => (
-        <Card key={label}>
-          <CardContent className="p-3">
-            <div className="flex items-center gap-2 mb-1">
-              <Icon className={`h-4 w-4 ${critical ? 'text-red-500' : warn ? 'text-amber-500' : 'text-text-tertiary'}`} />
-              <span className="text-xs text-text-secondary truncate">{label}</span>
-            </div>
-            <p className={`text-xl font-semibold ${critical ? 'text-red-600 dark:text-red-400' : warn ? 'text-amber-600 dark:text-amber-400' : 'text-text-primary'}`}>
-              {value.toLocaleString()}
-            </p>
-            {label === 'Open Alerts' && totalOpenAlerts > 0 && (
-              <div className="flex gap-1 mt-1">
-                {summary.open_alerts_critical > 0 && (
-                  <span className="text-[10px] px-1 py-0.5 rounded bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300">
-                    {summary.open_alerts_critical} critical
-                  </span>
-                )}
-                {summary.open_alerts_warning > 0 && (
-                  <span className="text-[10px] px-1 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
-                    {summary.open_alerts_warning} warn
-                  </span>
-                )}
-                {summary.open_alerts_info > 0 && (
-                  <span className="text-[10px] px-1 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-                    {summary.open_alerts_info} info
-                  </span>
-                )}
+      {stats.map(({ label, value, icon: Icon, warn, critical, action }) => {
+        const isActive = isCardActive(action);
+        return (
+          <Card
+            key={label}
+            className={`cursor-pointer transition-all hover:shadow-md ${
+              isActive ? 'ring-2 ring-brand-purple shadow-md' : ''
+            }`}
+            onClick={() => onCardClick(action)}
+          >
+            <CardContent className="p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <Icon className={`h-4 w-4 ${critical ? 'text-red-500' : warn ? 'text-amber-500' : 'text-text-tertiary'}`} />
+                <span className="text-xs text-text-secondary truncate">{label}</span>
               </div>
-            )}
-          </CardContent>
-        </Card>
-      ))}
+              <p className={`text-xl font-semibold ${critical ? 'text-red-600 dark:text-red-400' : warn ? 'text-amber-600 dark:text-amber-400' : 'text-text-primary'}`}>
+                {value.toLocaleString()}
+              </p>
+              {label === 'Open Alerts' && totalOpenAlerts > 0 && (
+                <div className="flex gap-1 mt-1">
+                  {summary.open_alerts_critical > 0 && (
+                    <span className="text-[10px] px-1 py-0.5 rounded bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300">
+                      {summary.open_alerts_critical} critical
+                    </span>
+                  )}
+                  {summary.open_alerts_warning > 0 && (
+                    <span className="text-[10px] px-1 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                      {summary.open_alerts_warning} warn
+                    </span>
+                  )}
+                  {summary.open_alerts_info > 0 && (
+                    <span className="text-[10px] px-1 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                      {summary.open_alerts_info} info
+                    </span>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })}
     </div>
   );
 }
@@ -222,12 +253,12 @@ function TimeRangeFilter({ value, onChange }: { value: TimeRange; onChange: (v: 
 // Query Executions Tab
 // ============================================================================
 
-function QueryExecutionsTab({ projectId }: { projectId: string }) {
+function QueryExecutionsTab({ projectId, initialFilter }: { projectId: string; initialFilter?: 'failed' }) {
   const [data, setData] = useState<PaginatedResponse<QueryExecution> | null>(null);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<TimeRange>('7d');
   const [sourceFilter, setSourceFilter] = useState('');
-  const [successFilter, setSuccessFilter] = useState('');
+  const [successFilter, setSuccessFilter] = useState(initialFilter === 'failed' ? 'false' : '');
   const [destructiveFilter, setDestructiveFilter] = useState(false);
   const [userInput, setUserInput] = useState('');
   const [userFilter, setUserFilter] = useState('');
@@ -1388,6 +1419,7 @@ const AuditPage = () => {
   const { toast } = useToast();
 
   const [activeTab, setActiveTab] = useState<AuditTab>('query-executions');
+  const [queryFilter, setQueryFilter] = useState<'failed' | undefined>(undefined);
   const [summary, setSummary] = useState<AuditSummary | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -1414,6 +1446,14 @@ const AuditPage = () => {
       description: 'Audit data is being refreshed.',
     });
   }, [toast]);
+
+  const handleCardClick = useCallback((action: SummaryCardAction) => {
+    setActiveTab(action.tab);
+    // When clicking "Failed Queries", pre-set the filter; otherwise clear it
+    setQueryFilter(action.filter);
+    // Force re-mount of the tab component so initialFilter takes effect
+    setRefreshKey(k => k + 1);
+  }, []);
 
   if (!pid) return null;
 
@@ -1446,33 +1486,13 @@ const AuditPage = () => {
         </div>
       </div>
 
-      {/* Summary */}
-      <AuditSummaryHeader summary={summary} />
-
-      {/* Tabs */}
-      <div className="border-b border-border-light mb-6">
-        <nav className="flex gap-6" aria-label="Audit tabs">
-          {TAB_CONFIG.map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              onClick={() => setActiveTab(key)}
-              className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${
-                activeTab === key
-                  ? 'border-brand-purple text-brand-purple'
-                  : 'border-transparent text-text-secondary hover:text-text-primary hover:border-border-medium'
-              }`}
-            >
-              <Icon className="h-4 w-4" />
-              {label}
-            </button>
-          ))}
-        </nav>
-      </div>
+      {/* Summary cards (also serve as tab navigation) */}
+      <AuditSummaryHeader summary={summary} activeTab={activeTab} {...(queryFilter ? { activeFilter: queryFilter } : {})} onCardClick={handleCardClick} />
 
       {/* Tab Content */}
       <Card>
         <CardContent className="p-6">
-          {activeTab === 'query-executions' && <QueryExecutionsTab key={refreshKey} projectId={pid} />}
+          {activeTab === 'query-executions' && <QueryExecutionsTab key={refreshKey} projectId={pid} {...(queryFilter ? { initialFilter: queryFilter } : {})} />}
           {activeTab === 'ontology-changes' && <OntologyChangesTab key={refreshKey} projectId={pid} />}
           {activeTab === 'schema-changes' && <SchemaChangesTab key={refreshKey} projectId={pid} />}
           {activeTab === 'query-approvals' && <QueryApprovalsTab key={refreshKey} projectId={pid} />}
