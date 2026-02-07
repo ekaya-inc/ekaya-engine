@@ -20,12 +20,18 @@ type RetentionService interface {
 	// PruneProject removes records older than the retention period for a project.
 	// Returns total number of records deleted across all tables.
 	PruneProject(ctx context.Context, projectID uuid.UUID, retentionDays int) (int64, error)
+
+	// RunScheduler starts a background goroutine that prunes all projects on the given interval.
+	// It runs immediately on startup, then repeats every interval.
+	// Cancel the context to stop the scheduler.
+	RunScheduler(ctx context.Context, interval time.Duration)
 }
 
 type retentionService struct {
 	db               *database.DB
 	queryHistoryRepo repositories.QueryHistoryRepository
 	mcpAuditRepo     repositories.MCPAuditRepository
+	mcpConfigRepo    repositories.MCPConfigRepository
 	logger           *zap.Logger
 }
 
@@ -33,12 +39,14 @@ func NewRetentionService(
 	db *database.DB,
 	queryHistoryRepo repositories.QueryHistoryRepository,
 	mcpAuditRepo repositories.MCPAuditRepository,
+	mcpConfigRepo repositories.MCPConfigRepository,
 	logger *zap.Logger,
 ) RetentionService {
 	return &retentionService{
 		db:               db,
 		queryHistoryRepo: queryHistoryRepo,
 		mcpAuditRepo:     mcpAuditRepo,
+		mcpConfigRepo:    mcpConfigRepo,
 		logger:           logger.Named("retention-service"),
 	}
 }
@@ -103,6 +111,87 @@ func (s *retentionService) PruneProject(ctx context.Context, projectID uuid.UUID
 	}
 
 	return totalDeleted, nil
+}
+
+// RunScheduler starts a background loop that prunes old data for all projects.
+func (s *retentionService) RunScheduler(ctx context.Context, interval time.Duration) {
+	go func() {
+		s.logger.Info("Retention scheduler started",
+			zap.Duration("interval", interval),
+			zap.Int("default_retention_days", DefaultRetentionDays))
+
+		// Run immediately on startup, then at each interval
+		s.pruneAllProjects(ctx)
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				s.logger.Info("Retention scheduler stopped")
+				return
+			case <-ticker.C:
+				s.pruneAllProjects(ctx)
+			}
+		}
+	}()
+}
+
+// pruneAllProjects iterates all projects and prunes each one using its configured retention period.
+func (s *retentionService) pruneAllProjects(ctx context.Context) {
+	// List all project IDs using a connection without tenant scope (so RLS returns all rows)
+	scope, err := s.db.WithoutTenant(ctx)
+	if err != nil {
+		s.logger.Error("Retention scheduler: failed to acquire connection", zap.Error(err))
+		return
+	}
+
+	rows, err := scope.Conn.Query(ctx, `SELECT project_id, audit_retention_days FROM engine_mcp_config`)
+	if err != nil {
+		scope.Close()
+		s.logger.Error("Retention scheduler: failed to list projects", zap.Error(err))
+		return
+	}
+
+	type projectRetention struct {
+		ID            uuid.UUID
+		RetentionDays *int
+	}
+	var projects []projectRetention
+	for rows.Next() {
+		var pr projectRetention
+		if err := rows.Scan(&pr.ID, &pr.RetentionDays); err != nil {
+			s.logger.Error("Retention scheduler: failed to scan project", zap.Error(err))
+			continue
+		}
+		projects = append(projects, pr)
+	}
+	rows.Close()
+	scope.Close()
+
+	if len(projects) == 0 {
+		return
+	}
+
+	s.logger.Debug("Retention scheduler: pruning projects", zap.Int("count", len(projects)))
+
+	for _, pr := range projects {
+		if ctx.Err() != nil {
+			return
+		}
+
+		days := DefaultRetentionDays
+		if pr.RetentionDays != nil && *pr.RetentionDays > 0 {
+			days = *pr.RetentionDays
+		}
+
+		if _, err := s.PruneProject(ctx, pr.ID, days); err != nil {
+			s.logger.Error("Retention scheduler: failed to prune project",
+				zap.String("project_id", pr.ID.String()),
+				zap.Error(err))
+		}
+	}
 }
 
 func (s *retentionService) pruneMCPAuditLog(ctx context.Context, projectID uuid.UUID, cutoff time.Time) (int64, error) {

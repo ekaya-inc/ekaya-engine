@@ -461,6 +461,15 @@ func main() {
 	auditPageHandler := handlers.NewAuditPageHandler(auditPageService, logger)
 	auditPageHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
+	// Create retention service and start scheduler for auto-pruning old audit/history data
+	retentionService := services.NewRetentionService(db, queryHistoryRepo, mcpAuditRepo, mcpConfigRepo, logger)
+	retentionCtx, retentionCancel := context.WithCancel(ctx)
+	retentionService.RunScheduler(retentionCtx, 24*time.Hour)
+
+	// Register retention config handler (protected) - audit retention configuration
+	retentionHandler := handlers.NewRetentionHandler(mcpConfigRepo, logger)
+	retentionHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
 	// Register glossary MCP tools (uses glossaryService for get_glossary tool)
 	glossaryToolDeps := &mcptools.GlossaryToolDeps{
 		BaseMCPToolDeps: mcptools.BaseMCPToolDeps{
@@ -643,12 +652,15 @@ func main() {
 			logger.Error("HTTP server shutdown error", zap.Error(err))
 		}
 
-		// 2. Shutdown DAG service (cancels DAGs, releases ownership)
+		// 2. Stop retention scheduler
+		retentionCancel()
+
+		// 3. Shutdown DAG service (cancels DAGs, releases ownership)
 		if err := ontologyDAGService.Shutdown(shutdownCtx); err != nil {
 			logger.Error("DAG service shutdown error", zap.Error(err))
 		}
 
-		// 3. Close conversation recorder (drain pending writes)
+		// 4. Close conversation recorder (drain pending writes)
 		convRecorder.Close()
 
 		close(shutdownComplete)

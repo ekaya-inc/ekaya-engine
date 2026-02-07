@@ -354,6 +354,8 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			}
 
 			// Log successful execution to history
+			modRowCount := modifyResult.RowCount
+			modDurationMs := int(executionTimeMs)
 			go logQueryExecution(tenantCtx, deps, QueryExecutionLog{
 				ProjectID:       projectID,
 				QueryID:         queryID,
@@ -361,12 +363,25 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 				SQL:             query.SQLQuery,
 				SQLType:         string(sqlType),
 				Params:          params,
-				RowCount:        modifyResult.RowCount,
+				RowCount:        modRowCount,
 				RowsAffected:    modifyResult.RowsAffected,
-				ExecutionTimeMs: int(executionTimeMs),
+				ExecutionTimeMs: modDurationMs,
 				IsModifying:     true,
 				Success:         true,
 			})
+
+			// Record to query learning history (async, best-effort)
+			if deps.QueryHistoryService != nil {
+				go logQueryHistory(tenantCtx, deps.GetDB(), deps.GetLogger(), deps.QueryHistoryService, &models.QueryHistoryEntry{
+					ProjectID:           projectID,
+					UserID:              auth.GetUserIDFromContext(tenantCtx),
+					NaturalLanguage:     query.NaturalLanguagePrompt,
+					SQL:                 query.SQLQuery,
+					ExecutedAt:          startTime,
+					ExecutionDurationMs: &modDurationMs,
+					RowCount:            &modRowCount,
+				})
+			}
 
 			// Format response for modifying query
 			response := struct {
@@ -404,6 +419,8 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		}
 
 		// Log execution to history (best effort - don't fail request if logging fails)
+		rowCount := len(result.Rows)
+		durationMs := int(executionTimeMs)
 		go logQueryExecution(tenantCtx, deps, QueryExecutionLog{
 			ProjectID:       projectID,
 			QueryID:         queryID,
@@ -411,12 +428,25 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			SQL:             query.SQLQuery,
 			SQLType:         string(sqlType),
 			Params:          params,
-			RowCount:        len(result.Rows),
+			RowCount:        rowCount,
 			RowsAffected:    0,
-			ExecutionTimeMs: int(executionTimeMs),
+			ExecutionTimeMs: durationMs,
 			IsModifying:     false,
 			Success:         true,
 		})
+
+		// Record to query learning history (async, best-effort)
+		if deps.QueryHistoryService != nil {
+			go logQueryHistory(tenantCtx, deps.GetDB(), deps.GetLogger(), deps.QueryHistoryService, &models.QueryHistoryEntry{
+				ProjectID:           projectID,
+				UserID:              auth.GetUserIDFromContext(tenantCtx),
+				NaturalLanguage:     query.NaturalLanguagePrompt,
+				SQL:                 query.SQLQuery,
+				ExecutedAt:          startTime,
+				ExecutionDurationMs: &durationMs,
+				RowCount:            &rowCount,
+			})
+		}
 
 		// Format response
 		truncated := len(result.Rows) > limit

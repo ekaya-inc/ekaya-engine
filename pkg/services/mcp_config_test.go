@@ -46,6 +46,20 @@ func (m *mockMCPConfigRepository) SetAgentAPIKey(ctx context.Context, projectID 
 	return m.err
 }
 
+func (m *mockMCPConfigRepository) GetAuditRetentionDays(_ context.Context, _ uuid.UUID) (*int, error) {
+	if m.config != nil {
+		return m.config.AuditRetentionDays, m.err
+	}
+	return nil, m.err
+}
+
+func (m *mockMCPConfigRepository) SetAuditRetentionDays(_ context.Context, _ uuid.UUID, days *int) error {
+	if m.config != nil {
+		m.config.AuditRetentionDays = days
+	}
+	return m.err
+}
+
 type mockQueryServiceForMCP struct {
 	hasEnabledQueries bool
 	hasEnabledErr     error

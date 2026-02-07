@@ -474,14 +474,14 @@ MCP Annotations:
 - idempotent_hint: true
 ```
 
-### 3.5 Privacy & Security
+### 3.5 Privacy & Security ✅
 
 - Query history is scoped by `project_id` AND `user_id` — users only see their own history
 - Admins see all users' query executions via the audit UI (Phase 1), not via MCP tools
 - Auto-prune records older than 90 days (admin-configurable)
 - SQL queries may contain literals (dates, IDs, etc.) — stored as-is for now
 
-### 3.6 Retention
+### 3.6 Retention ✅
 
 All audit and history tables share the same retention policy:
 - Default: 90 days
