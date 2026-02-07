@@ -492,7 +492,9 @@ All audit and history tables share the same retention policy:
 
 ## Phase 4: Alerts & Security
 
-### 4.1 New Table: `engine_mcp_audit_alerts`
+### 4.1 [x] Backend: Alert table, repository, service, and API endpoints
+
+Create the database migration for `engine_mcp_audit_alerts` table in `pkg/repositories/migrations/`. The table schema:
 
 ```sql
 CREATE TABLE engine_mcp_audit_alerts (
@@ -517,27 +519,94 @@ CREATE TABLE engine_mcp_audit_alerts (
 );
 ```
 
-### 4.2 Alert Types
+Add RLS policy scoped to `app.current_project_id` consistent with other engine tables.
 
-| Alert Type | Trigger | Severity |
-|------------|---------|----------|
-| `sql_injection_detected` | Injection pattern found in input | Critical |
-| `unusual_query_volume` | User exceeds normal query rate by 5x | Warning |
-| `sensitive_table_access` | Query touches flagged sensitive table | Warning |
-| `large_data_export` | Query returns > 10K rows | Info |
-| `after_hours_access` | Access outside business hours | Info |
-| `new_user_high_volume` | New user runs many queries quickly | Warning |
-| `repeated_errors` | Same error > 5 times in 10 min | Warning |
+Create `pkg/repositories/alert_repository.go` with methods:
+- `ListAlerts(ctx, projectID, filters)` — paginated list with filters for status (open/resolved/all) and severity
+- `GetAlertByID(ctx, projectID, alertID)` — single alert lookup
+- `CreateAlert(ctx, alert)` — insert new alert
+- `ResolveAlert(ctx, projectID, alertID, resolvedBy, resolution, notes)` — update status to resolved with resolver info and timestamp
 
-### 4.3 Alert API Endpoints
+Create `pkg/services/alert_service.go` with interface and implementation wrapping the repository. The service should validate inputs (e.g., resolution must be "dismissed" or "resolved", severity must be valid enum value).
 
-#### `GET /api/projects/{pid}/audit/alerts`
-Query params: `status` (open, resolved, all), `severity`
+Create `pkg/handlers/alert_handler.go` with two endpoints:
+- `GET /api/projects/{pid}/audit/alerts` — query params: `status` (open, resolved, all — default "open"), `severity`, `limit`, `offset`. Returns paginated alerts sorted by created_at DESC.
+- `POST /api/projects/{pid}/audit/alerts/{alert_id}/resolve` — JSON body: `{ "resolution": "dismissed|resolved", "notes": "..." }`. Sets resolved_by from auth context, resolved_at to now, status to the resolution value.
 
-#### `POST /api/projects/{pid}/audit/alerts/{alert_id}/resolve`
-Body: `{ "resolution": "dismissed|resolved", "notes": "..." }`
+Register routes in `pkg/server/routes.go` under the existing audit route group. Wire up dependency injection in the server setup following the existing pattern (see how audit_handler, audit_service, audit_repository are wired).
 
-### 4.4 Alert Configuration UI
+Add alert model types to `pkg/models/` (or in the alert_service/repository files if that matches existing patterns — check how audit models are defined).
 
-Project settings page for configuring alert thresholds, which alerts are enabled, and email notification recipients.
+### 4.2 [ ] Backend: Alert trigger detection in audit middleware
+
+Implement alert trigger logic that analyzes MCP audit events and creates alerts when conditions are met. This builds on the existing audit middleware from Phase 2 (`pkg/mcp/` area — check where the audit middleware and `engine_mcp_audit_log` recording lives).
+
+Create `pkg/services/alert_trigger_service.go` (or add to existing alert service) with a method `EvaluateEvent(ctx, auditEntry)` that checks each incoming MCP audit event against alert rules. The alert types and triggers:
+
+| Alert Type | Trigger Logic | Severity |
+|---|---|---|
+| `sql_injection_detected` | Check `security_flags` array on audit entry contains injection-related flags, or `security_level` is "critical" | Critical |
+| `unusual_query_volume` | Count user's queries in last hour; if > 5x their rolling average (or > 50 if no baseline), trigger | Warning |
+| `sensitive_table_access` | Check if query touches tables flagged as sensitive in ontology table metadata | Warning |
+| `large_data_export` | Check if query result `row_count` > 10,000 | Info |
+| `after_hours_access` | Check if event timestamp is outside 6am-10pm in project timezone (default UTC) | Info |
+| `new_user_high_volume` | User's first query was < 24h ago AND they've run > 20 queries | Warning |
+| `repeated_errors` | Same error message appears > 5 times from same user in last 10 minutes | Warning |
+
+Call `EvaluateEvent` from the audit middleware's async recording path (after the audit log entry is written). Alert creation should not block MCP responses — run in the same goroutine that records the audit entry (it's already async).
+
+Each alert trigger should be idempotent within a reasonable window — don't create duplicate alerts for the same condition within 1 hour. Check for existing open alerts of the same type + affected_user before creating a new one.
+
+Severity levels per alert type are defined in the table above. Title should be human-readable (e.g., "SQL injection pattern detected", "Unusual query volume from user@example.com").
+
+### 4.3 [ ] Frontend: Alerts tab on Audit page and alert management
+
+Add an "Alerts" tab to the existing audit page (`ui/src/pages/AuditPage.tsx`). This tab displays alerts from `GET /api/projects/{pid}/audit/alerts`.
+
+**TypeScript types** — add to `ui/src/types/audit.ts`:
+- `AuditAlert` type with fields matching the backend model (id, project_id, alert_type, severity, title, description, affected_user_id, related_audit_ids, status, resolved_by, resolved_at, resolution_notes, created_at, updated_at)
+- `ResolveAlertRequest` type: `{ resolution: 'dismissed' | 'resolved'; notes?: string }`
+
+**API methods** — add to `ui/src/services/engineApi.ts`:
+- `getAuditAlerts(projectId, params)` — GET with status/severity/limit/offset params
+- `resolveAuditAlert(projectId, alertId, body)` — POST to resolve endpoint
+
+**Alerts tab columns:** Time, Alert Type (with badge styling by severity — critical=red, warning=yellow, info=blue), Title, Affected User, Status, Resolved By, Resolution Notes (truncated).
+
+**Filters:** Status dropdown (Open, Resolved, All — default Open), Severity dropdown (All, Critical, Warning, Info).
+
+**Row actions:** Each open alert row should have a "Resolve" button that opens a small inline form or modal with: resolution type (dismiss/resolve radio), notes text field, and confirm button. On success, refresh the list.
+
+**Summary integration:** Update the audit summary header (from Phase 1) to include open alert counts by severity. Add to the existing `GET /api/projects/{pid}/audit/summary` endpoint — return `open_alerts_critical`, `open_alerts_warning`, `open_alerts_info` counts. Update the summary UI component accordingly.
+
+### 4.4 [ ] Alert configuration UI on project settings page
+
+Add an alert configuration section to the project settings page. Check the existing project settings page location (likely `ui/src/pages/` — search for project settings or MCP server config page referenced in plan Phase 2.5 at `/projects/{pid}/mcp-server`).
+
+**Backend:** Add a `alert_config` JSONB column to `engine_projects` table (or create a new `engine_project_alert_config` table if project settings are stored separately — check existing pattern). The config schema:
+
+```json
+{
+  "alerts_enabled": true,
+  "alert_settings": {
+    "sql_injection_detected": { "enabled": true, "severity": "critical" },
+    "unusual_query_volume": { "enabled": true, "severity": "warning", "threshold_multiplier": 5 },
+    "sensitive_table_access": { "enabled": true, "severity": "warning" },
+    "large_data_export": { "enabled": true, "severity": "info", "row_threshold": 10000 },
+    "after_hours_access": { "enabled": false, "severity": "info", "business_hours_start": "06:00", "business_hours_end": "22:00", "timezone": "UTC" },
+    "new_user_high_volume": { "enabled": true, "severity": "warning", "query_threshold": 20 },
+    "repeated_errors": { "enabled": true, "severity": "warning", "error_count": 5, "window_minutes": 10 }
+  }
+}
+```
+
+**Backend endpoints:**
+- `GET /api/projects/{pid}/audit/alert-config` — returns current config (defaults if none set)
+- `PUT /api/projects/{pid}/audit/alert-config` — updates config
+
+Add handler method to `pkg/handlers/alert_handler.go`, service method to `pkg/services/alert_service.go`, and repository method to store/retrieve config.
+
+**Frontend:** Create an Alert Configuration section showing each alert type as a card/row with: toggle (enabled/disabled), severity dropdown, and type-specific threshold inputs (e.g., row count for large_data_export, multiplier for unusual_query_volume, time range for after_hours_access). Include a master "Alerts Enabled" toggle at the top. Save button persists all changes via PUT endpoint.
+
+**Integration with trigger service (subtask 4.2):** The alert trigger service from subtask 4.2 must read this config before evaluating triggers — skip disabled alerts, use configured thresholds instead of hardcoded values. If subtask 4.2 is implemented first with hardcoded values, this subtask should update it to read from config.
 

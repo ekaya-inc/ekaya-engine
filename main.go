@@ -461,6 +461,12 @@ func main() {
 	auditPageHandler := handlers.NewAuditPageHandler(auditPageService, logger)
 	auditPageHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
+	// Register alert handler (protected) - audit alerts management
+	alertRepo := repositories.NewAlertRepository()
+	alertService := services.NewAlertService(alertRepo, logger)
+	alertHandler := handlers.NewAlertHandler(alertService, logger)
+	alertHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
 	// Create retention service and start scheduler for auto-pruning old audit/history data
 	retentionService := services.NewRetentionService(db, queryHistoryRepo, mcpAuditRepo, mcpConfigRepo, logger)
 	retentionCtx, retentionCancel := context.WithCancel(ctx)
