@@ -68,6 +68,7 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "suggest_approved_query", Description: "Suggest a reusable parameterized query for approval", ToolGroup: ToolGroupUser},
 	{Name: "suggest_query_update", Description: "Suggest an update to an existing pre-approved query for review", ToolGroup: ToolGroupUser},
 	{Name: "get_query_history", Description: "Get recent query execution history to avoid rewriting queries", ToolGroup: ToolGroupUser},
+	{Name: "record_query_feedback", Description: "Record whether a generated query was helpful", ToolGroup: ToolGroupUser},
 
 	// Dev query tools (developer group) - direct query management for administrators
 	{Name: "list_query_suggestions", Description: "List pending query suggestions awaiting review", ToolGroup: ToolGroupDeveloper},

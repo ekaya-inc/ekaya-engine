@@ -64,8 +64,10 @@ const setupMocks = (options: {
   hasDatasource?: boolean;
   hasOntology?: boolean;
   hasMCPConfig?: boolean;
+  hasSelectedTables?: boolean;
+  hasAIConfig?: boolean;
 } = {}) => {
-  const { hasDatasource = true, hasOntology = false, hasMCPConfig = true } = options;
+  const { hasDatasource = true, hasOntology = false, hasMCPConfig = true, hasSelectedTables = false, hasAIConfig = false } = options;
 
   vi.mocked(engineApi.listDataSources).mockResolvedValue({
     success: true,
@@ -83,13 +85,21 @@ const setupMocks = (options: {
     });
   }
 
-  vi.mocked(engineApi.getAIConfig).mockResolvedValue({
-    success: true,
-  });
+  vi.mocked(engineApi.getAIConfig).mockResolvedValue(
+    hasAIConfig
+      ? { success: true, data: { project_id: 'proj-1', config_type: 'anthropic' } }
+      : { success: true },
+  );
 
   vi.mocked(engineApi.getSchema).mockResolvedValue({
     success: true,
-    data: { tables: [], total_tables: 0, relationships: [] },
+    data: {
+      tables: hasSelectedTables
+        ? [{ table_name: 'users', schema_name: 'public', is_selected: true, columns: [] }]
+        : [],
+      total_tables: hasSelectedTables ? 1 : 0,
+      relationships: [],
+    },
   });
 
   if (hasOntology) {
@@ -103,6 +113,16 @@ const setupMocks = (options: {
       data: null,
     });
   }
+};
+
+const setupAllCompleteMocks = () => {
+  setupMocks({
+    hasDatasource: true,
+    hasSelectedTables: true,
+    hasAIConfig: true,
+    hasOntology: true,
+    hasMCPConfig: true,
+  });
 };
 
 const renderAIDataLiaisonPage = async () => {
@@ -203,6 +223,28 @@ describe('AIDataLiaisonPage', () => {
       await renderAIDataLiaisonPage();
       expect(screen.getByText('For Data Engineers (Developer Tools)')).toBeInTheDocument();
       expect(screen.getByText('list_query_suggestions')).toBeInTheDocument();
+    });
+  });
+
+  describe('Auditing Tile', () => {
+    it('shows auditing card when all checklist items are complete', async () => {
+      setupAllCompleteMocks();
+      await renderAIDataLiaisonPage();
+      expect(screen.getByText('Auditing')).toBeInTheDocument();
+      expect(screen.getByText(/Review query executions/)).toBeInTheDocument();
+    });
+
+    it('hides auditing card when checklist is incomplete', async () => {
+      setupMocks({ hasDatasource: true, hasOntology: false });
+      await renderAIDataLiaisonPage();
+      expect(screen.queryByText('Auditing')).not.toBeInTheDocument();
+    });
+
+    it('renders link to audit page', async () => {
+      setupAllCompleteMocks();
+      await renderAIDataLiaisonPage();
+      const auditLink = screen.getByRole('link', { name: /view audit log/i });
+      expect(auditLink).toHaveAttribute('href', '/projects/proj-1/audit');
     });
   });
 

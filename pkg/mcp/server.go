@@ -20,12 +20,20 @@ type ServerOption func(*serverOptions)
 
 type serverOptions struct {
 	toolFilter ToolFilterFunc
+	hooks      *server.Hooks
 }
 
 // WithToolFilter sets a function to filter tools based on context.
 func WithToolFilter(filter ToolFilterFunc) ServerOption {
 	return func(opts *serverOptions) {
 		opts.toolFilter = filter
+	}
+}
+
+// WithHooks sets hooks for MCP server events (tool calls, errors, etc.).
+func WithHooks(hooks *server.Hooks) ServerOption {
+	return func(opts *serverOptions) {
+		opts.hooks = hooks
 	}
 }
 
@@ -43,6 +51,9 @@ func NewServer(name, version string, logger *zap.Logger, opts ...ServerOption) *
 	}
 	if options.toolFilter != nil {
 		serverOpts = append(serverOpts, server.WithToolFilter(options.toolFilter))
+	}
+	if options.hooks != nil {
+		serverOpts = append(serverOpts, server.WithHooks(options.hooks))
 	}
 
 	mcpServer := server.NewMCPServer(

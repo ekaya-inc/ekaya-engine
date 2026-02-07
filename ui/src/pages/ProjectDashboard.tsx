@@ -12,6 +12,7 @@ import {
   Plus,
   Search,
   Server,
+  Shield,
   Sparkles,
 } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
@@ -97,56 +98,72 @@ const ProjectDashboard = () => {
     },
   ];
 
-  const intelligenceTiles: Tile[] = [
-    {
-      title: 'Ontology Extraction',
-      description: 'Run AI analysis to understand your schema and data semantics.',
-      icon: Layers,
-      path: `/projects/${pid}/ontology`,
-      disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
-      color: 'purple',
-    },
-    {
-      title: 'Ontology Questions',
-      description: 'Review and answer questions the AI has about your data.',
-      icon: MessageCircleQuestion,
-      path: `/projects/${pid}/ontology-questions`,
-      disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
-      color: 'amber',
-    },
-    {
-      title: 'Project Knowledge',
-      description: 'Domain facts and business rules that guide AI understanding.',
-      icon: Lightbulb,
-      path: `/projects/${pid}/project-knowledge`,
-      disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
-      color: 'indigo',
-    },
-    {
-      title: 'Enrichment',
-      description: 'Review and refine AI-generated metadata for tables and columns.',
-      icon: Sparkles,
-      path: `/projects/${pid}/enrichment`,
-      disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
-      color: 'orange',
-    },
-    {
-      title: 'Relationships',
-      description: 'View discovered foreign key and entity relationships.',
-      icon: Network,
-      path: `/projects/${pid}/relationships`,
-      disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
-      color: 'indigo',
-    },
-    {
-      title: 'Glossary',
-      description: 'Business terms and their SQL definitions for consistent reporting.',
-      icon: BookOpen,
-      path: `/projects/${pid}/glossary`,
-      disabled: !isConnected || !hasSelectedTables || !activeAIConfig,
-      color: 'cyan',
-    },
-  ];
+  const intelligenceTiles: Tile[] = useMemo(() => {
+    const tiles: Tile[] = [
+      {
+        title: 'Ontology Extraction',
+        description: 'Run AI analysis to understand your schema and data semantics.',
+        icon: Layers,
+        path: `/projects/${pid}/ontology`,
+        disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
+        color: 'purple',
+      },
+      {
+        title: 'Ontology Questions',
+        description: 'Review and answer questions the AI has about your data.',
+        icon: MessageCircleQuestion,
+        path: `/projects/${pid}/ontology-questions`,
+        disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
+        color: 'amber',
+      },
+      {
+        title: 'Project Knowledge',
+        description: 'Domain facts and business rules that guide AI understanding.',
+        icon: Lightbulb,
+        path: `/projects/${pid}/project-knowledge`,
+        disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
+        color: 'indigo',
+      },
+      {
+        title: 'Enrichment',
+        description: 'Review and refine AI-generated metadata for tables and columns.',
+        icon: Sparkles,
+        path: `/projects/${pid}/enrichment`,
+        disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
+        color: 'orange',
+      },
+      {
+        title: 'Relationships',
+        description: 'View discovered foreign key and entity relationships.',
+        icon: Network,
+        path: `/projects/${pid}/relationships`,
+        disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
+        color: 'indigo',
+      },
+      {
+        title: 'Glossary',
+        description: 'Business terms and their SQL definitions for consistent reporting.',
+        icon: BookOpen,
+        path: `/projects/${pid}/glossary`,
+        disabled: !isConnected || !hasSelectedTables || !activeAIConfig,
+        color: 'cyan',
+      },
+    ];
+
+    // Add Audit Log tile if AI Data Liaison is installed
+    if (installedApps.some((app) => app.app_id === APP_ID_AI_DATA_LIAISON)) {
+      tiles.push({
+        title: 'Audit Log',
+        description: 'Monitor query activity, security alerts, and governance events.',
+        icon: Shield,
+        path: `/projects/${pid}/audit`,
+        disabled: false,
+        color: 'green',
+      });
+    }
+
+    return tiles;
+  }, [pid, isConnected, hasSelectedTables, activeAIConfig, installedApps]);
 
   const applicationTiles: Tile[] = useMemo(() => {
     const tiles: Tile[] = [

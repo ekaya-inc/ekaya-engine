@@ -12,6 +12,9 @@ import type {
   AITestResult,
   ApiResponse,
   ApproveQueryResponse,
+  AlertConfig,
+  AuditAlert,
+  AuditSummary,
   ConnectionDetails,
   CreateDatasourceResponse,
   CreateGlossaryTermRequest,
@@ -36,15 +39,22 @@ import type {
   ListDatasourcesResponse,
   ListPendingQueriesResponse,
   ListQueriesResponse,
+  MCPAuditEvent,
   MCPConfigResponse,
+  OntologyChange,
+  PaginatedResponse,
   ParseProjectKnowledgeResponse,
   ProjectKnowledge,
   ProjectKnowledgeListResponse,
   Query,
+  QueryApproval,
+  QueryExecution,
   RejectQueryResponse,
   RelationshipDetail,
   RelationshipsResponse,
+  ResolveAlertRequest,
   SaveSelectionsResponse,
+  SchemaChange,
   SchemaRefreshResponse,
   TestConnectionRequest,
   TestConnectionResponse,
@@ -1039,6 +1049,151 @@ class EngineApiService {
     return this.makeRequest<{ message: string }>(
       `/${projectId}/datasources/${datasourceId}/ontology`,
       { method: 'DELETE' }
+    );
+  }
+
+  // --- Audit Page Methods ---
+
+  /**
+   * List query executions with filters
+   * GET /api/projects/{projectId}/audit/query-executions
+   */
+  async listAuditQueryExecutions(
+    projectId: string,
+    params?: Record<string, string>
+  ): Promise<ApiResponse<PaginatedResponse<QueryExecution>>> {
+    const query = params ? '?' + new URLSearchParams(params).toString() : '';
+    return this.makeRequest<PaginatedResponse<QueryExecution>>(
+      `/${projectId}/audit/query-executions${query}`
+    );
+  }
+
+  /**
+   * List ontology changes with filters
+   * GET /api/projects/{projectId}/audit/ontology-changes
+   */
+  async listAuditOntologyChanges(
+    projectId: string,
+    params?: Record<string, string>
+  ): Promise<ApiResponse<PaginatedResponse<OntologyChange>>> {
+    const query = params ? '?' + new URLSearchParams(params).toString() : '';
+    return this.makeRequest<PaginatedResponse<OntologyChange>>(
+      `/${projectId}/audit/ontology-changes${query}`
+    );
+  }
+
+  /**
+   * List schema changes with filters
+   * GET /api/projects/{projectId}/audit/schema-changes
+   */
+  async listAuditSchemaChanges(
+    projectId: string,
+    params?: Record<string, string>
+  ): Promise<ApiResponse<PaginatedResponse<SchemaChange>>> {
+    const query = params ? '?' + new URLSearchParams(params).toString() : '';
+    return this.makeRequest<PaginatedResponse<SchemaChange>>(
+      `/${projectId}/audit/schema-changes${query}`
+    );
+  }
+
+  /**
+   * List query approvals with filters
+   * GET /api/projects/{projectId}/audit/query-approvals
+   */
+  async listAuditQueryApprovals(
+    projectId: string,
+    params?: Record<string, string>
+  ): Promise<ApiResponse<PaginatedResponse<QueryApproval>>> {
+    const query = params ? '?' + new URLSearchParams(params).toString() : '';
+    return this.makeRequest<PaginatedResponse<QueryApproval>>(
+      `/${projectId}/audit/query-approvals${query}`
+    );
+  }
+
+  /**
+   * List MCP audit events with filters
+   * GET /api/projects/{projectId}/audit/mcp-events
+   */
+  async listAuditMCPEvents(
+    projectId: string,
+    params?: Record<string, string>
+  ): Promise<ApiResponse<PaginatedResponse<MCPAuditEvent>>> {
+    const query = params ? '?' + new URLSearchParams(params).toString() : '';
+    return this.makeRequest<PaginatedResponse<MCPAuditEvent>>(
+      `/${projectId}/audit/mcp-events${query}`
+    );
+  }
+
+  /**
+   * Get audit summary counts
+   * GET /api/projects/{projectId}/audit/summary
+   */
+  async getAuditSummary(
+    projectId: string
+  ): Promise<ApiResponse<AuditSummary>> {
+    return this.makeRequest<AuditSummary>(
+      `/${projectId}/audit/summary`
+    );
+  }
+
+  /**
+   * List audit alerts with filters
+   * GET /api/projects/{projectId}/audit/alerts
+   */
+  async getAuditAlerts(
+    projectId: string,
+    params?: Record<string, string>
+  ): Promise<ApiResponse<PaginatedResponse<AuditAlert>>> {
+    const query = params ? '?' + new URLSearchParams(params).toString() : '';
+    return this.makeRequest<PaginatedResponse<AuditAlert>>(
+      `/${projectId}/audit/alerts${query}`
+    );
+  }
+
+  /**
+   * Resolve an audit alert
+   * POST /api/projects/{projectId}/audit/alerts/{alertId}/resolve
+   */
+  async resolveAuditAlert(
+    projectId: string,
+    alertId: string,
+    body: ResolveAlertRequest
+  ): Promise<ApiResponse<{ message: string }>> {
+    return this.makeRequest<{ message: string }>(
+      `/${projectId}/audit/alerts/${alertId}/resolve`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }
+    );
+  }
+
+  /**
+   * Get alert configuration for a project
+   * GET /api/projects/{projectId}/audit/alert-config
+   */
+  async getAlertConfig(
+    projectId: string
+  ): Promise<ApiResponse<AlertConfig>> {
+    return this.makeRequest<AlertConfig>(
+      `/${projectId}/audit/alert-config`
+    );
+  }
+
+  /**
+   * Update alert configuration for a project
+   * PUT /api/projects/{projectId}/audit/alert-config
+   */
+  async updateAlertConfig(
+    projectId: string,
+    config: AlertConfig
+  ): Promise<ApiResponse<AlertConfig>> {
+    return this.makeRequest<AlertConfig>(
+      `/${projectId}/audit/alert-config`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(config),
+      }
     );
   }
 

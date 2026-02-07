@@ -23,6 +23,11 @@ type TenantScopeProvider interface {
 	WithTenantScope(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error)
 }
 
+// AuthFailureLogger records authentication failures to the MCP audit log.
+type AuthFailureLogger interface {
+	RecordAuthFailure(projectID uuid.UUID, userID, reason, clientIP string)
+}
+
 // Middleware provides MCP-specific authentication middleware.
 // Unlike the general auth middleware, this returns RFC 6750 WWW-Authenticate
 // headers for OAuth 2.0 Bearer token authentication errors.
@@ -31,17 +36,33 @@ type Middleware struct {
 	authService     auth.AuthService
 	agentKeyService services.AgentAPIKeyService
 	tenantProvider  TenantScopeProvider
+	auditLogger     AuthFailureLogger
 	logger          *zap.Logger
 }
 
 // NewMiddleware creates a new MCP auth middleware.
 // agentKeyService and tenantProvider can be nil if agent API key authentication is not needed.
-func NewMiddleware(authService auth.AuthService, agentKeyService services.AgentAPIKeyService, tenantProvider TenantScopeProvider, logger *zap.Logger) *Middleware {
-	return &Middleware{
+// auditLogger can be nil if auth failure auditing is not needed.
+func NewMiddleware(authService auth.AuthService, agentKeyService services.AgentAPIKeyService, tenantProvider TenantScopeProvider, logger *zap.Logger, opts ...MiddlewareOption) *Middleware {
+	m := &Middleware{
 		authService:     authService,
 		agentKeyService: agentKeyService,
 		tenantProvider:  tenantProvider,
 		logger:          logger,
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// MiddlewareOption configures optional Middleware behavior.
+type MiddlewareOption func(*Middleware)
+
+// WithAuditLogger enables auth failure auditing via the given logger.
+func WithAuditLogger(logger AuthFailureLogger) MiddlewareOption {
+	return func(m *Middleware) {
+		m.auditLogger = logger
 	}
 }
 
@@ -159,6 +180,7 @@ func (m *Middleware) handleAgentKeyAuth(w http.ResponseWriter, r *http.Request, 
 		m.logger.Debug("MCP agent auth failed: invalid API key",
 			zap.String("path", r.URL.Path),
 			zap.String("project_id", projectID.String()))
+		m.recordAuthFailure(projectID, "agent", "Invalid API key", r.RemoteAddr)
 		m.writeWWWAuthenticate(w, http.StatusUnauthorized, "invalid_token", "Invalid API key")
 		return
 	}
@@ -185,6 +207,10 @@ func (m *Middleware) handleJWTAuth(w http.ResponseWriter, r *http.Request, next 
 		m.logger.Debug("MCP auth failed: invalid or missing token",
 			zap.String("path", r.URL.Path),
 			zap.Error(err))
+		// Try to extract project ID for audit logging
+		if pid, pidErr := extractProjectIDFromPath(r.URL.Path); pidErr == nil {
+			m.recordAuthFailure(pid, "unknown", "Invalid or expired token", r.RemoteAddr)
+		}
 		m.writeWWWAuthenticate(w, http.StatusUnauthorized, "invalid_token", "The access token is invalid or expired")
 		return
 	}
@@ -211,6 +237,9 @@ func (m *Middleware) handleJWTAuth(w http.ResponseWriter, r *http.Request, next 
 		m.logger.Debug("MCP auth failed: project ID mismatch",
 			zap.String("url_project_id", urlProjectID),
 			zap.String("token_project_id", claims.ProjectID))
+		if pid, pidErr := uuid.Parse(urlProjectID); pidErr == nil {
+			m.recordAuthFailure(pid, claims.Subject, "Project ID mismatch", r.RemoteAddr)
+		}
 		m.writeWWWAuthenticate(w, http.StatusForbidden, "insufficient_scope", "The access token does not have access to this project")
 		return
 	}
@@ -230,6 +259,14 @@ func extractProjectIDFromPath(path string) (uuid.UUID, error) {
 	}
 
 	return uuid.Parse(parts[1])
+}
+
+// recordAuthFailure delegates to the audit logger if configured.
+// This is a no-op if no audit logger was provided.
+func (m *Middleware) recordAuthFailure(projectID uuid.UUID, userID, reason, clientIP string) {
+	if m.auditLogger != nil {
+		m.auditLogger.RecordAuthFailure(projectID, userID, reason, clientIP)
+	}
 }
 
 // writeWWWAuthenticate writes an RFC 6750 Bearer token error response.

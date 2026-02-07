@@ -22,9 +22,10 @@ import (
 // QueryToolDeps contains dependencies for approved queries tools.
 type QueryToolDeps struct {
 	BaseMCPToolDeps
-	ProjectService services.ProjectService
-	QueryService   services.QueryService
-	Auditor        *audit.SecurityAuditor
+	ProjectService      services.ProjectService
+	QueryService        services.QueryService
+	Auditor             *audit.SecurityAuditor
+	QueryHistoryService services.QueryHistoryService // Optional: for query learning history
 }
 
 // QueryLoggingDeps defines the interface for dependencies needed to log query executions.
@@ -45,6 +46,7 @@ var approvedQueriesToolNames = map[string]bool{
 	"suggest_approved_query": true,
 	"suggest_query_update":   true,
 	"get_query_history":      true,
+	"record_query_feedback":  true,
 }
 
 // RegisterApprovedQueriesTools registers tools for executing Pre-Approved Queries.
@@ -54,6 +56,7 @@ func RegisterApprovedQueriesTools(s *server.MCPServer, deps *QueryToolDeps) {
 	registerSuggestApprovedQueryTool(s, deps)
 	registerSuggestQueryUpdateTool(s, deps)
 	registerGetQueryHistoryTool(s, deps)
+	registerRecordQueryFeedbackTool(s, deps)
 }
 
 // listApprovedQueriesResult is the response structure for list_approved_queries.
@@ -351,6 +354,8 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			}
 
 			// Log successful execution to history
+			modRowCount := modifyResult.RowCount
+			modDurationMs := int(executionTimeMs)
 			go logQueryExecution(tenantCtx, deps, QueryExecutionLog{
 				ProjectID:       projectID,
 				QueryID:         queryID,
@@ -358,12 +363,25 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 				SQL:             query.SQLQuery,
 				SQLType:         string(sqlType),
 				Params:          params,
-				RowCount:        modifyResult.RowCount,
+				RowCount:        modRowCount,
 				RowsAffected:    modifyResult.RowsAffected,
-				ExecutionTimeMs: int(executionTimeMs),
+				ExecutionTimeMs: modDurationMs,
 				IsModifying:     true,
 				Success:         true,
 			})
+
+			// Record to query learning history (async, best-effort)
+			if deps.QueryHistoryService != nil {
+				go logQueryHistory(tenantCtx, deps.GetDB(), deps.GetLogger(), deps.QueryHistoryService, &models.QueryHistoryEntry{
+					ProjectID:           projectID,
+					UserID:              auth.GetUserIDFromContext(tenantCtx),
+					NaturalLanguage:     query.NaturalLanguagePrompt,
+					SQL:                 query.SQLQuery,
+					ExecutedAt:          startTime,
+					ExecutionDurationMs: &modDurationMs,
+					RowCount:            &modRowCount,
+				})
+			}
 
 			// Format response for modifying query
 			response := struct {
@@ -401,6 +419,8 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		}
 
 		// Log execution to history (best effort - don't fail request if logging fails)
+		rowCount := len(result.Rows)
+		durationMs := int(executionTimeMs)
 		go logQueryExecution(tenantCtx, deps, QueryExecutionLog{
 			ProjectID:       projectID,
 			QueryID:         queryID,
@@ -408,15 +428,25 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			SQL:             query.SQLQuery,
 			SQLType:         string(sqlType),
 			Params:          params,
-			RowCount:        len(result.Rows),
+			RowCount:        rowCount,
 			RowsAffected:    0,
-			ExecutionTimeMs: int(executionTimeMs),
+			ExecutionTimeMs: durationMs,
 			IsModifying:     false,
 			Success:         true,
 		})
 
-		// NOTE: Retention policy cleanup is deferred to Enterprise App Suite (see PLAN-app-enterprise.md)
-		// Enterprise admins will configure retention periods via the Audit & Visibility module
+		// Record to query learning history (async, best-effort)
+		if deps.QueryHistoryService != nil {
+			go logQueryHistory(tenantCtx, deps.GetDB(), deps.GetLogger(), deps.QueryHistoryService, &models.QueryHistoryEntry{
+				ProjectID:           projectID,
+				UserID:              auth.GetUserIDFromContext(tenantCtx),
+				NaturalLanguage:     query.NaturalLanguagePrompt,
+				SQL:                 query.SQLQuery,
+				ExecutedAt:          startTime,
+				ExecutionDurationMs: &durationMs,
+				RowCount:            &rowCount,
+			})
+		}
 
 		// Format response
 		truncated := len(result.Rows) > limit
@@ -1190,22 +1220,57 @@ func logQueryExecution(ctx context.Context, deps QueryLoggingDeps, log QueryExec
 	}
 }
 
-// registerGetQueryHistoryTool - Returns recent query execution history to avoid rewriting queries.
+// logQueryHistory records a successful query to the learning history table.
+// This runs in a goroutine and uses best-effort logging - failures are logged but don't affect the caller.
+func logQueryHistory(ctx context.Context, db *database.DB, logger *zap.Logger, svc services.QueryHistoryService, entry *models.QueryHistoryEntry) {
+	if db == nil || svc == nil {
+		return
+	}
+
+	// Use a background context with timeout since the original context may be cancelled
+	execCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	scope, err := db.WithTenant(execCtx, entry.ProjectID)
+	if err != nil {
+		logger.Warn("Failed to record query history: could not acquire tenant scope",
+			zap.Error(err),
+			zap.String("project_id", entry.ProjectID.String()))
+		return
+	}
+	defer scope.Close()
+
+	tenantCtx := database.SetTenantScope(execCtx, scope)
+
+	if err := svc.Record(tenantCtx, entry); err != nil {
+		logger.Warn("Failed to record query history entry",
+			zap.Error(err),
+			zap.String("project_id", entry.ProjectID.String()))
+	}
+}
+
+// registerGetQueryHistoryTool - Returns the user's recent successful query history for learning.
+// Queries the engine_mcp_query_history table which contains queries with natural language context.
 func registerGetQueryHistoryTool(s *server.MCPServer, deps *QueryToolDeps) {
 	tool := mcp.NewTool(
 		"get_query_history",
 		mcp.WithDescription(
-			"Get recent query execution history to see what queries have been run recently. "+
-				"Helps avoid rewriting the same queries repeatedly across sessions. "+
-				"Returns SQL, execution time, row count, and parameters for recent executions.",
+			"Get your recent successful query history with natural language context. "+
+				"Use this to find previous queries that answered similar questions and reuse their SQL patterns. "+
+				"Only shows your own queries (private to your account). "+
+				"Returns the natural language question, SQL, execution details, and optional feedback.",
 		),
 		mcp.WithNumber(
 			"limit",
-			mcp.Description("Maximum number of query executions to return (default: 20, max: 100)"),
+			mcp.Description("Maximum number of queries to return (default: 20, max: 100)"),
 		),
-		mcp.WithNumber(
-			"hours_back",
-			mcp.Description("How many hours back to look for query history (default: 24, max: 168)"),
+		mcp.WithString(
+			"since",
+			mcp.Description("Only return queries after this date (ISO 8601 format, e.g., '2024-01-01')"),
+		),
+		mcp.WithString(
+			"tables",
+			mcp.Description("Comma-separated list of table names to filter by (e.g., 'orders,users')"),
 		),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -1223,7 +1288,16 @@ func registerGetQueryHistoryTool(s *server.MCPServer, deps *QueryToolDeps) {
 		}
 		defer cleanup()
 
-		// Get optional limit parameter (default 20, max 100)
+		if deps.QueryHistoryService == nil {
+			return NewErrorResult("service_unavailable", "query history service is not available"), nil
+		}
+
+		userID := auth.GetUserIDFromContext(tenantCtx)
+		if userID == "" {
+			return NewErrorResult("authentication_required", "user identity required for query history"), nil
+		}
+
+		// Parse filters
 		limit := 20
 		if limitVal, ok := getOptionalFloat(req, "limit"); ok {
 			limit = int(limitVal)
@@ -1235,104 +1309,165 @@ func registerGetQueryHistoryTool(s *server.MCPServer, deps *QueryToolDeps) {
 			}
 		}
 
-		// Get optional hours_back parameter (default 24, max 168 = 1 week)
-		hoursBack := 24
-		if hoursVal, ok := getOptionalFloat(req, "hours_back"); ok {
-			hoursBack = int(hoursVal)
-			if hoursBack > 168 {
-				hoursBack = 168
-			}
-			if hoursBack < 1 {
-				hoursBack = 1
-			}
+		filters := models.QueryHistoryFilters{
+			UserID: userID,
+			Limit:  limit,
 		}
 
-		// Calculate cutoff time
-		cutoffTime := time.Now().Add(-time.Duration(hoursBack) * time.Hour)
-
-		// Query execution history
-		scope, ok := database.GetTenantScope(tenantCtx)
-		if !ok || scope == nil {
-			return nil, fmt.Errorf("tenant scope not found in context")
-		}
-
-		query := `
-			SELECT
-				qe.sql,
-				qe.executed_at,
-				qe.row_count,
-				qe.execution_time_ms,
-				qe.parameters,
-				q.natural_language_prompt as query_name
-			FROM engine_query_executions qe
-			LEFT JOIN engine_queries q ON qe.query_id = q.id
-			WHERE qe.project_id = $1
-			  AND qe.executed_at >= $2
-			ORDER BY qe.executed_at DESC
-			LIMIT $3
-		`
-
-		rows, err := scope.Conn.Query(tenantCtx, query, projectID, cutoffTime, limit)
-		if err != nil {
-			return nil, fmt.Errorf("failed to query execution history: %w", err)
-		}
-		defer rows.Close()
-
-		type queryExecution struct {
-			SQL             string         `json:"sql"`
-			ExecutedAt      string         `json:"executed_at"`
-			RowCount        int            `json:"row_count"`
-			ExecutionTimeMs int            `json:"execution_time_ms"`
-			Parameters      map[string]any `json:"parameters,omitempty"`
-			QueryName       *string        `json:"query_name,omitempty"`
-		}
-
-		var executions []queryExecution
-
-		for rows.Next() {
-			var exec queryExecution
-			var executedAt time.Time
-			var paramsJSON []byte
-			var queryName *string
-
-			err := rows.Scan(
-				&exec.SQL,
-				&executedAt,
-				&exec.RowCount,
-				&exec.ExecutionTimeMs,
-				&paramsJSON,
-				&queryName,
-			)
+		if sinceStr := getOptionalString(req, "since"); sinceStr != "" {
+			t, err := time.Parse(time.RFC3339, sinceStr)
 			if err != nil {
-				return nil, fmt.Errorf("failed to scan execution row: %w", err)
-			}
-
-			exec.ExecutedAt = executedAt.Format(time.RFC3339)
-			exec.QueryName = queryName
-
-			// Parse parameters JSON if present
-			if len(paramsJSON) > 0 {
-				var params map[string]any
-				if err := json.Unmarshal(paramsJSON, &params); err == nil {
-					exec.Parameters = params
+				// Try date-only format
+				t, err = time.Parse("2006-01-02", sinceStr)
+				if err != nil {
+					return NewErrorResult("invalid_parameter", fmt.Sprintf("invalid 'since' date format: %s (use ISO 8601, e.g., '2024-01-01')", sinceStr)), nil
 				}
 			}
-
-			executions = append(executions, exec)
+			filters.Since = &t
 		}
 
-		if err := rows.Err(); err != nil {
-			return nil, fmt.Errorf("error iterating execution rows: %w", err)
+		if tablesStr := getOptionalString(req, "tables"); tablesStr != "" {
+			tables := strings.Split(tablesStr, ",")
+			for i := range tables {
+				tables[i] = strings.TrimSpace(tables[i])
+			}
+			filters.TablesUsed = tables
+		}
+
+		entries, totalCount, err := deps.QueryHistoryService.List(tenantCtx, projectID, filters)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query history: %w", err)
+		}
+
+		// Build response
+		type historyEntry struct {
+			ID                  string   `json:"id"`
+			NaturalLanguage     string   `json:"natural_language"`
+			SQL                 string   `json:"sql"`
+			ExecutedAt          string   `json:"executed_at"`
+			RowCount            *int     `json:"row_count,omitempty"`
+			ExecutionDurationMs *int     `json:"execution_duration_ms,omitempty"`
+			TablesUsed          []string `json:"tables_used,omitempty"`
+			QueryType           *string  `json:"query_type,omitempty"`
+			UserFeedback        *string  `json:"user_feedback,omitempty"`
+		}
+
+		queries := make([]historyEntry, len(entries))
+		for i, e := range entries {
+			queries[i] = historyEntry{
+				ID:                  e.ID.String(),
+				NaturalLanguage:     e.NaturalLanguage,
+				SQL:                 e.SQL,
+				ExecutedAt:          e.ExecutedAt.Format(time.RFC3339),
+				RowCount:            e.RowCount,
+				ExecutionDurationMs: e.ExecutionDurationMs,
+				TablesUsed:          e.TablesUsed,
+				QueryType:           e.QueryType,
+				UserFeedback:        e.UserFeedback,
+			}
 		}
 
 		response := struct {
-			RecentQueries []queryExecution `json:"recent_queries"`
-			Count         int              `json:"count"`
-			HoursBack     int              `json:"hours_back"`
+			Queries    []historyEntry `json:"queries"`
+			TotalCount int            `json:"total_count"`
+			HasMore    bool           `json:"has_more"`
 		}{
-			RecentQueries: executions,
-			Count:         len(executions),
-			HoursBack:     hoursBack,
+			Queries:    queries,
+			TotalCount: totalCount,
+			HasMore:    totalCount > len(queries),
+		}
+
+		jsonResult, _ := json.Marshal(response)
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// registerRecordQueryFeedbackTool - Records user feedback on a query history entry.
+func registerRecordQueryFeedbackTool(s *server.MCPServer, deps *QueryToolDeps) {
+	tool := mcp.NewTool(
+		"record_query_feedback",
+		mcp.WithDescription(
+			"Record whether a previously generated query was helpful. "+
+				"This feedback improves future query suggestions. "+
+				"Use the query_id from get_query_history or from the query tool's response.",
+		),
+		mcp.WithString(
+			"query_id",
+			mcp.Required(),
+			mcp.Description("UUID of the query history entry to provide feedback on"),
+		),
+		mcp.WithString(
+			"feedback",
+			mcp.Required(),
+			mcp.Description("Feedback value: 'helpful' or 'not_helpful'"),
+		),
+		mcp.WithString(
+			"comment",
+			mcp.Description("Optional comment explaining the feedback (e.g., 'Had to add a date filter')"),
+		),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "record_query_feedback")
+		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
+			return nil, err
+		}
+		defer cleanup()
+
+		if deps.QueryHistoryService == nil {
+			return NewErrorResult("service_unavailable", "query history service is not available"), nil
+		}
+
+		userID := auth.GetUserIDFromContext(tenantCtx)
+		if userID == "" {
+			return NewErrorResult("authentication_required", "user identity required for feedback"), nil
+		}
+
+		// Parse required parameters
+		queryIDStr, err := req.RequireString("query_id")
+		if err != nil {
+			return NewErrorResult("invalid_parameters", "query_id is required"), nil
+		}
+		queryID, err := uuid.Parse(queryIDStr)
+		if err != nil {
+			return NewErrorResult("invalid_parameters", fmt.Sprintf("invalid query_id format: %s", queryIDStr)), nil
+		}
+
+		feedback, err := req.RequireString("feedback")
+		if err != nil {
+			return NewErrorResult("invalid_parameters", "feedback is required"), nil
+		}
+		if feedback != "helpful" && feedback != "not_helpful" {
+			return NewErrorResult("invalid_parameters", "feedback must be 'helpful' or 'not_helpful'"), nil
+		}
+
+		// Optional comment
+		var comment *string
+		if c := getOptionalString(req, "comment"); c != "" {
+			comment = &c
+		}
+
+		err = deps.QueryHistoryService.RecordFeedback(tenantCtx, projectID, queryID, userID, feedback, comment)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "not owned") {
+				return NewErrorResult("not_found", "query history entry not found or not accessible"), nil
+			}
+			return nil, fmt.Errorf("failed to record feedback: %w", err)
+		}
+
+		response := struct {
+			Recorded bool   `json:"recorded"`
+			Message  string `json:"message"`
+		}{
+			Recorded: true,
+			Message:  "Feedback recorded. Thank you for helping improve query suggestions.",
 		}
 
 		jsonResult, _ := json.Marshal(response)
