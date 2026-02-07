@@ -25,6 +25,8 @@ func TestDAGNodes_AllNodesHaveCorrectOrder(t *testing.T) {
 
 	// NOTE: The current DAG order is designed for schema-first extraction.
 	// FKDiscovery and TableFeatureExtraction run BEFORE column enrichment.
+	// Glossary nodes (GlossaryDiscovery, GlossaryEnrichment) are not part of
+	// the main DAG — they run separately after ontology questions are answered.
 	expectedOrder := []models.DAGNodeName{
 		models.DAGNodeKnowledgeSeeding,
 		models.DAGNodeColumnFeatureExtraction,
@@ -33,8 +35,6 @@ func TestDAGNodes_AllNodesHaveCorrectOrder(t *testing.T) {
 		models.DAGNodePKMatchDiscovery,
 		models.DAGNodeColumnEnrichment,
 		models.DAGNodeOntologyFinalization,
-		models.DAGNodeGlossaryDiscovery,
-		models.DAGNodeGlossaryEnrichment,
 	}
 
 	assert.Equal(t, len(expectedOrder), len(allNodes))
