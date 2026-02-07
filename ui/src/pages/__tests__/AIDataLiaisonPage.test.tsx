@@ -85,16 +85,17 @@ const setupMocks = (options: {
     });
   }
 
-  vi.mocked(engineApi.getAIConfig).mockResolvedValue({
-    success: true,
-    data: hasAIConfig ? { config_type: 'anthropic' } : undefined,
-  });
+  vi.mocked(engineApi.getAIConfig).mockResolvedValue(
+    hasAIConfig
+      ? { success: true, data: { project_id: 'proj-1', config_type: 'anthropic' } }
+      : { success: true },
+  );
 
   vi.mocked(engineApi.getSchema).mockResolvedValue({
     success: true,
     data: {
       tables: hasSelectedTables
-        ? [{ name: 'users', schema: 'public', is_selected: true, columns: [] }]
+        ? [{ table_name: 'users', schema_name: 'public', is_selected: true, columns: [] }]
         : [],
       total_tables: hasSelectedTables ? 1 : 0,
       relationships: [],
