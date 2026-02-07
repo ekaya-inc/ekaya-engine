@@ -82,6 +82,14 @@ func (m *mockGlossaryService) DeleteAlias(ctx context.Context, termID uuid.UUID,
 	return nil
 }
 
+func (m *mockGlossaryService) GetGenerationStatus(projectID uuid.UUID) *models.GlossaryGenerationStatus {
+	return &models.GlossaryGenerationStatus{Status: "idle", Message: "No generation in progress"}
+}
+
+func (m *mockGlossaryService) RunAutoGenerate(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
 // TestGlossaryToolDeps_Structure verifies the GlossaryToolDeps struct has all required fields.
 func TestGlossaryToolDeps_Structure(t *testing.T) {
 	deps := &GlossaryToolDeps{}

@@ -71,6 +71,14 @@ func (m *mockGlossaryService) EnrichGlossaryTerms(ctx context.Context, projectID
 	return nil
 }
 
+func (m *mockGlossaryService) GetGenerationStatus(projectID uuid.UUID) *models.GlossaryGenerationStatus {
+	return &models.GlossaryGenerationStatus{Status: "idle", Message: "No generation in progress"}
+}
+
+func (m *mockGlossaryService) RunAutoGenerate(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
 // GlossaryDiscoveryAdapter Tests
 
 func TestGlossaryDiscoveryAdapter_DiscoverGlossaryTerms_Success(t *testing.T) {
