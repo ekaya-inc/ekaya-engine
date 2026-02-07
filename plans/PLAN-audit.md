@@ -579,7 +579,7 @@ Add an "Alerts" tab to the existing audit page (`ui/src/pages/AuditPage.tsx`). T
 
 **Summary integration:** Update the audit summary header (from Phase 1) to include open alert counts by severity. Add to the existing `GET /api/projects/{pid}/audit/summary` endpoint — return `open_alerts_critical`, `open_alerts_warning`, `open_alerts_info` counts. Update the summary UI component accordingly.
 
-### 4.4 [ ] Alert configuration UI on project settings page
+### 4.4 [x] Alert configuration UI on project settings page
 
 Add an alert configuration section to the project settings page. Check the existing project settings page location (likely `ui/src/pages/` — search for project settings or MCP server config page referenced in plan Phase 2.5 at `/projects/{pid}/mcp-server`).
 

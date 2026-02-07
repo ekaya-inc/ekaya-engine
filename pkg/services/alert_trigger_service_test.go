@@ -64,8 +64,38 @@ func (m *mockAlertTriggerRepo) HasOpenAlertForType(_ context.Context, _ uuid.UUI
 	return m.hasOpenAlert, nil
 }
 
+// mockMCPConfigRepoForTrigger implements the MCPConfigRepository methods needed for trigger testing.
+type mockMCPConfigRepoForTrigger struct {
+	alertConfig *models.AlertConfig
+}
+
+func (m *mockMCPConfigRepoForTrigger) Get(_ context.Context, _ uuid.UUID) (*models.MCPConfig, error) {
+	return nil, nil
+}
+func (m *mockMCPConfigRepoForTrigger) Upsert(_ context.Context, _ *models.MCPConfig) error {
+	return nil
+}
+func (m *mockMCPConfigRepoForTrigger) GetAgentAPIKey(_ context.Context, _ uuid.UUID) (string, error) {
+	return "", nil
+}
+func (m *mockMCPConfigRepoForTrigger) SetAgentAPIKey(_ context.Context, _ uuid.UUID, _ string) error {
+	return nil
+}
+func (m *mockMCPConfigRepoForTrigger) GetAuditRetentionDays(_ context.Context, _ uuid.UUID) (*int, error) {
+	return nil, nil
+}
+func (m *mockMCPConfigRepoForTrigger) SetAuditRetentionDays(_ context.Context, _ uuid.UUID, _ *int) error {
+	return nil
+}
+func (m *mockMCPConfigRepoForTrigger) GetAlertConfig(_ context.Context, _ uuid.UUID) (*models.AlertConfig, error) {
+	return m.alertConfig, nil
+}
+func (m *mockMCPConfigRepoForTrigger) SetAlertConfig(_ context.Context, _ uuid.UUID, _ *models.AlertConfig) error {
+	return nil
+}
+
 func newTestTriggerService(alertRepo *mockAlertRepo, triggerRepo *mockAlertTriggerRepo) AlertTriggerService {
-	return NewAlertTriggerService(alertRepo, triggerRepo, zap.NewNop())
+	return NewAlertTriggerService(alertRepo, triggerRepo, &mockMCPConfigRepoForTrigger{}, zap.NewNop())
 }
 
 func newBaseEvent() *models.MCPAuditEvent {

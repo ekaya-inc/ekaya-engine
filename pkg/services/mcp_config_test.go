@@ -60,6 +60,14 @@ func (m *mockMCPConfigRepository) SetAuditRetentionDays(_ context.Context, _ uui
 	return m.err
 }
 
+func (m *mockMCPConfigRepository) GetAlertConfig(_ context.Context, _ uuid.UUID) (*models.AlertConfig, error) {
+	return nil, m.err
+}
+
+func (m *mockMCPConfigRepository) SetAlertConfig(_ context.Context, _ uuid.UUID, _ *models.AlertConfig) error {
+	return m.err
+}
+
 type mockQueryServiceForMCP struct {
 	hasEnabledQueries bool
 	hasEnabledErr     error

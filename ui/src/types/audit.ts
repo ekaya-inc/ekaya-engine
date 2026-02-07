@@ -173,6 +173,25 @@ export interface ResolveAlertRequest {
   notes?: string;
 }
 
+// Alert Configuration
+export interface AlertTypeSetting {
+  enabled: boolean;
+  severity: string;
+  threshold_multiplier?: number;
+  row_threshold?: number;
+  business_hours_start?: string;
+  business_hours_end?: string;
+  timezone?: string;
+  query_threshold?: number;
+  error_count?: number;
+  window_minutes?: number;
+}
+
+export interface AlertConfig {
+  alerts_enabled: boolean;
+  alert_settings: Record<string, AlertTypeSetting>;
+}
+
 // Audit Summary
 export interface AuditSummary {
   total_query_executions: number;

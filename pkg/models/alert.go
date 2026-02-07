@@ -15,8 +15,8 @@ const (
 
 // Alert status values.
 const (
-	AlertStatusOpen     = "open"
-	AlertStatusResolved = "resolved"
+	AlertStatusOpen      = "open"
+	AlertStatusResolved  = "resolved"
 	AlertStatusDismissed = "dismissed"
 )
 
@@ -39,9 +39,9 @@ type AuditAlert struct {
 	AlertType string `json:"alert_type"`
 	Severity  string `json:"severity"`
 
-	Title           string    `json:"title"`
-	Description     *string   `json:"description,omitempty"`
-	AffectedUserID  *string   `json:"affected_user_id,omitempty"`
+	Title           string      `json:"title"`
+	Description     *string     `json:"description,omitempty"`
+	AffectedUserID  *string     `json:"affected_user_id,omitempty"`
 	RelatedAuditIDs []uuid.UUID `json:"related_audit_ids,omitempty"`
 
 	Status          string     `json:"status"`

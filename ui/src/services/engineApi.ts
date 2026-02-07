@@ -12,6 +12,7 @@ import type {
   AITestResult,
   ApiResponse,
   ApproveQueryResponse,
+  AlertConfig,
   AuditAlert,
   AuditSummary,
   ConnectionDetails,
@@ -1148,6 +1149,35 @@ class EngineApiService {
       {
         method: 'POST',
         body: JSON.stringify(body),
+      }
+    );
+  }
+
+  /**
+   * Get alert configuration for a project
+   * GET /api/projects/{projectId}/audit/alert-config
+   */
+  async getAlertConfig(
+    projectId: string
+  ): Promise<ApiResponse<AlertConfig>> {
+    return this.makeRequest<AlertConfig>(
+      `/${projectId}/audit/alert-config`
+    );
+  }
+
+  /**
+   * Update alert configuration for a project
+   * PUT /api/projects/{projectId}/audit/alert-config
+   */
+  async updateAlertConfig(
+    projectId: string,
+    config: AlertConfig
+  ): Promise<ApiResponse<AlertConfig>> {
+    return this.makeRequest<AlertConfig>(
+      `/${projectId}/audit/alert-config`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(config),
       }
     );
   }

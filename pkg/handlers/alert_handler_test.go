@@ -67,6 +67,38 @@ func (m *mockAlertService) ResolveAlert(_ context.Context, _ uuid.UUID, _ uuid.U
 	return m.resolveErr
 }
 
+// mockMCPConfigRepoForAlert implements the MCPConfigRepository methods needed for alert handler testing.
+type mockMCPConfigRepoForAlert struct {
+	alertConfig *models.AlertConfig
+	err         error
+}
+
+func (m *mockMCPConfigRepoForAlert) Get(_ context.Context, _ uuid.UUID) (*models.MCPConfig, error) {
+	return nil, m.err
+}
+func (m *mockMCPConfigRepoForAlert) Upsert(_ context.Context, _ *models.MCPConfig) error {
+	return m.err
+}
+func (m *mockMCPConfigRepoForAlert) GetAgentAPIKey(_ context.Context, _ uuid.UUID) (string, error) {
+	return "", m.err
+}
+func (m *mockMCPConfigRepoForAlert) SetAgentAPIKey(_ context.Context, _ uuid.UUID, _ string) error {
+	return m.err
+}
+func (m *mockMCPConfigRepoForAlert) GetAuditRetentionDays(_ context.Context, _ uuid.UUID) (*int, error) {
+	return nil, m.err
+}
+func (m *mockMCPConfigRepoForAlert) SetAuditRetentionDays(_ context.Context, _ uuid.UUID, _ *int) error {
+	return m.err
+}
+func (m *mockMCPConfigRepoForAlert) GetAlertConfig(_ context.Context, _ uuid.UUID) (*models.AlertConfig, error) {
+	return m.alertConfig, m.err
+}
+func (m *mockMCPConfigRepoForAlert) SetAlertConfig(_ context.Context, _ uuid.UUID, config *models.AlertConfig) error {
+	m.alertConfig = config
+	return m.err
+}
+
 func makeAlertRequest(method, path string, body []byte, projectID uuid.UUID) *http.Request {
 	var req *http.Request
 	if body != nil {
@@ -95,7 +127,7 @@ func TestAlertHandler_ListAlerts_Success(t *testing.T) {
 			{ID: uuid.New(), ProjectID: projectID, Status: models.AlertStatusResolved, Severity: models.AlertSeverityInfo, Title: "Alert 3"},
 		},
 	}
-	handler := NewAlertHandler(svc, zap.NewNop())
+	handler := NewAlertHandler(svc, &mockMCPConfigRepoForAlert{}, zap.NewNop())
 
 	req := makeAlertRequest("GET", fmt.Sprintf("/api/projects/%s/audit/alerts", projectID), nil, projectID)
 	rr := httptest.NewRecorder()
@@ -124,7 +156,7 @@ func TestAlertHandler_ListAlerts_FilterBySeverity(t *testing.T) {
 			{ID: uuid.New(), ProjectID: projectID, Status: models.AlertStatusOpen, Severity: models.AlertSeverityWarning, Title: "Warning alert"},
 		},
 	}
-	handler := NewAlertHandler(svc, zap.NewNop())
+	handler := NewAlertHandler(svc, &mockMCPConfigRepoForAlert{}, zap.NewNop())
 
 	req := makeAlertRequest("GET", fmt.Sprintf("/api/projects/%s/audit/alerts?severity=critical", projectID), nil, projectID)
 	req.URL.RawQuery = "severity=critical"
@@ -146,7 +178,7 @@ func TestAlertHandler_ListAlerts_FilterBySeverity(t *testing.T) {
 func TestAlertHandler_ListAlerts_EmptyResult(t *testing.T) {
 	projectID := uuid.New()
 	svc := &mockAlertService{}
-	handler := NewAlertHandler(svc, zap.NewNop())
+	handler := NewAlertHandler(svc, &mockMCPConfigRepoForAlert{}, zap.NewNop())
 
 	req := makeAlertRequest("GET", fmt.Sprintf("/api/projects/%s/audit/alerts", projectID), nil, projectID)
 	rr := httptest.NewRecorder()
@@ -169,7 +201,7 @@ func TestAlertHandler_ResolveAlert_Success(t *testing.T) {
 	projectID := uuid.New()
 	alertID := uuid.New()
 	svc := &mockAlertService{}
-	handler := NewAlertHandler(svc, zap.NewNop())
+	handler := NewAlertHandler(svc, &mockMCPConfigRepoForAlert{}, zap.NewNop())
 
 	body, _ := json.Marshal(resolveAlertRequest{Resolution: "resolved", Notes: "Fixed"})
 	req := makeAlertRequestWithAuth("POST",
@@ -192,7 +224,7 @@ func TestAlertHandler_ResolveAlert_InvalidResolution(t *testing.T) {
 	projectID := uuid.New()
 	alertID := uuid.New()
 	svc := &mockAlertService{}
-	handler := NewAlertHandler(svc, zap.NewNop())
+	handler := NewAlertHandler(svc, &mockMCPConfigRepoForAlert{}, zap.NewNop())
 
 	body, _ := json.Marshal(resolveAlertRequest{Resolution: "invalid", Notes: "notes"})
 	req := makeAlertRequestWithAuth("POST",
@@ -209,7 +241,7 @@ func TestAlertHandler_ResolveAlert_InvalidResolution(t *testing.T) {
 func TestAlertHandler_ResolveAlert_InvalidAlertID(t *testing.T) {
 	projectID := uuid.New()
 	svc := &mockAlertService{}
-	handler := NewAlertHandler(svc, zap.NewNop())
+	handler := NewAlertHandler(svc, &mockMCPConfigRepoForAlert{}, zap.NewNop())
 
 	body, _ := json.Marshal(resolveAlertRequest{Resolution: "resolved", Notes: "notes"})
 	req := makeAlertRequestWithAuth("POST",
@@ -227,7 +259,7 @@ func TestAlertHandler_ResolveAlert_InvalidBody(t *testing.T) {
 	projectID := uuid.New()
 	alertID := uuid.New()
 	svc := &mockAlertService{}
-	handler := NewAlertHandler(svc, zap.NewNop())
+	handler := NewAlertHandler(svc, &mockMCPConfigRepoForAlert{}, zap.NewNop())
 
 	req := makeAlertRequestWithAuth("POST",
 		fmt.Sprintf("/api/projects/%s/audit/alerts/%s/resolve", projectID, alertID),
@@ -244,7 +276,7 @@ func TestAlertHandler_ResolveAlert_NoAuth(t *testing.T) {
 	projectID := uuid.New()
 	alertID := uuid.New()
 	svc := &mockAlertService{}
-	handler := NewAlertHandler(svc, zap.NewNop())
+	handler := NewAlertHandler(svc, &mockMCPConfigRepoForAlert{}, zap.NewNop())
 
 	body, _ := json.Marshal(resolveAlertRequest{Resolution: "resolved", Notes: "notes"})
 	// Use makeAlertRequest (no auth) instead of makeAlertRequestWithAuth
@@ -263,7 +295,7 @@ func TestAlertHandler_ResolveAlert_Dismissed(t *testing.T) {
 	projectID := uuid.New()
 	alertID := uuid.New()
 	svc := &mockAlertService{}
-	handler := NewAlertHandler(svc, zap.NewNop())
+	handler := NewAlertHandler(svc, &mockMCPConfigRepoForAlert{}, zap.NewNop())
 
 	body, _ := json.Marshal(resolveAlertRequest{Resolution: "dismissed", Notes: "False positive"})
 	req := makeAlertRequestWithAuth("POST",
@@ -275,4 +307,155 @@ func TestAlertHandler_ResolveAlert_Dismissed(t *testing.T) {
 	handler.ResolveAlert(rr, req)
 
 	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+// --- GetAlertConfig Tests ---
+
+func TestAlertHandler_GetAlertConfig_ReturnsDefaultsWhenNoneStored(t *testing.T) {
+	projectID := uuid.New()
+	configRepo := &mockMCPConfigRepoForAlert{alertConfig: nil}
+	handler := NewAlertHandler(&mockAlertService{}, configRepo, zap.NewNop())
+
+	req := makeAlertRequest("GET", fmt.Sprintf("/api/projects/%s/audit/alert-config", projectID), nil, projectID)
+	rr := httptest.NewRecorder()
+
+	handler.GetAlertConfig(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	var resp ApiResponse
+	err := json.NewDecoder(rr.Body).Decode(&resp)
+	require.NoError(t, err)
+	assert.True(t, resp.Success)
+
+	data := resp.Data.(map[string]any)
+	assert.Equal(t, true, data["alerts_enabled"])
+	settings := data["alert_settings"].(map[string]any)
+	assert.Contains(t, settings, models.AlertTypeSQLInjection)
+	assert.Contains(t, settings, models.AlertTypeUnusualQueryVolume)
+}
+
+func TestAlertHandler_GetAlertConfig_ReturnsStoredConfig(t *testing.T) {
+	projectID := uuid.New()
+	stored := &models.AlertConfig{
+		AlertsEnabled: false,
+		AlertSettings: map[string]models.AlertTypeSetting{
+			models.AlertTypeSQLInjection: {Enabled: false, Severity: models.AlertSeverityWarning},
+		},
+	}
+	configRepo := &mockMCPConfigRepoForAlert{alertConfig: stored}
+	handler := NewAlertHandler(&mockAlertService{}, configRepo, zap.NewNop())
+
+	req := makeAlertRequest("GET", fmt.Sprintf("/api/projects/%s/audit/alert-config", projectID), nil, projectID)
+	rr := httptest.NewRecorder()
+
+	handler.GetAlertConfig(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	var resp ApiResponse
+	err := json.NewDecoder(rr.Body).Decode(&resp)
+	require.NoError(t, err)
+	assert.True(t, resp.Success)
+
+	data := resp.Data.(map[string]any)
+	assert.Equal(t, false, data["alerts_enabled"])
+}
+
+func TestAlertHandler_GetAlertConfig_RepoError(t *testing.T) {
+	projectID := uuid.New()
+	configRepo := &mockMCPConfigRepoForAlert{err: fmt.Errorf("db error")}
+	handler := NewAlertHandler(&mockAlertService{}, configRepo, zap.NewNop())
+
+	req := makeAlertRequest("GET", fmt.Sprintf("/api/projects/%s/audit/alert-config", projectID), nil, projectID)
+	rr := httptest.NewRecorder()
+
+	handler.GetAlertConfig(rr, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
+// --- SetAlertConfig Tests ---
+
+func TestAlertHandler_SetAlertConfig_Success(t *testing.T) {
+	projectID := uuid.New()
+	configRepo := &mockMCPConfigRepoForAlert{}
+	handler := NewAlertHandler(&mockAlertService{}, configRepo, zap.NewNop())
+
+	config := models.AlertConfig{
+		AlertsEnabled: true,
+		AlertSettings: map[string]models.AlertTypeSetting{
+			models.AlertTypeSQLInjection: {Enabled: true, Severity: models.AlertSeverityCritical},
+		},
+	}
+	body, _ := json.Marshal(config)
+
+	req := makeAlertRequest("PUT", fmt.Sprintf("/api/projects/%s/audit/alert-config", projectID), body, projectID)
+	rr := httptest.NewRecorder()
+
+	handler.SetAlertConfig(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	var resp ApiResponse
+	err := json.NewDecoder(rr.Body).Decode(&resp)
+	require.NoError(t, err)
+	assert.True(t, resp.Success)
+
+	// Verify config was stored in the mock
+	assert.NotNil(t, configRepo.alertConfig)
+	assert.True(t, configRepo.alertConfig.AlertsEnabled)
+}
+
+func TestAlertHandler_SetAlertConfig_InvalidBody(t *testing.T) {
+	projectID := uuid.New()
+	handler := NewAlertHandler(&mockAlertService{}, &mockMCPConfigRepoForAlert{}, zap.NewNop())
+
+	req := makeAlertRequest("PUT", fmt.Sprintf("/api/projects/%s/audit/alert-config", projectID), []byte("{invalid"), projectID)
+	rr := httptest.NewRecorder()
+
+	handler.SetAlertConfig(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestAlertHandler_SetAlertConfig_InvalidSeverity(t *testing.T) {
+	projectID := uuid.New()
+	handler := NewAlertHandler(&mockAlertService{}, &mockMCPConfigRepoForAlert{}, zap.NewNop())
+
+	config := models.AlertConfig{
+		AlertsEnabled: true,
+		AlertSettings: map[string]models.AlertTypeSetting{
+			models.AlertTypeSQLInjection: {Enabled: true, Severity: "invalid_severity"},
+		},
+	}
+	body, _ := json.Marshal(config)
+
+	req := makeAlertRequest("PUT", fmt.Sprintf("/api/projects/%s/audit/alert-config", projectID), body, projectID)
+	rr := httptest.NewRecorder()
+
+	handler.SetAlertConfig(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestAlertHandler_SetAlertConfig_RepoError(t *testing.T) {
+	projectID := uuid.New()
+	configRepo := &mockMCPConfigRepoForAlert{err: fmt.Errorf("db error")}
+	handler := NewAlertHandler(&mockAlertService{}, configRepo, zap.NewNop())
+
+	config := models.AlertConfig{
+		AlertsEnabled: true,
+		AlertSettings: map[string]models.AlertTypeSetting{
+			models.AlertTypeSQLInjection: {Enabled: true, Severity: models.AlertSeverityCritical},
+		},
+	}
+	body, _ := json.Marshal(config)
+
+	req := makeAlertRequest("PUT", fmt.Sprintf("/api/projects/%s/audit/alert-config", projectID), body, projectID)
+	rr := httptest.NewRecorder()
+
+	handler.SetAlertConfig(rr, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 }

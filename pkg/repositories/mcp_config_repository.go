@@ -32,6 +32,13 @@ type MCPConfigRepository interface {
 	// SetAuditRetentionDays updates the audit retention days for a project.
 	// Pass nil to reset to default.
 	SetAuditRetentionDays(ctx context.Context, projectID uuid.UUID, days *int) error
+
+	// GetAlertConfig retrieves the alert configuration for a project.
+	// Returns nil if not configured (caller should use default).
+	GetAlertConfig(ctx context.Context, projectID uuid.UUID) (*models.AlertConfig, error)
+
+	// SetAlertConfig updates the alert configuration for a project.
+	SetAlertConfig(ctx context.Context, projectID uuid.UUID, config *models.AlertConfig) error
 }
 
 // mcpConfigRepository implements MCPConfigRepository using PostgreSQL.
@@ -215,6 +222,63 @@ func (r *mcpConfigRepository) SetAuditRetentionDays(ctx context.Context, project
 	tag, err := scope.Conn.Exec(ctx, query, days, now, projectID)
 	if err != nil {
 		return fmt.Errorf("failed to set audit retention days: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("MCP config not found for project %s", projectID)
+	}
+	return nil
+}
+
+// GetAlertConfig retrieves the alert configuration for a project.
+func (r *mcpConfigRepository) GetAlertConfig(ctx context.Context, projectID uuid.UUID) (*models.AlertConfig, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `SELECT alert_config FROM engine_mcp_config WHERE project_id = $1`
+
+	var configJSON []byte
+	err := scope.Conn.QueryRow(ctx, query, projectID).Scan(&configJSON)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get alert config: %w", err)
+	}
+
+	if configJSON == nil {
+		return nil, nil
+	}
+
+	var config models.AlertConfig
+	if err := json.Unmarshal(configJSON, &config); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal alert config: %w", err)
+	}
+	return &config, nil
+}
+
+// SetAlertConfig updates the alert configuration for a project.
+func (r *mcpConfigRepository) SetAlertConfig(ctx context.Context, projectID uuid.UUID, config *models.AlertConfig) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal alert config: %w", err)
+	}
+
+	now := time.Now()
+	query := `
+		UPDATE engine_mcp_config
+		SET alert_config = $1, updated_at = $2
+		WHERE project_id = $3`
+
+	tag, err := scope.Conn.Exec(ctx, query, configJSON, now, projectID)
+	if err != nil {
+		return fmt.Errorf("failed to set alert config: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("MCP config not found for project %s", projectID)

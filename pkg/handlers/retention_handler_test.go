@@ -43,6 +43,12 @@ func (m *mockMCPConfigRepoForRetention) SetAuditRetentionDays(_ context.Context,
 	m.retentionDays = days
 	return m.err
 }
+func (m *mockMCPConfigRepoForRetention) GetAlertConfig(_ context.Context, _ uuid.UUID) (*models.AlertConfig, error) {
+	return nil, m.err
+}
+func (m *mockMCPConfigRepoForRetention) SetAlertConfig(_ context.Context, _ uuid.UUID, _ *models.AlertConfig) error {
+	return m.err
+}
 
 func setupRetentionTest(t *testing.T) (*RetentionHandler, *mockMCPConfigRepoForRetention, uuid.UUID) {
 	t.Helper()

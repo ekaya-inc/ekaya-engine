@@ -22,6 +22,7 @@ type AlertTriggerService interface {
 type alertTriggerDeps struct {
 	alertRepo         repositories.AlertRepository
 	triggerRepo       repositories.AlertTriggerRepository
+	mcpConfigRepo     repositories.MCPConfigRepository
 	logger            *zap.Logger
 	idempotencyWindow time.Duration
 }
@@ -33,12 +34,14 @@ type alertTriggerService struct {
 func NewAlertTriggerService(
 	alertRepo repositories.AlertRepository,
 	triggerRepo repositories.AlertTriggerRepository,
+	mcpConfigRepo repositories.MCPConfigRepository,
 	logger *zap.Logger,
 ) AlertTriggerService {
 	return &alertTriggerService{
 		deps: alertTriggerDeps{
 			alertRepo:         alertRepo,
 			triggerRepo:       triggerRepo,
+			mcpConfigRepo:     mcpConfigRepo,
 			logger:            logger.Named("alert-trigger"),
 			idempotencyWindow: 1 * time.Hour,
 		},
@@ -47,25 +50,53 @@ func NewAlertTriggerService(
 
 var _ AlertTriggerService = (*alertTriggerService)(nil)
 
+// loadAlertConfig loads the alert configuration for the project, returning defaults if none is set.
+func (s *alertTriggerService) loadAlertConfig(ctx context.Context, projectID uuid.UUID) *models.AlertConfig {
+	config, err := s.deps.mcpConfigRepo.GetAlertConfig(ctx, projectID)
+	if err != nil {
+		s.deps.logger.Error("Failed to load alert config, using defaults",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		return models.DefaultAlertConfig()
+	}
+	if config == nil {
+		return models.DefaultAlertConfig()
+	}
+	return config
+}
+
 func (s *alertTriggerService) EvaluateEvent(ctx context.Context, event *models.MCPAuditEvent) error {
 	if event == nil || event.ProjectID == uuid.Nil {
+		return nil
+	}
+
+	config := s.loadAlertConfig(ctx, event.ProjectID)
+	if !config.AlertsEnabled {
 		return nil
 	}
 
 	// Each trigger runs independently; collect errors but don't stop on first failure
 	var errs []string
 
-	triggers := []func(context.Context, *models.MCPAuditEvent) error{
-		s.checkSQLInjection,
-		s.checkUnusualQueryVolume,
-		s.checkLargeDataExport,
-		s.checkAfterHoursAccess,
-		s.checkNewUserHighVolume,
-		s.checkRepeatedErrors,
+	type trigger struct {
+		alertType string
+		check     func(context.Context, *models.MCPAuditEvent, *models.AlertConfig) error
 	}
 
-	for _, trigger := range triggers {
-		if err := trigger(ctx, event); err != nil {
+	triggers := []trigger{
+		{models.AlertTypeSQLInjection, s.checkSQLInjection},
+		{models.AlertTypeUnusualQueryVolume, s.checkUnusualQueryVolume},
+		{models.AlertTypeLargeDataExport, s.checkLargeDataExport},
+		{models.AlertTypeAfterHoursAccess, s.checkAfterHoursAccess},
+		{models.AlertTypeNewUserHighVolume, s.checkNewUserHighVolume},
+		{models.AlertTypeRepeatedErrors, s.checkRepeatedErrors},
+	}
+
+	for _, t := range triggers {
+		if !config.IsAlertEnabled(t.alertType) {
+			continue
+		}
+		if err := t.check(ctx, event, config); err != nil {
 			errs = append(errs, err.Error())
 		}
 	}
@@ -77,20 +108,20 @@ func (s *alertTriggerService) EvaluateEvent(ctx context.Context, event *models.M
 }
 
 // checkSQLInjection creates a critical alert when security_flags indicate injection or security_level is critical.
-func (s *alertTriggerService) checkSQLInjection(ctx context.Context, event *models.MCPAuditEvent) error {
+func (s *alertTriggerService) checkSQLInjection(ctx context.Context, event *models.MCPAuditEvent, config *models.AlertConfig) error {
 	if !hasInjectionFlag(event) && event.SecurityLevel != models.MCPSecurityCritical {
 		return nil
 	}
 
-	return s.createAlertIfNew(ctx, event, models.AlertTypeSQLInjection, models.AlertSeverityCritical,
+	severity := config.GetSeverity(models.AlertTypeSQLInjection, models.AlertSeverityCritical)
+	return s.createAlertIfNew(ctx, event, models.AlertTypeSQLInjection, severity,
 		fmt.Sprintf("SQL injection pattern detected from %s", event.UserID),
 		describeSecurityEvent(event),
 	)
 }
 
-// checkUnusualQueryVolume alerts when a user's query count in the last hour exceeds 50.
-// Hardcoded threshold; will be configurable via alert config in task 4.4.
-func (s *alertTriggerService) checkUnusualQueryVolume(ctx context.Context, event *models.MCPAuditEvent) error {
+// checkUnusualQueryVolume alerts when a user's query count in the last hour exceeds the configured threshold.
+func (s *alertTriggerService) checkUnusualQueryVolume(ctx context.Context, event *models.MCPAuditEvent, config *models.AlertConfig) error {
 	if event.UserID == "" {
 		return nil
 	}
@@ -101,46 +132,90 @@ func (s *alertTriggerService) checkUnusualQueryVolume(ctx context.Context, event
 		return fmt.Errorf("unusual_query_volume check: %w", err)
 	}
 
-	const threshold = 50
+	threshold := 50
+	if setting, ok := config.AlertSettings[models.AlertTypeUnusualQueryVolume]; ok && setting.ThresholdMultiplier != nil {
+		// Use multiplier as an absolute threshold (consistent with plan spec: "> 5x their rolling average (or > 50 if no baseline)")
+		// For simplicity, threshold_multiplier * 10 gives a configurable absolute threshold
+		threshold = int(*setting.ThresholdMultiplier * 10)
+		if threshold < 1 {
+			threshold = 50
+		}
+	}
+
 	if count < threshold {
 		return nil
 	}
 
-	return s.createAlertIfNew(ctx, event, models.AlertTypeUnusualQueryVolume, models.AlertSeverityWarning,
+	severity := config.GetSeverity(models.AlertTypeUnusualQueryVolume, models.AlertSeverityWarning)
+	return s.createAlertIfNew(ctx, event, models.AlertTypeUnusualQueryVolume, severity,
 		fmt.Sprintf("Unusual query volume from %s (%d queries in last hour)", event.UserID, count),
 		fmt.Sprintf("User %s has executed %d queries in the last hour, exceeding threshold of %d.", event.UserID, count, threshold),
 	)
 }
 
-// checkLargeDataExport alerts when a query returns more than 10,000 rows.
-func (s *alertTriggerService) checkLargeDataExport(ctx context.Context, event *models.MCPAuditEvent) error {
+// checkLargeDataExport alerts when a query returns more than the configured row threshold.
+func (s *alertTriggerService) checkLargeDataExport(ctx context.Context, event *models.MCPAuditEvent, config *models.AlertConfig) error {
 	rowCount := extractRowCountFromSummary(event.ResultSummary)
-	const threshold = 10000
+
+	threshold := 10000
+	if setting, ok := config.AlertSettings[models.AlertTypeLargeDataExport]; ok && setting.RowThreshold != nil {
+		threshold = *setting.RowThreshold
+	}
+
 	if rowCount < threshold {
 		return nil
 	}
 
-	return s.createAlertIfNew(ctx, event, models.AlertTypeLargeDataExport, models.AlertSeverityInfo,
+	severity := config.GetSeverity(models.AlertTypeLargeDataExport, models.AlertSeverityInfo)
+	return s.createAlertIfNew(ctx, event, models.AlertTypeLargeDataExport, severity,
 		fmt.Sprintf("Large data export by %s (%d rows)", event.UserID, rowCount),
 		fmt.Sprintf("User %s executed a query returning %d rows (threshold: %d).", event.UserID, rowCount, threshold),
 	)
 }
 
-// checkAfterHoursAccess alerts when events occur outside business hours (6am-10pm UTC).
-func (s *alertTriggerService) checkAfterHoursAccess(ctx context.Context, event *models.MCPAuditEvent) error {
-	hour := time.Now().UTC().Hour()
-	if hour >= 6 && hour < 22 {
+// checkAfterHoursAccess alerts when events occur outside configured business hours.
+func (s *alertTriggerService) checkAfterHoursAccess(ctx context.Context, event *models.MCPAuditEvent, config *models.AlertConfig) error {
+	startHour, startMin := 6, 0
+	endHour, endMin := 22, 0
+	loc := time.UTC
+
+	if setting, ok := config.AlertSettings[models.AlertTypeAfterHoursAccess]; ok {
+		if setting.BusinessHoursStart != nil {
+			if h, m, err := parseHourMinute(*setting.BusinessHoursStart); err == nil {
+				startHour, startMin = h, m
+			}
+		}
+		if setting.BusinessHoursEnd != nil {
+			if h, m, err := parseHourMinute(*setting.BusinessHoursEnd); err == nil {
+				endHour, endMin = h, m
+			}
+		}
+		if setting.Timezone != nil {
+			if tz, err := time.LoadLocation(*setting.Timezone); err == nil {
+				loc = tz
+			}
+		}
+	}
+
+	now := time.Now().In(loc)
+	minuteOfDay := now.Hour()*60 + now.Minute()
+	startMinOfDay := startHour*60 + startMin
+	endMinOfDay := endHour*60 + endMin
+
+	if minuteOfDay >= startMinOfDay && minuteOfDay < endMinOfDay {
 		return nil
 	}
 
-	return s.createAlertIfNew(ctx, event, models.AlertTypeAfterHoursAccess, models.AlertSeverityInfo,
+	severity := config.GetSeverity(models.AlertTypeAfterHoursAccess, models.AlertSeverityInfo)
+	return s.createAlertIfNew(ctx, event, models.AlertTypeAfterHoursAccess, severity,
 		fmt.Sprintf("After-hours access by %s", event.UserID),
-		fmt.Sprintf("User %s accessed the system at %s UTC, outside business hours (06:00-22:00).", event.UserID, time.Now().UTC().Format("15:04")),
+		fmt.Sprintf("User %s accessed the system at %s %s, outside business hours (%02d:%02d-%02d:%02d).",
+			event.UserID, now.Format("15:04"), loc.String(), startHour, startMin, endHour, endMin),
 	)
 }
 
-// checkNewUserHighVolume alerts when a user's first event was <24h ago and they've run >20 queries.
-func (s *alertTriggerService) checkNewUserHighVolume(ctx context.Context, event *models.MCPAuditEvent) error {
+// checkNewUserHighVolume alerts when a user's first event was <24h ago and they've exceeded the configured query threshold.
+func (s *alertTriggerService) checkNewUserHighVolume(ctx context.Context, event *models.MCPAuditEvent, config *models.AlertConfig) error {
 	if event.UserID == "" {
 		return nil
 	}
@@ -163,25 +238,41 @@ func (s *alertTriggerService) checkNewUserHighVolume(ctx context.Context, event 
 		return fmt.Errorf("new_user_high_volume count: %w", err)
 	}
 
-	const threshold = 20
+	threshold := 20
+	if setting, ok := config.AlertSettings[models.AlertTypeNewUserHighVolume]; ok && setting.QueryThreshold != nil {
+		threshold = *setting.QueryThreshold
+	}
+
 	if count < threshold {
 		return nil
 	}
 
-	return s.createAlertIfNew(ctx, event, models.AlertTypeNewUserHighVolume, models.AlertSeverityWarning,
+	severity := config.GetSeverity(models.AlertTypeNewUserHighVolume, models.AlertSeverityWarning)
+	return s.createAlertIfNew(ctx, event, models.AlertTypeNewUserHighVolume, severity,
 		fmt.Sprintf("New user %s with high query volume (%d queries)", event.UserID, count),
 		fmt.Sprintf("User %s (first seen %s) has executed %d queries within their first 24 hours.",
 			event.UserID, firstTime.Format(time.RFC3339), count),
 	)
 }
 
-// checkRepeatedErrors alerts when the same error message appears >5 times from same user in 10 minutes.
-func (s *alertTriggerService) checkRepeatedErrors(ctx context.Context, event *models.MCPAuditEvent) error {
+// checkRepeatedErrors alerts when the same error message exceeds the configured count in the configured window.
+func (s *alertTriggerService) checkRepeatedErrors(ctx context.Context, event *models.MCPAuditEvent, config *models.AlertConfig) error {
 	if event.ErrorMessage == nil || *event.ErrorMessage == "" || event.UserID == "" {
 		return nil
 	}
 
-	since := time.Now().Add(-10 * time.Minute)
+	windowMinutes := 10
+	threshold := 5
+	if setting, ok := config.AlertSettings[models.AlertTypeRepeatedErrors]; ok {
+		if setting.ErrorCount != nil {
+			threshold = *setting.ErrorCount
+		}
+		if setting.WindowMinutes != nil {
+			windowMinutes = *setting.WindowMinutes
+		}
+	}
+
+	since := time.Now().Add(-time.Duration(windowMinutes) * time.Minute)
 
 	// Use a truncated version of the error for matching (first 100 chars)
 	errSubstring := *event.ErrorMessage
@@ -194,15 +285,15 @@ func (s *alertTriggerService) checkRepeatedErrors(ctx context.Context, event *mo
 		return fmt.Errorf("repeated_errors check: %w", err)
 	}
 
-	const threshold = 5
 	if count < threshold {
 		return nil
 	}
 
-	return s.createAlertIfNew(ctx, event, models.AlertTypeRepeatedErrors, models.AlertSeverityWarning,
-		fmt.Sprintf("Repeated errors from %s (%d occurrences in 10 min)", event.UserID, count),
-		fmt.Sprintf("User %s has encountered the same error %d times in the last 10 minutes: %s",
-			event.UserID, count, truncate(*event.ErrorMessage, 200)),
+	severity := config.GetSeverity(models.AlertTypeRepeatedErrors, models.AlertSeverityWarning)
+	return s.createAlertIfNew(ctx, event, models.AlertTypeRepeatedErrors, severity,
+		fmt.Sprintf("Repeated errors from %s (%d occurrences in %d min)", event.UserID, count, windowMinutes),
+		fmt.Sprintf("User %s has encountered the same error %d times in the last %d minutes: %s",
+			event.UserID, count, windowMinutes, truncate(*event.ErrorMessage, 200)),
 	)
 }
 
@@ -308,4 +399,17 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// parseHourMinute parses a "HH:MM" string into hour and minute components.
+func parseHourMinute(s string) (int, int, error) {
+	var h, m int
+	_, err := fmt.Sscanf(s, "%d:%d", &h, &m)
+	if err != nil {
+		return 0, 0, err
+	}
+	if h < 0 || h > 23 || m < 0 || m > 59 {
+		return 0, 0, fmt.Errorf("invalid time: %s", s)
+	}
+	return h, m, nil
 }

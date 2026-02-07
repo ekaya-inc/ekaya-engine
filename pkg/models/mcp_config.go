@@ -36,7 +36,7 @@ type ToolGroupConfig struct {
 type MCPConfig struct {
 	ProjectID            uuid.UUID                   `json:"project_id"`
 	ToolGroups           map[string]*ToolGroupConfig `json:"tool_groups"`
-	AgentAPIKeyEncrypted string                      `json:"-"`                   // Never serialize - encrypted at rest
+	AgentAPIKeyEncrypted string                      `json:"-"`                    // Never serialize - encrypted at rest
 	AuditRetentionDays   *int                        `json:"audit_retention_days"` // nil = use default (90 days)
 	CreatedAt            time.Time                   `json:"created_at"`
 	UpdatedAt            time.Time                   `json:"updated_at"`

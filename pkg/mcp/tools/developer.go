@@ -35,7 +35,7 @@ type MCPToolDeps struct {
 	ChangeReviewService          services.ChangeReviewService
 	PendingChangeRepo            repositories.PendingChangeRepository
 	InstalledAppService          services.InstalledAppService
-	Auditor                      *audit.SecurityAuditor      // Optional: for modifying query SIEM logging
+	Auditor                      *audit.SecurityAuditor       // Optional: for modifying query SIEM logging
 	QueryHistoryService          services.QueryHistoryService // Optional: for query learning history
 }
 

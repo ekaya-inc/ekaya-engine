@@ -19,13 +19,13 @@ const (
 	// Query events
 	MCPEventQueryExecuted         = "query_executed"          // Query execution via MCP tool
 	MCPEventQueryBlocked          = "query_blocked"           // Query blocked by policy
-	MCPEventApprovedQueryExecuted = "approved_query_executed"  // Pre-approved query execution
+	MCPEventApprovedQueryExecuted = "approved_query_executed" // Pre-approved query execution
 
 	// Security events
-	MCPEventSQLInjectionAttempt    = "sql_injection_attempt"     // SQL injection pattern detected
-	MCPEventRateLimitHit           = "rate_limit_hit"            // Rate limit exceeded
+	MCPEventSQLInjectionAttempt     = "sql_injection_attempt"     // SQL injection pattern detected
+	MCPEventRateLimitHit            = "rate_limit_hit"            // Rate limit exceeded
 	MCPEventUnauthorizedTableAccess = "unauthorized_table_access" // Access to restricted table
-	MCPEventSensitiveDataAccess    = "sensitive_data_access"     // Access to sensitive column
+	MCPEventSensitiveDataAccess     = "sensitive_data_access"     // Access to sensitive column
 )
 
 // MCP audit security levels classify the severity of audit events.
@@ -55,9 +55,9 @@ type MCPAuditEvent struct {
 	SQLQuery        *string        `json:"sql_query,omitempty"`
 
 	// Response details
-	WasSuccessful bool            `json:"was_successful"`
-	ErrorMessage  *string         `json:"error_message,omitempty"`
-	ResultSummary map[string]any  `json:"result_summary,omitempty"`
+	WasSuccessful bool           `json:"was_successful"`
+	ErrorMessage  *string        `json:"error_message,omitempty"`
+	ResultSummary map[string]any `json:"result_summary,omitempty"`
 
 	// Performance
 	DurationMs *int `json:"duration_ms,omitempty"`

@@ -464,12 +464,12 @@ func main() {
 	// Register alert handler (protected) - audit alerts management
 	alertRepo := repositories.NewAlertRepository()
 	alertService := services.NewAlertService(alertRepo, logger)
-	alertHandler := handlers.NewAlertHandler(alertService, logger)
+	alertHandler := handlers.NewAlertHandler(alertService, mcpConfigRepo, logger)
 	alertHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Wire alert trigger detection into the MCP audit pipeline
 	alertTriggerRepo := repositories.NewAlertTriggerRepository()
-	alertTriggerService := services.NewAlertTriggerService(alertRepo, alertTriggerRepo, logger)
+	alertTriggerService := services.NewAlertTriggerService(alertRepo, alertTriggerRepo, mcpConfigRepo, logger)
 	mcpAuditLogger.SetAlertTrigger(alertTriggerService)
 
 	// Create retention service and start scheduler for auto-pruning old audit/history data

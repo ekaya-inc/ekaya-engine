@@ -9,20 +9,23 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 // AlertHandler handles audit alert HTTP requests.
 type AlertHandler struct {
-	alertService services.AlertService
-	logger       *zap.Logger
+	alertService  services.AlertService
+	mcpConfigRepo repositories.MCPConfigRepository
+	logger        *zap.Logger
 }
 
 // NewAlertHandler creates a new alert handler.
-func NewAlertHandler(alertService services.AlertService, logger *zap.Logger) *AlertHandler {
+func NewAlertHandler(alertService services.AlertService, mcpConfigRepo repositories.MCPConfigRepository, logger *zap.Logger) *AlertHandler {
 	return &AlertHandler{
-		alertService: alertService,
-		logger:       logger,
+		alertService:  alertService,
+		mcpConfigRepo: mcpConfigRepo,
+		logger:        logger,
 	}
 }
 
@@ -34,6 +37,12 @@ func (h *AlertHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.M
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.ListAlerts)))
 	mux.HandleFunc("POST "+base+"/{alert_id}/resolve",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.ResolveAlert)))
+
+	configBase := "/api/projects/{pid}/audit/alert-config"
+	mux.HandleFunc("GET "+configBase,
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetAlertConfig)))
+	mux.HandleFunc("PUT "+configBase,
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.SetAlertConfig)))
 }
 
 // ListAlerts handles GET /api/projects/{pid}/audit/alerts
@@ -135,6 +144,76 @@ func (h *AlertHandler) ResolveAlert(w http.ResponseWriter, r *http.Request) {
 	if err := WriteJSON(w, http.StatusOK, ApiResponse{
 		Success: true,
 		Message: "Alert resolved successfully",
+	}); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// GetAlertConfig handles GET /api/projects/{pid}/audit/alert-config
+func (h *AlertHandler) GetAlertConfig(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	config, err := h.mcpConfigRepo.GetAlertConfig(r.Context(), projectID)
+	if err != nil {
+		h.logger.Error("Failed to get alert config", zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "internal_error", "Failed to get alert configuration"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if config == nil {
+		config = models.DefaultAlertConfig()
+	}
+
+	if err := WriteJSON(w, http.StatusOK, ApiResponse{
+		Success: true,
+		Data:    config,
+	}); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// SetAlertConfig handles PUT /api/projects/{pid}/audit/alert-config
+func (h *AlertHandler) SetAlertConfig(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	var config models.AlertConfig
+	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_request", "Invalid request body"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Validate severity values in alert settings
+	for alertType, setting := range config.AlertSettings {
+		if setting.Severity != "" && !models.ValidAlertSeverity(setting.Severity) {
+			if err := ErrorResponse(w, http.StatusBadRequest, "invalid_severity",
+				"Invalid severity for alert type "+alertType+": "+setting.Severity); err != nil {
+				h.logger.Error("Failed to write error response", zap.Error(err))
+			}
+			return
+		}
+	}
+
+	if err := h.mcpConfigRepo.SetAlertConfig(r.Context(), projectID, &config); err != nil {
+		h.logger.Error("Failed to set alert config", zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "internal_error", "Failed to update alert configuration"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if err := WriteJSON(w, http.StatusOK, ApiResponse{
+		Success: true,
+		Data:    &config,
 	}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}

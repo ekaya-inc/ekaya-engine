@@ -36,7 +36,7 @@ func (h *RetentionHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *au
 }
 
 type retentionResponse struct {
-	RetentionDays int `json:"retention_days"`
+	RetentionDays int  `json:"retention_days"`
 	IsDefault     bool `json:"is_default"`
 }
 

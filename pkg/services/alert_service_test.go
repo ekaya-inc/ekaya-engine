@@ -16,11 +16,11 @@ import (
 
 // mockAlertRepo implements repositories.AlertRepository for testing.
 type mockAlertRepo struct {
-	alerts    []*models.AuditAlert
-	createErr error
+	alerts     []*models.AuditAlert
+	createErr  error
 	resolveErr error
-	listErr   error
-	getErr    error
+	listErr    error
+	getErr     error
 }
 
 func (m *mockAlertRepo) ListAlerts(_ context.Context, projectID uuid.UUID, filters models.AlertFilters) ([]*models.AuditAlert, int, error) {
