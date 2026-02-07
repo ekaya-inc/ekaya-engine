@@ -75,7 +75,10 @@ func setupGlossaryTest(t *testing.T) *glossaryTestContext {
 	service := services.NewGlossaryService(glossaryRepo, ontologyRepo, nil, nil, datasourceSvc, adapterFactory, mockLLMFactory, nil, zap.NewNop(), "test")
 
 	// Create handler
-	handler := NewGlossaryHandler(service, zap.NewNop())
+	questionService := services.NewOntologyQuestionService(
+		repositories.NewOntologyQuestionRepository(), ontologyRepo, nil,
+		nil, zap.NewNop())
+	handler := NewGlossaryHandler(service, questionService, zap.NewNop())
 
 	// Use a unique project ID for consistent testing
 	projectID := uuid.MustParse("00000000-0000-0000-0000-000000000003")

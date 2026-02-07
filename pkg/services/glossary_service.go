@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -50,6 +52,9 @@ func IsTestTerm(termName string) bool {
 	return false
 }
 
+// generationStatus tracks per-project glossary generation progress in memory.
+var generationStatus sync.Map // map[uuid.UUID]*models.GlossaryGenerationStatus
+
 // GlossaryService provides operations for managing business glossary terms.
 type GlossaryService interface {
 	// CreateTerm creates a new glossary term for a project.
@@ -91,6 +96,15 @@ type GlossaryService interface {
 	// Processes terms in parallel via LLM calls.
 	// Only enriches terms with source="discovered" that lack enrichment.
 	EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error
+
+	// GetGenerationStatus returns the current glossary generation status for a project.
+	// Returns an idle status if no generation has been started.
+	GetGenerationStatus(projectID uuid.UUID) *models.GlossaryGenerationStatus
+
+	// RunAutoGenerate orchestrates glossary discovery and enrichment with status tracking.
+	// Resolves the active ontology internally. Runs synchronously — callers should
+	// invoke in a goroutine for async behavior.
+	RunAutoGenerate(ctx context.Context, projectID uuid.UUID) error
 }
 
 // SQLTestResult contains the result of testing a SQL query.
@@ -2668,4 +2682,77 @@ func isUnionInAggregatingSubquery(sql string) bool {
 	}
 
 	return false
+}
+
+// setGenerationStatus stores the current generation status for a project.
+func setGenerationStatus(projectID uuid.UUID, status, message, errMsg string, startedAt *time.Time) {
+	generationStatus.Store(projectID, &models.GlossaryGenerationStatus{
+		Status:    status,
+		Message:   message,
+		Error:     errMsg,
+		StartedAt: startedAt,
+	})
+}
+
+func (s *glossaryService) GetGenerationStatus(projectID uuid.UUID) *models.GlossaryGenerationStatus {
+	val, ok := generationStatus.Load(projectID)
+	if !ok {
+		return &models.GlossaryGenerationStatus{
+			Status:  "idle",
+			Message: "No generation in progress",
+		}
+	}
+	return val.(*models.GlossaryGenerationStatus)
+}
+
+func (s *glossaryService) RunAutoGenerate(ctx context.Context, projectID uuid.UUID) error {
+	now := time.Now()
+
+	// Establish tenant context — callers pass context.Background() from goroutines
+	setGenerationStatus(projectID, "discovering", "Resolving tenant context...", "", &now)
+	tenantCtx, cleanup, err := s.getTenant(ctx, projectID)
+	if err != nil {
+		s.logger.Error("glossary auto-generate: failed to get tenant context", zap.Error(err))
+		setGenerationStatus(projectID, "failed", "Failed to get tenant context", err.Error(), &now)
+		return fmt.Errorf("get tenant context: %w", err)
+	}
+	defer cleanup()
+
+	// Resolve active ontology ID
+	setGenerationStatus(projectID, "discovering", "Resolving active ontology...", "", &now)
+	ontology, err := s.ontologyRepo.GetActive(tenantCtx, projectID)
+	if err != nil {
+		s.logger.Error("glossary auto-generate: failed to get active ontology", zap.Error(err))
+		setGenerationStatus(projectID, "failed", "Failed to get active ontology", err.Error(), &now)
+		return fmt.Errorf("get active ontology: %w", err)
+	}
+	if ontology == nil {
+		s.logger.Error("glossary auto-generate: no active ontology found")
+		setGenerationStatus(projectID, "failed", "No active ontology found", "no active ontology found for project", &now)
+		return fmt.Errorf("no active ontology found for project")
+	}
+	ontologyID := ontology.ID
+
+	// Discovery phase
+	setGenerationStatus(projectID, "discovering", "Discovering glossary terms from ontology...", "", &now)
+	count, err := s.DiscoverGlossaryTerms(tenantCtx, projectID, ontologyID)
+	if err != nil {
+		s.logger.Error("glossary auto-generate: discovery failed", zap.Error(err))
+		setGenerationStatus(projectID, "failed", "Discovery failed", err.Error(), &now)
+		return fmt.Errorf("glossary discovery failed: %w", err)
+	}
+	s.logger.Info("glossary auto-generate: discovery complete", zap.Int("terms_discovered", count))
+
+	// Enrichment phase
+	setGenerationStatus(projectID, "enriching", fmt.Sprintf("Enriching %d discovered terms with SQL...", count), "", &now)
+	err = s.EnrichGlossaryTerms(tenantCtx, projectID, ontologyID)
+	if err != nil {
+		s.logger.Error("glossary auto-generate: enrichment failed", zap.Error(err))
+		setGenerationStatus(projectID, "failed", "Enrichment failed", err.Error(), &now)
+		return fmt.Errorf("glossary enrichment failed: %w", err)
+	}
+
+	setGenerationStatus(projectID, "completed", fmt.Sprintf("Generated and enriched %d glossary terms", count), "", &now)
+	s.logger.Info("glossary auto-generate: completed", zap.Int("terms_discovered", count))
+	return nil
 }

@@ -442,7 +442,7 @@ func main() {
 	ontologyEnrichmentHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register glossary handler (protected) - business glossary for MCP clients
-	glossaryHandler := handlers.NewGlossaryHandler(glossaryService, logger)
+	glossaryHandler := handlers.NewGlossaryHandler(glossaryService, ontologyQuestionService, logger)
 	glossaryHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register knowledge handler (protected) - project knowledge facts

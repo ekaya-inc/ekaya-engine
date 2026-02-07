@@ -179,6 +179,14 @@ func (s *testGlossaryService) EnrichGlossaryTerms(ctx context.Context, projectID
 	return nil
 }
 
+func (s *testGlossaryService) GetGenerationStatus(projectID uuid.UUID) *models.GlossaryGenerationStatus {
+	return &models.GlossaryGenerationStatus{Status: "idle"}
+}
+
+func (s *testGlossaryService) RunAutoGenerate(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
 // cleanup removes test glossary terms.
 func (tc *glossaryToolTestContext) cleanup() {
 	tc.t.Helper()

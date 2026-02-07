@@ -4,11 +4,15 @@ import {
   BookOpen,
   ChevronDown,
   ChevronRight,
+  Loader2,
+  MessageSquareWarning,
   Plus,
   Edit3,
+  RefreshCw,
+  Sparkles,
   Trash2,
 } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { GlossaryTermEditor } from "../components/GlossaryTermEditor";
@@ -22,13 +26,15 @@ import {
 } from "../components/ui/Card";
 import { useToast } from "../hooks/useToast";
 import engineApi from "../services/engineApi";
-import ontologyService from "../services/ontologyService";
-import type { GlossaryTerm, OntologyWorkflowStatus } from "../types";
+import ontologyApi from "../services/ontologyApi";
+import type { GlossaryGenerationStatus, GlossaryTerm } from "../types";
+
+const POLL_INTERVAL_MS = 3000;
 
 /**
  * GlossaryPage - Display business glossary terms with technical mappings
  * Shows all glossary terms (discovered and user-defined) with their SQL details.
- * Glossary discovery is handled by the unified DAG workflow on the Ontology page.
+ * Supports auto-generation gated on ontology questions being answered.
  */
 const GlossaryPage = () => {
   const navigate = useNavigate();
@@ -40,8 +46,15 @@ const GlossaryPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // State for ontology status (to check if extraction has been run)
-  const [ontologyStatus, setOntologyStatus] = useState<OntologyWorkflowStatus | null>(null);
+  // Generation status from the list endpoint
+  const [generationStatus, setGenerationStatus] = useState<GlossaryGenerationStatus | null>(null);
+
+  // Question-gating state
+  const [pendingRequiredQuestions, setPendingRequiredQuestions] = useState<number | null>(null);
+  const [checkingQuestions, setCheckingQuestions] = useState(false);
+
+  // Auto-generate in-flight
+  const [generating, setGenerating] = useState(false);
 
   // Track which terms have expanded SQL details
   const [expandedTerms, setExpandedTerms] = useState<Set<string>>(new Set());
@@ -50,6 +63,9 @@ const GlossaryPage = () => {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingTerm, setEditingTerm] = useState<GlossaryTerm | null>(null);
   const [deletingTermId, setDeletingTermId] = useState<string | null>(null);
+
+  // Polling ref
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Toggle expanded state for a term
   const toggleExpanded = (termId: string): void => {
@@ -64,43 +80,37 @@ const GlossaryPage = () => {
     });
   };
 
-  // Subscribe to ontology status updates
-  useEffect(() => {
-    if (!pid) return;
-
-    ontologyService.setProjectId(pid);
-    const unsubscribe = ontologyService.subscribe((status) => {
-      setOntologyStatus(status);
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, [pid]);
-
-  // Fetch glossary terms
-  const fetchTerms = useCallback(async (): Promise<void> => {
+  // Fetch glossary terms (and generation_status)
+  const fetchTerms = useCallback(async (silent = false): Promise<void> => {
     if (!pid) return;
     try {
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
       setError(null);
 
       const response = await engineApi.listGlossaryTerms(pid);
 
       if (response.data) {
-        // Sort terms alphabetically by term field
         const termsArray = response.data.terms ?? [];
         const sortedTerms = [...termsArray].sort((a, b) =>
           a.term.localeCompare(b.term)
         );
         setTerms(sortedTerms);
+        if (response.data.generation_status) {
+          setGenerationStatus(response.data.generation_status);
+        }
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Failed to fetch glossary terms";
-      console.error("Failed to fetch glossary terms:", errorMessage);
-      setError(errorMessage);
+      if (!silent) {
+        console.error("Failed to fetch glossary terms:", errorMessage);
+        setError(errorMessage);
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [pid]);
 
@@ -108,6 +118,127 @@ const GlossaryPage = () => {
   useEffect(() => {
     fetchTerms();
   }, [fetchTerms]);
+
+  // Check for pending required questions via the questions endpoint (read-only, no side effects)
+  const checkPendingQuestions = useCallback(async (): Promise<void> => {
+    if (!pid) return;
+    setCheckingQuestions(true);
+    try {
+      const response = await ontologyApi.getNextQuestion(pid);
+      const required = response.counts?.required ?? 0;
+      setPendingRequiredQuestions(required);
+    } catch {
+      // If we can't check questions, assume none pending so the button is available
+      setPendingRequiredQuestions(0);
+    } finally {
+      setCheckingQuestions(false);
+    }
+  }, [pid]);
+
+  // When in empty state with idle generation, check for pending questions on mount
+  useEffect(() => {
+    if (
+      !loading &&
+      terms.length === 0 &&
+      generationStatus?.status === 'idle' &&
+      pendingRequiredQuestions === null &&
+      !checkingQuestions
+    ) {
+      checkPendingQuestions();
+    }
+  }, [loading, terms.length, generationStatus?.status, pendingRequiredQuestions, checkingQuestions, checkPendingQuestions]);
+
+  // Poll while generation is in progress
+  const isGenerating = generationStatus?.status === 'discovering' || generationStatus?.status === 'enriching';
+
+  useEffect(() => {
+    if (isGenerating) {
+      pollRef.current = setInterval(() => {
+        fetchTerms(true);
+      }, POLL_INTERVAL_MS);
+    } else {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+      // If generation just completed, refresh once more
+      if (generating && generationStatus?.status === 'completed') {
+        setGenerating(false);
+        fetchTerms(true);
+        toast({
+          title: 'Glossary generated',
+          description: generationStatus.message,
+          variant: 'default',
+        });
+      } else if (generating && generationStatus?.status === 'failed') {
+        setGenerating(false);
+        toast({
+          title: 'Glossary generation failed',
+          description: generationStatus.error ?? generationStatus.message,
+          variant: 'destructive',
+        });
+      }
+    }
+
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, [isGenerating, generating, generationStatus?.status, generationStatus?.message, generationStatus?.error, fetchTerms, toast]);
+
+  // Handle auto-generate
+  const handleAutoGenerate = async (): Promise<void> => {
+    if (!pid) return;
+    setGenerating(true);
+    try {
+      await engineApi.autoGenerateGlossary(pid);
+      // Poll will pick up status changes
+      fetchTerms(true);
+    } catch (err) {
+      setGenerating(false);
+      const errorMessage = err instanceof Error ? err.message : 'Failed to start glossary generation';
+      toast({
+        title: 'Failed to generate glossary',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    }
+  };
+
+  // Handle regenerate (with confirmation)
+  const handleRegenerate = async (): Promise<void> => {
+    if (!pid) return;
+
+    const confirmed = window.confirm(
+      'This will regenerate all inferred glossary terms. Manually created terms will be preserved. Continue?'
+    );
+    if (!confirmed) return;
+
+    // Check for pending questions first
+    setGenerating(true);
+    try {
+      await engineApi.autoGenerateGlossary(pid);
+      fetchTerms(true);
+    } catch (err) {
+      setGenerating(false);
+      const errorMessage = err instanceof Error ? err.message : '';
+      if (errorMessage.includes("required question")) {
+        toast({
+          title: 'Cannot regenerate',
+          description: 'Please answer all required ontology questions first.',
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'Failed to regenerate glossary',
+          description: errorMessage,
+          variant: 'destructive',
+        });
+      }
+    }
+  };
 
   // Handle add term
   const handleAddTerm = (): void => {
@@ -174,10 +305,6 @@ const GlossaryPage = () => {
     fetchTerms();
   };
 
-  // Check if ontology is complete
-  const isOntologyComplete = ontologyStatus?.progress.state === 'complete'
-    || ontologyStatus?.ontologyReady === true;
-
   // Loading state
   if (loading) {
     return (
@@ -233,7 +360,7 @@ const GlossaryPage = () => {
     );
   }
 
-  // Empty state
+  // Empty state - with generation status awareness
   if (terms.length === 0) {
     return (
       <div className="mx-auto max-w-6xl">
@@ -245,25 +372,84 @@ const GlossaryPage = () => {
         </div>
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center max-w-md p-6">
-            <div className="mb-4">
-              <BookOpen className="h-16 w-16 mx-auto text-muted-foreground" />
-            </div>
-            {!isOntologyComplete ? (
+            {/* Generation in progress */}
+            {isGenerating ? (
               <>
-                <h2 className="text-xl font-semibold mb-2">Run Ontology Extraction First</h2>
-                <p className="text-sm text-muted-foreground mb-6">
-                  No glossary terms have been discovered yet. Run the ontology extraction workflow to identify business terms in your database schema.
+                <div className="mb-4">
+                  <Loader2 className="h-16 w-16 mx-auto text-cyan-500 animate-spin" />
+                </div>
+                <h2 className="text-xl font-semibold mb-2">Generating Glossary Terms</h2>
+                <p className="text-sm text-muted-foreground mb-2">
+                  {generationStatus?.message ?? 'Working...'}
                 </p>
-                <Button onClick={() => navigate(`/projects/${pid}/ontology`)}>
-                  Go to Ontology
+                <p className="text-xs text-text-tertiary">
+                  This may take a few minutes depending on the size of your schema.
+                </p>
+              </>
+            ) : generationStatus?.status === 'failed' ? (
+              <>
+                <div className="mb-4 text-destructive">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <h2 className="text-xl font-semibold mb-2">Generation Failed</h2>
+                <p className="text-sm text-muted-foreground mb-4">
+                  {generationStatus.error ?? generationStatus.message}
+                </p>
+                <Button onClick={handleAutoGenerate} disabled={generating}>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Retry
+                </Button>
+              </>
+            ) : checkingQuestions ? (
+              <>
+                <div className="mb-4">
+                  <Loader2 className="h-16 w-16 mx-auto text-muted-foreground animate-spin" />
+                </div>
+                <h2 className="text-xl font-semibold mb-2">Checking readiness...</h2>
+              </>
+            ) : pendingRequiredQuestions !== null && pendingRequiredQuestions !== 0 ? (
+              /* Required questions need answering */
+              <>
+                <div className="mb-4">
+                  <MessageSquareWarning className="h-16 w-16 mx-auto text-amber-500" />
+                </div>
+                <h2 className="text-xl font-semibold mb-2">Answer Required Questions First</h2>
+                <p className="text-sm text-muted-foreground mb-6">
+                  {pendingRequiredQuestions > 0
+                    ? `${pendingRequiredQuestions} required question${pendingRequiredQuestions === 1 ? '' : 's'} must be answered before glossary terms can be generated.`
+                    : 'Required ontology questions must be answered before glossary terms can be generated.'}
+                </p>
+                <Button onClick={() => navigate(`/projects/${pid}/ontology-questions`)}>
+                  Answer Questions
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </>
-            ) : (
+            ) : pendingRequiredQuestions === 0 && !generating ? (
+              /* Ready to auto-generate */
               <>
-                <h2 className="text-xl font-semibold mb-2">No Glossary Terms Discovered Yet</h2>
+                <div className="mb-4">
+                  <BookOpen className="h-16 w-16 mx-auto text-muted-foreground" />
+                </div>
+                <h2 className="text-xl font-semibold mb-2">No Glossary Terms Yet</h2>
                 <p className="text-sm text-muted-foreground mb-6">
-                  The ontology extraction has completed, but no business glossary terms were discovered in your database schema.
+                  Generate business glossary terms from your ontology. Terms will include SQL definitions and technical mappings.
+                </p>
+                <Button onClick={handleAutoGenerate}>
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  Auto-Generate Terms
+                </Button>
+              </>
+            ) : (
+              /* Fallback: still loading / no info yet */
+              <>
+                <div className="mb-4">
+                  <BookOpen className="h-16 w-16 mx-auto text-muted-foreground" />
+                </div>
+                <h2 className="text-xl font-semibold mb-2">No Glossary Terms Yet</h2>
+                <p className="text-sm text-muted-foreground mb-6">
+                  Run the ontology extraction workflow first, then generate glossary terms.
                 </p>
                 <Button onClick={() => navigate(`/projects/${pid}/ontology`)}>
                   Go to Ontology
@@ -289,13 +475,21 @@ const GlossaryPage = () => {
             Back to Dashboard
           </Button>
           <div className="flex items-center gap-2">
-            <Button onClick={handleAddTerm}>
+            <Button onClick={handleAddTerm} disabled={isGenerating}>
               <Plus className="mr-2 h-4 w-4" />
               Add Term
             </Button>
-            <Button variant="outline" onClick={() => navigate(`/projects/${pid}/ontology`)}>
-              Go to Ontology
-              <ArrowRight className="ml-2 h-4 w-4" />
+            <Button
+              variant="outline"
+              onClick={handleRegenerate}
+              disabled={isGenerating || generating}
+            >
+              {isGenerating ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Regenerate
             </Button>
           </div>
         </div>
@@ -306,6 +500,25 @@ const GlossaryPage = () => {
           Business terms with their technical mappings
         </p>
       </div>
+
+      {/* Generation in-progress banner */}
+      {isGenerating && (
+        <Card className="mb-6 border-cyan-500/30 bg-cyan-500/5">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-3">
+              <Loader2 className="h-5 w-5 text-cyan-500 animate-spin flex-shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-text-primary">
+                  Generating glossary terms...
+                </p>
+                <p className="text-xs text-text-secondary">
+                  {generationStatus?.message ?? 'Working...'}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Summary Card */}
       <Card className="mb-6">

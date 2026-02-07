@@ -15,6 +15,7 @@ vi.mock('../../services/engineApi', () => ({
     testGlossarySQL: vi.fn(),
     createGlossaryTerm: vi.fn(),
     updateGlossaryTerm: vi.fn(),
+    autoGenerateGlossary: vi.fn(),
   },
 }));
 
@@ -22,6 +23,12 @@ vi.mock('../../services/ontologyService', () => ({
   default: {
     setProjectId: vi.fn(),
     subscribe: vi.fn(() => vi.fn()),
+  },
+}));
+
+vi.mock('../../services/ontologyApi', () => ({
+  default: {
+    getNextQuestion: vi.fn().mockResolvedValue({ all_complete: true, counts: { required: 0, optional: 0 } }),
   },
 }));
 
@@ -387,11 +394,11 @@ describe('GlossaryPage', () => {
       });
     });
 
-    it('shows Go to Ontology button', async () => {
+    it('shows Regenerate button when terms exist', async () => {
       renderGlossaryPage();
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: /go to ontology/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /regenerate/i })).toBeInTheDocument();
       });
     });
   });
