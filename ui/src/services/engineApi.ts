@@ -12,6 +12,7 @@ import type {
   AITestResult,
   ApiResponse,
   ApproveQueryResponse,
+  AuditAlert,
   AuditSummary,
   ConnectionDetails,
   CreateDatasourceResponse,
@@ -49,6 +50,7 @@ import type {
   RejectQueryResponse,
   RelationshipDetail,
   RelationshipsResponse,
+  ResolveAlertRequest,
   SaveSelectionsResponse,
   SchemaChange,
   SchemaRefreshResponse,
@@ -1115,6 +1117,38 @@ class EngineApiService {
   ): Promise<ApiResponse<AuditSummary>> {
     return this.makeRequest<AuditSummary>(
       `/${projectId}/audit/summary`
+    );
+  }
+
+  /**
+   * List audit alerts with filters
+   * GET /api/projects/{projectId}/audit/alerts
+   */
+  async getAuditAlerts(
+    projectId: string,
+    params?: Record<string, string>
+  ): Promise<ApiResponse<PaginatedResponse<AuditAlert>>> {
+    const query = params ? '?' + new URLSearchParams(params).toString() : '';
+    return this.makeRequest<PaginatedResponse<AuditAlert>>(
+      `/${projectId}/audit/alerts${query}`
+    );
+  }
+
+  /**
+   * Resolve an audit alert
+   * POST /api/projects/{projectId}/audit/alerts/{alertId}/resolve
+   */
+  async resolveAuditAlert(
+    projectId: string,
+    alertId: string,
+    body: ResolveAlertRequest
+  ): Promise<ApiResponse<{ message: string }>> {
+    return this.makeRequest<{ message: string }>(
+      `/${projectId}/audit/alerts/${alertId}/resolve`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }
     );
   }
 

@@ -57,6 +57,9 @@ type AuditSummary struct {
 	OntologyChangesCount  int `json:"ontology_changes_count"`
 	PendingSchemaChanges  int `json:"pending_schema_changes"`
 	PendingQueryApprovals int `json:"pending_query_approvals"`
+	OpenAlertsCritical    int `json:"open_alerts_critical"`
+	OpenAlertsWarning     int `json:"open_alerts_warning"`
+	OpenAlertsInfo        int `json:"open_alerts_info"`
 }
 
 // QueryExecutionRow represents a row from the query executions audit view.

@@ -150,6 +150,29 @@ export interface MCPAuditEventFilters {
   offset?: number;
 }
 
+// Audit Alerts
+export interface AuditAlert {
+  id: string;
+  project_id: string;
+  alert_type: string;
+  severity: string;
+  title: string;
+  description?: string;
+  affected_user_id?: string;
+  related_audit_ids?: string[];
+  status: string;
+  resolved_by?: string;
+  resolved_at?: string;
+  resolution_notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResolveAlertRequest {
+  resolution: 'dismissed' | 'resolved';
+  notes?: string;
+}
+
 // Audit Summary
 export interface AuditSummary {
   total_query_executions: number;
@@ -158,4 +181,7 @@ export interface AuditSummary {
   ontology_changes_count: number;
   pending_schema_changes: number;
   pending_query_approvals: number;
+  open_alerts_critical: number;
+  open_alerts_warning: number;
+  open_alerts_info: number;
 }

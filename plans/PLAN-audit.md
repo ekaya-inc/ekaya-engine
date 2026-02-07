@@ -559,7 +559,7 @@ Each alert trigger should be idempotent within a reasonable window — don't cre
 
 Severity levels per alert type are defined in the table above. Title should be human-readable (e.g., "SQL injection pattern detected", "Unusual query volume from user@example.com").
 
-### 4.3 [ ] Frontend: Alerts tab on Audit page and alert management
+### 4.3 [x] Frontend: Alerts tab on Audit page and alert management
 
 Add an "Alerts" tab to the existing audit page (`ui/src/pages/AuditPage.tsx`). This tab displays alerts from `GET /api/projects/{pid}/audit/alerts`.
 

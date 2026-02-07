@@ -421,6 +421,19 @@ func (r *auditPageRepository) GetSummary(ctx context.Context, projectID uuid.UUI
 		return nil, fmt.Errorf("failed to count pending query approvals: %w", err)
 	}
 
+	// Open alerts by severity
+	err = scope.Conn.QueryRow(ctx, `
+		SELECT
+			COALESCE(SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN severity = 'warning' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN severity = 'info' THEN 1 ELSE 0 END), 0)
+		FROM engine_mcp_audit_alerts
+		WHERE project_id = $1 AND status = 'open'`,
+		projectID).Scan(&summary.OpenAlertsCritical, &summary.OpenAlertsWarning, &summary.OpenAlertsInfo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count open alerts: %w", err)
+	}
+
 	return summary, nil
 }
 

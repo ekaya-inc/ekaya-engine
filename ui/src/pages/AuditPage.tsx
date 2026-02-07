@@ -20,6 +20,7 @@ import {
   FileEdit,
   GitPullRequest,
   Terminal,
+  Bell,
 } from 'lucide-react';
 import { Fragment, useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -29,16 +30,18 @@ import { Card, CardContent } from '../components/ui/Card';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
 import type {
+  AuditAlert,
   AuditSummary,
   MCPAuditEvent,
   OntologyChange,
   PaginatedResponse,
   QueryApproval,
   QueryExecution,
+  ResolveAlertRequest,
   SchemaChange,
 } from '../types';
 
-type AuditTab = 'query-executions' | 'ontology-changes' | 'schema-changes' | 'query-approvals' | 'mcp-events';
+type AuditTab = 'query-executions' | 'ontology-changes' | 'schema-changes' | 'query-approvals' | 'mcp-events' | 'alerts';
 
 const TAB_CONFIG: { key: AuditTab; label: string; icon: typeof Database }[] = [
   { key: 'query-executions', label: 'Query Executions', icon: Database },
@@ -46,6 +49,7 @@ const TAB_CONFIG: { key: AuditTab; label: string; icon: typeof Database }[] = [
   { key: 'schema-changes', label: 'Schema Changes', icon: GitPullRequest },
   { key: 'query-approvals', label: 'Query Approvals', icon: Shield },
   { key: 'mcp-events', label: 'MCP Events', icon: Terminal },
+  { key: 'alerts', label: 'Alerts', icon: Bell },
 ];
 
 // Time range presets
@@ -88,6 +92,8 @@ function truncateSQL(sql: string, maxLen = 80): string {
 function AuditSummaryHeader({ summary }: { summary: AuditSummary | null }) {
   if (!summary) return null;
 
+  const totalOpenAlerts = summary.open_alerts_critical + summary.open_alerts_warning + summary.open_alerts_info;
+
   const stats = [
     { label: 'Query Executions (30d)', value: summary.total_query_executions, icon: Database },
     { label: 'Failed Queries', value: summary.failed_query_count, icon: XCircle, warn: summary.failed_query_count > 0 },
@@ -95,20 +101,40 @@ function AuditSummaryHeader({ summary }: { summary: AuditSummary | null }) {
     { label: 'Ontology Changes', value: summary.ontology_changes_count, icon: FileEdit },
     { label: 'Pending Schema', value: summary.pending_schema_changes, icon: GitPullRequest, warn: summary.pending_schema_changes > 0 },
     { label: 'Pending Approvals', value: summary.pending_query_approvals, icon: Shield, warn: summary.pending_query_approvals > 0 },
+    { label: 'Open Alerts', value: totalOpenAlerts, icon: Bell, warn: summary.open_alerts_critical > 0, critical: summary.open_alerts_critical > 0 },
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 mb-6">
-      {stats.map(({ label, value, icon: Icon, warn }) => (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7 mb-6">
+      {stats.map(({ label, value, icon: Icon, warn, critical }) => (
         <Card key={label}>
           <CardContent className="p-3">
             <div className="flex items-center gap-2 mb-1">
-              <Icon className={`h-4 w-4 ${warn ? 'text-amber-500' : 'text-text-tertiary'}`} />
+              <Icon className={`h-4 w-4 ${critical ? 'text-red-500' : warn ? 'text-amber-500' : 'text-text-tertiary'}`} />
               <span className="text-xs text-text-secondary truncate">{label}</span>
             </div>
-            <p className={`text-xl font-semibold ${warn ? 'text-amber-600 dark:text-amber-400' : 'text-text-primary'}`}>
+            <p className={`text-xl font-semibold ${critical ? 'text-red-600 dark:text-red-400' : warn ? 'text-amber-600 dark:text-amber-400' : 'text-text-primary'}`}>
               {value.toLocaleString()}
             </p>
+            {label === 'Open Alerts' && totalOpenAlerts > 0 && (
+              <div className="flex gap-1 mt-1">
+                {summary.open_alerts_critical > 0 && (
+                  <span className="text-[10px] px-1 py-0.5 rounded bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300">
+                    {summary.open_alerts_critical} critical
+                  </span>
+                )}
+                {summary.open_alerts_warning > 0 && (
+                  <span className="text-[10px] px-1 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                    {summary.open_alerts_warning} warn
+                  </span>
+                )}
+                {summary.open_alerts_info > 0 && (
+                  <span className="text-[10px] px-1 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                    {summary.open_alerts_info} info
+                  </span>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
       ))}
@@ -1118,6 +1144,241 @@ function MCPEventsTab({ projectId }: { projectId: string }) {
 }
 
 // ============================================================================
+// Alerts Tab
+// ============================================================================
+
+function AlertsTab({ projectId }: { projectId: string }) {
+  const { toast } = useToast();
+  const [data, setData] = useState<PaginatedResponse<AuditAlert> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState('open');
+  const [severityFilter, setSeverityFilter] = useState('');
+  const [offset, setOffset] = useState(0);
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
+  const [resolveForm, setResolveForm] = useState<{ resolution: ResolveAlertRequest['resolution']; notes: string }>({
+    resolution: 'resolved',
+    notes: '',
+  });
+  const [submitting, setSubmitting] = useState(false);
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params: Record<string, string> = { limit: '50', offset: String(offset) };
+      if (statusFilter) params.status = statusFilter;
+      if (severityFilter) params.severity = severityFilter;
+
+      const response = await engineApi.getAuditAlerts(projectId, params);
+      if (response.success && response.data) {
+        setData(response.data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch alerts:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId, statusFilter, severityFilter, offset]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { setOffset(0); }, [statusFilter, severityFilter]);
+
+  const handleResolve = async (alertId: string) => {
+    setSubmitting(true);
+    try {
+      const body: ResolveAlertRequest = { resolution: resolveForm.resolution };
+      if (resolveForm.notes) body.notes = resolveForm.notes;
+      const response = await engineApi.resolveAuditAlert(projectId, alertId, body);
+      if (response.success) {
+        toast({ title: 'Alert resolved', description: response.message ?? 'Alert resolved successfully.' });
+        setResolvingId(null);
+        setResolveForm({ resolution: 'resolved', notes: '' });
+        fetchData();
+      }
+    } catch (error) {
+      console.error('Failed to resolve alert:', error);
+      toast({ title: 'Error', description: 'Failed to resolve alert.', variant: 'destructive' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const severityBadge = (severity: string) => {
+    switch (severity) {
+      case 'critical': return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
+      case 'warning': return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
+      case 'info': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
+      default: return 'bg-surface-secondary text-text-secondary';
+    }
+  };
+
+  const statusBadge = (status: string) => {
+    switch (status) {
+      case 'open': return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
+      case 'resolved': return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
+      case 'dismissed': return 'bg-surface-secondary text-text-secondary';
+      default: return 'bg-surface-secondary text-text-secondary';
+    }
+  };
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          className="text-xs px-2 py-1 rounded border border-border-light bg-surface-primary text-text-primary"
+        >
+          <option value="open">Open</option>
+          <option value="resolved">Resolved</option>
+          <option value="dismissed">Dismissed</option>
+          <option value="">All</option>
+        </select>
+        <select
+          value={severityFilter}
+          onChange={e => setSeverityFilter(e.target.value)}
+          className="text-xs px-2 py-1 rounded border border-border-light bg-surface-primary text-text-primary"
+        >
+          <option value="">All Severities</option>
+          <option value="critical">Critical</option>
+          <option value="warning">Warning</option>
+          <option value="info">Info</option>
+        </select>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-6 w-6 animate-spin text-text-secondary" />
+        </div>
+      ) : !data || data.items.length === 0 ? (
+        <div className="text-center py-12 text-text-secondary">
+          <Bell className="h-8 w-8 mx-auto mb-2 text-text-tertiary" />
+          <p>No alerts found</p>
+        </div>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border-light text-left text-text-secondary">
+                  <th className="pb-2 pr-3 font-medium">Time</th>
+                  <th className="pb-2 pr-3 font-medium">Alert Type</th>
+                  <th className="pb-2 pr-3 font-medium">Title</th>
+                  <th className="pb-2 pr-3 font-medium">Affected User</th>
+                  <th className="pb-2 pr-3 font-medium">Status</th>
+                  <th className="pb-2 pr-3 font-medium">Resolved By</th>
+                  <th className="pb-2 pr-3 font-medium">Resolution Notes</th>
+                  <th className="pb-2 pr-3 font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.items.map(alert => (
+                  <Fragment key={alert.id}>
+                    <tr className={`border-b border-border-light/50 ${
+                      alert.severity === 'critical' ? 'bg-red-50/50 dark:bg-red-900/10' :
+                      alert.severity === 'warning' ? 'bg-amber-50/50 dark:bg-amber-900/10' : ''
+                    }`}>
+                      <td className="py-2 pr-3 whitespace-nowrap text-text-secondary">
+                        <div className="flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          {formatDate(alert.created_at)}
+                        </div>
+                      </td>
+                      <td className="py-2 pr-3">
+                        <span className={`px-1.5 py-0.5 text-xs rounded ${severityBadge(alert.severity)}`}>
+                          {alert.alert_type.replace(/_/g, ' ')}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-3 text-text-primary max-w-[220px]" title={alert.description ?? undefined}>
+                        {alert.title}
+                      </td>
+                      <td className="py-2 pr-3 text-text-secondary truncate max-w-[140px]">
+                        {alert.affected_user_id ?? '–'}
+                      </td>
+                      <td className="py-2 pr-3">
+                        <span className={`px-1.5 py-0.5 text-xs rounded ${statusBadge(alert.status)}`}>
+                          {alert.status}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-3 text-text-secondary truncate max-w-[120px]">
+                        {alert.resolved_by ?? '–'}
+                      </td>
+                      <td className="py-2 pr-3 text-text-secondary text-xs truncate max-w-[160px]" title={alert.resolution_notes ?? undefined}>
+                        {alert.resolution_notes ?? '–'}
+                      </td>
+                      <td className="py-2 pr-3">
+                        {alert.status === 'open' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setResolvingId(resolvingId === alert.id ? null : alert.id)}
+                          >
+                            Resolve
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                    {resolvingId === alert.id && (
+                      <tr>
+                        <td colSpan={8} className="py-3 px-4 bg-surface-secondary/30">
+                          <div className="flex items-center gap-3">
+                            <label className="flex items-center gap-1 text-xs text-text-secondary">
+                              <input
+                                type="radio"
+                                name={`resolution-${alert.id}`}
+                                checked={resolveForm.resolution === 'resolved'}
+                                onChange={() => setResolveForm(f => ({ ...f, resolution: 'resolved' }))}
+                                className="rounded"
+                              />
+                              Resolve
+                            </label>
+                            <label className="flex items-center gap-1 text-xs text-text-secondary">
+                              <input
+                                type="radio"
+                                name={`resolution-${alert.id}`}
+                                checked={resolveForm.resolution === 'dismissed'}
+                                onChange={() => setResolveForm(f => ({ ...f, resolution: 'dismissed' }))}
+                                className="rounded"
+                              />
+                              Dismiss
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="Notes (optional)..."
+                              value={resolveForm.notes}
+                              onChange={e => setResolveForm(f => ({ ...f, notes: e.target.value }))}
+                              className="text-xs px-2 py-1 rounded border border-border-light bg-surface-primary text-text-primary flex-1 max-w-xs"
+                            />
+                            <Button
+                              size="sm"
+                              disabled={submitting}
+                              onClick={() => handleResolve(alert.id)}
+                            >
+                              {submitting ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Confirm'}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => { setResolvingId(null); setResolveForm({ resolution: 'resolved', notes: '' }); }}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pagination total={data.total} limit={data.limit} offset={data.offset} onPageChange={setOffset} />
+        </>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
 // Main Audit Page
 // ============================================================================
 
@@ -1216,6 +1477,7 @@ const AuditPage = () => {
           {activeTab === 'schema-changes' && <SchemaChangesTab key={refreshKey} projectId={pid} />}
           {activeTab === 'query-approvals' && <QueryApprovalsTab key={refreshKey} projectId={pid} />}
           {activeTab === 'mcp-events' && <MCPEventsTab key={refreshKey} projectId={pid} />}
+          {activeTab === 'alerts' && <AlertsTab key={refreshKey} projectId={pid} />}
         </CardContent>
       </Card>
     </div>
