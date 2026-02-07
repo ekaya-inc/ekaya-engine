@@ -6,6 +6,7 @@ import {
   Copy,
   ExternalLink,
   Loader2,
+  ScrollText,
   Trash2,
   XCircle,
 } from 'lucide-react';
@@ -451,6 +452,33 @@ const AIDataLiaisonPage = () => {
           </div>
         </CardContent>
       </Card>
+
+      {/* Auditing (only when setup is complete) */}
+      {allComplete && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-purple/10">
+                <ScrollText className="h-5 w-5 text-brand-purple" />
+              </div>
+              <div>
+                <CardTitle className="text-lg">Auditing</CardTitle>
+                <CardDescription>
+                  Review query executions, ontology changes, schema changes, and query approvals
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <Link to={`/projects/${pid}/audit`}>
+              <Button variant="outline">
+                <ScrollText className="mr-2 h-4 w-4" />
+                View Audit Log
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Danger Zone */}
       <Card className="border-red-200 dark:border-red-900">

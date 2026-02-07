@@ -165,6 +165,8 @@ func main() {
 	schemaChangeDetectionService := services.NewSchemaChangeDetectionService(pendingChangeRepo, logger)
 	dataChangeDetectionService := services.NewDataChangeDetectionService(schemaRepo, columnMetadataRepo, ontologyRepo, pendingChangeRepo, datasourceService, projectService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, securityAuditor, logger)
+	queryHistoryRepo := repositories.NewQueryHistoryRepository()
+	queryHistoryService := services.NewQueryHistoryService(queryHistoryRepo, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
 	installedAppService := services.NewInstalledAppService(installedAppRepo, logger)
 	mcpConfigService := services.NewMCPConfigService(mcpConfigRepo, queryService, projectService, installedAppService, cfg.BaseURL, logger)
@@ -308,9 +310,12 @@ func main() {
 		PendingChangeRepo:            pendingChangeRepo,
 		InstalledAppService:          installedAppService,
 		Auditor:                      securityAuditor, // For SIEM logging of modifying queries
+		QueryHistoryService:          queryHistoryService,
 	}
+	mcpAuditLogger := mcp.NewAuditLogger(db, logger)
 	mcpServer := mcp.NewServer("ekaya-engine", cfg.Version, logger,
 		mcp.WithToolFilter(mcptools.NewToolFilter(mcpToolDeps)),
+		mcp.WithHooks(mcpAuditLogger.Hooks()),
 	)
 	mcptools.RegisterHealthTool(mcpServer.MCP(), cfg.Version, &mcptools.HealthToolDeps{
 		DB:                db,
@@ -327,9 +332,10 @@ func main() {
 			MCPConfigService: mcpConfigService,
 			Logger:           logger,
 		},
-		ProjectService: projectService,
-		QueryService:   queryService,
-		Auditor:        securityAuditor,
+		ProjectService:      projectService,
+		QueryService:        queryService,
+		Auditor:             securityAuditor,
+		QueryHistoryService: queryHistoryService,
 	}
 	mcptools.RegisterApprovedQueriesTools(mcpServer.MCP(), queryToolDeps)
 
@@ -374,7 +380,9 @@ func main() {
 
 	mcpHandler := handlers.NewMCPHandler(mcpServer, logger, cfg.MCP)
 	tenantScopeProvider := database.NewTenantScopeProvider(db)
-	mcpAuthMiddleware := mcpauth.NewMiddleware(authService, agentAPIKeyService, tenantScopeProvider, logger)
+	mcpAuthMiddleware := mcpauth.NewMiddleware(authService, agentAPIKeyService, tenantScopeProvider, logger,
+		mcpauth.WithAuditLogger(mcpAuditLogger),
+	)
 	mcpHandler.RegisterRoutes(mux, mcpAuthMiddleware)
 
 	// Register MCP OAuth token endpoint (public - for MCP clients)
@@ -445,6 +453,33 @@ func main() {
 	// Register installed apps handler (protected) - application installation tracking
 	installedAppHandler := handlers.NewInstalledAppHandler(installedAppService, logger)
 	installedAppHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register audit page handler (protected) - audit visibility UI
+	auditPageRepo := repositories.NewAuditPageRepository()
+	mcpAuditRepo := repositories.NewMCPAuditRepository()
+	auditPageService := services.NewAuditPageService(auditPageRepo, mcpAuditRepo, logger)
+	auditPageHandler := handlers.NewAuditPageHandler(auditPageService, logger)
+	auditPageHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register alert handler (protected) - audit alerts management
+	alertRepo := repositories.NewAlertRepository()
+	alertService := services.NewAlertService(alertRepo, logger)
+	alertHandler := handlers.NewAlertHandler(alertService, mcpConfigRepo, logger)
+	alertHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Wire alert trigger detection into the MCP audit pipeline
+	alertTriggerRepo := repositories.NewAlertTriggerRepository()
+	alertTriggerService := services.NewAlertTriggerService(alertRepo, alertTriggerRepo, mcpConfigRepo, logger)
+	mcpAuditLogger.SetAlertTrigger(alertTriggerService)
+
+	// Create retention service and start scheduler for auto-pruning old audit/history data
+	retentionService := services.NewRetentionService(db, queryHistoryRepo, mcpAuditRepo, mcpConfigRepo, logger)
+	retentionCtx, retentionCancel := context.WithCancel(ctx)
+	retentionService.RunScheduler(retentionCtx, 24*time.Hour)
+
+	// Register retention config handler (protected) - audit retention configuration
+	retentionHandler := handlers.NewRetentionHandler(mcpConfigRepo, logger)
+	retentionHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register glossary MCP tools (uses glossaryService for get_glossary tool)
 	glossaryToolDeps := &mcptools.GlossaryToolDeps{
@@ -628,12 +663,15 @@ func main() {
 			logger.Error("HTTP server shutdown error", zap.Error(err))
 		}
 
-		// 2. Shutdown DAG service (cancels DAGs, releases ownership)
+		// 2. Stop retention scheduler
+		retentionCancel()
+
+		// 3. Shutdown DAG service (cancels DAGs, releases ownership)
 		if err := ontologyDAGService.Shutdown(shutdownCtx); err != nil {
 			logger.Error("DAG service shutdown error", zap.Error(err))
 		}
 
-		// 3. Close conversation recorder (drain pending writes)
+		// 4. Close conversation recorder (drain pending writes)
 		convRecorder.Close()
 
 		close(shutdownComplete)
