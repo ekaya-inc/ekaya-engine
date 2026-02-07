@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -20,8 +22,9 @@ import (
 
 // GlossaryListResponse for GET /glossary
 type GlossaryListResponse struct {
-	Terms []*models.BusinessGlossaryTerm `json:"terms"`
-	Total int                            `json:"total"`
+	Terms            []*models.BusinessGlossaryTerm   `json:"terms"`
+	Total            int                              `json:"total"`
+	GenerationStatus *models.GlossaryGenerationStatus `json:"generation_status,omitempty"`
 }
 
 // CreateGlossaryTermRequest for POST /glossary
@@ -63,16 +66,19 @@ type TestSQLResponse struct {
 // GlossaryHandler handles business glossary HTTP requests.
 type GlossaryHandler struct {
 	glossaryService services.GlossaryService
+	questionService services.OntologyQuestionService
 	logger          *zap.Logger
 }
 
 // NewGlossaryHandler creates a new glossary handler.
 func NewGlossaryHandler(
 	glossaryService services.GlossaryService,
+	questionService services.OntologyQuestionService,
 	logger *zap.Logger,
 ) *GlossaryHandler {
 	return &GlossaryHandler{
 		glossaryService: glossaryService,
+		questionService: questionService,
 		logger:          logger,
 	}
 }
@@ -98,6 +104,8 @@ func (h *GlossaryHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *aut
 		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Delete)))
 	mux.HandleFunc("POST "+base+"/suggest",
 		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Suggest)))
+	mux.HandleFunc("POST "+base+"/auto-generate",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.AutoGenerate)))
 }
 
 // List handles GET /api/projects/{pid}/glossary
@@ -119,8 +127,9 @@ func (h *GlossaryHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := GlossaryListResponse{
-		Terms: terms,
-		Total: len(terms),
+		Terms:            terms,
+		Total:            len(terms),
+		GenerationStatus: h.glossaryService.GetGenerationStatus(projectID),
 	}
 
 	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {
@@ -403,6 +412,60 @@ func (h *GlossaryHandler) TestSQL(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// AutoGenerate handles POST /api/projects/{pid}/glossary/auto-generate
+func (h *GlossaryHandler) AutoGenerate(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	// Check for pending required questions
+	counts, err := h.questionService.GetPendingCounts(r.Context(), projectID)
+	if err != nil {
+		h.logger.Error("Failed to get pending question counts",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "check_questions_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+	if counts != nil && counts.Required > 0 {
+		msg := fmt.Sprintf("Please answer %d required question(s) before generating the glossary", counts.Required)
+		if err := ErrorResponse(w, http.StatusConflict, "required_questions_pending", msg); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Check if generation is already running
+	status := h.glossaryService.GetGenerationStatus(projectID)
+	if status.Status == "discovering" || status.Status == "enriching" {
+		if err := ErrorResponse(w, http.StatusConflict, "generation_in_progress", "Glossary generation is already in progress"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Kick off generation in a goroutine with a background context
+	go func() {
+		bgCtx := context.Background()
+		if err := h.glossaryService.RunAutoGenerate(bgCtx, projectID); err != nil {
+			h.logger.Error("Glossary auto-generate failed",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		}
+	}()
+
+	// Return 202 Accepted with initial status
+	if err := WriteJSON(w, http.StatusAccepted, ApiResponse{
+		Success: true,
+		Data:    h.glossaryService.GetGenerationStatus(projectID),
+	}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
 }
