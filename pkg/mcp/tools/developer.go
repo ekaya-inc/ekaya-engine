@@ -35,7 +35,8 @@ type MCPToolDeps struct {
 	ChangeReviewService          services.ChangeReviewService
 	PendingChangeRepo            repositories.PendingChangeRepository
 	InstalledAppService          services.InstalledAppService
-	Auditor                      *audit.SecurityAuditor // Optional: for modifying query SIEM logging
+	Auditor                      *audit.SecurityAuditor      // Optional: for modifying query SIEM logging
+	QueryHistoryService          services.QueryHistoryService // Optional: for query learning history
 }
 
 // dataLiaisonTools is a reference to the shared list in services.DataLiaisonTools.
@@ -462,6 +463,10 @@ func registerQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 			"limit",
 			mcp.Description("Max rows to return (default: 100, max: 1000)"),
 		),
+		mcp.WithString(
+			"natural_language_context",
+			mcp.Description("The natural language question that prompted this query. When provided, the query is saved to history for future reference and learning."),
+		),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
@@ -483,6 +488,9 @@ func registerQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 		if err != nil {
 			return nil, err
 		}
+
+		// Get optional natural language context for query history
+		nlContext := getOptionalString(req, "natural_language_context")
 
 		// Validate it's a SELECT statement
 		sqlUpper := strings.ToUpper(strings.TrimSpace(sql))
@@ -550,6 +558,26 @@ func registerQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 			Success:         true,
 		})
 
+		// If natural language context provided and query history service available,
+		// record to query learning history (async, best-effort)
+		var historyID *uuid.UUID
+		if nlContext != "" && deps.QueryHistoryService != nil {
+			hID := uuid.New()
+			historyID = &hID
+			rowCount := len(rows)
+			durationMs := int(executionTimeMs)
+			go logQueryHistory(tenantCtx, deps.GetDB(), deps.GetLogger(), deps.QueryHistoryService, &models.QueryHistoryEntry{
+				ID:                  hID,
+				ProjectID:           projectID,
+				UserID:              auth.GetUserIDFromContext(tenantCtx),
+				NaturalLanguage:     nlContext,
+				SQL:                 sql,
+				ExecutedAt:          startTime,
+				ExecutionDurationMs: &durationMs,
+				RowCount:            &rowCount,
+			})
+		}
+
 		// Extract column names from ColumnInfo for response
 		columnNames := make([]string, len(queryResult.Columns))
 		for i, col := range queryResult.Columns {
@@ -557,15 +585,17 @@ func registerQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 		}
 
 		result := struct {
-			Columns   []string         `json:"columns"`
-			Rows      []map[string]any `json:"rows"`
-			RowCount  int              `json:"row_count"`
-			Truncated bool             `json:"truncated"`
+			Columns        []string         `json:"columns"`
+			Rows           []map[string]any `json:"rows"`
+			RowCount       int              `json:"row_count"`
+			Truncated      bool             `json:"truncated"`
+			QueryHistoryID *uuid.UUID       `json:"query_history_id,omitempty"`
 		}{
-			Columns:   columnNames,
-			Rows:      rows,
-			RowCount:  len(rows),
-			Truncated: truncated,
+			Columns:        columnNames,
+			Rows:           rows,
+			RowCount:       len(rows),
+			Truncated:      truncated,
+			QueryHistoryID: historyID,
 		}
 
 		jsonResult, err := json.Marshal(result)

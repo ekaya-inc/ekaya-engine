@@ -165,6 +165,8 @@ func main() {
 	schemaChangeDetectionService := services.NewSchemaChangeDetectionService(pendingChangeRepo, logger)
 	dataChangeDetectionService := services.NewDataChangeDetectionService(schemaRepo, columnMetadataRepo, ontologyRepo, pendingChangeRepo, datasourceService, projectService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, securityAuditor, logger)
+	queryHistoryRepo := repositories.NewQueryHistoryRepository()
+	queryHistoryService := services.NewQueryHistoryService(queryHistoryRepo, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
 	installedAppService := services.NewInstalledAppService(installedAppRepo, logger)
 	mcpConfigService := services.NewMCPConfigService(mcpConfigRepo, queryService, projectService, installedAppService, cfg.BaseURL, logger)
@@ -308,6 +310,7 @@ func main() {
 		PendingChangeRepo:            pendingChangeRepo,
 		InstalledAppService:          installedAppService,
 		Auditor:                      securityAuditor, // For SIEM logging of modifying queries
+		QueryHistoryService:          queryHistoryService,
 	}
 	mcpAuditLogger := mcp.NewAuditLogger(db, logger)
 	mcpServer := mcp.NewServer("ekaya-engine", cfg.Version, logger,
@@ -329,9 +332,10 @@ func main() {
 			MCPConfigService: mcpConfigService,
 			Logger:           logger,
 		},
-		ProjectService: projectService,
-		QueryService:   queryService,
-		Auditor:        securityAuditor,
+		ProjectService:      projectService,
+		QueryService:        queryService,
+		Auditor:             securityAuditor,
+		QueryHistoryService: queryHistoryService,
 	}
 	mcptools.RegisterApprovedQueriesTools(mcpServer.MCP(), queryToolDeps)
 
