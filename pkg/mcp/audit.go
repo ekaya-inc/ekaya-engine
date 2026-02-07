@@ -24,11 +24,18 @@ import (
 
 // AuditLogger writes MCP audit events to the database asynchronously.
 type AuditLogger struct {
-	db     *database.DB
-	logger *zap.Logger
+	db           *database.DB
+	logger       *zap.Logger
+	alertTrigger AlertEventEvaluator
 
 	// startTimes tracks when tool calls begin, keyed by request ID.
 	startTimes sync.Map
+}
+
+// AlertEventEvaluator evaluates audit events for alert conditions.
+// Defined here to avoid a circular dependency between mcp and services packages.
+type AlertEventEvaluator interface {
+	EvaluateEvent(ctx context.Context, event *models.MCPAuditEvent) error
 }
 
 // NewAuditLogger creates an AuditLogger that records MCP events.
@@ -37,6 +44,12 @@ func NewAuditLogger(db *database.DB, logger *zap.Logger) *AuditLogger {
 		db:     db,
 		logger: logger.Named("mcp-audit"),
 	}
+}
+
+// SetAlertTrigger configures an alert trigger service to evaluate events after recording.
+// This is set after construction to avoid circular dependency issues during DI wiring.
+func (a *AuditLogger) SetAlertTrigger(trigger AlertEventEvaluator) {
+	a.alertTrigger = trigger
 }
 
 // Hooks returns mcp-go Hooks configured to capture tool call events.
@@ -187,13 +200,25 @@ func (a *AuditLogger) record(event *models.MCPAuditEvent) {
 			zap.Error(err),
 			zap.String("project_id", event.ProjectID.String()),
 			zap.String("event_type", event.EventType))
+		return
+	}
+
+	// Evaluate alert triggers after the audit event is recorded.
+	// Runs in the same goroutine (already async) — does not block MCP responses.
+	if a.alertTrigger != nil {
+		if triggerErr := a.alertTrigger.EvaluateEvent(tenantCtx, event); triggerErr != nil {
+			a.logger.Error("Alert trigger evaluation failed",
+				zap.Error(triggerErr),
+				zap.String("project_id", event.ProjectID.String()),
+				zap.String("event_type", event.EventType))
+		}
 	}
 }
 
 // maxSQLSize is the maximum size of SQL strings stored in audit logs.
 const maxSQLSize = 10240 // 10KB
 
-// sqlStringLiteralPattern matches SQL string literals: 'value', 'it''s escaped', etc.
+// sqlStringLiteralPattern matches SQL string literals: 'value', 'it”s escaped', etc.
 // Handles escaped single quotes within strings.
 var sqlStringLiteralPattern = regexp.MustCompile(`'(?:[^']*(?:'')?)*[^']*'`)
 
@@ -299,6 +324,10 @@ func summarizeResult(result *mcplib.CallToolResult) map[string]any {
 		for _, c := range result.Content {
 			if tc, ok := c.(mcplib.TextContent); ok {
 				text := tc.Text
+
+				// Extract row_count from JSON responses for alert evaluation
+				extractRowCount(text, summary)
+
 				if len(text) > 200 {
 					text = text[:200] + "...[truncated]"
 				}
@@ -309,6 +338,18 @@ func summarizeResult(result *mcplib.CallToolResult) map[string]any {
 	}
 
 	return summary
+}
+
+// extractRowCount attempts to extract the row_count field from a JSON text response
+// and stores it in the summary map. Used by the alert trigger service to detect
+// large data exports without parsing the full response.
+func extractRowCount(text string, summary map[string]any) {
+	var partial struct {
+		RowCount *int `json:"row_count"`
+	}
+	if err := json.Unmarshal([]byte(text), &partial); err == nil && partial.RowCount != nil {
+		summary["row_count"] = *partial.RowCount
+	}
 }
 
 // RecordAuthFailure logs a failed MCP authentication attempt.

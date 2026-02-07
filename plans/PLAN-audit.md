@@ -537,7 +537,7 @@ Register routes in `pkg/server/routes.go` under the existing audit route group. 
 
 Add alert model types to `pkg/models/` (or in the alert_service/repository files if that matches existing patterns — check how audit models are defined).
 
-### 4.2 [ ] Backend: Alert trigger detection in audit middleware
+### 4.2 [x] Backend: Alert trigger detection in audit middleware
 
 Implement alert trigger logic that analyzes MCP audit events and creates alerts when conditions are met. This builds on the existing audit middleware from Phase 2 (`pkg/mcp/` area — check where the audit middleware and `engine_mcp_audit_log` recording lives).
 

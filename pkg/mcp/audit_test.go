@@ -282,8 +282,8 @@ func TestSanitizeParams_NonSQLStringPreserved(t *testing.T) {
 
 func TestSanitizeParams_HashesSensitiveKeys(t *testing.T) {
 	params := map[string]any{
-		"password":  "my-secret-password",
-		"api_key":   "sk-1234567890",
+		"password":   "my-secret-password",
+		"api_key":    "sk-1234567890",
 		"table_name": "users",
 	}
 
@@ -488,6 +488,60 @@ func TestSummarizeResult_TruncatesLongPreview(t *testing.T) {
 	expectedLen := 200 + len("...[truncated]")
 	if len(preview) != expectedLen {
 		t.Errorf("expected preview length %d, got %d", expectedLen, len(preview))
+	}
+}
+
+func TestSummarizeResult_ExtractsRowCount(t *testing.T) {
+	jsonText := `{"columns":["id","name"],"rows":[{"id":1,"name":"test"}],"row_count":15000,"truncated":false}`
+	result := summarizeResult(&mcplib.CallToolResult{
+		Content: []mcplib.Content{
+			mcplib.TextContent{Text: jsonText},
+		},
+	})
+
+	rc, ok := result["row_count"]
+	if !ok {
+		t.Fatal("expected row_count in result summary")
+	}
+	if rc != 15000 {
+		t.Errorf("expected row_count=15000, got %v", rc)
+	}
+}
+
+func TestSummarizeResult_NoRowCountInNonJSON(t *testing.T) {
+	result := summarizeResult(&mcplib.CallToolResult{
+		Content: []mcplib.Content{
+			mcplib.TextContent{Text: "plain text response"},
+		},
+	})
+
+	_, ok := result["row_count"]
+	if ok {
+		t.Error("expected no row_count for non-JSON response")
+	}
+}
+
+func TestExtractRowCount_ValidJSON(t *testing.T) {
+	summary := map[string]any{}
+	extractRowCount(`{"row_count":42}`, summary)
+	if summary["row_count"] != 42 {
+		t.Errorf("expected row_count=42, got %v", summary["row_count"])
+	}
+}
+
+func TestExtractRowCount_NoRowCount(t *testing.T) {
+	summary := map[string]any{}
+	extractRowCount(`{"other":"value"}`, summary)
+	if _, ok := summary["row_count"]; ok {
+		t.Error("expected no row_count for JSON without it")
+	}
+}
+
+func TestExtractRowCount_InvalidJSON(t *testing.T) {
+	summary := map[string]any{}
+	extractRowCount("not json", summary)
+	if _, ok := summary["row_count"]; ok {
+		t.Error("expected no row_count for invalid JSON")
 	}
 }
 
