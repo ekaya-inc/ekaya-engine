@@ -1,6 +1,9 @@
 import { Bell, Loader2, Save } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import engineApi from "../services/engineApi";
+import type { AlertConfig, AlertTypeSetting } from "../types/audit";
+
 import { Button } from "./ui/Button";
 import {
   Card,
@@ -12,8 +15,6 @@ import {
 import { Input } from "./ui/Input";
 import { Label } from "./ui/Label";
 import { Switch } from "./ui/Switch";
-import engineApi from "../services/engineApi";
-import type { AlertConfig, AlertTypeSetting } from "../types/audit";
 
 interface AlertConfigSectionProps {
   projectId: string;
