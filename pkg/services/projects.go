@@ -23,6 +23,7 @@ var ErrOntologyNotFound = errors.New("no active ontology found for project")
 type ProvisionResult struct {
 	ProjectID       uuid.UUID
 	Name            string
+	Applications    []central.ApplicationInfo // applications assigned by central
 	PAPIURL         string
 	ProjectsPageURL string // URL to ekaya-central projects list
 	ProjectPageURL  string // URL to this project in ekaya-central
@@ -123,6 +124,7 @@ func (s *projectService) Provision(ctx context.Context, projectID uuid.UUID, nam
 	if err == nil {
 		// Project exists - return its info
 		var papiURL, projectsPageURL, projectPageURL string
+		var storedApps []central.ApplicationInfo
 		if existingProject.Parameters != nil {
 			if v, ok := existingProject.Parameters["papi_url"].(string); ok {
 				papiURL = v
@@ -133,10 +135,12 @@ func (s *projectService) Provision(ctx context.Context, projectID uuid.UUID, nam
 			if v, ok := existingProject.Parameters["project_page_url"].(string); ok {
 				projectPageURL = v
 			}
+			storedApps, _ = existingProject.Parameters["applications"].([]central.ApplicationInfo)
 		}
 		return &ProvisionResult{
 			ProjectID:       existingProject.ID,
 			Name:            existingProject.Name,
+			Applications:    storedApps,
 			PAPIURL:         papiURL,
 			ProjectsPageURL: projectsPageURL,
 			ProjectPageURL:  projectPageURL,
@@ -165,19 +169,26 @@ func (s *projectService) Provision(ctx context.Context, projectID uuid.UUID, nam
 		return nil, fmt.Errorf("failed to create project: %w", err)
 	}
 
-	// Create empty ontology for immediate MCP tool use.
-	// This is done within the existing scope since we don't have tenant context yet.
-	s.createEmptyOntology(ctx, projectID)
+	// Determine which applications to provision.
+	// Default to MCP server if no applications specified (backward compat with old central).
+	applications, _ := params["applications"].([]central.ApplicationInfo)
+	hasMCPServer := len(applications) == 0
+	for _, app := range applications {
+		if app.Name == central.AppMCPServer {
+			hasMCPServer = true
+		}
+	}
 
-	// Create MCP config with defaults.
-	// This ensures tools are configured correctly from the start and prevents
-	// other code paths (like SetAgentAPIKey) from creating config with wrong defaults.
-	s.createDefaultMCPConfig(ctx, projectID)
+	if hasMCPServer {
+		// Create empty ontology for immediate MCP tool use.
+		s.createEmptyOntology(ctx, projectID)
 
-	// Generate Agent API Key for MCP authentication.
-	// This creates the key immediately so it's available when the user first visits
-	// the MCP Server configuration page. Users can regenerate the key there if needed.
-	s.generateAgentAPIKey(ctx, projectID)
+		// Create MCP config with defaults.
+		s.createDefaultMCPConfig(ctx, projectID)
+
+		// Generate Agent API Key for MCP authentication.
+		s.generateAgentAPIKey(ctx, projectID)
+	}
 
 	// Extract URLs from parameters
 	var papiURL, projectsPageURL, projectPageURL string
@@ -196,6 +207,7 @@ func (s *projectService) Provision(ctx context.Context, projectID uuid.UUID, nam
 	return &ProvisionResult{
 		ProjectID:       project.ID,
 		Name:            project.Name,
+		Applications:    applications,
 		PAPIURL:         papiURL,
 		ProjectsPageURL: projectsPageURL,
 		ProjectPageURL:  projectPageURL,
@@ -546,13 +558,21 @@ func (s *projectService) ProvisionFromClaims(ctx context.Context, claims *auth.C
 	if projectInfo.URLs.AuthServerURL != "" {
 		params["auth_server_url"] = projectInfo.URLs.AuthServerURL
 	}
+	if len(projectInfo.Applications) > 0 {
+		params["applications"] = projectInfo.Applications
+	}
 
+	appNames := make([]string, len(projectInfo.Applications))
+	for i, app := range projectInfo.Applications {
+		appNames[i] = app.Name
+	}
 	s.logger.Info("Provisioning project from claims",
 		zap.String("project_id", claims.ProjectID),
 		zap.String("project_name", projectInfo.Name),
 		zap.String("email", claims.Email),
 		zap.String("papi", claims.PAPI),
-		zap.Strings("roles", claims.Roles))
+		zap.Strings("roles", claims.Roles),
+		zap.Strings("applications", appNames))
 
 	// Ensure project exists (idempotent)
 	result, err := s.Provision(ctx, projectID, projectInfo.Name, params)

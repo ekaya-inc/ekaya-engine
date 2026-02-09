@@ -17,12 +17,31 @@ import (
 // DefaultTimeout is the maximum time to wait for ekaya-central responses.
 const DefaultTimeout = 30 * time.Second
 
+// Application name constants for known application types.
+const (
+	AppMCPServer     = "mcp-server"
+	AppAIDataLiaison = "ai-data-liaison"
+)
+
+// ApplicationInfo describes an application assigned to a project by ekaya-central.
+type ApplicationInfo struct {
+	Name    string       `json:"name"`
+	Billing *BillingInfo `json:"billing,omitempty"`
+}
+
+// BillingInfo contains billing status from ekaya-central.
+type BillingInfo struct {
+	Status         string `json:"status"`
+	FreeSeatsLimit int    `json:"freeSeatsLimit"`
+}
+
 // ProjectInfo contains project information from ekaya-central.
 type ProjectInfo struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	Description string      `json:"description,omitempty"`
-	URLs        ProjectURLs `json:"urls,omitempty"`
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Description  string            `json:"description,omitempty"`
+	Applications []ApplicationInfo `json:"applications,omitempty"`
+	URLs         ProjectURLs       `json:"urls,omitempty"`
 }
 
 // ProjectURLs contains URLs for navigating to ekaya-central pages.
