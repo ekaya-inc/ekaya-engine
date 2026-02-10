@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   BookOpen,
+  Bot,
   BrainCircuit,
   Database,
   Layers,
@@ -29,7 +30,7 @@ import type {
   AIOption,
   OntologyWorkflowStatus,
 } from '../types';
-import { APP_ID_AI_DATA_LIAISON } from '../types';
+import { APP_ID_AI_DATA_LIAISON, APP_ID_AI_AGENTS } from '../types';
 
 type TileColor = 'blue' | 'green' | 'purple' | 'orange' | 'gray' | 'indigo' | 'cyan' | 'amber';
 
@@ -186,6 +187,18 @@ const ProjectDashboard = () => {
         path: `/projects/${pid}/ai-data-liaison`,
         disabled: false,
         color: 'blue',
+      });
+    }
+
+    // Add AI Agents tile if installed
+    if (installedApps.some((app) => app.app_id === APP_ID_AI_AGENTS)) {
+      tiles.push({
+        title: 'AI Agents and Automation',
+        description: 'Connect AI coding agents and automation tools to your data via API key authentication.',
+        icon: Bot,
+        path: `/projects/${pid}/ai-agents`,
+        disabled: false,
+        color: 'orange',
       });
     }
 

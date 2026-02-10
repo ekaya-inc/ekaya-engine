@@ -94,9 +94,10 @@ describe('ApplicationsPage', () => {
     renderPage();
 
     expect(screen.getByText('AI Data Liaison')).toBeInTheDocument();
+    expect(screen.getByText('AI Agents and Automation')).toBeInTheDocument();
     expect(screen.getByText('Product Kit')).toBeInTheDocument();
     expect(screen.getByText('On-Premise Chat')).toBeInTheDocument();
-    expect(screen.getByText('More Coming!')).toBeInTheDocument();
+    expect(screen.getByText('Coming Soon!')).toBeInTheDocument();
   });
 
   it('renders Contact Sales buttons for Product Kit and On-Premise Chat', () => {
@@ -110,10 +111,12 @@ describe('ApplicationsPage', () => {
     expect(contactSalesButtons).toHaveLength(2);
   });
 
-  it('renders Install button for AI Data Liaison when not installed', () => {
+  it('renders Install buttons for installable apps when not installed', () => {
     renderPage();
 
-    expect(screen.getByRole('button', { name: 'Install' })).toBeInTheDocument();
+    // Both AI Data Liaison and AI Agents should have Install buttons
+    const installButtons = screen.getAllByRole('button', { name: 'Install' });
+    expect(installButtons).toHaveLength(2);
     expect(
       screen.getByRole('button', { name: /Learn More/i })
     ).toBeInTheDocument();
@@ -127,16 +130,18 @@ describe('ApplicationsPage', () => {
     expect(
       screen.getByRole('button', { name: 'Configure' })
     ).toBeInTheDocument();
-    // Install button should not be present
-    expect(screen.queryByRole('button', { name: 'Install' })).toBeNull();
+    // AI Agents still has Install button (only AI Data Liaison is installed)
+    const installButtons = screen.getAllByRole('button', { name: 'Install' });
+    expect(installButtons).toHaveLength(1);
   });
 
   it('calls install and navigates when clicking Install on AI Data Liaison', async () => {
     mockInstall.mockResolvedValue({ id: 'test-id', app_id: 'ai-data-liaison' });
     renderPage();
 
-    const installButton = screen.getByRole('button', { name: 'Install' });
-    fireEvent.click(installButton);
+    // Click the first Install button (AI Data Liaison)
+    const installButtons = screen.getAllByRole('button', { name: 'Install' });
+    fireEvent.click(installButtons[0] as HTMLElement);
 
     await waitFor(() => {
       expect(mockInstall).toHaveBeenCalledWith('ai-data-liaison');
@@ -206,11 +211,13 @@ describe('ApplicationsPage', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1');
   });
 
-  it('displays Coming Soon text for disabled tiles', () => {
+  it('displays disabled state for Coming Soon tile', () => {
     renderPage();
 
-    // The "More Coming!" tile should have "Coming Soon" footer text
-    expect(screen.getByText('Coming Soon')).toBeInTheDocument();
+    // The "Coming Soon!" tile should be rendered but with no footer actions
+    const comingCard = screen.getByTestId('app-card-more-coming');
+    expect(comingCard).toBeInTheDocument();
+    expect(screen.getByText('Coming Soon!')).toBeInTheDocument();
   });
 
   it('opens Learn More link in new tab', () => {

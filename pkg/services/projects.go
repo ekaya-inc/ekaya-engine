@@ -173,20 +173,26 @@ func (s *projectService) Provision(ctx context.Context, projectID uuid.UUID, nam
 	// Default to MCP server if no applications specified (backward compat with old central).
 	applications, _ := params["applications"].([]central.ApplicationInfo)
 	hasMCPServer := len(applications) == 0
+	hasAIAgents := false
 	for _, app := range applications {
 		if app.Name == central.AppMCPServer {
 			hasMCPServer = true
+		}
+		if app.Name == central.AppAIAgents {
+			hasAIAgents = true
 		}
 	}
 
 	if hasMCPServer {
 		// Create empty ontology for immediate MCP tool use.
 		s.createEmptyOntology(ctx, projectID)
+	}
 
+	if hasMCPServer || hasAIAgents {
 		// Create MCP config with defaults.
 		s.createDefaultMCPConfig(ctx, projectID)
 
-		// Generate Agent API Key for MCP authentication.
+		// Generate Agent API Key for authentication.
 		s.generateAgentAPIKey(ctx, projectID)
 	}
 

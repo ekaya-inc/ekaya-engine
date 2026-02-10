@@ -10,12 +10,14 @@ import (
 const (
 	AppIDMCPServer     = "mcp-server"
 	AppIDAIDataLiaison = "ai-data-liaison"
+	AppIDAIAgents      = "ai-agents"
 )
 
 // KnownAppIDs is the set of valid app identifiers.
 var KnownAppIDs = map[string]bool{
 	AppIDMCPServer:     true,
 	AppIDAIDataLiaison: true,
+	AppIDAIAgents:      true,
 }
 
 // InstalledApp represents an application installed for a project.

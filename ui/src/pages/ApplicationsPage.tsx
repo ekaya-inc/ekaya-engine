@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   ArrowLeft,
+  Bot,
   BrainCircuit,
   Check,
   ExternalLink,
@@ -21,10 +22,9 @@ import {
   CardTitle,
 } from '../components/ui/Card';
 import { useInstalledApps, useInstallApp } from '../hooks/useInstalledApps';
-import { APP_ID_AI_DATA_LIAISON } from '../types';
 import { cn } from '../utils/cn';
 
-type AppColor = 'blue' | 'purple' | 'green' | 'gray';
+type AppColor = 'blue' | 'purple' | 'green' | 'gray' | 'orange';
 
 interface ApplicationInfo {
   id: string;
@@ -51,6 +51,15 @@ const applications: ApplicationInfo[] = [
     learnMoreUrl: 'https://ekaya.ai/enterprise/',
   },
   {
+    id: 'ai-agents',
+    title: 'AI Agents and Automation',
+    subtitle: 'Connect AI coding agents and automation tools to your data via API key authentication',
+    icon: Bot,
+    color: 'orange',
+    available: true,
+    installable: true,
+  },
+  {
     id: 'product-kit',
     title: 'Product Kit',
     subtitle: 'Enable AI Features in your existing SaaS Product',
@@ -68,8 +77,8 @@ const applications: ApplicationInfo[] = [
   },
   {
     id: 'more-coming',
-    title: 'More Coming!',
-    subtitle: 'Additional applications in development',
+    title: 'Coming Soon!',
+    subtitle: 'Additional applications are in development',
     icon: Sparkles,
     color: 'gray',
     available: false,
@@ -82,6 +91,7 @@ const getColorClasses = (color: AppColor): { bg: string; text: string } => {
     purple: { bg: 'bg-purple-500/10', text: 'text-purple-500' },
     green: { bg: 'bg-green-500/10', text: 'text-green-500' },
     gray: { bg: 'bg-gray-500/10', text: 'text-gray-500' },
+    orange: { bg: 'bg-orange-500/10', text: 'text-orange-500' },
   };
   return colorMap[color];
 };
@@ -118,17 +128,13 @@ const ApplicationsPage = () => {
   };
 
   const renderAppFooter = (app: ApplicationInfo) => {
-    // Not available (Coming Soon)
+    // Not available (no actions to show)
     if (!app.available) {
-      return (
-        <CardFooter className="pt-0">
-          <span className="text-xs text-text-secondary">Coming Soon</span>
-        </CardFooter>
-      );
+      return null;
     }
 
-    // AI Data Liaison - special handling with Install/Installed state
-    if (app.id === APP_ID_AI_DATA_LIAISON) {
+    // Installable apps - show Install/Installed state
+    if (app.installable) {
       const appIsInstalled = isInstalled(app.id);
       const isCurrentlyInstalling = installingAppId === app.id && isInstalling;
 
@@ -224,7 +230,7 @@ const ApplicationsPage = () => {
         {applications.map((app) => {
           const Icon = app.icon;
           const colors = getColorClasses(app.color);
-          const appIsInstalled = app.id === APP_ID_AI_DATA_LIAISON && isInstalled(app.id);
+          const appIsInstalled = app.installable === true && isInstalled(app.id);
 
           return (
             <Card
