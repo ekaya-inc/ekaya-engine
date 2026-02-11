@@ -415,6 +415,10 @@ func (m *mockDatasourceService) TestConnection(ctx context.Context, dsType strin
 	return errors.New("not implemented")
 }
 
+func (m *mockDatasourceService) Rename(ctx context.Context, id uuid.UUID, name string) error {
+	return nil
+}
+
 // mockSchemaDiscoverer is a mock for datasource.SchemaDiscoverer.
 type mockSchemaDiscoverer struct {
 	tables            []datasource.TableMetadata

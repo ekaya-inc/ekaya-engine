@@ -136,6 +136,10 @@ func (m *mockDatasourceServiceForCandidateCollector) Get(ctx context.Context, pr
 	}, nil
 }
 
+func (m *mockDatasourceServiceForCandidateCollector) Rename(ctx context.Context, id uuid.UUID, name string) error {
+	return nil
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================

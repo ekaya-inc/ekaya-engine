@@ -193,6 +193,23 @@ class EngineApiService {
   }
 
   /**
+   * Rename datasource (name only, no connection test required)
+   */
+  async renameDatasource(
+    projectId: string,
+    datasourceId: string,
+    name: string
+  ): Promise<ApiResponse<{ datasource_id: string; name: string }>> {
+    return this.makeRequest<{ datasource_id: string; name: string }>(
+      `/${projectId}/datasources/${datasourceId}/name`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ name }),
+      }
+    );
+  }
+
+  /**
    * Delete datasource for a project
    */
   async deleteDataSource(

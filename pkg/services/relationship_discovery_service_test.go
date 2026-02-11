@@ -1030,6 +1030,10 @@ func (m *mockDatasourceServiceForRelDiscovery) Get(_ context.Context, _, _ uuid.
 	return m.datasource, nil
 }
 
+func (m *mockDatasourceServiceForRelDiscovery) Rename(ctx context.Context, id uuid.UUID, name string) error {
+	return nil
+}
+
 type mockAdapterFactoryForRelDiscovery struct {
 	datasource.DatasourceAdapterFactory
 	schemaDiscoverer datasource.SchemaDiscoverer

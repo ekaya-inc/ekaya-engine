@@ -539,6 +539,10 @@ func (m *mockDatasourceSvc) TestConnection(ctx context.Context, dsType string, c
 	return nil
 }
 
+func (m *mockDatasourceSvc) Rename(ctx context.Context, id uuid.UUID, name string) error {
+	return nil
+}
+
 // --- Tests for Create() parameter validation ---
 
 // TestCreate_RejectsUndefinedParameters tests that Create() rejects queries
@@ -931,6 +935,10 @@ func (m *mockDatasourceSvcForTest) Delete(ctx context.Context, id uuid.UUID) err
 }
 
 func (m *mockDatasourceSvcForTest) TestConnection(ctx context.Context, dsType string, config map[string]any, datasourceID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockDatasourceSvcForTest) Rename(ctx context.Context, id uuid.UUID, name string) error {
 	return nil
 }
 

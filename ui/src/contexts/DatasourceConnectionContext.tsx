@@ -51,6 +51,11 @@ interface DatasourceConnectionContextValue {
     projectId: string,
     datasourceId: string
   ) => Promise<ApiResponse<DeleteDatasourceResponse>>;
+  renameDatasource: (
+    projectId: string,
+    datasourceId: string,
+    name: string
+  ) => Promise<void>;
   selectDatasource: (datasourceId: string) => void;
   clearError: () => void;
   isLoading: boolean;
@@ -410,6 +415,29 @@ export const DatasourceConnectionProvider = ({
     }
   };
 
+  const renameDatasource = async (
+    projectId: string,
+    datasourceId: string,
+    name: string
+  ): Promise<void> => {
+    const result = await engineApi.renameDatasource(projectId, datasourceId, name);
+    if (result.success) {
+      // Update local state so UI stays in sync
+      setDatasources((prev) =>
+        prev.map((ds) =>
+          ds.datasourceId === datasourceId
+            ? { ...ds, displayName: name }
+            : ds
+        )
+      );
+      if (selectedDatasource?.datasourceId === datasourceId) {
+        setSelectedDatasource((prev) =>
+          prev ? { ...prev, displayName: name } : prev
+        );
+      }
+    }
+  };
+
   const clearError = (): void => {
     setError(null);
   };
@@ -432,6 +460,7 @@ export const DatasourceConnectionProvider = ({
         refreshSchemaSelections,
         updateDataSource,
         deleteDataSource,
+        renameDatasource,
         selectDatasource,
         isLoading,
         error,

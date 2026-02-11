@@ -28,6 +28,7 @@ type mockDatasourceRepository struct {
 	listErr          error
 	updateErr        error
 	deleteErr        error
+	renameErr        error
 
 	// Capture inputs for verification
 	capturedDS              *models.Datasource
@@ -78,6 +79,10 @@ func (m *mockDatasourceRepository) Update(ctx context.Context, id uuid.UUID, nam
 
 func (m *mockDatasourceRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	return m.deleteErr
+}
+
+func (m *mockDatasourceRepository) Rename(ctx context.Context, id uuid.UUID, name string) error {
+	return m.renameErr
 }
 
 func (m *mockDatasourceRepository) GetProjectID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {

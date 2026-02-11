@@ -227,6 +227,10 @@ func (m *mockDatasourceService) TestConnection(ctx context.Context, dsType strin
 	return m.err
 }
 
+func (m *mockDatasourceService) Rename(ctx context.Context, id uuid.UUID, name string) error {
+	return nil
+}
+
 // mockSchemaService is a configurable mock for schema handler tests.
 type mockSchemaService struct {
 	schema        *models.DatasourceSchema

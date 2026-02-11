@@ -31,6 +31,9 @@ type DatasourceService interface {
 	// If decryption fails for a datasource, it returns the datasource with DecryptionFailed=true.
 	List(ctx context.Context, projectID uuid.UUID) ([]*models.DatasourceWithStatus, error)
 
+	// Rename updates only the name of a datasource.
+	Rename(ctx context.Context, id uuid.UUID, name string) error
+
 	// Update modifies a datasource with encrypted config.
 	Update(ctx context.Context, id uuid.UUID, name, dsType, provider string, config map[string]any) error
 
@@ -205,6 +208,24 @@ func (s *datasourceService) List(ctx context.Context, projectID uuid.UUID) ([]*m
 	}
 
 	return result, nil
+}
+
+// Rename updates only the name of a datasource.
+func (s *datasourceService) Rename(ctx context.Context, id uuid.UUID, name string) error {
+	if name == "" {
+		return fmt.Errorf("datasource name is required")
+	}
+
+	if err := s.repo.Rename(ctx, id, name); err != nil {
+		return err
+	}
+
+	s.logger.Info("Renamed datasource",
+		zap.String("id", id.String()),
+		zap.String("name", name),
+	)
+
+	return nil
 }
 
 // Update modifies a datasource with encrypted config.

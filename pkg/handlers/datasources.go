@@ -49,6 +49,11 @@ type UpdateDatasourceRequest struct {
 	Config   map[string]any `json:"config"`
 }
 
+// RenameDatasourceRequest for PATCH name body.
+type RenameDatasourceRequest struct {
+	Name string `json:"name"`
+}
+
 // TestConnectionRequest for connection testing.
 // Matches frontend's flat structure (type + config fields at top level).
 type TestConnectionRequest struct {
@@ -161,6 +166,8 @@ func (h *DatasourcesHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Get)))
 	mux.HandleFunc("PUT /api/projects/{pid}/datasources/{id}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Update)))
+	mux.HandleFunc("PATCH /api/projects/{pid}/datasources/{id}/name",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Rename)))
 	mux.HandleFunc("DELETE /api/projects/{pid}/datasources/{id}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Delete)))
 	mux.HandleFunc("POST /api/projects/{pid}/datasources/test",
@@ -342,6 +349,53 @@ func (h *DatasourcesHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := ApiResponse{Success: true, Data: data}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// Rename handles PATCH /api/projects/{pid}/datasources/{id}/name
+// Renames a datasource without requiring a connection test.
+func (h *DatasourcesHandler) Rename(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+
+	datasourceID, err := uuid.Parse(idStr)
+	if err != nil {
+		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_datasource_id", "Invalid datasource ID format"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	var req RenameDatasourceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_request", "Invalid request body"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if req.Name == "" {
+		if err := ErrorResponse(w, http.StatusBadRequest, "missing_name", "Datasource name is required"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if err := h.datasourceService.Rename(r.Context(), datasourceID, req.Name); err != nil {
+		h.logger.Error("Failed to rename datasource",
+			zap.String("datasource_id", datasourceID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "rename_failed", "Failed to rename datasource"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	response := ApiResponse{Success: true, Data: map[string]string{
+		"datasource_id": datasourceID.String(),
+		"name":          req.Name,
+	}}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
