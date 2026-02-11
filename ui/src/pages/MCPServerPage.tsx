@@ -30,6 +30,7 @@ const MCPServerPage = () => {
   const [hasSelectedTables, setHasSelectedTables] = useState(false);
   const [aiConfig, setAiConfig] = useState<AIConfigResponse | null>(null);
   const [dagStatus, setDagStatus] = useState<DAGStatusResponse | null>(null);
+  const [questionCounts, setQuestionCounts] = useState<{ required: number; optional: number } | null>(null);
 
   // Read tool group configs from backend
   const developerState = config?.toolGroups[TOOL_GROUP_IDS.DEVELOPER];
@@ -71,6 +72,13 @@ const MCPServerPage = () => {
           setDagStatus(dagRes.data ?? null);
         } catch {
           setDagStatus(null);
+        }
+
+        try {
+          const countsRes = await engineApi.getOntologyQuestionCounts(pid);
+          setQuestionCounts(countsRes.data ?? null);
+        } catch {
+          setQuestionCounts(null);
         }
       }
     } catch (error) {
@@ -166,6 +174,28 @@ const MCPServerPage = () => {
       ontologyItem.link = `/projects/${pid}/ontology`;
     }
     items.push(ontologyItem);
+
+    // 5. Critical ontology questions answered
+    const questionsComplete = questionCounts !== null && questionCounts.required === 0;
+    const questionsItem: ChecklistItem = {
+      id: 'questions',
+      title: 'Critical Ontology Questions answered',
+      description: questionsComplete
+        ? 'All critical questions about your schema have been answered'
+        : questionCounts !== null
+          ? `${questionCounts.required} critical question${questionCounts.required === 1 ? '' : 's'} need${questionCounts.required === 1 ? 's' : ''} answer${questionCounts.required === 1 ? '' : 's'}`
+          : ontologyComplete
+            ? 'Check for critical questions about your schema'
+            : 'Extract ontology first',
+      status: loading
+        ? 'loading'
+        : questionsComplete
+          ? 'complete'
+          : 'pending',
+      link: `/projects/${pid}/ontology-questions`,
+      linkText: questionsComplete ? 'Manage' : 'Answer',
+    };
+    items.push(questionsItem);
 
     return items;
   };
