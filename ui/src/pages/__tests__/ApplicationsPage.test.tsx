@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ProjectProvider } from '../../contexts/ProjectContext';
 import ApplicationsPage from '../ApplicationsPage';
 
 // Mock react-router-dom hooks
@@ -70,14 +71,16 @@ describe('ApplicationsPage', () => {
 
   const renderPage = () => {
     return render(
-      <MemoryRouter initialEntries={['/projects/proj-1/applications']}>
-        <Routes>
-          <Route
-            path="/projects/:pid/applications"
-            element={<ApplicationsPage />}
-          />
-        </Routes>
-      </MemoryRouter>
+      <ProjectProvider>
+        <MemoryRouter initialEntries={['/projects/proj-1/applications']}>
+          <Routes>
+            <Route
+              path="/projects/:pid/applications"
+              element={<ApplicationsPage />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </ProjectProvider>
     );
   };
 
@@ -117,9 +120,8 @@ describe('ApplicationsPage', () => {
     // Both AI Data Liaison and AI Agents should have Install buttons
     const installButtons = screen.getAllByRole('button', { name: 'Install' });
     expect(installButtons).toHaveLength(2);
-    expect(
-      screen.getByRole('button', { name: /Learn More/i })
-    ).toBeInTheDocument();
+    const learnMoreButtons = screen.getAllByRole('button', { name: /Learn More/i });
+    expect(learnMoreButtons).toHaveLength(2);
   });
 
   it('renders Installed badge and Configure button when AI Data Liaison is installed', () => {
@@ -226,8 +228,8 @@ describe('ApplicationsPage', () => {
 
     renderPage();
 
-    const learnMoreButton = screen.getByRole('button', { name: /Learn More/i });
-    fireEvent.click(learnMoreButton);
+    const learnMoreButtons = screen.getAllByRole('button', { name: /Learn More/i });
+    fireEvent.click(learnMoreButtons[0] as HTMLElement);
 
     expect(mockOpen).toHaveBeenCalledWith(
       'https://ekaya.ai/enterprise/',

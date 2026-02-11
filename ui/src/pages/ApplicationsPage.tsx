@@ -21,8 +21,30 @@ import {
   CardHeader,
   CardTitle,
 } from '../components/ui/Card';
+import { useProject } from '../contexts/ProjectContext';
 import { useInstalledApps, useInstallApp } from '../hooks/useInstalledApps';
 import { cn } from '../utils/cn';
+
+/** Map ekaya-central origins to marketing site origins */
+const marketingOriginMap: Record<string, string> = {
+  'http://localhost:5002': 'http://localhost:3030',
+  'http://localhost:3040': 'http://localhost:3030',
+  'https://us.dev.ekaya.ai': 'https://dev.ekaya.ai',
+  'https://us.ekaya.ai': 'https://ekaya.ai',
+};
+
+function getMarketingOrigin(projectsPageUrl: string | null): string {
+  if (projectsPageUrl) {
+    try {
+      const origin = new URL(projectsPageUrl).origin;
+      const mapped = marketingOriginMap[origin];
+      if (mapped) return mapped;
+    } catch {
+      // invalid URL, fall through to default
+    }
+  }
+  return 'https://ekaya.ai';
+}
 
 type AppColor = 'blue' | 'purple' | 'green' | 'gray' | 'orange';
 
@@ -43,12 +65,12 @@ const applications: ApplicationInfo[] = [
   {
     id: 'ai-data-liaison',
     title: 'AI Data Liaison',
-    subtitle: 'Make Better Business Decisions 10x Faster',
+    subtitle: 'Make Better Business Decisions 10x Faster and lower the burden on the data team',
     icon: BrainCircuit,
     color: 'blue',
     available: true,
     installable: true,
-    learnMoreUrl: 'https://ekaya.ai/enterprise/',
+    learnMoreUrl: '/enterprise/',
   },
   {
     id: 'ai-agents',
@@ -58,6 +80,7 @@ const applications: ApplicationInfo[] = [
     color: 'orange',
     available: true,
     installable: true,
+    learnMoreUrl: '/ai-agents/',
   },
   {
     id: 'product-kit',
@@ -99,9 +122,11 @@ const getColorClasses = (color: AppColor): { bg: string; text: string } => {
 const ApplicationsPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
+  const { urls } = useProject();
   const { isInstalled, refetch } = useInstalledApps(pid);
   const { install, isLoading: isInstalling } = useInstallApp(pid);
   const [installingAppId, setInstallingAppId] = useState<string | null>(null);
+  const marketingOrigin = getMarketingOrigin(urls.projectsPageUrl);
 
   const handleContactSales = (app: ApplicationInfo) => {
     const subject = encodeURIComponent(
@@ -118,13 +143,13 @@ const ApplicationsPage = () => {
     setInstallingAppId(null);
     if (result) {
       await refetch();
-      // Navigate to the app's configuration page
-      navigate(`/projects/${pid}/${appId}`);
+      // Return to project dashboard so the user sees the app tile appear
+      navigate(`/projects/${pid}`);
     }
   };
 
-  const handleLearnMore = (url: string) => {
-    window.open(url, '_blank', 'noopener,noreferrer');
+  const handleLearnMore = (path: string) => {
+    window.open(`${marketingOrigin}${path}`, '_blank', 'noopener,noreferrer');
   };
 
   const renderAppFooter = (app: ApplicationInfo) => {
