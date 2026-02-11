@@ -33,6 +33,9 @@ type DatasourceRepository interface {
 	// Update modifies an existing datasource.
 	Update(ctx context.Context, id uuid.UUID, name, dsType, provider, encryptedConfig string) error
 
+	// Rename updates only the name of a datasource.
+	Rename(ctx context.Context, id uuid.UUID, name string) error
+
 	// Delete removes a datasource by ID.
 	Delete(ctx context.Context, id uuid.UUID) error
 
@@ -251,6 +254,27 @@ func (r *datasourceRepository) Update(ctx context.Context, id uuid.UUID, name, d
 	result, err := scope.Conn.Exec(ctx, query, id, name, dsType, provider, encryptedConfig, time.Now())
 	if err != nil {
 		return fmt.Errorf("failed to update datasource: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("datasource not found")
+	}
+
+	return nil
+}
+
+// Rename updates only the name of a datasource.
+func (r *datasourceRepository) Rename(ctx context.Context, id uuid.UUID, name string) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `UPDATE engine_datasources SET name = $2, updated_at = $3 WHERE id = $1`
+
+	result, err := scope.Conn.Exec(ctx, query, id, name, time.Now())
+	if err != nil {
+		return fmt.Errorf("failed to rename datasource: %w", err)
 	}
 
 	if result.RowsAffected() == 0 {

@@ -115,6 +115,7 @@ const DatasourceConfiguration = ({
     saveDataSource,
     updateDataSource,
     deleteDataSource,
+    renameDatasource,
   } = useDatasourceConnection();
 
   const adapterInfo = getAdapterInfo(
@@ -137,6 +138,7 @@ const DatasourceConfiguration = ({
     ProviderInfo | undefined
   >(selectedProvider);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const originalNameRef = useRef<string>("");
   const hasAutoSelectedAuthMethod = useRef<boolean>(false);
 
   // Use provider info for display if available, otherwise fall back to adapter info
@@ -180,6 +182,35 @@ const DatasourceConfiguration = ({
       ...prev,
       [field]: value,
     }));
+  };
+
+  const handleNameSave = async (): Promise<void> => {
+    setIsEditingName(false);
+    const datasourceId =
+      connectionDetails?.datasourceId ?? selectedDatasource?.datasourceId;
+
+    // Only call API for existing datasources with a changed name
+    if (!isEditingExisting || !datasourceId || !pid) return;
+    const trimmedName = config.displayName.trim();
+    if (!trimmedName || trimmedName === originalNameRef.current) return;
+
+    try {
+      await renameDatasource(pid, datasourceId, trimmedName);
+    } catch {
+      // Revert name on error
+      handleConfigChange("displayName", originalNameRef.current);
+      toast({
+        title: "Error",
+        description: "Failed to rename datasource",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleNameCancel = (): void => {
+    // Revert to original name, no API call
+    handleConfigChange("displayName", originalNameRef.current);
+    setIsEditingName(false);
   };
 
   const handleParseConnectionString = (): void => {
@@ -1105,10 +1136,13 @@ const DatasourceConfiguration = ({
                 onChange={(e) =>
                   handleConfigChange("displayName", e.target.value)
                 }
-                onBlur={() => setIsEditingName(false)}
+                onBlur={() => void handleNameSave()}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === "Escape") {
-                    setIsEditingName(false);
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void handleNameSave();
+                  } else if (e.key === "Escape") {
+                    handleNameCancel();
                   }
                 }}
                 className="text-xl font-semibold max-w-md"
@@ -1117,7 +1151,10 @@ const DatasourceConfiguration = ({
             ) : (
               <button
                 type="button"
-                onClick={() => setIsEditingName(true)}
+                onClick={() => {
+                  originalNameRef.current = config.displayName;
+                  setIsEditingName(true);
+                }}
                 className="flex items-center gap-2 text-xl font-semibold text-text-primary hover:text-blue-600 transition-colors group"
               >
                 {config.displayName || displayInfo.name}

@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   ArrowLeft,
+  Bot,
   BrainCircuit,
   Check,
   ExternalLink,
@@ -20,11 +21,32 @@ import {
   CardHeader,
   CardTitle,
 } from '../components/ui/Card';
+import { useProject } from '../contexts/ProjectContext';
 import { useInstalledApps, useInstallApp } from '../hooks/useInstalledApps';
-import { APP_ID_AI_DATA_LIAISON } from '../types';
 import { cn } from '../utils/cn';
 
-type AppColor = 'blue' | 'purple' | 'green' | 'gray';
+/** Map ekaya-central origins to marketing site origins */
+const marketingOriginMap: Record<string, string> = {
+  'http://localhost:5002': 'http://localhost:3030',
+  'http://localhost:3040': 'http://localhost:3030',
+  'https://us.dev.ekaya.ai': 'https://dev.ekaya.ai',
+  'https://us.ekaya.ai': 'https://ekaya.ai',
+};
+
+function getMarketingOrigin(projectsPageUrl: string | null): string {
+  if (projectsPageUrl) {
+    try {
+      const origin = new URL(projectsPageUrl).origin;
+      const mapped = marketingOriginMap[origin];
+      if (mapped) return mapped;
+    } catch {
+      // invalid URL, fall through to default
+    }
+  }
+  return 'https://ekaya.ai';
+}
+
+type AppColor = 'blue' | 'purple' | 'green' | 'gray' | 'orange';
 
 interface ApplicationInfo {
   id: string;
@@ -43,12 +65,22 @@ const applications: ApplicationInfo[] = [
   {
     id: 'ai-data-liaison',
     title: 'AI Data Liaison',
-    subtitle: 'Make Better Business Decisions 10x Faster',
+    subtitle: 'Make Better Business Decisions 10x Faster and lower the burden on the data team',
     icon: BrainCircuit,
     color: 'blue',
     available: true,
     installable: true,
-    learnMoreUrl: 'https://ekaya.ai/enterprise/',
+    learnMoreUrl: '/enterprise/',
+  },
+  {
+    id: 'ai-agents',
+    title: 'AI Agents and Automation',
+    subtitle: 'Connect AI coding agents and automation tools to your data via API key authentication',
+    icon: Bot,
+    color: 'orange',
+    available: true,
+    installable: true,
+    learnMoreUrl: '/ai-agents/',
   },
   {
     id: 'product-kit',
@@ -68,8 +100,8 @@ const applications: ApplicationInfo[] = [
   },
   {
     id: 'more-coming',
-    title: 'More Coming!',
-    subtitle: 'Additional applications in development',
+    title: 'Coming Soon!',
+    subtitle: 'Additional applications are in development',
     icon: Sparkles,
     color: 'gray',
     available: false,
@@ -82,6 +114,7 @@ const getColorClasses = (color: AppColor): { bg: string; text: string } => {
     purple: { bg: 'bg-purple-500/10', text: 'text-purple-500' },
     green: { bg: 'bg-green-500/10', text: 'text-green-500' },
     gray: { bg: 'bg-gray-500/10', text: 'text-gray-500' },
+    orange: { bg: 'bg-orange-500/10', text: 'text-orange-500' },
   };
   return colorMap[color];
 };
@@ -89,9 +122,11 @@ const getColorClasses = (color: AppColor): { bg: string; text: string } => {
 const ApplicationsPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
+  const { urls } = useProject();
   const { isInstalled, refetch } = useInstalledApps(pid);
   const { install, isLoading: isInstalling } = useInstallApp(pid);
   const [installingAppId, setInstallingAppId] = useState<string | null>(null);
+  const marketingOrigin = getMarketingOrigin(urls.projectsPageUrl);
 
   const handleContactSales = (app: ApplicationInfo) => {
     const subject = encodeURIComponent(
@@ -108,27 +143,23 @@ const ApplicationsPage = () => {
     setInstallingAppId(null);
     if (result) {
       await refetch();
-      // Navigate to the app's configuration page
-      navigate(`/projects/${pid}/${appId}`);
+      // Return to project dashboard so the user sees the app tile appear
+      navigate(`/projects/${pid}`);
     }
   };
 
-  const handleLearnMore = (url: string) => {
-    window.open(url, '_blank', 'noopener,noreferrer');
+  const handleLearnMore = (path: string) => {
+    window.open(`${marketingOrigin}${path}`, '_blank', 'noopener,noreferrer');
   };
 
   const renderAppFooter = (app: ApplicationInfo) => {
-    // Not available (Coming Soon)
+    // Not available (no actions to show)
     if (!app.available) {
-      return (
-        <CardFooter className="pt-0">
-          <span className="text-xs text-text-secondary">Coming Soon</span>
-        </CardFooter>
-      );
+      return null;
     }
 
-    // AI Data Liaison - special handling with Install/Installed state
-    if (app.id === APP_ID_AI_DATA_LIAISON) {
+    // Installable apps - show Install/Installed state
+    if (app.installable) {
       const appIsInstalled = isInstalled(app.id);
       const isCurrentlyInstalling = installingAppId === app.id && isInstalling;
 
@@ -224,7 +255,7 @@ const ApplicationsPage = () => {
         {applications.map((app) => {
           const Icon = app.icon;
           const colors = getColorClasses(app.color);
-          const appIsInstalled = app.id === APP_ID_AI_DATA_LIAISON && isInstalled(app.id);
+          const appIsInstalled = app.installable === true && isInstalled(app.id);
 
           return (
             <Card

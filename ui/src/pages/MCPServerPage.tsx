@@ -3,7 +3,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import MCPLogo from '../components/icons/MCPLogo';
-import AgentToolsSection from '../components/mcp/AgentToolsSection';
 import DeveloperToolsSection from '../components/mcp/DeveloperToolsSection';
 import UserToolsSection from '../components/mcp/UserToolsSection';
 import { Button } from '../components/ui/Button';
@@ -21,7 +20,6 @@ const MCPServerPage = () => {
   const [config, setConfig] = useState<MCPConfigResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
-  const [agentApiKey, setAgentApiKey] = useState<string>('');
   const [copied, setCopied] = useState(false);
 
   // Read tool group configs from backend
@@ -58,24 +56,6 @@ const MCPServerPage = () => {
   useEffect(() => {
     fetchConfig();
   }, [fetchConfig]);
-
-  // Fetch agent API key on mount
-  useEffect(() => {
-    const fetchAgentKey = async () => {
-      if (!pid) return;
-
-      try {
-        const response = await engineApi.getAgentAPIKey(pid, true);
-        if (response.success && response.data) {
-          setAgentApiKey(response.data.key);
-        }
-      } catch (error) {
-        console.error('Failed to fetch agent API key:', error);
-      }
-    };
-
-    fetchAgentKey();
-  }, [pid]);
 
   const handleAllowOntologyMaintenanceChange = async (enabled: boolean) => {
     if (!pid || !config) return;
@@ -266,14 +246,6 @@ const MCPServerPage = () => {
               disabled={updating}
             />
 
-            {/* Agent Tools Section */}
-            <AgentToolsSection
-              projectId={pid ?? ''}
-              serverUrl={config.serverUrl}
-              agentApiKey={agentApiKey}
-              onAgentApiKeyChange={setAgentApiKey}
-              enabledTools={config.agentTools}
-            />
           </>
         )}
       </div>

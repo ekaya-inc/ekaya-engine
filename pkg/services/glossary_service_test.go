@@ -393,6 +393,10 @@ func (m *mockDatasourceServiceForGlossary) TestConnection(ctx context.Context, d
 	return nil
 }
 
+func (m *mockDatasourceServiceForGlossary) Rename(ctx context.Context, id uuid.UUID, name string) error {
+	return nil
+}
+
 // Mock adapter factory (minimal implementation for tests)
 type mockQueryExecutorForGlossary struct{}
 

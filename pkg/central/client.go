@@ -21,6 +21,7 @@ const DefaultTimeout = 30 * time.Second
 const (
 	AppMCPServer     = "mcp-server"
 	AppAIDataLiaison = "ai-data-liaison"
+	AppAIAgents      = "ai-agents"
 )
 
 // ApplicationInfo describes an application assigned to a project by ekaya-central.

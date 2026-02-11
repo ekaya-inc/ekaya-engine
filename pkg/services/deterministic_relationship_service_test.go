@@ -1537,6 +1537,10 @@ func (m *mockTestDatasourceService) Delete(ctx context.Context, datasourceID uui
 	return nil
 }
 
+func (m *mockTestDatasourceService) Rename(ctx context.Context, id uuid.UUID, name string) error {
+	return nil
+}
+
 func (m *mockTestEntityRepo) GetAliasesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityAlias, error) {
 	return nil, nil
 }

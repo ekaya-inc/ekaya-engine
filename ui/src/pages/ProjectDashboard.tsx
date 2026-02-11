@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   BookOpen,
+  Bot,
   BrainCircuit,
   Database,
   Layers,
@@ -29,7 +30,7 @@ import type {
   AIOption,
   OntologyWorkflowStatus,
 } from '../types';
-import { APP_ID_AI_DATA_LIAISON } from '../types';
+import { APP_ID_AI_DATA_LIAISON, APP_ID_AI_AGENTS } from '../types';
 
 type TileColor = 'blue' | 'green' | 'purple' | 'orange' | 'gray' | 'indigo' | 'cyan' | 'amber';
 
@@ -39,6 +40,7 @@ interface Tile {
   icon: LucideIcon;
   path: string;
   disabled: boolean;
+  disabledReason?: string;
   color: TileColor;
 }
 
@@ -173,6 +175,7 @@ const ProjectDashboard = () => {
         icon: Server,
         path: `/projects/${pid}/mcp-server`,
         disabled: !isConnected, // Requires datasource
+        disabledReason: 'Requires a datasource to be configured.',
         color: 'cyan',
       },
     ];
@@ -184,8 +187,22 @@ const ProjectDashboard = () => {
         description: 'Conversational AI interface for your data — chat, query, and explore.',
         icon: BrainCircuit,
         path: `/projects/${pid}/ai-data-liaison`,
-        disabled: false,
+        disabled: !isConnected,
+        disabledReason: 'Requires MCP Server to be enabled.',
         color: 'blue',
+      });
+    }
+
+    // Add AI Agents tile if installed
+    if (installedApps.some((app) => app.app_id === APP_ID_AI_AGENTS)) {
+      tiles.push({
+        title: 'AI Agents and Automation',
+        description: 'Connect AI coding agents and automation tools to your data via API key authentication.',
+        icon: Bot,
+        path: `/projects/${pid}/ai-agents`,
+        disabled: !isConnected,
+        disabledReason: 'Requires MCP Server to be enabled.',
+        color: 'orange',
       });
     }
 
@@ -307,9 +324,9 @@ const ProjectDashboard = () => {
             )}
           </div>
           <CardTitle className="text-2xl mt-4">{tile.title}</CardTitle>
-          {tile.disabled && (
+          {tile.disabled && tile.disabledReason && (
             <p className="text-sm text-text-tertiary mt-2">
-              Requires a datasource to be configured.
+              {tile.disabledReason}
             </p>
           )}
         </CardHeader>

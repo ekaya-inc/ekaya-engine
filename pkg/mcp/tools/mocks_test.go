@@ -271,6 +271,10 @@ func (m *mockDatasourceService) TestConnection(ctx context.Context, dsType strin
 	return m.connectionError
 }
 
+func (m *mockDatasourceService) Rename(ctx context.Context, id uuid.UUID, name string) error {
+	return nil
+}
+
 // mockSchemaService implements services.SchemaService for testing.
 type mockSchemaService struct {
 	refreshResult         *models.RefreshResult
