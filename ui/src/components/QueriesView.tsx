@@ -1052,13 +1052,15 @@ const QueriesView = ({
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between mb-2">
                 <CardTitle className="text-lg">Queries</CardTitle>
-                <Button
-                  size="sm"
-                  onClick={handleCreateButtonClick}
-                  className="h-8 px-2"
-                >
-                  <Plus className="h-4 w-4" />
-                </Button>
+                {filter !== 'rejected' && (
+                  <Button
+                    size="sm"
+                    onClick={handleCreateButtonClick}
+                    className="h-8 px-2"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                )}
               </div>
               <div className="relative">
                 <Search className="absolute left-2 top-2.5 h-4 w-4 text-text-tertiary" />
