@@ -84,7 +84,7 @@ const applications: ApplicationInfo[] = [
   },
   {
     id: 'product-kit',
-    title: 'Product Kit',
+    title: 'Product Kit [BETA]',
     subtitle: 'Enable AI Features in your existing SaaS Product',
     icon: Package,
     color: 'purple',
@@ -92,7 +92,7 @@ const applications: ApplicationInfo[] = [
   },
   {
     id: 'on-premise-chat',
-    title: 'On-Premise Chat',
+    title: 'On-Premise Chat [BETA]',
     subtitle: 'Deploy AI Chat where data never leaves your data boundary',
     icon: MessageSquare,
     color: 'green',

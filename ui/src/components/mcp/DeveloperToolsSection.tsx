@@ -29,7 +29,7 @@ export default function DeveloperToolsSection({
         <CardTitle>Developer Tools</CardTitle>
         <CardDescription>
           Full access to schema exploration, query management, and ontology maintenance. Available
-          to users with admin, data, or developer roles.
+          to users with admin or data roles.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

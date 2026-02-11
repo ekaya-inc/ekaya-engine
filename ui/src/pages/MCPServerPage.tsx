@@ -4,10 +4,10 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import MCPLogo from '../components/icons/MCPLogo';
 import DeveloperToolsSection from '../components/mcp/DeveloperToolsSection';
-import UserToolsSection from '../components/mcp/UserToolsSection';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { TOOL_GROUP_IDS } from '../constants/mcpToolMetadata';
+import { useConfig } from '../contexts/ConfigContext';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
 import type { MCPConfigResponse } from '../types';
@@ -15,6 +15,7 @@ import type { MCPConfigResponse } from '../types';
 const MCPServerPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
+  const { config: appConfig } = useConfig();
   const { toast } = useToast();
 
   const [config, setConfig] = useState<MCPConfigResponse | null>(null);
@@ -23,9 +24,6 @@ const MCPServerPage = () => {
   const [copied, setCopied] = useState(false);
 
   // Read tool group configs from backend
-  const approvedQueriesState = config?.toolGroups[TOOL_GROUP_IDS.USER];
-  const allowOntologyMaintenance = approvedQueriesState?.allowOntologyMaintenance ?? true;
-
   const developerState = config?.toolGroups[TOOL_GROUP_IDS.DEVELOPER];
   const addQueryTools = developerState?.addQueryTools ?? true;
   const addOntologyMaintenance = developerState?.addOntologyMaintenance ?? true;
@@ -56,36 +54,6 @@ const MCPServerPage = () => {
   useEffect(() => {
     fetchConfig();
   }, [fetchConfig]);
-
-  const handleAllowOntologyMaintenanceChange = async (enabled: boolean) => {
-    if (!pid || !config) return;
-
-    try {
-      setUpdating(true);
-      const response = await engineApi.updateMCPConfig(pid, {
-        allowOntologyMaintenance: enabled,
-      });
-
-      if (response.success && response.data) {
-        setConfig(response.data);
-        toast({
-          title: 'Success',
-          description: `Allow Usage to Improve Ontology ${enabled ? 'enabled' : 'disabled'}`,
-        });
-      } else {
-        throw new Error(response.error ?? 'Failed to update configuration');
-      }
-    } catch (error) {
-      console.error('Failed to update MCP config:', error);
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to update configuration',
-        variant: 'destructive',
-      });
-    } finally {
-      setUpdating(false);
-    }
-  };
 
   const handleAddQueryToolsChange = async (enabled: boolean) => {
     if (!pid || !config) return;
@@ -212,7 +180,7 @@ const MCPServerPage = () => {
                 </div>
 
                 <a
-                  href={`https://us.ekaya.ai/mcp-setup?mcp_url=${encodeURIComponent(config.serverUrl)}`}
+                  href={`${appConfig?.authServerUrl}/mcp-setup?mcp_url=${encodeURIComponent(config.serverUrl)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 text-sm text-brand-purple hover:underline"
@@ -226,15 +194,6 @@ const MCPServerPage = () => {
                 </p>
               </CardContent>
             </Card>
-
-            {/* User Tools Section */}
-            <UserToolsSection
-              projectId={pid ?? ''}
-              allowOntologyMaintenance={allowOntologyMaintenance}
-              onAllowOntologyMaintenanceChange={handleAllowOntologyMaintenanceChange}
-              enabledTools={config.userTools}
-              disabled={updating}
-            />
 
             {/* Developer Tools Section */}
             <DeveloperToolsSection

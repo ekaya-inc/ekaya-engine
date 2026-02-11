@@ -13,6 +13,7 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
+import UserToolsSection from '../components/mcp/UserToolsSection';
 import { Button } from '../components/ui/Button';
 import {
   Card,
@@ -30,16 +31,13 @@ import {
   DialogTitle,
 } from '../components/ui/Dialog';
 import { Input } from '../components/ui/Input';
+import { TOOL_GROUP_IDS } from '../constants/mcpToolMetadata';
+import { useConfig } from '../contexts/ConfigContext';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
 import type { AIConfigResponse, DAGStatusResponse, Datasource, MCPConfigResponse } from '../types';
 
-// Tools enabled by AI Data Liaison installation
-const DATA_LIAISON_USER_TOOLS = [
-  { name: 'suggest_approved_query', description: 'Propose new queries for approval' },
-  { name: 'suggest_query_update', description: 'Propose updates to existing queries' },
-];
-
+// Developer tools added to the MCP Server by AI Data Liaison installation
 const DATA_LIAISON_DEVELOPER_TOOLS = [
   { name: 'list_query_suggestions', description: 'View pending query suggestions' },
   { name: 'approve_query_suggestion', description: 'Approve a suggested query' },
@@ -61,6 +59,7 @@ interface ChecklistItem {
 const AIDataLiaisonPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
+  const { config: appConfig } = useConfig();
   const { toast } = useToast();
 
   // Uninstall dialog state
@@ -76,6 +75,11 @@ const AIDataLiaisonPage = () => {
   const [mcpConfig, setMcpConfig] = useState<MCPConfigResponse | null>(null);
   const [aiConfig, setAiConfig] = useState<AIConfigResponse | null>(null);
   const [copied, setCopied] = useState(false);
+  const [updatingConfig, setUpdatingConfig] = useState(false);
+
+  // User Tools config from MCP config
+  const allowOntologyMaintenance =
+    mcpConfig?.toolGroups[TOOL_GROUP_IDS.USER]?.allowOntologyMaintenance ?? true;
 
   const fetchChecklistData = useCallback(async () => {
     if (!pid) return;
@@ -163,6 +167,36 @@ const AIDataLiaisonPage = () => {
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy URL:', err);
+    }
+  };
+
+  const handleAllowOntologyMaintenanceChange = async (enabled: boolean) => {
+    if (!pid) return;
+
+    try {
+      setUpdatingConfig(true);
+      const response = await engineApi.updateMCPConfig(pid, {
+        allowOntologyMaintenance: enabled,
+      });
+
+      if (response.success && response.data) {
+        setMcpConfig(response.data);
+        toast({
+          title: 'Success',
+          description: `Allow Usage to Improve Ontology ${enabled ? 'enabled' : 'disabled'}`,
+        });
+      } else {
+        throw new Error(response.error ?? 'Failed to update configuration');
+      }
+    } catch (error) {
+      console.error('Failed to update MCP config:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to update configuration',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdatingConfig(false);
     }
   };
 
@@ -394,7 +428,7 @@ const AIDataLiaisonPage = () => {
               </Button>
             </div>
             <a
-              href={`https://us.ekaya.ai/mcp-setup?mcp_url=${encodeURIComponent(mcpConfig.serverUrl)}`}
+              href={`${appConfig?.authServerUrl}/mcp-setup?mcp_url=${encodeURIComponent(mcpConfig.serverUrl)}`}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 text-sm text-brand-purple hover:underline"
@@ -406,49 +440,36 @@ const AIDataLiaisonPage = () => {
         </Card>
       )}
 
-      {/* Enabled Tools */}
+      {/* User Tools Section */}
+      {mcpConfig && (
+        <UserToolsSection
+          projectId={pid ?? ''}
+          allowOntologyMaintenance={allowOntologyMaintenance}
+          onAllowOntologyMaintenanceChange={handleAllowOntologyMaintenanceChange}
+          enabledTools={mcpConfig.userTools}
+          disabled={updatingConfig}
+        />
+      )}
+
+      {/* Additional Developer Tools */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Enabled Tools</CardTitle>
+          <CardTitle className="text-lg">Additional Developer Tools</CardTitle>
           <CardDescription>
-            AI Data Liaison adds these MCP tools to your project
+            AI Data Liaison adds these tools to the MCP Server for data engineers
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6">
-          {/* User Tools */}
-          <div>
-            <h4 className="text-sm font-medium text-text-primary mb-2">
-              For Business Users (User Tools)
-            </h4>
-            <div className="space-y-2">
-              {DATA_LIAISON_USER_TOOLS.map((tool) => (
-                <div
-                  key={tool.name}
-                  className="flex items-center gap-3 rounded border border-border-light bg-surface-secondary px-3 py-2"
-                >
-                  <code className="text-xs font-mono text-brand-purple">{tool.name}</code>
-                  <span className="text-sm text-text-secondary">{tool.description}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Developer Tools */}
-          <div>
-            <h4 className="text-sm font-medium text-text-primary mb-2">
-              For Data Engineers (Developer Tools)
-            </h4>
-            <div className="space-y-2">
-              {DATA_LIAISON_DEVELOPER_TOOLS.map((tool) => (
-                <div
-                  key={tool.name}
-                  className="flex items-center gap-3 rounded border border-border-light bg-surface-secondary px-3 py-2"
-                >
-                  <code className="text-xs font-mono text-brand-purple">{tool.name}</code>
-                  <span className="text-sm text-text-secondary">{tool.description}</span>
-                </div>
-              ))}
-            </div>
+        <CardContent>
+          <div className="space-y-2">
+            {DATA_LIAISON_DEVELOPER_TOOLS.map((tool) => (
+              <div
+                key={tool.name}
+                className="flex items-center gap-3 rounded border border-border-light bg-surface-secondary px-3 py-2"
+              >
+                <code className="text-xs font-mono text-brand-purple">{tool.name}</code>
+                <span className="text-sm text-text-secondary">{tool.description}</span>
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>
