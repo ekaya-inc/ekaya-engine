@@ -131,6 +131,14 @@ func registerProbeColumnsTool(s *server.MCPServer, deps *ProbeToolDeps) {
 			"columns",
 			mcp.Required(),
 			mcp.Description("Array of {table, column} objects to probe"),
+			mcp.Items(map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"table":  map[string]any{"type": "string", "description": "Table name"},
+					"column": map[string]any{"type": "string", "description": "Column name"},
+				},
+				"required": []string{"table", "column"},
+			}),
 		),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -154,8 +162,11 @@ func registerProbeColumnsTool(s *server.MCPServer, deps *ProbeToolDeps) {
 			return NewErrorResult("invalid_parameters", "invalid request arguments"), nil
 		}
 
-		columnsArg, ok := args["columns"].([]any)
-		if !ok || len(columnsArg) == 0 {
+		columnsArg, parseErr := extractArrayParam(args, "columns", deps.Logger)
+		if parseErr != nil {
+			return NewErrorResult("invalid_parameters", parseErr.Error()), nil
+		}
+		if len(columnsArg) == 0 {
 			return NewErrorResult("invalid_parameters",
 				"columns parameter is required and must be a non-empty array"), nil
 		}

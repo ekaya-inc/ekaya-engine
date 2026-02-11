@@ -28,6 +28,7 @@ import ProjectsRedirect from './pages/ProjectsRedirect';
 import QueriesPage from './pages/QueriesPage';
 import RelationshipsPage from './pages/RelationshipsPage';
 import SchemaPage from './pages/SchemaPage';
+import ServerSetupPage from './pages/ServerSetupPage';
 import SettingsPage from './pages/SettingsPage';
 
 const App = (): JSX.Element => {
@@ -59,6 +60,7 @@ const App = (): JSX.Element => {
                   <Route path="ontology-questions" element={<OntologyQuestionsPage />} />
                   <Route path="queries/*" element={<QueriesPage />} />
                   <Route path="mcp-server" element={<MCPServerPage />} />
+                  <Route path="server-setup" element={<ServerSetupPage />} />
                   <Route path="settings" element={<SettingsPage />} />
                   <Route path="help" element={<HelpPage />} />
                 </Route>

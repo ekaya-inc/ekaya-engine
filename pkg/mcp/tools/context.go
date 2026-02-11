@@ -75,6 +75,7 @@ func registerGetContextTool(s *server.MCPServer, deps *ContextToolDeps) {
 		mcp.WithArray(
 			"tables",
 			mcp.Description("Optional: filter to specific tables (for 'tables' or 'columns' depth)"),
+			mcp.WithStringItems(),
 		),
 		mcp.WithBoolean(
 			"include_relationships",
@@ -83,6 +84,7 @@ func registerGetContextTool(s *server.MCPServer, deps *ContextToolDeps) {
 		mcp.WithArray(
 			"include",
 			mcp.Description("Optional: additional data to include. Supported values: 'statistics' (distinct_count, row_count, null_rate, cardinality_ratio, is_joinable, joinability_reason), 'sample_values' (actual values for columns with ≤50 distinct values)"),
+			mcp.WithStringItems(),
 		),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -119,9 +121,16 @@ func registerGetContextTool(s *server.MCPServer, deps *ContextToolDeps) {
 		}
 
 		// Parse optional parameters
-		tables := getStringSlice(req, "tables")
+		tables, parseErr := getStringSlice(req, "tables")
+		if parseErr != nil {
+			return NewErrorResult("invalid_parameters", parseErr.Error()), nil
+		}
 		includeRelationships := getOptionalBoolWithDefault(req, "include_relationships", true)
-		includeOptions := parseIncludeOptions(getStringSlice(req, "include"))
+		includeValues, parseErr := getStringSlice(req, "include")
+		if parseErr != nil {
+			return NewErrorResult("invalid_parameters", parseErr.Error()), nil
+		}
+		includeOptions := parseIncludeOptions(includeValues)
 
 		// Get the active ontology (may be nil)
 		ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)

@@ -116,6 +116,10 @@ func (m *mockProjectService) SetOntologySettings(ctx context.Context, projectID 
 	return nil
 }
 
+func (m *mockProjectService) SyncServerURL(ctx context.Context, projectID uuid.UUID, papiURL, token string) error {
+	return nil
+}
+
 // mockAuthService is a mock AuthService for integration testing.
 type mockAuthService struct {
 	claims *auth.Claims

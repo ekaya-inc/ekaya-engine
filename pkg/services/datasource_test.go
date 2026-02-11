@@ -602,6 +602,10 @@ func (m *mockProjectServiceForDatasource) SetOntologySettings(ctx context.Contex
 	return nil
 }
 
+func (m *mockProjectServiceForDatasource) SyncServerURL(ctx context.Context, projectID uuid.UUID, papiURL, token string) error {
+	return nil
+}
+
 // TestDatasourceService_Delete_ClearsDefaultDatasourceID verifies that when the default
 // datasource is deleted, the default_datasource_id is cleared so that a new datasource
 // can become the default.

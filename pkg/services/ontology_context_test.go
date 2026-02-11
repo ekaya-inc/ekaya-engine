@@ -152,6 +152,10 @@ func (m *mockProjectServiceForOntology) SetOntologySettings(ctx context.Context,
 	return nil
 }
 
+func (m *mockProjectServiceForOntology) SyncServerURL(ctx context.Context, projectID uuid.UUID, papiURL, token string) error {
+	return nil
+}
+
 // ============================================================================
 // Tests
 // ============================================================================

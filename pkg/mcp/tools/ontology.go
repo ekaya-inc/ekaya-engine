@@ -29,22 +29,13 @@ func RegisterOntologyTools(s *server.MCPServer, deps *OntologyToolDeps) {
 }
 
 // getStringSlice extracts a slice of strings from request arguments.
-func getStringSlice(req mcp.CallToolRequest, key string) []string {
+// Returns (nil, nil) if the key is absent; returns an error if the value is malformed.
+func getStringSlice(req mcp.CallToolRequest, key string) ([]string, error) {
 	args, ok := req.Params.Arguments.(map[string]any)
 	if !ok {
-		return nil
+		return nil, nil
 	}
-	val, ok := args[key].([]any)
-	if !ok {
-		return nil
-	}
-	result := make([]string, 0, len(val))
-	for _, item := range val {
-		if str, ok := item.(string); ok {
-			result = append(result, str)
-		}
-	}
-	return result
+	return extractStringSlice(args, key, nil)
 }
 
 // getOptionalBoolWithDefault extracts an optional boolean argument with a default value.
@@ -73,6 +64,7 @@ func registerGetOntologyTool(s *server.MCPServer, deps *OntologyToolDeps) {
 		mcp.WithArray(
 			"tables",
 			mcp.Description("Optional: filter to specific tables (for 'tables' or 'columns' depth)"),
+			mcp.WithStringItems(),
 		),
 		mcp.WithBoolean(
 			"include_relationships",
@@ -115,7 +107,10 @@ func registerGetOntologyTool(s *server.MCPServer, deps *OntologyToolDeps) {
 		}
 
 		// Parse optional parameters
-		tables := getStringSlice(req, "tables")
+		tables, parseErr := getStringSlice(req, "tables")
+		if parseErr != nil {
+			return NewErrorResult("invalid_parameters", parseErr.Error()), nil
+		}
 		includeRelationships := getOptionalBoolWithDefault(req, "include_relationships", true)
 
 		// Get the active ontology

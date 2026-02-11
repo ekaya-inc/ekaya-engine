@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"net/http"
+	"net/url"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -37,6 +39,7 @@ func NewConfigHandler(cfg *config.Config, adapterFactory datasource.DatasourceAd
 func (h *ConfigHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/config/auth", h.Get)
 	mux.HandleFunc("GET /api/config/datasource-types", h.GetDatasourceTypes)
+	mux.HandleFunc("GET /api/config/server-status", h.GetServerStatus)
 }
 
 // Get returns public configuration for the frontend.
@@ -53,6 +56,41 @@ func (h *ConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to encode config response", zap.Error(err))
+	}
+}
+
+// ServerStatusResponse contains server accessibility information for the frontend.
+type ServerStatusResponse struct {
+	BaseURL                    string `json:"base_url"`
+	IsLocalhost                bool   `json:"is_localhost"`
+	IsHTTPS                    bool   `json:"is_https"`
+	AccessibleForBusinessUsers bool   `json:"accessible_for_business_users"`
+}
+
+// GetServerStatus returns server accessibility status.
+// GET /api/config/server-status
+// This endpoint is public (derived from the already-public base_url).
+func (h *ConfigHandler) GetServerStatus(w http.ResponseWriter, r *http.Request) {
+	baseURL := h.config.BaseURL
+	isHTTPS := strings.HasPrefix(baseURL, "https://")
+
+	isLocalhost := false
+	if parsed, err := url.Parse(baseURL); err == nil {
+		hostname := parsed.Hostname()
+		isLocalhost = hostname == "localhost" || hostname == "127.0.0.1" || hostname == "::1"
+	}
+
+	response := ServerStatusResponse{
+		BaseURL:                    baseURL,
+		IsLocalhost:                isLocalhost,
+		IsHTTPS:                    isHTTPS,
+		AccessibleForBusinessUsers: !isLocalhost && isHTTPS,
+	}
+
+	w.Header().Set("Cache-Control", "public, max-age=60")
+
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to encode server status response", zap.Error(err))
 	}
 }
 

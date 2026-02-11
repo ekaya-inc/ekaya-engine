@@ -608,11 +608,25 @@ If datasource_id is not provided, the project's default datasource will be used.
 		mcp.WithString("datasource_id",
 			mcp.Description("UUID of the datasource (optional, defaults to project's default datasource)")),
 		mcp.WithArray("parameters",
-			mcp.Description("Parameter definitions (array of objects with name, type, description, required, example)")),
+			mcp.Description("Parameter definitions for {{placeholder}} values in SQL"),
+			mcp.Items(map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name":        map[string]any{"type": "string", "description": "Parameter name matching {{name}} in SQL"},
+					"type":        map[string]any{"type": "string", "description": "Data type: string, integer, decimal, uuid, date, timestamp, boolean"},
+					"description": map[string]any{"type": "string", "description": "What this parameter represents"},
+					"required":    map[string]any{"type": "boolean", "description": "Whether the parameter is required (default: true)"},
+					"example":     map[string]any{"description": "Example value used for validation dry-run"},
+				},
+				"required": []string{"name", "type"},
+			}),
+		),
 		mcp.WithObject("output_column_descriptions",
 			mcp.Description("Descriptions for output columns (e.g., {\"total\": \"Total amount in USD\"})")),
 		mcp.WithArray("tags",
-			mcp.Description("Tags for organizing queries (e.g., [\"billing\", \"reporting\"])")),
+			mcp.Description("Tags for organizing queries (e.g., [\"billing\", \"reporting\"])"),
+			mcp.WithStringItems(),
+		),
 	)
 
 	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -711,7 +725,11 @@ If datasource_id is not provided, the project's default datasource will be used.
 
 		// Parse optional parameters
 		var paramDefs []models.QueryParameter
-		if paramsArray, ok := args["parameters"].([]any); ok && len(paramsArray) > 0 {
+		paramsArray, parseErr := extractArrayParam(args, "parameters", deps.Logger)
+		if parseErr != nil {
+			return NewErrorResult("invalid_parameters", parseErr.Error()), nil
+		}
+		if len(paramsArray) > 0 {
 			paramDefs, err = parseDevQueryParameterDefinitions(paramsArray)
 			if err != nil {
 				return NewErrorResultWithDetails("invalid_parameters",
@@ -737,12 +755,12 @@ If datasource_id is not provided, the project's default datasource will be used.
 
 		// Parse optional tags
 		var tags []string
-		if tagsArray, ok := args["tags"].([]any); ok {
-			for _, tag := range tagsArray {
-				if str, ok := tag.(string); ok {
-					tags = append(tags, str)
-				}
-			}
+		tagSlice, tagErr := extractStringSlice(args, "tags", deps.Logger)
+		if tagErr != nil {
+			return NewErrorResult("invalid_parameters", tagErr.Error()), nil
+		}
+		if tagSlice != nil {
+			tags = tagSlice
 		}
 
 		// Detect if this is a modifying statement (INSERT/UPDATE/DELETE/CALL)
@@ -873,11 +891,25 @@ Use this for admin-initiated updates that bypass the suggestion workflow.`),
 		mcp.WithString("description",
 			mcp.Description("Updated description of what business question this query answers")),
 		mcp.WithArray("parameters",
-			mcp.Description("Updated parameter definitions (array of objects with name, type, description, required, example)")),
+			mcp.Description("Updated parameter definitions for {{placeholder}} values in SQL"),
+			mcp.Items(map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name":        map[string]any{"type": "string", "description": "Parameter name matching {{name}} in SQL"},
+					"type":        map[string]any{"type": "string", "description": "Data type: string, integer, decimal, uuid, date, timestamp, boolean"},
+					"description": map[string]any{"type": "string", "description": "What this parameter represents"},
+					"required":    map[string]any{"type": "boolean", "description": "Whether the parameter is required (default: true)"},
+					"example":     map[string]any{"description": "Example value used for validation dry-run"},
+				},
+				"required": []string{"name", "type"},
+			}),
+		),
 		mcp.WithObject("output_column_descriptions",
 			mcp.Description("Updated descriptions for output columns (e.g., {\"total\": \"Total amount in USD\"})")),
 		mcp.WithArray("tags",
-			mcp.Description("Updated tags for organizing queries (e.g., [\"billing\", \"reporting\"])")),
+			mcp.Description("Updated tags for organizing queries (e.g., [\"billing\", \"reporting\"])"),
+			mcp.WithStringItems(),
+		),
 		mcp.WithBoolean("is_enabled",
 			mcp.Description("Enable or disable the query")),
 	)
@@ -986,7 +1018,11 @@ Use this for admin-initiated updates that bypass the suggestion workflow.`),
 		}
 
 		// Parse optional parameters
-		if paramsArray, ok := args["parameters"].([]any); ok && len(paramsArray) > 0 {
+		paramsArray, parseErr := extractArrayParam(args, "parameters", deps.Logger)
+		if parseErr != nil {
+			return NewErrorResult("invalid_parameters", parseErr.Error()), nil
+		}
+		if len(paramsArray) > 0 {
 			paramDefs, err := parseDevQueryParameterDefinitions(paramsArray)
 			if err != nil {
 				return NewErrorResultWithDetails("invalid_parameters",
@@ -1015,14 +1051,12 @@ Use this for admin-initiated updates that bypass the suggestion workflow.`),
 		}
 
 		// Parse optional tags
-		if tagsArray, ok := args["tags"].([]any); ok {
-			tags := make([]string, 0, len(tagsArray))
-			for _, tag := range tagsArray {
-				if str, ok := tag.(string); ok {
-					tags = append(tags, str)
-				}
-			}
-			updateReq.Tags = &tags
+		tagSlice, tagErr := extractStringSlice(args, "tags", deps.Logger)
+		if tagErr != nil {
+			return NewErrorResult("invalid_parameters", tagErr.Error()), nil
+		}
+		if tagSlice != nil {
+			updateReq.Tags = &tagSlice
 			updatedFields = append(updatedFields, "tags")
 		}
 

@@ -1,19 +1,18 @@
 import {
   ArrowLeft,
   Check,
-  CheckCircle2,
-  Circle,
   Copy,
   ExternalLink,
   Loader2,
   ScrollText,
   Trash2,
-  XCircle,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import UserToolsSection from '../components/mcp/UserToolsSection';
+import SetupChecklist from '../components/SetupChecklist';
+import type { ChecklistItem } from '../components/SetupChecklist';
 import { Button } from '../components/ui/Button';
 import {
   Card,
@@ -35,7 +34,7 @@ import { TOOL_GROUP_IDS } from '../constants/mcpToolMetadata';
 import { useConfig } from '../contexts/ConfigContext';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
-import type { AIConfigResponse, DAGStatusResponse, Datasource, MCPConfigResponse } from '../types';
+import type { DAGStatusResponse, Datasource, MCPConfigResponse, ServerStatusResponse } from '../types';
 
 // Developer tools added to the MCP Server by AI Data Liaison installation
 const DATA_LIAISON_DEVELOPER_TOOLS = [
@@ -46,15 +45,6 @@ const DATA_LIAISON_DEVELOPER_TOOLS = [
   { name: 'update_approved_query', description: 'Update an existing query' },
   { name: 'delete_approved_query', description: 'Delete a query' },
 ];
-
-interface ChecklistItem {
-  id: string;
-  title: string;
-  description: string;
-  status: 'pending' | 'complete' | 'error' | 'loading';
-  link?: string;
-  linkText?: string;
-}
 
 const AIDataLiaisonPage = () => {
   const navigate = useNavigate();
@@ -69,11 +59,9 @@ const AIDataLiaisonPage = () => {
 
   // Checklist state
   const [loading, setLoading] = useState(true);
-  const [datasource, setDatasource] = useState<Datasource | null>(null);
-  const [hasSelectedTables, setHasSelectedTables] = useState(false);
-  const [dagStatus, setDagStatus] = useState<DAGStatusResponse | null>(null);
+  const [mcpServerReady, setMcpServerReady] = useState(false);
+  const [serverStatus, setServerStatus] = useState<ServerStatusResponse | null>(null);
   const [mcpConfig, setMcpConfig] = useState<MCPConfigResponse | null>(null);
-  const [aiConfig, setAiConfig] = useState<AIConfigResponse | null>(null);
   const [copied, setCopied] = useState(false);
   const [updatingConfig, setUpdatingConfig] = useState(false);
 
@@ -86,37 +74,29 @@ const AIDataLiaisonPage = () => {
 
     setLoading(true);
     try {
-      // Fetch all data in parallel
-      const [datasourcesRes, mcpConfigRes, aiConfigRes] = await Promise.all([
-        engineApi.listDataSources(pid),
+      // Fetch MCP config, datasources, and server status in parallel
+      const [mcpConfigRes, datasourcesRes, serverStatusRes] = await Promise.all([
         engineApi.getMCPConfig(pid),
-        engineApi.getAIConfig(pid),
+        engineApi.listDataSources(pid),
+        engineApi.getServerStatus(),
       ]);
 
-      // Get first datasource (if any)
-      const ds = datasourcesRes.data?.datasources?.[0] ?? null;
-      setDatasource(ds);
       setMcpConfig(mcpConfigRes.data ?? null);
-      setAiConfig(aiConfigRes.data ?? null);
+      setServerStatus(serverStatusRes);
 
-      // If datasource exists, fetch schema selections and DAG status
+      // Check if MCP Server is ready: ontology DAG completed implies all prereqs are met
+      const ds: Datasource | null = datasourcesRes.data?.datasources?.[0] ?? null;
+      let dagCompleted = false;
       if (ds) {
         try {
-          const schemaRes = await engineApi.getSchema(pid, ds.datasource_id);
-          const hasSelections = schemaRes.data?.tables?.some((t) => t.is_selected === true) ?? false;
-          setHasSelectedTables(hasSelections);
-        } catch {
-          setHasSelectedTables(false);
-        }
-
-        try {
           const dagRes = await engineApi.getOntologyDAGStatus(pid, ds.datasource_id);
-          setDagStatus(dagRes.data ?? null);
+          const dagData: DAGStatusResponse | null = dagRes.data ?? null;
+          dagCompleted = dagData?.status === 'completed';
         } catch {
           // DAG might not exist yet
-          setDagStatus(null);
         }
       }
+      setMcpServerReady(dagCompleted);
     } catch (error) {
       console.error('Failed to fetch checklist data:', error);
       toast({
@@ -204,102 +184,30 @@ const AIDataLiaisonPage = () => {
   const getChecklistItems = (): ChecklistItem[] => {
     const items: ChecklistItem[] = [];
 
-    // 1. Datasource configured
+    const isAccessible = serverStatus?.accessible_for_business_users ?? false;
+
+    // 1. MCP Server set up
     items.push({
-      id: 'datasource',
-      title: 'Datasource configured',
-      description: datasource
-        ? `Connected to ${datasource.name} (${datasource.type})`
-        : 'Connect a database to enable AI Data Liaison',
-      status: loading ? 'loading' : datasource ? 'complete' : 'pending',
-      link: `/projects/${pid}/datasource`,
-      linkText: datasource ? 'Manage' : 'Configure',
-    });
-
-    // 2. Schema selected
-    const schemaItem: ChecklistItem = {
-      id: 'schema',
-      title: 'Schema selected',
-      description: hasSelectedTables
-        ? 'Tables and columns selected for analysis'
-        : datasource
-          ? 'Select which tables and columns to include'
-          : 'Configure datasource first',
-      status: loading ? 'loading' : hasSelectedTables ? 'complete' : 'pending',
-      linkText: hasSelectedTables ? 'Manage' : 'Configure',
-    };
-    if (datasource) {
-      schemaItem.link = `/projects/${pid}/schema`;
-    }
-    items.push(schemaItem);
-
-    // 3. AI configured
-    const isAIConfigured = !!aiConfig?.config_type && aiConfig.config_type !== 'none';
-    items.push({
-      id: 'ai-config',
-      title: 'AI configured',
-      description: isAIConfigured
-        ? 'AI model configured'
-        : hasSelectedTables
-          ? 'Configure an AI model for ontology extraction'
-          : 'Configure datasource and select schema first',
-      status: loading ? 'loading' : isAIConfigured ? 'complete' : 'pending',
-      link: `/projects/${pid}/ai-config`,
-      linkText: isAIConfigured ? 'Manage' : 'Configure',
-    });
-
-    // 4. Ontology extracted
-    const ontologyComplete = dagStatus?.status === 'completed';
-    const ontologyRunning = dagStatus?.status === 'running';
-    const ontologyFailed = dagStatus?.status === 'failed';
-
-    const ontologyItem: ChecklistItem = {
-      id: 'ontology',
-      title: 'Ontology extracted',
-      description: ontologyComplete
-        ? 'Schema semantics extracted and ready'
-        : ontologyRunning
-          ? `Extracting... (${dagStatus?.current_node ?? 'starting'})`
-          : ontologyFailed
-            ? 'Extraction failed - click to retry'
-            : datasource
-              ? 'Extract semantic understanding from your schema'
-              : 'Configure datasource first',
-      status: loading
-        ? 'loading'
-        : ontologyComplete
-          ? 'complete'
-          : ontologyFailed
-            ? 'error'
-            : 'pending',
-      linkText: ontologyComplete ? 'Manage' : ontologyFailed ? 'Retry' : 'Configure',
-    };
-    if (datasource) {
-      ontologyItem.link = `/projects/${pid}/ontology`;
-    }
-    items.push(ontologyItem);
-
-    // 5. MCP Server URL available
-    items.push({
-      id: 'mcp-url',
-      title: 'MCP Server URL ready',
-      description: mcpConfig?.serverUrl
-        ? 'Share this URL with business users'
-        : 'MCP Server URL will be available after setup',
-      status: loading ? 'loading' : mcpConfig?.serverUrl ? 'complete' : 'pending',
+      id: 'mcp-server',
+      title: 'MCP Server set up',
+      description: mcpServerReady
+        ? 'Datasource, schema, AI, and ontology configured'
+        : 'Configure datasource, schema, AI, and extract ontology',
+      status: loading ? 'loading' : mcpServerReady ? 'complete' : 'pending',
       link: `/projects/${pid}/mcp-server`,
-      linkText: mcpConfig?.serverUrl ? 'Manage' : 'Configure',
+      linkText: mcpServerReady ? 'Manage' : 'Configure',
     });
 
-    // 6. AI Data Liaison installed (only complete when all prior steps are done)
-    const allPriorComplete = items.every((item) => item.status === 'complete');
+    // 2. MCP Server accessible to business users
     items.push({
-      id: 'installed',
-      title: 'AI Data Liaison ready',
-      description: allPriorComplete
-        ? 'Query suggestion workflow enabled'
-        : 'Complete all steps above to enable',
-      status: allPriorComplete ? 'complete' : 'pending',
+      id: 'server-accessible',
+      title: 'MCP Server accessible',
+      description: isAccessible
+        ? 'Server is reachable by business users over HTTPS'
+        : 'Server is on localhost \u2014 business users cannot connect',
+      status: loading ? 'loading' : isAccessible ? 'complete' : 'pending',
+      link: `/projects/${pid}/server-setup`,
+      linkText: isAccessible ? 'Review' : 'Configure',
     });
 
     return items;
@@ -337,67 +245,12 @@ const AIDataLiaisonPage = () => {
       </div>
 
       {/* Setup Checklist */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            {allComplete ? (
-              <CheckCircle2 className="h-5 w-5 text-green-500" />
-            ) : (
-              <Circle className="h-5 w-5 text-text-secondary" />
-            )}
-            Setup Checklist
-          </CardTitle>
-          <CardDescription>
-            {allComplete
-              ? 'AI Data Liaison is ready for business users'
-              : 'Complete these steps to enable AI Data Liaison'}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {checklistItems.map((item, index) => (
-              <div
-                key={item.id}
-                className="flex items-start gap-3 rounded-lg border border-border-light p-3"
-              >
-                <div className="mt-0.5">
-                  {item.status === 'loading' ? (
-                    <Loader2 className="h-5 w-5 animate-spin text-text-secondary" />
-                  ) : item.status === 'complete' ? (
-                    <CheckCircle2 className="h-5 w-5 text-green-500" />
-                  ) : item.status === 'error' ? (
-                    <XCircle className="h-5 w-5 text-red-500" />
-                  ) : (
-                    <Circle className="h-5 w-5 text-text-secondary" />
-                  )}
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-text-primary">
-                      {index + 1}. {item.title}
-                    </span>
-                  </div>
-                  <p className="text-sm text-text-secondary">{item.description}</p>
-                </div>
-                {item.link && item.status !== 'complete' && (
-                  <Link to={item.link}>
-                    <Button variant="outline" size="sm">
-                      {item.linkText}
-                    </Button>
-                  </Link>
-                )}
-                {item.link && item.status === 'complete' && (
-                  <Link to={item.link}>
-                    <Button variant="ghost" size="sm" className="text-text-secondary">
-                      {item.linkText}
-                    </Button>
-                  </Link>
-                )}
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      <SetupChecklist
+        items={checklistItems}
+        title="Setup Checklist"
+        description="Complete these steps to enable AI Data Liaison"
+        completeDescription="AI Data Liaison is ready for business users"
+      />
 
       {/* MCP URL Quick Access (only when ready) */}
       {mcpConfig?.serverUrl && (

@@ -2,6 +2,7 @@
 package central
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -117,6 +118,41 @@ func (c *Client) GetProject(ctx context.Context, baseURL, projectID, token strin
 	c.logger.Debug("Fetching project from ekaya-central",
 		zap.String("url", endpoint),
 		zap.String("project_id", projectID))
+
+	return c.doProjectRequest(req, projectID)
+}
+
+// UpdateServerUrl updates the project's serverUrl in ekaya-central.
+// This is called when the admin configures HTTPS and wants to sync the new URL
+// so that ekaya-central redirect URLs and MCP setup links are correct.
+// baseURL is the ekaya-central API base URL (from JWT papi claim).
+// projectID is the project UUID.
+// serverURL is the new server URL (e.g., "https://data.acme.com").
+// token is the JWT token for authentication (must have admin role).
+func (c *Client) UpdateServerUrl(ctx context.Context, baseURL, projectID, serverURL, token string) (*ProjectInfo, error) {
+	endpoint, err := buildURL(baseURL, "api", "v1", "projects", projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build URL: %w", err)
+	}
+
+	body, err := json.Marshal(map[string]string{"serverUrl": serverURL})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	c.logger.Info("Updating server URL in ekaya-central",
+		zap.String("url", endpoint),
+		zap.String("project_id", projectID),
+		zap.String("server_url", serverURL))
 
 	return c.doProjectRequest(req, projectID)
 }

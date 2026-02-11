@@ -236,6 +236,10 @@ func (m *mockProjectService) SetOntologySettings(ctx context.Context, projectID 
 	return nil
 }
 
+func (m *mockProjectService) SyncServerURL(ctx context.Context, projectID uuid.UUID, papiURL, token string) error {
+	return nil
+}
+
 // mockDatasourceService implements services.DatasourceService for testing.
 type mockDatasourceService struct {
 	datasource      *models.Datasource

@@ -226,6 +226,10 @@ func (m *mockProjectServiceForMCP) SetOntologySettings(ctx context.Context, proj
 	return nil
 }
 
+func (m *mockProjectServiceForMCP) SyncServerURL(ctx context.Context, projectID uuid.UUID, papiURL, token string) error {
+	return nil
+}
+
 // Tests
 
 func TestMCPConfigService_Get_ReturnsStoredConfigState(t *testing.T) {

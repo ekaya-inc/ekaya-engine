@@ -325,6 +325,7 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 		mcp.WithArray(
 			"aliases",
 			mcp.Description("Alternative names for the term (e.g., 'AOV', 'Average Order Value')"),
+			mcp.WithStringItems(),
 		),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -366,22 +367,12 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 		// Extract and validate aliases array
 		var aliases []string
 		if args, ok := req.Params.Arguments.(map[string]any); ok {
-			if aliasArray, ok := args["aliases"].([]any); ok {
-				for i, alias := range aliasArray {
-					aliasStr, ok := alias.(string)
-					if !ok {
-						return NewErrorResultWithDetails(
-							"invalid_parameters",
-							fmt.Sprintf("parameter 'aliases' must be an array of strings. Element at index %d is %T, not string", i, alias),
-							map[string]any{
-								"parameter":             "aliases",
-								"invalid_element_index": i,
-								"invalid_element_type":  fmt.Sprintf("%T", alias),
-							},
-						), nil
-					}
-					aliases = append(aliases, aliasStr)
-				}
+			aliasSlice, aliasErr := extractStringSlice(args, "aliases", deps.Logger)
+			if aliasErr != nil {
+				return NewErrorResult("invalid_parameters", aliasErr.Error()), nil
+			}
+			if aliasSlice != nil {
+				aliases = aliasSlice
 			}
 		}
 

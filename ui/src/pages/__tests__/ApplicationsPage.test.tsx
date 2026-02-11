@@ -98,8 +98,8 @@ describe('ApplicationsPage', () => {
 
     expect(screen.getByText('AI Data Liaison')).toBeInTheDocument();
     expect(screen.getByText('AI Agents and Automation')).toBeInTheDocument();
-    expect(screen.getByText('Product Kit')).toBeInTheDocument();
-    expect(screen.getByText('On-Premise Chat')).toBeInTheDocument();
+    expect(screen.getByText('Product Kit [BETA]')).toBeInTheDocument();
+    expect(screen.getByText('On-Premise Chat [BETA]')).toBeInTheDocument();
     expect(screen.getByText('Coming Soon!')).toBeInTheDocument();
   });
 
@@ -173,7 +173,7 @@ describe('ApplicationsPage', () => {
 
     expect(mockClick).toHaveBeenCalled();
     expect(capturedHref).toBe(
-      'mailto:sales@ekaya.ai?subject=Interest%20in%20Product%20Kit%20for%20my%20Ekaya%20project'
+      'mailto:sales@ekaya.ai?subject=Interest%20in%20Product%20Kit%20%5BBETA%5D%20for%20my%20Ekaya%20project'
     );
   });
 
@@ -188,7 +188,7 @@ describe('ApplicationsPage', () => {
 
     expect(mockClick).toHaveBeenCalled();
     expect(capturedHref).toBe(
-      'mailto:sales@ekaya.ai?subject=Interest%20in%20On-Premise%20Chat%20for%20my%20Ekaya%20project'
+      'mailto:sales@ekaya.ai?subject=Interest%20in%20On-Premise%20Chat%20%5BBETA%5D%20for%20my%20Ekaya%20project'
     );
   });
 

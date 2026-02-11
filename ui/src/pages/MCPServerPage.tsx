@@ -4,13 +4,15 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import MCPLogo from '../components/icons/MCPLogo';
 import DeveloperToolsSection from '../components/mcp/DeveloperToolsSection';
+import SetupChecklist from '../components/SetupChecklist';
+import type { ChecklistItem } from '../components/SetupChecklist';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { TOOL_GROUP_IDS } from '../constants/mcpToolMetadata';
 import { useConfig } from '../contexts/ConfigContext';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
-import type { MCPConfigResponse } from '../types';
+import type { AIConfigResponse, DAGStatusResponse, Datasource, MCPConfigResponse } from '../types';
 
 const MCPServerPage = () => {
   const navigate = useNavigate();
@@ -23,6 +25,12 @@ const MCPServerPage = () => {
   const [updating, setUpdating] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // Setup checklist state
+  const [datasource, setDatasource] = useState<Datasource | null>(null);
+  const [hasSelectedTables, setHasSelectedTables] = useState(false);
+  const [aiConfig, setAiConfig] = useState<AIConfigResponse | null>(null);
+  const [dagStatus, setDagStatus] = useState<DAGStatusResponse | null>(null);
+
   // Read tool group configs from backend
   const developerState = config?.toolGroups[TOOL_GROUP_IDS.DEVELOPER];
   const addQueryTools = developerState?.addQueryTools ?? true;
@@ -33,11 +41,37 @@ const MCPServerPage = () => {
 
     try {
       setLoading(true);
-      const response = await engineApi.getMCPConfig(pid);
-      if (response.success && response.data) {
-        setConfig(response.data);
+      const [mcpRes, datasourcesRes, aiConfigRes] = await Promise.all([
+        engineApi.getMCPConfig(pid),
+        engineApi.listDataSources(pid),
+        engineApi.getAIConfig(pid),
+      ]);
+
+      if (mcpRes.success && mcpRes.data) {
+        setConfig(mcpRes.data);
       } else {
-        throw new Error(response.error ?? 'Failed to load MCP configuration');
+        throw new Error(mcpRes.error ?? 'Failed to load MCP configuration');
+      }
+
+      const ds = datasourcesRes.data?.datasources?.[0] ?? null;
+      setDatasource(ds);
+      setAiConfig(aiConfigRes.data ?? null);
+
+      if (ds) {
+        try {
+          const schemaRes = await engineApi.getSchema(pid, ds.datasource_id);
+          const hasSelections = schemaRes.data?.tables?.some((t) => t.is_selected === true) ?? false;
+          setHasSelectedTables(hasSelections);
+        } catch {
+          setHasSelectedTables(false);
+        }
+
+        try {
+          const dagRes = await engineApi.getOntologyDAGStatus(pid, ds.datasource_id);
+          setDagStatus(dagRes.data ?? null);
+        } catch {
+          setDagStatus(null);
+        }
       }
     } catch (error) {
       console.error('Failed to fetch MCP config:', error);
@@ -54,6 +88,87 @@ const MCPServerPage = () => {
   useEffect(() => {
     fetchConfig();
   }, [fetchConfig]);
+
+  const getChecklistItems = (): ChecklistItem[] => {
+    const items: ChecklistItem[] = [];
+
+    // 1. Datasource configured
+    items.push({
+      id: 'datasource',
+      title: 'Datasource configured',
+      description: datasource
+        ? `Connected to ${datasource.name} (${datasource.type})`
+        : 'Connect a database to enable the MCP Server',
+      status: loading ? 'loading' : datasource ? 'complete' : 'pending',
+      link: `/projects/${pid}/datasource`,
+      linkText: datasource ? 'Manage' : 'Configure',
+    });
+
+    // 2. Schema selected
+    const schemaItem: ChecklistItem = {
+      id: 'schema',
+      title: 'Schema selected',
+      description: hasSelectedTables
+        ? 'Tables and columns selected for analysis'
+        : datasource
+          ? 'Select which tables and columns to include'
+          : 'Configure datasource first',
+      status: loading ? 'loading' : hasSelectedTables ? 'complete' : 'pending',
+      linkText: hasSelectedTables ? 'Manage' : 'Configure',
+    };
+    if (datasource) {
+      schemaItem.link = `/projects/${pid}/schema`;
+    }
+    items.push(schemaItem);
+
+    // 3. AI configured
+    const isAIConfigured = !!aiConfig?.config_type && aiConfig.config_type !== 'none';
+    items.push({
+      id: 'ai-config',
+      title: 'AI configured',
+      description: isAIConfigured
+        ? 'AI model configured'
+        : hasSelectedTables
+          ? 'Configure an AI model for ontology extraction'
+          : 'Configure datasource and select schema first',
+      status: loading ? 'loading' : isAIConfigured ? 'complete' : 'pending',
+      link: `/projects/${pid}/ai-config`,
+      linkText: isAIConfigured ? 'Manage' : 'Configure',
+    });
+
+    // 4. Ontology extracted
+    const ontologyComplete = dagStatus?.status === 'completed';
+    const ontologyRunning = dagStatus?.status === 'running';
+    const ontologyFailed = dagStatus?.status === 'failed';
+
+    const ontologyItem: ChecklistItem = {
+      id: 'ontology',
+      title: 'Ontology extracted',
+      description: ontologyComplete
+        ? 'Schema semantics extracted and ready'
+        : ontologyRunning
+          ? `Extracting... (${dagStatus?.current_node ?? 'starting'})`
+          : ontologyFailed
+            ? 'Extraction failed - click to retry'
+            : datasource
+              ? 'Extract semantic understanding from your schema'
+              : 'Configure datasource first',
+      status: loading
+        ? 'loading'
+        : ontologyComplete
+          ? 'complete'
+          : ontologyFailed
+            ? 'error'
+            : 'pending',
+      linkText: ontologyComplete ? 'Manage' : ontologyFailed ? 'Retry' : 'Configure',
+    };
+    if (datasource) {
+      ontologyItem.link = `/projects/${pid}/ontology`;
+    }
+    items.push(ontologyItem);
+
+    return items;
+  };
 
   const handleAddQueryToolsChange = async (enabled: boolean) => {
     if (!pid || !config) return;
@@ -134,6 +249,8 @@ const MCPServerPage = () => {
     );
   }
 
+  const checklistItems = getChecklistItems();
+
   return (
     <div className="mx-auto max-w-4xl">
       <div className="mb-6">
@@ -152,6 +269,14 @@ const MCPServerPage = () => {
       </div>
 
       <div className="space-y-6">
+        {/* Setup Checklist */}
+        <SetupChecklist
+          items={checklistItems}
+          title="Setup Checklist"
+          description="Complete these steps to enable the MCP Server"
+          completeDescription="MCP Server is ready"
+        />
+
         {config && (
           <>
             {/* Simplified URL Section */}

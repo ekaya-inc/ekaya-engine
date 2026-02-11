@@ -57,6 +57,8 @@ func (h *ProjectsHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *aut
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Delete)))
 	mux.HandleFunc("PATCH /api/projects/{pid}/auth-server-url",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.UpdateAuthServerURL)))
+	mux.HandleFunc("POST /api/projects/{pid}/sync-server-url",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.SyncServerURL)))
 }
 
 // GetCurrent handles GET /projects
@@ -265,6 +267,60 @@ func (h *ProjectsHandler) UpdateAuthServerURL(w http.ResponseWriter, r *http.Req
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// SyncServerURL handles POST /api/projects/{pid}/sync-server-url
+// Pushes the engine's current base_url to ekaya-central so redirect URLs
+// and MCP setup links reflect the server's actual address.
+func (h *ProjectsHandler) SyncServerURL(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok {
+		if err := ErrorResponse(w, http.StatusUnauthorized, "unauthorized", "Missing authentication"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if claims.PAPI == "" {
+		if err := ErrorResponse(w, http.StatusBadRequest, "missing_papi", "JWT does not contain ekaya-central API URL"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	token, hasToken := auth.GetToken(r.Context())
+	if !hasToken {
+		if err := ErrorResponse(w, http.StatusUnauthorized, "unauthorized", "Missing token"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	pidStr := r.PathValue("pid")
+	projectID, err := uuid.Parse(pidStr)
+	if err != nil {
+		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_project_id", "Invalid project ID format"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if err := h.projectService.SyncServerURL(r.Context(), projectID, claims.PAPI, token); err != nil {
+		h.logger.Error("Failed to sync server URL to ekaya-central",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "sync_failed", "Failed to sync server URL to ekaya-central"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if err := WriteJSON(w, http.StatusOK, map[string]string{
+		"status":     "success",
+		"server_url": h.cfg.BaseURL,
+	}); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
 }
 
 // buildProjectResponse creates a ProjectResponse from a Project model.

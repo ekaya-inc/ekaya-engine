@@ -38,6 +38,13 @@ export interface EnabledToolInfo {
   description: string;
 }
 
+export interface ServerStatusResponse {
+  base_url: string;
+  is_localhost: boolean;
+  is_https: boolean;
+  accessible_for_business_users: boolean;
+}
+
 export interface MCPConfigResponse {
   serverUrl: string;
   toolGroups: Record<string, ToolGroupState>;

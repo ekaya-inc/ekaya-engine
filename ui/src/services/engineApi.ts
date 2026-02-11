@@ -56,6 +56,7 @@ import type {
   SaveSelectionsResponse,
   SchemaChange,
   SchemaRefreshResponse,
+  ServerStatusResponse,
   TestConnectionRequest,
   TestConnectionResponse,
   TestQueryRequest,
@@ -995,6 +996,35 @@ class EngineApiService {
       console.error('Engine API Error (project config):', error);
       return null;
     }
+  }
+
+  /**
+   * Get server accessibility status
+   * GET /api/config/server-status
+   * Note: Not project-scoped, uses /api/config/server-status directly
+   */
+  async getServerStatus(): Promise<ServerStatusResponse | null> {
+    try {
+      const response = await fetch('/api/config/server-status');
+      if (!response.ok) return null;
+      return (await response.json()) as ServerStatusResponse;
+    } catch (error) {
+      console.error('Engine API Error (server status):', error);
+      return null;
+    }
+  }
+
+  /**
+   * Sync server URL to ekaya-central
+   * POST /api/projects/{projectId}/sync-server-url
+   */
+  async syncServerUrl(
+    projectId: string
+  ): Promise<ApiResponse<{ status: string; server_url: string }>> {
+    return this.makeRequest<{ status: string; server_url: string }>(
+      `/${projectId}/sync-server-url`,
+      { method: 'POST' }
+    );
   }
 
   // --- Ontology DAG Methods ---

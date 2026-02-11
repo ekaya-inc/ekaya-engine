@@ -104,6 +104,7 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 		mcp.WithArray(
 			"tags",
 			mcp.Description("Optional: Filter queries by tags. Returns queries matching ANY of the provided tags (e.g., [\"billing\", \"category:analytics\"])"),
+			mcp.WithStringItems(),
 		),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -130,32 +131,9 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 		// Parse and validate optional tags filter
 		var tags []string
 		if args, ok := req.Params.Arguments.(map[string]any); ok {
-			if tagsVal, exists := args["tags"]; exists {
-				// Validate that tags is an array
-				tagsArray, ok := tagsVal.([]any)
-				if !ok {
-					return NewErrorResultWithDetails("invalid_parameters",
-						"parameter 'tags' must be an array",
-						map[string]any{
-							"parameter":     "tags",
-							"expected_type": "array",
-							"actual_type":   fmt.Sprintf("%T", tagsVal),
-						}), nil
-				}
-				// Validate that each element is a string
-				for i, tag := range tagsArray {
-					str, ok := tag.(string)
-					if !ok {
-						return NewErrorResultWithDetails("invalid_parameters",
-							"all tag elements must be strings",
-							map[string]any{
-								"parameter":             "tags",
-								"invalid_element_index": i,
-								"invalid_element_type":  fmt.Sprintf("%T", tag),
-							}), nil
-					}
-					tags = append(tags, str)
-				}
+			tags, err = extractStringSlice(args, "tags", deps.Logger)
+			if err != nil {
+				return NewErrorResult("invalid_parameters", err.Error()), nil
 			}
 		}
 
@@ -574,7 +552,18 @@ func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		),
 		mcp.WithArray(
 			"parameters",
-			mcp.Description("Parameter definitions (inferred from SQL if omitted)"),
+			mcp.Description("Parameter definitions for {{placeholder}} values in SQL"),
+			mcp.Items(map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name":        map[string]any{"type": "string", "description": "Parameter name matching {{name}} in SQL"},
+					"type":        map[string]any{"type": "string", "description": "Data type: string, integer, decimal, uuid, date, timestamp, boolean"},
+					"description": map[string]any{"type": "string", "description": "What this parameter represents"},
+					"required":    map[string]any{"type": "boolean", "description": "Whether the parameter is required (default: true)"},
+					"example":     map[string]any{"description": "Example value used for validation dry-run"},
+				},
+				"required": []string{"name", "type"},
+			}),
 		),
 		mcp.WithObject(
 			"output_column_descriptions",
@@ -583,6 +572,7 @@ func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		mcp.WithArray(
 			"tags",
 			mcp.Description("Optional tags for organizing queries (e.g., [\"billing\", \"category:analytics\", \"reporting\"])"),
+			mcp.WithStringItems(),
 		),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -623,7 +613,11 @@ func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		// Parse optional parameters
 		var paramDefs []models.QueryParameter
 		if args, ok := req.Params.Arguments.(map[string]any); ok {
-			if paramsArray, ok := args["parameters"].([]any); ok {
+			paramsArray, parseErr := extractArrayParam(args, "parameters", deps.Logger)
+			if parseErr != nil {
+				return NewErrorResult("invalid_parameters", parseErr.Error()), nil
+			}
+			if paramsArray != nil {
 				paramDefs, err = parseParameterDefinitions(paramsArray)
 				if err != nil {
 					return NewErrorResult("invalid_parameters",
@@ -648,12 +642,9 @@ func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		// Parse optional tags
 		var tags []string
 		if args, ok := req.Params.Arguments.(map[string]any); ok {
-			if tagsArray, ok := args["tags"].([]any); ok {
-				for _, tag := range tagsArray {
-					if str, ok := tag.(string); ok {
-						tags = append(tags, str)
-					}
-				}
+			tags, err = extractStringSlice(args, "tags", deps.Logger)
+			if err != nil {
+				return NewErrorResult("invalid_parameters", err.Error()), nil
 			}
 		}
 
@@ -756,6 +747,17 @@ func registerSuggestQueryUpdateTool(s *server.MCPServer, deps *QueryToolDeps) {
 		mcp.WithArray(
 			"parameters",
 			mcp.Description("Updated parameter definitions"),
+			mcp.Items(map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name":        map[string]any{"type": "string", "description": "Parameter name matching {{name}} in SQL"},
+					"type":        map[string]any{"type": "string", "description": "Data type: string, integer, decimal, uuid, date, timestamp, boolean"},
+					"description": map[string]any{"type": "string", "description": "What this parameter represents"},
+					"required":    map[string]any{"type": "boolean", "description": "Whether the parameter is required (default: true)"},
+					"example":     map[string]any{"description": "Example value used for validation dry-run"},
+				},
+				"required": []string{"name", "type"},
+			}),
 		),
 		mcp.WithObject(
 			"output_column_descriptions",
@@ -764,6 +766,7 @@ func registerSuggestQueryUpdateTool(s *server.MCPServer, deps *QueryToolDeps) {
 		mcp.WithArray(
 			"tags",
 			mcp.Description("Updated tags for organizing queries"),
+			mcp.WithStringItems(),
 		),
 		mcp.WithString(
 			"context",
@@ -860,7 +863,11 @@ func registerSuggestQueryUpdateTool(s *server.MCPServer, deps *QueryToolDeps) {
 		}
 
 		// Parse optional parameters update
-		if paramsArray, ok := args["parameters"].([]any); ok && len(paramsArray) > 0 {
+		paramsArray, parseErr := extractArrayParam(args, "parameters", deps.Logger)
+		if parseErr != nil {
+			return NewErrorResult("invalid_parameters", parseErr.Error()), nil
+		}
+		if len(paramsArray) > 0 {
 			paramDefs, err := parseParameterDefinitions(paramsArray)
 			if err != nil {
 				return NewErrorResult("invalid_parameters",
@@ -883,14 +890,12 @@ func registerSuggestQueryUpdateTool(s *server.MCPServer, deps *QueryToolDeps) {
 		}
 
 		// Parse optional tags update
-		if tagsArray, ok := args["tags"].([]any); ok {
-			var tags []string
-			for _, tag := range tagsArray {
-				if str, ok := tag.(string); ok {
-					tags = append(tags, str)
-				}
-			}
-			updateReq.Tags = &tags
+		tagSlice, tagErr := extractStringSlice(args, "tags", deps.Logger)
+		if tagErr != nil {
+			return NewErrorResult("invalid_parameters", tagErr.Error()), nil
+		}
+		if tagSlice != nil {
+			updateReq.Tags = &tagSlice
 			updatedFields = append(updatedFields, "tags")
 		}
 

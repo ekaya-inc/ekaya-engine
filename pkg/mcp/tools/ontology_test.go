@@ -279,14 +279,16 @@ func TestGetOntologyTool_HelperFunctions(t *testing.T) {
 				Arguments: args1,
 			},
 		}
-		result := getStringSlice(req, "tables")
+		result, err := getStringSlice(req, "tables")
+		require.NoError(t, err)
 		assert.Equal(t, []string{"users", "orders", "products"}, result)
 
 		// Test with missing key
-		result = getStringSlice(req, "nonexistent")
+		result, err = getStringSlice(req, "nonexistent")
+		require.NoError(t, err)
 		assert.Nil(t, result)
 
-		// Test with non-array value
+		// Test with non-array value - should return error
 		args2 := map[string]any{
 			"tables": "not-an-array",
 		}
@@ -295,10 +297,11 @@ func TestGetOntologyTool_HelperFunctions(t *testing.T) {
 				Arguments: args2,
 			},
 		}
-		result = getStringSlice(req, "tables")
+		result, err = getStringSlice(req, "tables")
+		assert.Error(t, err, "Should return error for unparseable string value")
 		assert.Nil(t, result)
 
-		// Test with array containing non-strings
+		// Test with array containing non-strings - should return error
 		args3 := map[string]any{
 			"mixed": []any{"string", 42, true},
 		}
@@ -307,8 +310,9 @@ func TestGetOntologyTool_HelperFunctions(t *testing.T) {
 				Arguments: args3,
 			},
 		}
-		result = getStringSlice(req, "mixed")
-		assert.Equal(t, []string{"string"}, result, "Should filter out non-string values")
+		result, err = getStringSlice(req, "mixed")
+		assert.Error(t, err, "Should return error for arrays with non-string elements")
+		assert.Nil(t, result)
 	})
 
 	t.Run("getOptionalBoolWithDefault", func(t *testing.T) {

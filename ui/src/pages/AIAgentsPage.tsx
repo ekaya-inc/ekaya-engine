@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import AgentToolsSection from '../components/mcp/AgentToolsSection';
+import SetupChecklist from '../components/SetupChecklist';
+import type { ChecklistItem } from '../components/SetupChecklist';
 import { Button } from '../components/ui/Button';
 import {
   Card,
@@ -22,7 +24,7 @@ import {
 import { Input } from '../components/ui/Input';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
-import type { MCPConfigResponse } from '../types';
+import type { Datasource, MCPConfigResponse } from '../types';
 
 const AIAgentsPage = () => {
   const navigate = useNavigate();
@@ -32,6 +34,10 @@ const AIAgentsPage = () => {
   const [config, setConfig] = useState<MCPConfigResponse | null>(null);
   const [agentApiKey, setAgentApiKey] = useState<string>('');
   const [loading, setLoading] = useState(true);
+
+  // Checklist state
+  const [datasource, setDatasource] = useState<Datasource | null>(null);
+  const [hasQueries, setHasQueries] = useState(false);
 
   // Uninstall dialog state
   const [confirmText, setConfirmText] = useState('');
@@ -43,9 +49,10 @@ const AIAgentsPage = () => {
 
     setLoading(true);
     try {
-      const [configRes, keyRes] = await Promise.all([
+      const [configRes, keyRes, datasourcesRes] = await Promise.all([
         engineApi.getMCPConfig(pid),
         engineApi.getAgentAPIKey(pid, true),
+        engineApi.listDataSources(pid),
       ]);
 
       if (configRes.success && configRes.data) {
@@ -53,6 +60,20 @@ const AIAgentsPage = () => {
       }
       if (keyRes.success && keyRes.data) {
         setAgentApiKey(keyRes.data.key);
+      }
+
+      const ds: Datasource | null = datasourcesRes.data?.datasources?.[0] ?? null;
+      setDatasource(ds);
+
+      // Check if any pre-approved queries exist
+      if (ds) {
+        try {
+          const queriesRes = await engineApi.listQueries(pid, ds.datasource_id);
+          const approvedCount = queriesRes.data?.queries?.filter((q) => q.status === 'approved').length ?? 0;
+          setHasQueries(approvedCount > 0);
+        } catch {
+          setHasQueries(false);
+        }
       }
     } catch (error) {
       console.error('Failed to fetch AI Agents config:', error);
@@ -69,6 +90,41 @@ const AIAgentsPage = () => {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  const getChecklistItems = (): ChecklistItem[] => {
+    const items: ChecklistItem[] = [];
+
+    // 1. Datasource configured
+    items.push({
+      id: 'datasource',
+      title: 'Datasource configured',
+      description: datasource
+        ? `Connected to ${datasource.name} (${datasource.type})`
+        : 'Connect a database to enable AI Agents',
+      status: loading ? 'loading' : datasource ? 'complete' : 'pending',
+      link: `/projects/${pid}/datasource`,
+      linkText: datasource ? 'Manage' : 'Configure',
+    });
+
+    // 2. Pre-Approved Queries created
+    const queriesItem: ChecklistItem = {
+      id: 'queries',
+      title: 'Pre-Approved Queries created',
+      description: hasQueries
+        ? 'Queries available for agents to execute'
+        : datasource
+          ? 'Create queries that agents can run'
+          : 'Configure datasource first',
+      status: loading ? 'loading' : hasQueries ? 'complete' : 'pending',
+      linkText: hasQueries ? 'Manage' : 'Configure',
+    };
+    if (datasource) {
+      queriesItem.link = `/projects/${pid}/queries`;
+    }
+    items.push(queriesItem);
+
+    return items;
+  };
 
   const handleUninstall = async () => {
     if (confirmText !== 'uninstall application' || !pid) return;
@@ -123,6 +179,14 @@ const AIAgentsPage = () => {
           </p>
         </div>
       </div>
+
+      {/* Setup Checklist */}
+      <SetupChecklist
+        items={getChecklistItems()}
+        title="Setup Checklist"
+        description="Complete these steps to enable AI Agents"
+        completeDescription="AI Agents and Automation is ready"
+      />
 
       {/* Agent Tools Section (reused component) */}
       {config && (
