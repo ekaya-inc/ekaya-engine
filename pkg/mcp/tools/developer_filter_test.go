@@ -1187,49 +1187,6 @@ func createTestToolsWithDataLiaison() []mcp.Tool {
 	}
 }
 
-// mockInstalledAppService is a mock implementation for testing.
-type mockInstalledAppService struct {
-	installed map[string]bool
-}
-
-func newMockInstalledAppService(installedApps ...string) *mockInstalledAppService {
-	m := &mockInstalledAppService{installed: make(map[string]bool)}
-	for _, app := range installedApps {
-		m.installed[app] = true
-	}
-	// MCP Server is always installed
-	m.installed[models.AppIDMCPServer] = true
-	return m
-}
-
-func (m *mockInstalledAppService) ListInstalled(ctx context.Context, projectID uuid.UUID) ([]*models.InstalledApp, error) {
-	return nil, nil
-}
-
-func (m *mockInstalledAppService) IsInstalled(ctx context.Context, projectID uuid.UUID, appID string) (bool, error) {
-	return m.installed[appID], nil
-}
-
-func (m *mockInstalledAppService) Install(ctx context.Context, projectID uuid.UUID, appID string, userID string) (*models.InstalledApp, error) {
-	return nil, nil
-}
-
-func (m *mockInstalledAppService) Uninstall(ctx context.Context, projectID uuid.UUID, appID string) error {
-	return nil
-}
-
-func (m *mockInstalledAppService) GetSettings(ctx context.Context, projectID uuid.UUID, appID string) (map[string]any, error) {
-	return nil, nil
-}
-
-func (m *mockInstalledAppService) UpdateSettings(ctx context.Context, projectID uuid.UUID, appID string, settings map[string]any) error {
-	return nil
-}
-
-func (m *mockInstalledAppService) GetApp(ctx context.Context, projectID uuid.UUID, appID string) (*models.InstalledApp, error) {
-	return nil, nil
-}
-
 func TestNewToolFilter_DataLiaisonNotInstalled_BusinessTools(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
@@ -1277,12 +1234,12 @@ func TestNewToolFilter_DataLiaisonNotInstalled_BusinessTools(t *testing.T) {
 	// AI Data Liaison NOT installed
 	deps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
-			Logger:           zap.NewNop(),
+			DB:                  engineDB.DB,
+			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:              zap.NewNop(),
+			InstalledAppService: newMockInstalledAppService(), // No AI Data Liaison
 		},
-		ProjectService:      mockProjectServiceWithDatasource(),
-		InstalledAppService: newMockInstalledAppService(), // No AI Data Liaison
+		ProjectService: mockProjectServiceWithDatasource(),
 	}
 
 	filter := NewToolFilter(deps)
@@ -1357,12 +1314,12 @@ func TestNewToolFilter_DataLiaisonInstalled_BusinessTools(t *testing.T) {
 	// AI Data Liaison IS installed
 	deps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
-			Logger:           zap.NewNop(),
+			DB:                  engineDB.DB,
+			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:              zap.NewNop(),
+			InstalledAppService: newMockInstalledAppService(models.AppIDAIDataLiaison), // AI Data Liaison installed
 		},
-		ProjectService:      mockProjectServiceWithDatasource(),
-		InstalledAppService: newMockInstalledAppService(models.AppIDAIDataLiaison), // AI Data Liaison installed
+		ProjectService: mockProjectServiceWithDatasource(),
 	}
 
 	filter := NewToolFilter(deps)
@@ -1430,12 +1387,12 @@ func TestNewToolFilter_DataLiaisonNotInstalled_DeveloperTools(t *testing.T) {
 	// AI Data Liaison NOT installed
 	deps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
-			Logger:           zap.NewNop(),
+			DB:                  engineDB.DB,
+			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:              zap.NewNop(),
+			InstalledAppService: newMockInstalledAppService(), // No AI Data Liaison
 		},
-		ProjectService:      mockProjectServiceWithDatasource(),
-		InstalledAppService: newMockInstalledAppService(), // No AI Data Liaison
+		ProjectService: mockProjectServiceWithDatasource(),
 	}
 
 	filter := NewToolFilter(deps)
@@ -1518,12 +1475,12 @@ func TestNewToolFilter_DataLiaisonInstalled_DeveloperTools(t *testing.T) {
 	// AI Data Liaison IS installed
 	deps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
-			Logger:           zap.NewNop(),
+			DB:                  engineDB.DB,
+			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:              zap.NewNop(),
+			InstalledAppService: newMockInstalledAppService(models.AppIDAIDataLiaison), // AI Data Liaison installed
 		},
-		ProjectService:      mockProjectServiceWithDatasource(),
-		InstalledAppService: newMockInstalledAppService(models.AppIDAIDataLiaison), // AI Data Liaison installed
+		ProjectService: mockProjectServiceWithDatasource(),
 	}
 
 	filter := NewToolFilter(deps)
@@ -1598,12 +1555,12 @@ func TestNewToolFilter_DataLiaisonNotInstalled_NilService_FallbackToHidden(t *te
 	// InstalledAppService is nil - should default to hiding data liaison tools
 	deps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
-			Logger:           zap.NewNop(),
+			DB:                  engineDB.DB,
+			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:              zap.NewNop(),
+			InstalledAppService: nil, // Nil service - fallback to not installed
 		},
-		ProjectService:      mockProjectServiceWithDatasource(),
-		InstalledAppService: nil, // Nil service - fallback to not installed
+		ProjectService: mockProjectServiceWithDatasource(),
 	}
 
 	filter := NewToolFilter(deps)
@@ -1628,6 +1585,80 @@ func TestNewToolFilter_DataLiaisonNotInstalled_NilService_FallbackToHidden(t *te
 	for _, name := range allDataLiaisonTools {
 		if containsTool(filtered, name) {
 			t.Errorf("expected tool %s to be HIDDEN when InstalledAppService is nil", name)
+		}
+	}
+}
+
+func TestNewToolFilter_AIAgentsNotInstalled_AgentToolsHidden(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Create config with agent_tools enabled
+	setupTestConfigWithAgentTools(t, engineDB.DB, projectID, true)
+
+	deps := &MCPToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:                  engineDB.DB,
+			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:              zap.NewNop(),
+			InstalledAppService: newMockInstalledAppService(), // ai-agents NOT installed
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createTestTools()
+
+	// Agent authentication
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	claims.Subject = "agent"
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	filtered := filter(ctx, tools)
+
+	// Agent tools should be hidden when ai-agents app is NOT installed,
+	// even though agent_tools config is enabled
+	if len(filtered) != 1 {
+		t.Errorf("expected 1 tool (health only), got %d: %v", len(filtered), toolNames(filtered))
+	}
+	if !containsTool(filtered, "health") {
+		t.Error("health tool should always be present")
+	}
+}
+
+func TestNewToolFilter_AIAgentsInstalled_AgentToolsShown(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Create config with agent_tools enabled
+	setupTestConfigWithAgentTools(t, engineDB.DB, projectID, true)
+
+	deps := &MCPToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:                  engineDB.DB,
+			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:              zap.NewNop(),
+			InstalledAppService: newMockInstalledAppService(models.AppIDAIAgents), // ai-agents IS installed
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createTestTools()
+
+	// Agent authentication
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	claims.Subject = "agent"
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	filtered := filter(ctx, tools)
+
+	// Agent tools should be visible when BOTH config enabled AND app installed
+	expectedTools := []string{"health", "list_approved_queries", "execute_approved_query"}
+	if len(filtered) != len(expectedTools) {
+		t.Errorf("expected %d tools, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
+	}
+	for _, name := range expectedTools {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be present", name)
 		}
 	}
 }

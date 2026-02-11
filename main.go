@@ -296,9 +296,10 @@ func main() {
 	// Register MCP server (authenticated - project-scoped)
 	mcpToolDeps := &mcptools.MCPToolDeps{
 		BaseMCPToolDeps: mcptools.BaseMCPToolDeps{
-			DB:               db,
-			MCPConfigService: mcpConfigService,
-			Logger:           logger,
+			DB:                  db,
+			MCPConfigService:    mcpConfigService,
+			Logger:              logger,
+			InstalledAppService: installedAppService,
 		},
 		DatasourceService:            datasourceService,
 		SchemaService:                schemaService,
@@ -308,7 +309,6 @@ func main() {
 		DataChangeDetectionService:   dataChangeDetectionService,
 		ChangeReviewService:          changeReviewService,
 		PendingChangeRepo:            pendingChangeRepo,
-		InstalledAppService:          installedAppService,
 		Auditor:                      securityAuditor, // For SIEM logging of modifying queries
 		QueryHistoryService:          queryHistoryService,
 	}
@@ -328,9 +328,10 @@ func main() {
 	// Register approved queries tools (separate tool group from developer tools)
 	queryToolDeps := &mcptools.QueryToolDeps{
 		BaseMCPToolDeps: mcptools.BaseMCPToolDeps{
-			DB:               db,
-			MCPConfigService: mcpConfigService,
-			Logger:           logger,
+			DB:                  db,
+			MCPConfigService:    mcpConfigService,
+			Logger:              logger,
+			InstalledAppService: installedAppService,
 		},
 		ProjectService:      projectService,
 		QueryService:        queryService,
@@ -343,9 +344,10 @@ func main() {
 	// (approve/reject, create/update/delete queries directly)
 	devQueryToolDeps := &mcptools.DevQueryToolDeps{
 		BaseMCPToolDeps: mcptools.BaseMCPToolDeps{
-			DB:               db,
-			MCPConfigService: mcpConfigService,
-			Logger:           logger,
+			DB:                  db,
+			MCPConfigService:    mcpConfigService,
+			Logger:              logger,
+			InstalledAppService: installedAppService,
 		},
 		ProjectService: projectService,
 		QueryService:   queryService,
@@ -355,9 +357,10 @@ func main() {
 	// Register schema tools for entity/role semantic context
 	schemaToolDeps := &mcptools.SchemaToolDeps{
 		BaseMCPToolDeps: mcptools.BaseMCPToolDeps{
-			DB:               db,
-			MCPConfigService: mcpConfigService,
-			Logger:           logger,
+			DB:                  db,
+			MCPConfigService:    mcpConfigService,
+			Logger:              logger,
+			InstalledAppService: installedAppService,
 		},
 		ProjectService: projectService,
 		SchemaService:  schemaService,
@@ -367,9 +370,10 @@ func main() {
 	// Register ontology tools for progressive semantic disclosure
 	ontologyToolDeps := &mcptools.OntologyToolDeps{
 		BaseMCPToolDeps: mcptools.BaseMCPToolDeps{
-			DB:               db,
-			MCPConfigService: mcpConfigService,
-			Logger:           logger,
+			DB:                  db,
+			MCPConfigService:    mcpConfigService,
+			Logger:              logger,
+			InstalledAppService: installedAppService,
 		},
 		ProjectService:         projectService,
 		OntologyContextService: ontologyContextService,
@@ -484,9 +488,10 @@ func main() {
 	// Register glossary MCP tools (uses glossaryService for get_glossary tool)
 	glossaryToolDeps := &mcptools.GlossaryToolDeps{
 		BaseMCPToolDeps: mcptools.BaseMCPToolDeps{
-			DB:               db,
-			MCPConfigService: mcpConfigService,
-			Logger:           logger,
+			DB:                  db,
+			MCPConfigService:    mcpConfigService,
+			Logger:              logger,
+			InstalledAppService: installedAppService,
 		},
 		GlossaryService: glossaryService,
 	}
@@ -495,9 +500,10 @@ func main() {
 	// Register project knowledge MCP tools (for storing domain facts)
 	knowledgeToolDeps := &mcptools.KnowledgeToolDeps{
 		BaseMCPToolDeps: mcptools.BaseMCPToolDeps{
-			DB:               db,
-			MCPConfigService: mcpConfigService,
-			Logger:           logger,
+			DB:                  db,
+			MCPConfigService:    mcpConfigService,
+			Logger:              logger,
+			InstalledAppService: installedAppService,
 		},
 		KnowledgeRepository: knowledgeRepo,
 		OntologyRepository:  ontologyRepo,
@@ -507,9 +513,10 @@ func main() {
 	// Register unified context tool (consolidates ontology, schema, and glossary)
 	contextToolDeps := &mcptools.ContextToolDeps{
 		BaseMCPToolDeps: mcptools.BaseMCPToolDeps{
-			DB:               db,
-			MCPConfigService: mcpConfigService,
-			Logger:           logger,
+			DB:                  db,
+			MCPConfigService:    mcpConfigService,
+			Logger:              logger,
+			InstalledAppService: installedAppService,
 		},
 		ProjectService:         projectService,
 		OntologyContextService: ontologyContextService,
@@ -526,9 +533,10 @@ func main() {
 	// Register column metadata tools (for updating column semantic information)
 	columnToolDeps := &mcptools.ColumnToolDeps{
 		BaseMCPToolDeps: mcptools.BaseMCPToolDeps{
-			DB:               db,
-			MCPConfigService: mcpConfigService,
-			Logger:           logger,
+			DB:                  db,
+			MCPConfigService:    mcpConfigService,
+			Logger:              logger,
+			InstalledAppService: installedAppService,
 		},
 		OntologyRepo:       ontologyRepo,
 		SchemaRepo:         schemaRepo,
@@ -541,9 +549,10 @@ func main() {
 	// Register table metadata tools (for updating table-level semantic information)
 	tableToolDeps := &mcptools.TableToolDeps{
 		BaseMCPToolDeps: mcptools.BaseMCPToolDeps{
-			DB:               db,
-			MCPConfigService: mcpConfigService,
-			Logger:           logger,
+			DB:                  db,
+			MCPConfigService:    mcpConfigService,
+			Logger:              logger,
+			InstalledAppService: installedAppService,
 		},
 		SchemaRepo:        schemaRepo,
 		TableMetadataRepo: tableMetadataRepo,
@@ -554,9 +563,10 @@ func main() {
 	// Register column probe tools (for deep-diving into column statistics and semantics)
 	probeToolDeps := &mcptools.ProbeToolDeps{
 		BaseMCPToolDeps: mcptools.BaseMCPToolDeps{
-			DB:               db,
-			MCPConfigService: mcpConfigService,
-			Logger:           logger,
+			DB:                  db,
+			MCPConfigService:    mcpConfigService,
+			Logger:              logger,
+			InstalledAppService: installedAppService,
 		},
 		SchemaRepo:         schemaRepo,
 		OntologyRepo:       ontologyRepo,
@@ -568,9 +578,10 @@ func main() {
 	// Register search tools (for full-text search across schema and ontology)
 	searchToolDeps := &mcptools.SearchToolDeps{
 		BaseMCPToolDeps: mcptools.BaseMCPToolDeps{
-			DB:               db,
-			MCPConfigService: mcpConfigService,
-			Logger:           logger,
+			DB:                  db,
+			MCPConfigService:    mcpConfigService,
+			Logger:              logger,
+			InstalledAppService: installedAppService,
 		},
 		SchemaRepo: schemaRepo,
 	}
@@ -579,9 +590,10 @@ func main() {
 	// Register ontology question tools (for listing and managing questions)
 	questionToolDeps := &mcptools.QuestionToolDeps{
 		BaseMCPToolDeps: mcptools.BaseMCPToolDeps{
-			DB:               db,
-			MCPConfigService: mcpConfigService,
-			Logger:           logger,
+			DB:                  db,
+			MCPConfigService:    mcpConfigService,
+			Logger:              logger,
+			InstalledAppService: installedAppService,
 		},
 		QuestionRepo: ontologyQuestionRepo,
 	}
