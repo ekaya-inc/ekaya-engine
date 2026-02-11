@@ -100,7 +100,7 @@ describe('ApplicationsPage', () => {
     expect(screen.getByText('AI Agents and Automation')).toBeInTheDocument();
     expect(screen.getByText('Product Kit [BETA]')).toBeInTheDocument();
     expect(screen.getByText('On-Premise Chat [BETA]')).toBeInTheDocument();
-    expect(screen.getByText('Coming Soon!')).toBeInTheDocument();
+    expect(screen.getByText('Your own Data Application')).toBeInTheDocument();
   });
 
   it('renders Contact Sales buttons for Product Kit and On-Premise Chat', () => {
@@ -192,14 +192,12 @@ describe('ApplicationsPage', () => {
     );
   });
 
-  it('does not render Contact Sales button for disabled More Coming tile', () => {
+  it('renders Contact Support button on Build Your Own tile', () => {
     renderPage();
 
-    const moreComingCard = screen.getByTestId('app-card-more-coming');
-    const contactSalesButton = moreComingCard.querySelector(
-      'button[name="Contact Sales"]'
-    );
-    expect(contactSalesButton).toBeNull();
+    const buildYourOwnCard = screen.getByTestId('app-card-build-your-own');
+    expect(buildYourOwnCard).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Contact Support' })).toBeInTheDocument();
   });
 
   it('navigates back when clicking back button', () => {
@@ -213,13 +211,16 @@ describe('ApplicationsPage', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1');
   });
 
-  it('displays disabled state for Coming Soon tile', () => {
+  it('opens mailto link when clicking Contact Support on Build Your Own tile', () => {
     renderPage();
 
-    // The "Coming Soon!" tile should be rendered but with no footer actions
-    const comingCard = screen.getByTestId('app-card-more-coming');
-    expect(comingCard).toBeInTheDocument();
-    expect(screen.getByText('Coming Soon!')).toBeInTheDocument();
+    const contactSupportButton = screen.getByRole('button', { name: 'Contact Support' });
+    fireEvent.click(contactSupportButton);
+
+    expect(mockClick).toHaveBeenCalled();
+    expect(capturedHref).toBe(
+      'mailto:support@ekaya.ai?subject=Interest%20in%20building%20a%20custom%20data%20application%20on%20Ekaya'
+    );
   });
 
   it('opens Learn More link in new tab', () => {

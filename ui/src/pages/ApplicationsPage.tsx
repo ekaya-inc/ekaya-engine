@@ -5,10 +5,10 @@ import {
   BrainCircuit,
   Check,
   ExternalLink,
+  Hammer,
   Loader2,
   MessageSquare,
   Package,
-  Sparkles,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -59,6 +59,8 @@ interface ApplicationInfo {
   installable?: boolean;
   /** URL for Learn More link */
   learnMoreUrl?: string;
+  /** If true, show a Contact Support button instead of install/sales actions */
+  contactSupport?: boolean;
 }
 
 const applications: ApplicationInfo[] = [
@@ -99,12 +101,13 @@ const applications: ApplicationInfo[] = [
     available: true,
   },
   {
-    id: 'more-coming',
-    title: 'Coming Soon!',
-    subtitle: 'Additional applications are in development',
-    icon: Sparkles,
-    color: 'gray',
-    available: false,
+    id: 'build-your-own',
+    title: 'Your own Data Application',
+    subtitle: 'Need custom functionality or want to sell your own solution? Ekaya is the platform for connecting AI to Data.',
+    icon: Hammer,
+    color: 'purple',
+    available: true,
+    contactSupport: true,
   },
 ];
 
@@ -152,10 +155,35 @@ const ApplicationsPage = () => {
     window.open(`${marketingOrigin}${path}`, '_blank', 'noopener,noreferrer');
   };
 
+  const handleContactSupport = () => {
+    const subject = encodeURIComponent(
+      'Interest in building a custom data application on Ekaya',
+    );
+    const link = document.createElement('a');
+    link.href = `mailto:support@ekaya.ai?subject=${subject}`;
+    link.click();
+  };
+
   const renderAppFooter = (app: ApplicationInfo) => {
     // Not available (no actions to show)
     if (!app.available) {
       return null;
+    }
+
+    // Contact Support tile - same style as Contact Sales (full-width, show on hover)
+    if (app.contactSupport) {
+      return (
+        <CardFooter className="pt-0">
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full opacity-0 transition-opacity group-hover:opacity-100"
+            onClick={handleContactSupport}
+          >
+            Contact Support
+          </Button>
+        </CardFooter>
+      );
     }
 
     // Installable apps - show Install/Installed state

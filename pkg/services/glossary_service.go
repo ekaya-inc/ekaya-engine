@@ -2718,6 +2718,9 @@ func (s *glossaryService) RunAutoGenerate(ctx context.Context, projectID uuid.UU
 	}
 	defer cleanup()
 
+	// Set inferred provenance — this is an automated LLM operation, not a user action
+	tenantCtx = models.WithInferredProvenance(tenantCtx, uuid.Nil)
+
 	// Resolve active ontology ID
 	setGenerationStatus(projectID, "discovering", "Resolving active ontology...", "", &now)
 	ontology, err := s.ontologyRepo.GetActive(tenantCtx, projectID)

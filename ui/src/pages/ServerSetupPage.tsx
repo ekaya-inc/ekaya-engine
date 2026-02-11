@@ -58,7 +58,7 @@ const ServerSetupPage = () => {
       await engineApi.syncServerUrl(pid);
       toast({
         title: 'Success',
-        description: 'Server URL synced to ekaya-central',
+        description: 'Server URL synced to the Ekaya Service',
       });
     } catch (error) {
       toast({
@@ -283,11 +283,11 @@ const ServerSetupPage = () => {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <RefreshCw className="h-5 w-5 text-brand-purple" />
-            {isAccessible ? 'Sync to ekaya-central' : 'Verify & Sync'}
+            {isAccessible ? 'Sync to Ekaya Service' : 'Verify & Sync'}
           </CardTitle>
           <CardDescription>
             {isAccessible
-              ? 'Push this server URL to ekaya-central so redirect URLs and MCP setup links are correct'
+              ? 'Push this server URL to the Ekaya Service so redirect URLs and MCP setup links are correct'
               : 'After configuring HTTPS, navigate to this page on the new URL and sync'}
           </CardDescription>
         </CardHeader>
@@ -312,7 +312,7 @@ const ServerSetupPage = () => {
               ) : (
                 <>
                   <RefreshCw className="mr-2 h-4 w-4" />
-                  Update ekaya-central
+                  Update Ekaya Service
                 </>
               )}
             </Button>
@@ -322,9 +322,9 @@ const ServerSetupPage = () => {
           </div>
 
           <p className="text-xs text-text-secondary">
-            This updates the server URL stored in ekaya-central from the current{' '}
+            This updates the server URL stored in the Ekaya Service from the current{' '}
             <code className="bg-surface-secondary px-1 rounded">{serverStatus?.base_url}</code>.
-            ekaya-central uses this URL for redirect links and MCP setup instructions.
+            The Ekaya Service uses this URL for redirect links and MCP setup instructions.
           </p>
         </CardContent>
       </Card>
