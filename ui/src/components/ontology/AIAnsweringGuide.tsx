@@ -82,17 +82,6 @@ export const AIAnsweringGuide = ({ questionCount }: AIAnsweringGuideProps) => {
             </li>
           </ol>
         </div>
-
-        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4">
-          <h4 className="font-medium text-sm text-amber-600 dark:text-amber-400 mb-2">
-            When AI can&apos;t help
-          </h4>
-          <p className="text-sm text-muted-foreground">
-            For projects without accessible source code (business processes, 3rd party applications),
-            you may need to answer questions manually based on your domain knowledge.
-            The questions below can serve as a checklist to review with subject matter experts.
-          </p>
-        </div>
       </CardContent>
     </Card>
   );

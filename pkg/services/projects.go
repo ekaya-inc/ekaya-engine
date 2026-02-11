@@ -65,6 +65,10 @@ type ProjectService interface {
 	// Ontology extraction settings
 	GetOntologySettings(ctx context.Context, projectID uuid.UUID) (*OntologySettings, error)
 	SetOntologySettings(ctx context.Context, projectID uuid.UUID, settings *OntologySettings) error
+
+	// SyncServerURL pushes the engine's base URL to ekaya-central so redirect URLs
+	// and MCP setup links are correct after TLS/domain configuration changes.
+	SyncServerURL(ctx context.Context, projectID uuid.UUID, papiURL, token string) error
 }
 
 // projectService implements ProjectService.
@@ -692,6 +696,20 @@ func (s *projectService) SyncFromCentralAsync(projectID uuid.UUID, papiURL, toke
 			zap.String("old_name", oldName),
 			zap.String("new_name", projectInfo.Name))
 	}()
+}
+
+// SyncServerURL pushes the engine's base URL to ekaya-central.
+func (s *projectService) SyncServerURL(ctx context.Context, projectID uuid.UUID, papiURL, token string) error {
+	_, err := s.centralClient.UpdateServerUrl(ctx, papiURL, projectID.String(), s.baseURL, token)
+	if err != nil {
+		return fmt.Errorf("failed to update server URL in ekaya-central: %w", err)
+	}
+
+	s.logger.Info("Synced server URL to ekaya-central",
+		zap.String("project_id", projectID.String()),
+		zap.String("server_url", s.baseURL))
+
+	return nil
 }
 
 // Ensure projectService implements ProjectService at compile time.

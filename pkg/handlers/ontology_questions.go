@@ -90,6 +90,8 @@ func (h *OntologyQuestionsHandler) RegisterRoutes(mux *http.ServeMux, authMiddle
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Answer)))
 	mux.HandleFunc("POST "+base+"/{qid}/skip",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Skip)))
+	mux.HandleFunc("GET "+base+"/counts",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Counts)))
 	mux.HandleFunc("DELETE "+base+"/{qid}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Delete)))
 }
@@ -118,6 +120,36 @@ func (h *OntologyQuestionsHandler) List(w http.ResponseWriter, r *http.Request) 
 	}
 	for i, q := range questions {
 		data.Questions[i] = h.toQuestionResponse(q)
+	}
+
+	response := ApiResponse{Success: true, Data: data}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// Counts handles GET /api/projects/{pid}/ontology/questions/counts
+func (h *OntologyQuestionsHandler) Counts(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	counts, err := h.questionService.GetPendingCounts(r.Context(), projectID)
+	if err != nil {
+		h.logger.Error("Failed to get question counts",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "internal_error", "Failed to get question counts"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	data := QuestionCountsResponse{Required: 0, Optional: 0}
+	if counts != nil {
+		data.Required = counts.Required
+		data.Optional = counts.Optional
 	}
 
 	response := ApiResponse{Success: true, Data: data}

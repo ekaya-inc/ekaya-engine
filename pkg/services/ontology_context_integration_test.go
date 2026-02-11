@@ -96,6 +96,10 @@ func (m *mockProjectServiceForIntegration) SetOntologySettings(ctx context.Conte
 	return nil
 }
 
+func (m *mockProjectServiceForIntegration) SyncServerURL(ctx context.Context, projectID uuid.UUID, papiURL, token string) error {
+	return nil
+}
+
 // setupOntologyContextTest creates a test context with real database.
 func setupOntologyContextTest(t *testing.T) *ontologyContextTestContext {
 	t.Helper()

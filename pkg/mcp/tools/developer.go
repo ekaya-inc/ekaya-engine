@@ -34,7 +34,6 @@ type MCPToolDeps struct {
 	DataChangeDetectionService   services.DataChangeDetectionService
 	ChangeReviewService          services.ChangeReviewService
 	PendingChangeRepo            repositories.PendingChangeRepository
-	InstalledAppService          services.InstalledAppService
 	Auditor                      *audit.SecurityAuditor       // Optional: for modifying query SIEM logging
 	QueryHistoryService          services.QueryHistoryService // Optional: for query learning history
 }
@@ -222,7 +221,7 @@ func NewToolFilter(deps *MCPToolDeps) func(ctx context.Context, tools []mcp.Tool
 		isAgent := claims.Subject == "agent"
 
 		if isAgent {
-			// Agent authentication - only allow agent tools when agent_tools is enabled
+			// Agent authentication - only allow agent tools when agent_tools is enabled AND ai-agents app is installed
 			agentEnabled, err := deps.MCPConfigService.IsToolGroupEnabled(tenantCtx, projectID, services.ToolGroupAgentTools)
 			if err != nil {
 				deps.Logger.Error("Tool filter: failed to check agent_tools config",
@@ -231,11 +230,28 @@ func NewToolFilter(deps *MCPToolDeps) func(ctx context.Context, tools []mcp.Tool
 				return filterAgentTools(tools, false)
 			}
 
+			// Also check if ai-agents app is installed
+			agentAppInstalled := true // default to installed if service unavailable
+			if deps.GetInstalledAppService() != nil {
+				installed, err := deps.GetInstalledAppService().IsInstalled(tenantCtx, projectID, models.AppIDAIAgents)
+				if err != nil {
+					deps.Logger.Error("Tool filter: failed to check ai-agents app installation",
+						zap.String("project_id", projectID.String()),
+						zap.Error(err))
+					agentAppInstalled = false // fail closed
+				} else {
+					agentAppInstalled = installed
+				}
+			}
+
+			effectiveEnabled := agentEnabled && agentAppInstalled
+
 			deps.Logger.Debug("Tool filter: agent authentication, filtering to agent tools only",
 				zap.String("project_id", projectID.String()),
-				zap.Bool("agent_tools_enabled", agentEnabled))
+				zap.Bool("agent_tools_enabled", agentEnabled),
+				zap.Bool("agent_app_installed", agentAppInstalled))
 
-			return filterAgentTools(tools, agentEnabled)
+			return filterAgentTools(tools, effectiveEnabled)
 		}
 
 		// User authentication - use GetEnabledTools for consistent filtering with UI
@@ -258,8 +274,8 @@ func NewToolFilter(deps *MCPToolDeps) func(ctx context.Context, tools []mcp.Tool
 
 		// Check if AI Data Liaison app is installed - if not, remove data liaison tools
 		dataLiaisonInstalled := false
-		if deps.InstalledAppService != nil {
-			installed, err := deps.InstalledAppService.IsInstalled(tenantCtx, projectID, models.AppIDAIDataLiaison)
+		if deps.GetInstalledAppService() != nil {
+			installed, err := deps.GetInstalledAppService().IsInstalled(tenantCtx, projectID, models.AppIDAIDataLiaison)
 			if err != nil {
 				deps.Logger.Warn("Tool filter: failed to check AI Data Liaison app installation",
 					zap.String("project_id", projectID.String()),

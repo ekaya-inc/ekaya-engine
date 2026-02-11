@@ -1173,6 +1173,10 @@ func (m *mockTestProjectService) SetOntologySettings(ctx context.Context, projec
 	return nil
 }
 
+func (m *mockTestProjectService) SyncServerURL(ctx context.Context, projectID uuid.UUID, papiURL, token string) error {
+	return nil
+}
+
 type mockTestAdapterFactory struct {
 	discoverer *mockTestSchemaDiscoverer
 }

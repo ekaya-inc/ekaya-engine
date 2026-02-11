@@ -184,7 +184,7 @@ const ProjectDashboard = () => {
     if (installedApps.some((app) => app.app_id === APP_ID_AI_DATA_LIAISON)) {
       tiles.push({
         title: 'AI Data Liaison',
-        description: 'Conversational AI interface for your data — chat, query, and explore.',
+        description: 'Make Better Business Decisions 10x Faster and lower the burden on the data team.',
         icon: BrainCircuit,
         path: `/projects/${pid}/ai-data-liaison`,
         disabled: !isConnected,

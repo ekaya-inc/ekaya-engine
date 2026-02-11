@@ -206,16 +206,16 @@ func registerCreateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 	tool := mcp.NewTool(
 		"create_glossary_term",
 		mcp.WithDescription(
-			"Create a new business glossary term with its SQL definition. "+
-				"The SQL will be validated before saving. "+
+			"Create a new business glossary term. "+
+				"If SQL is provided, it will be validated before saving. "+
 				"Use this to add new business metrics like 'Revenue', 'Active Users', etc.",
 		),
 		mcp.WithString("term", mcp.Required(),
 			mcp.Description("The business term name (e.g., 'Daily Active Users')")),
 		mcp.WithString("definition", mcp.Required(),
 			mcp.Description("Human-readable description of what this term means")),
-		mcp.WithString("defining_sql", mcp.Required(),
-			mcp.Description("SQL query that calculates this metric")),
+		mcp.WithString("defining_sql",
+			mcp.Description("SQL query that calculates this metric (optional — not all terms have direct SQL)")),
 		mcp.WithString("base_table",
 			mcp.Description("Primary table this term is derived from (optional)")),
 		mcp.WithReadOnlyHintAnnotation(false),
@@ -234,7 +234,7 @@ func registerCreateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 
 		term, _ := req.RequireString("term")
 		definition, _ := req.RequireString("definition")
-		definingSQL, _ := req.RequireString("defining_sql")
+		definingSQL := getOptionalString(req, "defining_sql")
 		baseTable := getOptionalString(req, "base_table")
 
 		// Validate term is not empty after trimming whitespace
@@ -325,6 +325,7 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 		mcp.WithArray(
 			"aliases",
 			mcp.Description("Alternative names for the term (e.g., 'AOV', 'Average Order Value')"),
+			mcp.WithStringItems(),
 		),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -366,22 +367,12 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 		// Extract and validate aliases array
 		var aliases []string
 		if args, ok := req.Params.Arguments.(map[string]any); ok {
-			if aliasArray, ok := args["aliases"].([]any); ok {
-				for i, alias := range aliasArray {
-					aliasStr, ok := alias.(string)
-					if !ok {
-						return NewErrorResultWithDetails(
-							"invalid_parameters",
-							fmt.Sprintf("parameter 'aliases' must be an array of strings. Element at index %d is %T, not string", i, alias),
-							map[string]any{
-								"parameter":             "aliases",
-								"invalid_element_index": i,
-								"invalid_element_type":  fmt.Sprintf("%T", alias),
-							},
-						), nil
-					}
-					aliases = append(aliases, aliasStr)
-				}
+			aliasSlice, aliasErr := extractStringSlice(args, "aliases", deps.Logger)
+			if aliasErr != nil {
+				return NewErrorResult("invalid_parameters", aliasErr.Error()), nil
+			}
+			if aliasSlice != nil {
+				aliases = aliasSlice
 			}
 		}
 
@@ -399,10 +390,6 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 			if definition == "" {
 				return NewErrorResult("missing_required",
 					"definition is required when creating a new term"), nil
-			}
-			if sql == "" {
-				return NewErrorResult("missing_required",
-					"sql is required when creating a new term"), nil
 			}
 
 			term = &models.BusinessGlossaryTerm{

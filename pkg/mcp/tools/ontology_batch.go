@@ -61,6 +61,18 @@ func registerUpdateColumnsTool(s *server.MCPServer, deps *ColumnToolDeps) {
 			"updates",
 			mcp.Required(),
 			mcp.Description("Array of column updates, each with table, column, and metadata fields (description, enum_values, entity, role)"),
+			mcp.Items(map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"table":       map[string]any{"type": "string", "description": "Table name"},
+					"column":      map[string]any{"type": "string", "description": "Column name"},
+					"description": map[string]any{"type": "string", "description": "Column description"},
+					"entity":      map[string]any{"type": "string", "description": "Entity the column belongs to"},
+					"role":        map[string]any{"type": "string", "description": "Column role: dimension, measure, identifier, attribute"},
+					"enum_values": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Enum value labels"},
+				},
+				"required": []string{"table", "column"},
+			}),
 		),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -258,8 +270,11 @@ func parseColumnUpdates(req mcp.CallToolRequest) ([]ColumnUpdate, error) {
 		return nil, fmt.Errorf("invalid request arguments")
 	}
 
-	updatesRaw, ok := args["updates"].([]any)
-	if !ok {
+	updatesRaw, parseErr := extractArrayParam(args, "updates", nil)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	if updatesRaw == nil {
 		return nil, fmt.Errorf("'updates' must be an array")
 	}
 
@@ -315,7 +330,11 @@ func parseColumnUpdates(req mcp.CallToolRequest) ([]ColumnUpdate, error) {
 		}
 
 		// Parse enum_values array
-		if enumRaw, ok := updateMap["enum_values"].([]any); ok {
+		enumRaw, enumErr := extractArrayParam(updateMap, "enum_values", nil)
+		if enumErr != nil {
+			return nil, fmt.Errorf("update at index %d: %v", i, enumErr)
+		}
+		if enumRaw != nil {
 			enumValues := make([]string, 0, len(enumRaw))
 			for j, ev := range enumRaw {
 				evStr, ok := ev.(string)

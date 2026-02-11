@@ -64,15 +64,17 @@ type ToolAccessDeps interface {
 	GetDB() *database.DB
 	GetMCPConfigService() services.MCPConfigService
 	GetLogger() *zap.Logger
+	GetInstalledAppService() services.InstalledAppService
 }
 
 // BaseMCPToolDeps provides the common dependencies that all MCP tools need.
 // Tool-specific *Deps structs should embed this to avoid repeating the
 // GetDB/GetMCPConfigService/GetLogger method implementations.
 type BaseMCPToolDeps struct {
-	DB               *database.DB
-	MCPConfigService services.MCPConfigService
-	Logger           *zap.Logger
+	DB                  *database.DB
+	MCPConfigService    services.MCPConfigService
+	Logger              *zap.Logger
+	InstalledAppService services.InstalledAppService
 }
 
 // GetDB implements ToolAccessDeps.
@@ -83,6 +85,11 @@ func (d *BaseMCPToolDeps) GetMCPConfigService() services.MCPConfigService { retu
 
 // GetLogger implements ToolAccessDeps.
 func (d *BaseMCPToolDeps) GetLogger() *zap.Logger { return d.Logger }
+
+// GetInstalledAppService implements ToolAccessDeps.
+func (d *BaseMCPToolDeps) GetInstalledAppService() services.InstalledAppService {
+	return d.InstalledAppService
+}
 
 // ToolAccessResult contains the result of a successful access check.
 type ToolAccessResult struct {
@@ -141,16 +148,22 @@ func CheckToolAccess(ctx context.Context, deps ToolAccessDeps, toolName string) 
 	enabledTools := computeToolsForRole(claims, state)
 
 	// Check if the requested tool is in the enabled list
-	if isToolInList(toolName, enabledTools) {
-		return &ToolAccessResult{
-			ProjectID: projectID,
-			TenantCtx: tenantCtx,
-			Cleanup:   func() { scope.Close() },
-		}, nil
+	if !isToolInList(toolName, enabledTools) {
+		scope.Close()
+		return nil, newToolAccessError("tool_not_enabled", fmt.Sprintf("%s tool is not enabled for this project", toolName))
 	}
 
-	scope.Close()
-	return nil, newToolAccessError("tool_not_enabled", fmt.Sprintf("%s tool is not enabled for this project", toolName))
+	// Check if the required app is installed for this tool
+	if err := checkAppInstallation(tenantCtx, deps, claims, toolName, projectID); err != nil {
+		scope.Close()
+		return nil, err
+	}
+
+	return &ToolAccessResult{
+		ProjectID: projectID,
+		TenantCtx: tenantCtx,
+		Cleanup:   func() { scope.Close() },
+	}, nil
 }
 
 // computeToolsForRole determines the tool set based on JWT claims.
@@ -171,6 +184,49 @@ func isToolInList(toolName string, tools []services.ToolSpec) bool {
 		}
 	}
 	return false
+}
+
+// checkAppInstallation verifies that the required app is installed for the given tool.
+// Returns nil if access is allowed, or a ToolAccessError if the app is not installed.
+// If InstalledAppService is nil (e.g. in tests), access is allowed (backward compat).
+func checkAppInstallation(ctx context.Context, deps ToolAccessDeps, claims *auth.Claims, toolName string, projectID uuid.UUID) error {
+	appService := deps.GetInstalledAppService()
+	if appService == nil {
+		return nil // No app service available, allow access (backward compat for tests)
+	}
+
+	// Agent auth requires ai-agents app to be installed
+	if claims.Subject == "agent" {
+		installed, err := appService.IsInstalled(ctx, projectID, models.AppIDAIAgents)
+		if err != nil {
+			deps.GetLogger().Error("Failed to check ai-agents app installation",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			// Fail closed: deny access on error
+			return newToolAccessError("app_not_installed", "ai-agents app installation check failed")
+		}
+		if !installed {
+			return newToolAccessError("app_not_installed", "ai-agents app is not installed for this project")
+		}
+		return nil
+	}
+
+	// Data Liaison tools require ai-data-liaison app to be installed
+	if services.DataLiaisonTools[toolName] {
+		installed, err := appService.IsInstalled(ctx, projectID, models.AppIDAIDataLiaison)
+		if err != nil {
+			deps.GetLogger().Error("Failed to check AI Data Liaison app installation",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			// Fail closed: deny access on error
+			return newToolAccessError("app_not_installed", "AI Data Liaison app installation check failed")
+		}
+		if !installed {
+			return newToolAccessError("app_not_installed", "AI Data Liaison app is not installed for this project")
+		}
+	}
+
+	return nil
 }
 
 // AcquireToolAccess verifies tool access and sets up tenant context for tool execution.

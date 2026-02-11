@@ -275,6 +275,7 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 		mcp.WithArray(
 			"enum_values",
 			mcp.Description("Optional - Array of enumeration values with descriptions (e.g., ['ACTIVE - Normal account', 'SUSPENDED - Temporary hold'])"),
+			mcp.WithStringItems(),
 		),
 		mcp.WithString(
 			"entity",
@@ -367,7 +368,11 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 		// Extract and validate enum_values array
 		var enumValues []string
 		if args, ok := req.Params.Arguments.(map[string]any); ok {
-			if enumArray, ok := args["enum_values"].([]any); ok {
+			enumArray, enumErr := extractArrayParam(args, "enum_values", deps.Logger)
+			if enumErr != nil {
+				return NewErrorResult("invalid_parameters", enumErr.Error()), nil
+			}
+			if len(enumArray) > 0 {
 				for i, ev := range enumArray {
 					evStr, ok := ev.(string)
 					if !ok {

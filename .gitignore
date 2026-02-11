@@ -17,6 +17,7 @@ go.work.sum
 
 # Dependency directories
 vendor/
+node_modules/
 
 # Build output
 bin/

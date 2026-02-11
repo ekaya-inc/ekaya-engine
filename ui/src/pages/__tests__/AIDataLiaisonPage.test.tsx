@@ -15,6 +15,7 @@ vi.mock('../../services/engineApi', () => ({
     getAIConfig: vi.fn(),
     getSchema: vi.fn(),
     getOntologyDAGStatus: vi.fn(),
+    getServerStatus: vi.fn(),
   },
 }));
 
@@ -35,6 +36,21 @@ vi.mock('react-router-dom', async () => {
     useNavigate: () => mockNavigate,
   };
 });
+
+// Mock the ConfigContext
+vi.mock('../../contexts/ConfigContext', () => ({
+  useConfig: () => ({
+    config: {
+      oauthClientId: 'test-client',
+      baseUrl: 'http://localhost:3443',
+      authorizationEndpoint: 'http://localhost:8080/authorize',
+      tokenEndpoint: 'http://localhost:8080/token',
+      authServerUrl: 'http://localhost:8080',
+    },
+    loading: false,
+    error: null,
+  }),
+}));
 
 const mockDatasource: Datasource = {
   datasource_id: 'ds-1',
@@ -68,6 +84,8 @@ const setupMocks = (options: {
   hasAIConfig?: boolean;
 } = {}) => {
   const { hasDatasource = true, hasOntology = false, hasMCPConfig = true, hasSelectedTables = false, hasAIConfig = false } = options;
+
+  vi.mocked(engineApi.getServerStatus).mockResolvedValue(null);
 
   vi.mocked(engineApi.listDataSources).mockResolvedValue({
     success: true,
@@ -122,6 +140,13 @@ const setupAllCompleteMocks = () => {
     hasAIConfig: true,
     hasOntology: true,
     hasMCPConfig: true,
+  });
+  // Server must be accessible for all checklist items to be complete
+  vi.mocked(engineApi.getServerStatus).mockResolvedValue({
+    base_url: 'https://example.com',
+    is_localhost: false,
+    is_https: true,
+    accessible_for_business_users: true,
   });
 };
 
@@ -188,40 +213,40 @@ describe('AIDataLiaisonPage', () => {
       expect(screen.getByText('Setup Checklist')).toBeInTheDocument();
     });
 
-    it('shows datasource as configured when present', async () => {
+    it('shows MCP Server as pending when not ready', async () => {
       await renderAIDataLiaisonPage();
-      expect(screen.getByText('1. Datasource configured')).toBeInTheDocument();
-      expect(screen.getByText(/Connected to Test DB/)).toBeInTheDocument();
+      expect(screen.getByText('1. MCP Server set up')).toBeInTheDocument();
+      expect(screen.getByText('Configure datasource, schema, AI, and extract ontology')).toBeInTheDocument();
     });
 
-    it('shows datasource as pending when not configured', async () => {
-      setupMocks({ hasDatasource: false });
+    it('shows MCP Server as complete when ontology is ready', async () => {
+      setupAllCompleteMocks();
       await renderAIDataLiaisonPage();
-      expect(screen.getByText(/Connect a database to enable AI Data Liaison/)).toBeInTheDocument();
+      expect(screen.getByText('1. MCP Server set up')).toBeInTheDocument();
+      expect(screen.getByText('Datasource, schema, AI, and ontology configured')).toBeInTheDocument();
     });
 
-    it('shows AI Data Liaison as pending when prior steps incomplete', async () => {
+    it('shows MCP Server accessible as pending when server is on localhost', async () => {
       await renderAIDataLiaisonPage();
-      expect(screen.getByText('6. AI Data Liaison ready')).toBeInTheDocument();
-      expect(screen.getByText('Complete all steps above to enable')).toBeInTheDocument();
+      expect(screen.getByText('2. MCP Server accessible')).toBeInTheDocument();
+      expect(screen.getByText(/business users cannot connect/)).toBeInTheDocument();
     });
   });
 
   describe('Enabled Tools', () => {
-    it('renders enabled tools card', async () => {
+    it('renders user tools card', async () => {
       await renderAIDataLiaisonPage();
-      expect(screen.getByText('Enabled Tools')).toBeInTheDocument();
+      expect(screen.getByText('User Tools')).toBeInTheDocument();
     });
 
-    it('shows user tools section', async () => {
+    it('shows ontology maintenance toggle', async () => {
       await renderAIDataLiaisonPage();
-      expect(screen.getByText('For Business Users (User Tools)')).toBeInTheDocument();
-      expect(screen.getByText('suggest_approved_query')).toBeInTheDocument();
+      expect(screen.getByText('Allow Usage to Improve Ontology')).toBeInTheDocument();
     });
 
-    it('shows developer tools section', async () => {
+    it('shows additional developer tools section', async () => {
       await renderAIDataLiaisonPage();
-      expect(screen.getByText('For Data Engineers (Developer Tools)')).toBeInTheDocument();
+      expect(screen.getByText('Additional Developer Tools')).toBeInTheDocument();
       expect(screen.getByText('list_query_suggestions')).toBeInTheDocument();
     });
   });

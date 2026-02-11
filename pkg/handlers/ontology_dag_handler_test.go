@@ -84,6 +84,10 @@ func (m *mockProjectServiceForDAG) SetOntologySettings(ctx context.Context, proj
 	return nil
 }
 
+func (m *mockProjectServiceForDAG) SyncServerURL(ctx context.Context, projectID uuid.UUID, papiURL, token string) error {
+	return nil
+}
+
 func TestOntologyDAGHandler_StartExtraction_Success(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()

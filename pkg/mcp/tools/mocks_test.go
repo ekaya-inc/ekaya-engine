@@ -236,6 +236,10 @@ func (m *mockProjectService) SetOntologySettings(ctx context.Context, projectID 
 	return nil
 }
 
+func (m *mockProjectService) SyncServerURL(ctx context.Context, projectID uuid.UUID, papiURL, token string) error {
+	return nil
+}
+
 // mockDatasourceService implements services.DatasourceService for testing.
 type mockDatasourceService struct {
 	datasource      *models.Datasource
@@ -469,6 +473,49 @@ func (m *mockSchemaRepository) GetColumnsWithFeaturesByDatasource(ctx context.Co
 }
 func (m *mockSchemaRepository) DeleteInferredRelationshipsByProject(ctx context.Context, projectID uuid.UUID) (int64, error) {
 	return 0, nil
+}
+
+// mockInstalledAppService is a mock implementation for testing.
+type mockInstalledAppService struct {
+	installed map[string]bool
+}
+
+func newMockInstalledAppService(installedApps ...string) *mockInstalledAppService {
+	m := &mockInstalledAppService{installed: make(map[string]bool)}
+	for _, app := range installedApps {
+		m.installed[app] = true
+	}
+	// MCP Server is always installed
+	m.installed[models.AppIDMCPServer] = true
+	return m
+}
+
+func (m *mockInstalledAppService) ListInstalled(ctx context.Context, projectID uuid.UUID) ([]*models.InstalledApp, error) {
+	return nil, nil
+}
+
+func (m *mockInstalledAppService) IsInstalled(ctx context.Context, projectID uuid.UUID, appID string) (bool, error) {
+	return m.installed[appID], nil
+}
+
+func (m *mockInstalledAppService) Install(ctx context.Context, projectID uuid.UUID, appID string, userID string) (*models.InstalledApp, error) {
+	return nil, nil
+}
+
+func (m *mockInstalledAppService) Uninstall(ctx context.Context, projectID uuid.UUID, appID string) error {
+	return nil
+}
+
+func (m *mockInstalledAppService) GetSettings(ctx context.Context, projectID uuid.UUID, appID string) (map[string]any, error) {
+	return nil, nil
+}
+
+func (m *mockInstalledAppService) UpdateSettings(ctx context.Context, projectID uuid.UUID, appID string, settings map[string]any) error {
+	return nil
+}
+
+func (m *mockInstalledAppService) GetApp(ctx context.Context, projectID uuid.UUID, appID string) (*models.InstalledApp, error) {
+	return nil, nil
 }
 
 // mockColumnMetadataRepository implements repositories.ColumnMetadataRepository for testing.
