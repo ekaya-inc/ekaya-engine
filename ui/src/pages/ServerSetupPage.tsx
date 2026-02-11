@@ -203,7 +203,7 @@ const ServerSetupPage = () => {
                     </span>
                   </div>
                   <p className="text-sm text-text-secondary">
-                    Use Let's Encrypt, your organization's PKI, or a cloud provider certificate.
+                    Use Let&apos;s Encrypt, your organization&apos;s PKI, or a cloud provider certificate.
                     Set <code className="bg-surface-secondary px-1 rounded">base_url</code>,{' '}
                     <code className="bg-surface-secondary px-1 rounded">tls_cert_path</code>, and{' '}
                     <code className="bg-surface-secondary px-1 rounded">tls_key_path</code> in{' '}
@@ -217,7 +217,7 @@ const ServerSetupPage = () => {
                   </div>
                   <p className="text-sm text-text-secondary mb-2">
                     Generate with <code className="bg-surface-secondary px-1 rounded">openssl</code> for
-                    internal or testing use. Users' browsers must trust the root CA.
+                    internal or testing use. Users&apos; browsers must trust the root CA.
                   </p>
                   <div className="rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-3 py-2">
                     <p className="text-xs text-amber-800 dark:text-amber-300">
@@ -235,7 +235,7 @@ const ServerSetupPage = () => {
                   <p className="text-sm text-text-secondary">
                     Use Caddy, nginx, or another proxy to terminate TLS. Keep ekaya-engine on HTTP
                     internally and set{' '}
-                    <code className="bg-surface-secondary px-1 rounded">base_url</code> to the proxy's
+                    <code className="bg-surface-secondary px-1 rounded">base_url</code> to the proxy&apos;s
                     public HTTPS URL.
                   </p>
                 </div>
@@ -249,10 +249,10 @@ const ServerSetupPage = () => {
               </h3>
               <div className="rounded-lg bg-surface-secondary border border-border-light p-4 font-mono text-sm">
                 <div className="text-text-secondary"># Tell Ekaya Engine your public URL</div>
-                <div>base_url: <span className="text-brand-purple">"https://yourservice.yourdomain:yourport"</span></div>
+                <div>base_url: <span className="text-brand-purple">&quot;https://yourservice.yourdomain:yourport&quot;</span></div>
                 <div className="mt-2 text-text-secondary"># Provide TLS certificates (Options A/B only)</div>
-                <div>tls_cert_path: <span className="text-brand-purple">"/path/to/cert.pem"</span></div>
-                <div>tls_key_path: <span className="text-brand-purple">"/path/to/key.pem"</span></div>
+                <div>tls_cert_path: <span className="text-brand-purple">&quot;/path/to/cert.pem&quot;</span></div>
+                <div>tls_key_path: <span className="text-brand-purple">&quot;/path/to/key.pem&quot;</span></div>
               </div>
               <p className="text-xs text-text-secondary mt-2">
                 Environment variables{' '}
@@ -345,7 +345,7 @@ const ServerSetupPage = () => {
           <div className="rounded-lg bg-surface-secondary border border-border-light p-3 font-mono text-sm">
             <span className="text-text-secondary"># Add to your shell profile or MCP client config</span>
             <br />
-            export NODE_EXTRA_CA_CERTS=<span className="text-brand-purple">"/path/to/your/ca-cert.pem"</span>
+            export NODE_EXTRA_CA_CERTS=<span className="text-brand-purple">&quot;/path/to/your/ca-cert.pem&quot;</span>
           </div>
         </CardContent>
       </Card>

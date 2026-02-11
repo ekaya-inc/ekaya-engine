@@ -94,6 +94,9 @@ func (m *scenarioProjectService) GetOntologySettings(ctx context.Context, projec
 func (m *scenarioProjectService) SetOntologySettings(ctx context.Context, projectID uuid.UUID, settings *services.OntologySettings) error {
 	return nil
 }
+func (m *scenarioProjectService) SyncServerURL(ctx context.Context, projectID uuid.UUID, papiURL, token string) error {
+	return nil
+}
 
 // ============================================================================
 // Scenario Test Context

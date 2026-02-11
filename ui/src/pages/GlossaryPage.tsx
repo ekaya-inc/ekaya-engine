@@ -17,7 +17,6 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import { GlossaryTermEditor } from "../components/GlossaryTermEditor";
 import { Button } from "../components/ui/Button";
-import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import {
   Card,
   CardContent,
@@ -25,6 +24,7 @@ import {
   CardHeader,
   CardTitle,
 } from "../components/ui/Card";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { useToast } from "../hooks/useToast";
 import engineApi from "../services/engineApi";
 import ontologyApi from "../services/ontologyApi";

@@ -15,6 +15,7 @@ vi.mock('../../services/engineApi', () => ({
     getAIConfig: vi.fn(),
     getSchema: vi.fn(),
     getOntologyDAGStatus: vi.fn(),
+    getServerStatus: vi.fn(),
   },
 }));
 
@@ -84,6 +85,8 @@ const setupMocks = (options: {
 } = {}) => {
   const { hasDatasource = true, hasOntology = false, hasMCPConfig = true, hasSelectedTables = false, hasAIConfig = false } = options;
 
+  vi.mocked(engineApi.getServerStatus).mockResolvedValue(null);
+
   vi.mocked(engineApi.listDataSources).mockResolvedValue({
     success: true,
     data: { datasources: hasDatasource ? [mockDatasource] : [] },
@@ -137,6 +140,13 @@ const setupAllCompleteMocks = () => {
     hasAIConfig: true,
     hasOntology: true,
     hasMCPConfig: true,
+  });
+  // Server must be accessible for all checklist items to be complete
+  vi.mocked(engineApi.getServerStatus).mockResolvedValue({
+    base_url: 'https://example.com',
+    is_localhost: false,
+    is_https: true,
+    accessible_for_business_users: true,
   });
 };
 
@@ -216,10 +226,10 @@ describe('AIDataLiaisonPage', () => {
       expect(screen.getByText('Datasource, schema, AI, and ontology configured')).toBeInTheDocument();
     });
 
-    it('shows AI Data Liaison as pending when MCP Server not ready', async () => {
+    it('shows MCP Server accessible as pending when server is on localhost', async () => {
       await renderAIDataLiaisonPage();
-      expect(screen.getByText('2. AI Data Liaison ready')).toBeInTheDocument();
-      expect(screen.getByText('Complete MCP Server setup to enable')).toBeInTheDocument();
+      expect(screen.getByText('2. MCP Server accessible')).toBeInTheDocument();
+      expect(screen.getByText(/business users cannot connect/)).toBeInTheDocument();
     });
   });
 

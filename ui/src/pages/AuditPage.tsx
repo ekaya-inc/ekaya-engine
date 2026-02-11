@@ -593,14 +593,14 @@ function OntologyChangesTab({ projectId }: { projectId: string }) {
                         </td>
                         <td className="py-2 pr-3 text-text-secondary">{row.source}</td>
                         <td className="py-2 pr-3 text-text-secondary text-xs">
-                          {hasChanges ? `${Object.keys(row.changed_fields!).length} field(s)` : '–'}
+                          {hasChanges && row.changed_fields ? `${Object.keys(row.changed_fields).length} field(s)` : '–'}
                         </td>
                       </tr>
                       {isExpanded && hasChanges && (
                         <tr>
                           <td colSpan={7} className="py-2 px-4 bg-surface-secondary/30">
                             <div className="font-mono text-xs space-y-1 max-h-60 overflow-y-auto">
-                              {Object.entries(row.changed_fields!).map(([field, change]) => (
+                              {Object.entries(row.changed_fields ?? {}).map(([field, change]) => (
                                 <div key={field} className="flex gap-2">
                                   <span className="font-semibold text-text-primary min-w-[120px]">{field}:</span>
                                   <span className="text-red-600 dark:text-red-400 line-through">{JSON.stringify(change.old)}</span>
@@ -1061,7 +1061,7 @@ function MCPEventsTab({ projectId }: { projectId: string }) {
               <tbody>
                 {data.items.map(row => {
                   const isExpanded = expandedRow === row.id;
-                  const hasDetails = row.request_params || row.result_summary || row.error_message || row.sql_query;
+                  const hasDetails = row.request_params ?? row.result_summary ?? row.error_message ?? row.sql_query;
                   return (
                     <Fragment key={row.id}>
                       <tr

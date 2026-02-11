@@ -3,6 +3,7 @@
  * Replaces window.confirm() with an in-app dialog using existing Dialog primitives.
  */
 
+import { Button } from './Button';
 import {
   Dialog,
   DialogContent,
@@ -11,7 +12,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from './Dialog';
-import { Button } from './Button';
 
 interface ConfirmDialogProps {
   open: boolean;
