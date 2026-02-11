@@ -69,6 +69,17 @@ func Test_031_GlossaryDefiningSql(t *testing.T) {
 		assert.Equal(t, expectedType, dataType, "Column %s should have type %s", colName, expectedType)
 	}
 
+	// Verify defining_sql is nullable (migration 029 drops NOT NULL)
+	var definingSqlNullable string
+	err = engineDB.DB.Pool.QueryRow(ctx, `
+		SELECT is_nullable
+		FROM information_schema.columns
+		WHERE table_name = 'engine_business_glossary'
+		AND column_name = 'defining_sql'
+	`).Scan(&definingSqlNullable)
+	require.NoError(t, err)
+	assert.Equal(t, "YES", definingSqlNullable, "defining_sql should be nullable")
+
 	// Verify old fragmented columns no longer exist
 	oldColumns := []string{"sql_pattern", "columns_used", "filters", "aggregation"}
 	for _, colName := range oldColumns {

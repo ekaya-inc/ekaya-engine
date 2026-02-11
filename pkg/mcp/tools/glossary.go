@@ -206,16 +206,16 @@ func registerCreateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 	tool := mcp.NewTool(
 		"create_glossary_term",
 		mcp.WithDescription(
-			"Create a new business glossary term with its SQL definition. "+
-				"The SQL will be validated before saving. "+
+			"Create a new business glossary term. "+
+				"If SQL is provided, it will be validated before saving. "+
 				"Use this to add new business metrics like 'Revenue', 'Active Users', etc.",
 		),
 		mcp.WithString("term", mcp.Required(),
 			mcp.Description("The business term name (e.g., 'Daily Active Users')")),
 		mcp.WithString("definition", mcp.Required(),
 			mcp.Description("Human-readable description of what this term means")),
-		mcp.WithString("defining_sql", mcp.Required(),
-			mcp.Description("SQL query that calculates this metric")),
+		mcp.WithString("defining_sql",
+			mcp.Description("SQL query that calculates this metric (optional — not all terms have direct SQL)")),
 		mcp.WithString("base_table",
 			mcp.Description("Primary table this term is derived from (optional)")),
 		mcp.WithReadOnlyHintAnnotation(false),
@@ -234,7 +234,7 @@ func registerCreateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 
 		term, _ := req.RequireString("term")
 		definition, _ := req.RequireString("definition")
-		definingSQL, _ := req.RequireString("defining_sql")
+		definingSQL := getOptionalString(req, "defining_sql")
 		baseTable := getOptionalString(req, "base_table")
 
 		// Validate term is not empty after trimming whitespace
@@ -390,10 +390,6 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 			if definition == "" {
 				return NewErrorResult("missing_required",
 					"definition is required when creating a new term"), nil
-			}
-			if sql == "" {
-				return NewErrorResult("missing_required",
-					"sql is required when creating a new term"), nil
 			}
 
 			term = &models.BusinessGlossaryTerm{

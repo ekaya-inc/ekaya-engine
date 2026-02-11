@@ -168,9 +168,6 @@ func (s *glossaryService) CreateTerm(ctx context.Context, projectID uuid.UUID, t
 	if term.Definition == "" {
 		return fmt.Errorf("term definition is required")
 	}
-	if term.DefiningSQL == "" {
-		return fmt.Errorf("defining_sql is required")
-	}
 
 	// Handle test-like term names based on environment
 	if IsTestTerm(term.Term) {
@@ -198,22 +195,24 @@ func (s *glossaryService) CreateTerm(ctx context.Context, projectID uuid.UUID, t
 	}
 	term.OntologyID = &ontology.ID
 
-	// Validate SQL and capture output columns
-	testResult, err := s.TestSQL(ctx, projectID, term.DefiningSQL)
-	if err != nil {
-		s.logger.Error("Failed to test SQL during term creation",
-			zap.String("project_id", projectID.String()),
-			zap.String("term", term.Term),
-			zap.Error(err))
-		return fmt.Errorf("test SQL: %w", err)
-	}
+	// Validate SQL and capture output columns (only when SQL is provided)
+	if term.DefiningSQL != "" {
+		testResult, err := s.TestSQL(ctx, projectID, term.DefiningSQL)
+		if err != nil {
+			s.logger.Error("Failed to test SQL during term creation",
+				zap.String("project_id", projectID.String()),
+				zap.String("term", term.Term),
+				zap.Error(err))
+			return fmt.Errorf("test SQL: %w", err)
+		}
 
-	if !testResult.Valid {
-		return fmt.Errorf("SQL validation failed: %s", testResult.Error)
-	}
+		if !testResult.Valid {
+			return fmt.Errorf("SQL validation failed: %s", testResult.Error)
+		}
 
-	// Set output columns from test result
-	term.OutputColumns = testResult.OutputColumns
+		// Set output columns from test result
+		term.OutputColumns = testResult.OutputColumns
+	}
 
 	if err := s.glossaryRepo.Create(ctx, term); err != nil {
 		s.logger.Error("Failed to create glossary term",
@@ -242,9 +241,6 @@ func (s *glossaryService) UpdateTerm(ctx context.Context, term *models.BusinessG
 	if term.Definition == "" {
 		return fmt.Errorf("term definition is required")
 	}
-	if term.DefiningSQL == "" {
-		return fmt.Errorf("defining_sql is required")
-	}
 
 	// Handle test-like term names based on environment
 	if IsTestTerm(term.Term) {
@@ -269,8 +265,8 @@ func (s *glossaryService) UpdateTerm(ctx context.Context, term *models.BusinessG
 		return apperrors.ErrNotFound
 	}
 
-	// If SQL changed, re-validate and update output columns
-	if term.DefiningSQL != existing.DefiningSQL {
+	// If SQL changed and is non-empty, re-validate and update output columns
+	if term.DefiningSQL != existing.DefiningSQL && term.DefiningSQL != "" {
 		testResult, err := s.TestSQL(ctx, term.ProjectID, term.DefiningSQL)
 		if err != nil {
 			s.logger.Error("Failed to test SQL during term update",
@@ -286,9 +282,12 @@ func (s *glossaryService) UpdateTerm(ctx context.Context, term *models.BusinessG
 
 		// Update output columns from test result
 		term.OutputColumns = testResult.OutputColumns
-	} else {
+	} else if term.DefiningSQL == existing.DefiningSQL {
 		// SQL hasn't changed, preserve existing output columns
 		term.OutputColumns = existing.OutputColumns
+	} else {
+		// SQL was cleared — clear output columns
+		term.OutputColumns = nil
 	}
 
 	if err := s.glossaryRepo.Update(ctx, term); err != nil {

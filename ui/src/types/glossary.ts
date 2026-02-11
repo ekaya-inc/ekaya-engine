@@ -66,7 +66,7 @@ export interface TestSQLResult {
 export interface CreateGlossaryTermRequest {
   term: string;
   definition: string;
-  defining_sql: string;
+  defining_sql?: string;
   base_table?: string;
   aliases?: string[];
 }

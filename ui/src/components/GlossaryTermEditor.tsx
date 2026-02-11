@@ -64,11 +64,17 @@ export function GlossaryTermEditor({
         setDefiningSql(term.defining_sql);
         setBaseTable(term.base_table ?? '');
         setAliases(term.aliases ?? []);
-        setSqlTested(true); // Existing terms already have tested SQL
-        setTestResult({
-          valid: true,
-          output_columns: term.output_columns ?? [],
-        });
+        // Mark SQL as tested if the term already has valid SQL
+        if (term.defining_sql) {
+          setSqlTested(true);
+          setTestResult({
+            valid: true,
+            output_columns: term.output_columns ?? [],
+          });
+        } else {
+          setSqlTested(false);
+          setTestResult(null);
+        }
       } else {
         // Reset for new term
         setTermName('');
@@ -164,12 +170,8 @@ export function GlossaryTermEditor({
       return;
     }
 
-    if (!definingSql.trim()) {
-      setSaveError('SQL is required');
-      return;
-    }
-
-    if (!sqlTested || !testResult?.valid) {
+    // If SQL is provided, it must be tested and valid
+    if (definingSql.trim() && (!sqlTested || !testResult?.valid)) {
       setSaveError('Please test the SQL and ensure it is valid before saving');
       return;
     }
@@ -182,7 +184,7 @@ export function GlossaryTermEditor({
         const updateRequest: {
           term: string;
           definition: string;
-          defining_sql: string;
+          defining_sql?: string;
           base_table?: string;
           aliases?: string[];
         } = {
@@ -209,7 +211,7 @@ export function GlossaryTermEditor({
         const createRequest: {
           term: string;
           definition: string;
-          defining_sql: string;
+          defining_sql?: string;
           base_table?: string;
           aliases?: string[];
         } = {
@@ -244,12 +246,9 @@ export function GlossaryTermEditor({
     }
   };
 
-  const canSave =
-    termName.trim() &&
-    definition.trim() &&
-    definingSql.trim() &&
-    sqlTested &&
-    testResult?.valid;
+  const hasSql = !!definingSql.trim();
+  const sqlValid = !hasSql || (sqlTested && testResult?.valid);
+  const canSave = !!termName.trim() && !!definition.trim() && sqlValid;
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -260,8 +259,8 @@ export function GlossaryTermEditor({
           </DialogTitle>
           <DialogDescription>
             {isEditing
-              ? 'Update the business term definition and SQL query.'
-              : 'Define a new business term with executable SQL.'}
+              ? 'Update the business term definition and optional SQL query.'
+              : 'Define a new business term. SQL is optional.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -308,7 +307,7 @@ export function GlossaryTermEditor({
               htmlFor="defining-sql"
               className="block text-sm font-medium text-text-primary mb-1"
             >
-              Defining SQL
+              Defining SQL <span className="text-text-tertiary">(optional)</span>
             </label>
             <SqlEditor
               value={definingSql}

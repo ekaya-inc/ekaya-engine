@@ -17,6 +17,7 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import { GlossaryTermEditor } from "../components/GlossaryTermEditor";
 import { Button } from "../components/ui/Button";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import {
   Card,
   CardContent,
@@ -63,6 +64,10 @@ const GlossaryPage = () => {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingTerm, setEditingTerm] = useState<GlossaryTerm | null>(null);
   const [deletingTermId, setDeletingTermId] = useState<string | null>(null);
+
+  // Confirmation dialog state
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+  const [termToDelete, setTermToDelete] = useState<GlossaryTerm | null>(null);
 
   // Polling ref
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -208,35 +213,24 @@ const GlossaryPage = () => {
   };
 
   // Handle regenerate (with confirmation)
-  const handleRegenerate = async (): Promise<void> => {
+  const handleRegenerate = (): void => {
+    setConfirmRegenerate(true);
+  };
+
+  const confirmRegenerateAction = async (): Promise<void> => {
     if (!pid) return;
-
-    const confirmed = window.confirm(
-      'This will regenerate all inferred glossary terms. Manually created terms will be preserved. Continue?'
-    );
-    if (!confirmed) return;
-
-    // Check for pending questions first
+    setConfirmRegenerate(false);
     setGenerating(true);
     try {
       await engineApi.autoGenerateGlossary(pid);
       fetchTerms(true);
     } catch (err) {
       setGenerating(false);
-      const errorMessage = err instanceof Error ? err.message : '';
-      if (errorMessage.includes("required question")) {
-        toast({
-          title: 'Cannot regenerate',
-          description: 'Please answer all required ontology questions first.',
-          variant: 'destructive',
-        });
-      } else {
-        toast({
-          title: 'Failed to regenerate glossary',
-          description: errorMessage,
-          variant: 'destructive',
-        });
-      }
+      toast({
+        title: 'Failed to regenerate glossary',
+        description: err instanceof Error ? err.message : 'An unexpected error occurred',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -253,15 +247,14 @@ const GlossaryPage = () => {
   };
 
   // Handle delete term
-  const handleDeleteTerm = async (term: GlossaryTerm): Promise<void> => {
-    if (!pid) return;
+  const handleDeleteTerm = (term: GlossaryTerm): void => {
+    setTermToDelete(term);
+  };
 
-    const confirmed = window.confirm(
-      `Are you sure you want to delete the term "${term.term}"? This action cannot be undone.`
-    );
-
-    if (!confirmed) return;
-
+  const confirmDeleteAction = async (): Promise<void> => {
+    if (!pid || !termToDelete) return;
+    const term = termToDelete;
+    setTermToDelete(null);
     setDeletingTermId(term.id);
 
     try {
@@ -692,6 +685,27 @@ const GlossaryPage = () => {
           onSave={handleEditorSave}
         />
       )}
+
+      {/* Regenerate Confirmation */}
+      <ConfirmDialog
+        open={confirmRegenerate}
+        onConfirm={confirmRegenerateAction}
+        onCancel={() => setConfirmRegenerate(false)}
+        title="Regenerate Glossary"
+        description="This will regenerate all inferred glossary terms. Manually created terms will be preserved."
+        confirmLabel="Regenerate"
+      />
+
+      {/* Delete Confirmation */}
+      <ConfirmDialog
+        open={!!termToDelete}
+        onConfirm={confirmDeleteAction}
+        onCancel={() => setTermToDelete(null)}
+        title="Delete Term"
+        description={`Are you sure you want to delete "${termToDelete?.term ?? ''}"? This action cannot be undone.`}
+        confirmLabel="Delete"
+        variant="destructive"
+      />
     </div>
   );
 };

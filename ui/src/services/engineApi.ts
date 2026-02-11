@@ -104,8 +104,8 @@ class EngineApiService {
 
       if (!response.ok) {
         throw new Error(
-          data.error ??
-            data.message ??
+          data.message ??
+            data.error ??
             `HTTP ${response.status}: ${response.statusText}`
         );
       }
@@ -1096,6 +1096,20 @@ class EngineApiService {
     return this.makeRequest<{ message: string }>(
       `/${projectId}/datasources/${datasourceId}/ontology`,
       { method: 'DELETE' }
+    );
+  }
+
+  // --- Ontology Questions Methods ---
+
+  /**
+   * Get pending ontology question counts (required vs optional)
+   * GET /api/projects/{projectId}/ontology/questions/counts
+   */
+  async getOntologyQuestionCounts(
+    projectId: string
+  ): Promise<ApiResponse<{ required: number; optional: number }>> {
+    return this.makeRequest<{ required: number; optional: number }>(
+      `/${projectId}/ontology/questions/counts`
     );
   }
 

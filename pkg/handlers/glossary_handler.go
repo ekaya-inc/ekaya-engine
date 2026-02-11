@@ -169,8 +169,17 @@ func (h *GlossaryHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 		// Check for validation errors
 		errMsg := err.Error()
-		if errMsg == "term name is required" || errMsg == "term definition is required" || errMsg == "defining_sql is required" || strings.Contains(errMsg, "SQL validation failed") {
+		if errMsg == "term name is required" || errMsg == "term definition is required" || strings.Contains(errMsg, "SQL validation failed") {
 			if err := ErrorResponse(w, http.StatusBadRequest, "validation_error", errMsg); err != nil {
+				h.logger.Error("Failed to write error response", zap.Error(err))
+			}
+			return
+		}
+
+		// Check for duplicate term
+		if strings.Contains(errMsg, "duplicate key") || strings.Contains(errMsg, "23505") {
+			if err := ErrorResponse(w, http.StatusConflict, "term_already_exists",
+				fmt.Sprintf("A glossary term named %q already exists", req.Term)); err != nil {
 				h.logger.Error("Failed to write error response", zap.Error(err))
 			}
 			return
@@ -260,7 +269,7 @@ func (h *GlossaryHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 		// Check for validation errors
 		errMsg := err.Error()
-		if errMsg == "term name is required" || errMsg == "term definition is required" || errMsg == "defining_sql is required" || strings.Contains(errMsg, "SQL validation failed") {
+		if errMsg == "term name is required" || errMsg == "term definition is required" || strings.Contains(errMsg, "SQL validation failed") {
 			if err := ErrorResponse(w, http.StatusBadRequest, "validation_error", errMsg); err != nil {
 				h.logger.Error("Failed to write error response", zap.Error(err))
 			}
