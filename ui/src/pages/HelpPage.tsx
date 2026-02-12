@@ -55,7 +55,7 @@ const HelpPage = () => {
       icon: ListTree,
       title: "Extract Your Ontology",
       description: "Let AI analyze your schema and discover semantic meaning",
-      link: "ontology-extraction",
+      link: "ontology",
     },
     {
       icon: Zap,
