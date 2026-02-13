@@ -97,6 +97,7 @@ pkg/
 3. **Repositories are data-only** - SQL queries, external API calls
 4. **Dependency injection** - Services accept interfaces, not concrete types
 5. **Fail fast** - Return errors immediately, don't continue on failure
+6. **User JWT for all access checks** - We do not mint service JWTs. The user's JWT (issued by ekaya-central) is forwarded for all calls to central. Almost all project-level settings require `"role": "admin"` in the claims.
 
 ### Example Pattern
 
