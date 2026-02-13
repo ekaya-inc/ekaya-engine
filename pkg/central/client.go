@@ -46,6 +46,12 @@ type ProjectInfo struct {
 	URLs         ProjectURLs       `json:"urls,omitempty"`
 }
 
+// AppActionResponse is the response from app lifecycle endpoints (install, activate, uninstall).
+type AppActionResponse struct {
+	Status      string `json:"status"`                // e.g. "installed", "activated", "pending_activation"
+	RedirectUrl string `json:"redirectUrl,omitempty"` // if present, redirect user here
+}
+
 // ProjectURLs contains URLs for navigating to ekaya-central pages.
 type ProjectURLs struct {
 	ProjectsPage  string `json:"projectsPage,omitempty"`
@@ -155,6 +161,83 @@ func (c *Client) UpdateServerUrl(ctx context.Context, baseURL, projectID, server
 		zap.String("server_url", serverURL))
 
 	return c.doProjectRequest(req, projectID)
+}
+
+// InstallApp notifies ekaya-central that an application is being installed.
+// callbackUrl is the engine URL that central should redirect to if user interaction is needed.
+func (c *Client) InstallApp(ctx context.Context, baseURL, projectID, appID, token, callbackUrl string) (*AppActionResponse, error) {
+	return c.doAppAction(ctx, baseURL, projectID, appID, "install", token, callbackUrl)
+}
+
+// ActivateApp notifies ekaya-central that an application is being activated.
+// callbackUrl is the engine URL that central should redirect to if user interaction is needed.
+func (c *Client) ActivateApp(ctx context.Context, baseURL, projectID, appID, token, callbackUrl string) (*AppActionResponse, error) {
+	return c.doAppAction(ctx, baseURL, projectID, appID, "activate", token, callbackUrl)
+}
+
+// UninstallApp notifies ekaya-central that an application is being uninstalled.
+// callbackUrl is the engine URL that central should redirect to if user interaction is needed.
+func (c *Client) UninstallApp(ctx context.Context, baseURL, projectID, appID, token, callbackUrl string) (*AppActionResponse, error) {
+	return c.doAppAction(ctx, baseURL, projectID, appID, "uninstall", token, callbackUrl)
+}
+
+// doAppAction executes an app lifecycle action (install, activate, uninstall) against ekaya-central.
+func (c *Client) doAppAction(ctx context.Context, baseURL, projectID, appID, action, token, callbackUrl string) (*AppActionResponse, error) {
+	endpoint, err := buildURL(baseURL, "api", "v1", "projects", projectID, "apps", appID, action)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build URL: %w", err)
+	}
+
+	body, err := json.Marshal(map[string]string{"callbackUrl": callbackUrl})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	c.logger.Info("Calling ekaya-central app action",
+		zap.String("action", action),
+		zap.String("url", endpoint),
+		zap.String("project_id", projectID),
+		zap.String("app_id", appID))
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call ekaya-central: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		c.logger.Error("ekaya-central app action failed",
+			zap.String("action", action),
+			zap.Int("status", resp.StatusCode),
+			zap.String("body", string(respBody)))
+		return nil, fmt.Errorf("ekaya-central returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result AppActionResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	c.logger.Info("ekaya-central app action completed",
+		zap.String("action", action),
+		zap.String("status", result.Status),
+		zap.Bool("has_redirect", result.RedirectUrl != ""))
+
+	return &result, nil
 }
 
 // doProjectRequest executes an HTTP request and parses the project response.

@@ -498,11 +498,19 @@ func (m *mockInstalledAppService) IsInstalled(ctx context.Context, projectID uui
 	return m.installed[appID], nil
 }
 
-func (m *mockInstalledAppService) Install(ctx context.Context, projectID uuid.UUID, appID string, userID string) (*models.InstalledApp, error) {
+func (m *mockInstalledAppService) Install(ctx context.Context, projectID uuid.UUID, appID string, userID string) (*services.AppActionResult, error) {
 	return nil, nil
 }
 
-func (m *mockInstalledAppService) Uninstall(ctx context.Context, projectID uuid.UUID, appID string) error {
+func (m *mockInstalledAppService) Activate(ctx context.Context, projectID uuid.UUID, appID string) (*services.AppActionResult, error) {
+	return nil, nil
+}
+
+func (m *mockInstalledAppService) Uninstall(ctx context.Context, projectID uuid.UUID, appID string) (*services.AppActionResult, error) {
+	return nil, nil
+}
+
+func (m *mockInstalledAppService) CompleteCallback(ctx context.Context, projectID uuid.UUID, appID, action, status, nonce, userID string) error {
 	return nil
 }
 

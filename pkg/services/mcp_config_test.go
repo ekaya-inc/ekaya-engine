@@ -1057,11 +1057,19 @@ func (m *mockInstalledAppServiceForMCP) IsInstalled(ctx context.Context, project
 	return m.installed[appID], nil
 }
 
-func (m *mockInstalledAppServiceForMCP) Install(ctx context.Context, projectID uuid.UUID, appID string, userID string) (*models.InstalledApp, error) {
+func (m *mockInstalledAppServiceForMCP) Install(ctx context.Context, projectID uuid.UUID, appID string, userID string) (*AppActionResult, error) {
 	return nil, nil
 }
 
-func (m *mockInstalledAppServiceForMCP) Uninstall(ctx context.Context, projectID uuid.UUID, appID string) error {
+func (m *mockInstalledAppServiceForMCP) Activate(ctx context.Context, projectID uuid.UUID, appID string) (*AppActionResult, error) {
+	return nil, nil
+}
+
+func (m *mockInstalledAppServiceForMCP) Uninstall(ctx context.Context, projectID uuid.UUID, appID string) (*AppActionResult, error) {
+	return nil, nil
+}
+
+func (m *mockInstalledAppServiceForMCP) CompleteCallback(ctx context.Context, projectID uuid.UUID, appID, action, status, nonce, userID string) error {
 	return nil
 }
 

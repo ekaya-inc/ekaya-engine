@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
@@ -34,10 +35,16 @@ func (h *InstalledAppHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware 
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Get)))
 	mux.HandleFunc("POST "+base+"/{appId}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Install)))
+	mux.HandleFunc("POST "+base+"/{appId}/activate",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Activate)))
 	mux.HandleFunc("DELETE "+base+"/{appId}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Uninstall)))
 	mux.HandleFunc("PATCH "+base+"/{appId}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.UpdateSettings)))
+
+	// Callback endpoint is unauthenticated — browser redirects don't carry Authorization headers.
+	// Security relies on the single-use nonce (same pattern as OAuth callbacks).
+	mux.HandleFunc("GET "+base+"/{appId}/callback", tenantMiddleware(h.Callback))
 }
 
 // List handles GET /api/projects/{pid}/apps
@@ -115,7 +122,7 @@ func (h *InstalledAppHandler) Install(w http.ResponseWriter, r *http.Request) {
 	// Get user ID from auth context for tracking who installed the app
 	userID := auth.GetUserIDFromContext(r.Context())
 
-	app, err := h.installedAppService.Install(r.Context(), projectID, appID, userID)
+	result, err := h.installedAppService.Install(r.Context(), projectID, appID, userID)
 	if err != nil {
 		h.logger.Error("Failed to install app",
 			zap.String("project_id", projectID.String()),
@@ -148,8 +155,70 @@ func (h *InstalledAppHandler) Install(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := ApiResponse{Success: true, Data: app}
+	// If central requires a redirect, return the redirect URL
+	if result.RedirectUrl != "" {
+		response := ApiResponse{Success: true, Data: map[string]string{"redirectUrl": result.RedirectUrl}}
+		if err := WriteJSON(w, http.StatusOK, response); err != nil {
+			h.logger.Error("Failed to write response", zap.Error(err))
+		}
+		return
+	}
+
+	response := ApiResponse{Success: true, Data: result.App}
 	if err := WriteJSON(w, http.StatusCreated, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// Activate handles POST /api/projects/{pid}/apps/{appId}/activate
+func (h *InstalledAppHandler) Activate(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	appID := r.PathValue("appId")
+	if appID == "" {
+		if err := ErrorResponse(w, http.StatusBadRequest, "missing_app_id", "App ID is required"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	result, err := h.installedAppService.Activate(r.Context(), projectID, appID)
+	if err != nil {
+		h.logger.Error("Failed to activate app",
+			zap.String("project_id", projectID.String()),
+			zap.String("app_id", appID),
+			zap.Error(err))
+
+		statusCode := http.StatusInternalServerError
+		errorCode := "activate_failed"
+		message := "Failed to activate app"
+
+		if err.Error() == "mcp-server does not require activation" {
+			statusCode = http.StatusBadRequest
+			errorCode = "cannot_activate"
+			message = "MCP Server does not require activation"
+		}
+
+		if err := ErrorResponse(w, statusCode, errorCode, message); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// If central requires a redirect, return the redirect URL
+	if result.RedirectUrl != "" {
+		response := ApiResponse{Success: true, Data: map[string]string{"redirectUrl": result.RedirectUrl}}
+		if err := WriteJSON(w, http.StatusOK, response); err != nil {
+			h.logger.Error("Failed to write response", zap.Error(err))
+		}
+		return
+	}
+
+	response := ApiResponse{Success: true, Data: map[string]string{"status": result.Status}}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
 }
@@ -169,7 +238,7 @@ func (h *InstalledAppHandler) Uninstall(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	err := h.installedAppService.Uninstall(r.Context(), projectID, appID)
+	result, err := h.installedAppService.Uninstall(r.Context(), projectID, appID)
 	if err != nil {
 		h.logger.Error("Failed to uninstall app",
 			zap.String("project_id", projectID.String()),
@@ -198,9 +267,86 @@ func (h *InstalledAppHandler) Uninstall(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	response := ApiResponse{Success: true, Data: map[string]string{"status": "uninstalled"}}
+	// If central requires a redirect, return the redirect URL
+	if result.RedirectUrl != "" {
+		response := ApiResponse{Success: true, Data: map[string]string{"redirectUrl": result.RedirectUrl}}
+		if err := WriteJSON(w, http.StatusOK, response); err != nil {
+			h.logger.Error("Failed to write response", zap.Error(err))
+		}
+		return
+	}
+
+	response := ApiResponse{Success: true, Data: map[string]string{"status": result.Status}}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// Callback handles GET /api/projects/{pid}/apps/{appId}/callback
+// This endpoint is unauthenticated — browser redirects from central don't carry
+// Authorization headers. Security relies on the single-use nonce (state param).
+// Returns HTTP 302 redirects to UI pages, not JSON.
+func (h *InstalledAppHandler) Callback(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	appID := r.PathValue("appId")
+	action := r.URL.Query().Get("action")
+	status := r.URL.Query().Get("status")
+	nonce := r.URL.Query().Get("state")
+
+	if appID == "" || action == "" || status == "" || nonce == "" {
+		http.Error(w, "Missing required callback parameters", http.StatusBadRequest)
+		return
+	}
+
+	// Validate action is one of the known values
+	if action != "install" && action != "activate" && action != "uninstall" {
+		http.Error(w, "Invalid action parameter", http.StatusBadRequest)
+		return
+	}
+
+	// For install callbacks, we don't have the userID from auth (unauthenticated endpoint).
+	// Use empty string — the nonce validates the request originated from a legitimate flow.
+	userID := ""
+
+	err := h.installedAppService.CompleteCallback(r.Context(), projectID, appID, action, status, nonce, userID)
+	if err != nil {
+		h.logger.Error("Failed to complete callback",
+			zap.String("project_id", projectID.String()),
+			zap.String("app_id", appID),
+			zap.String("action", action),
+			zap.String("status", status),
+			zap.Error(err))
+		http.Error(w, "Callback processing failed", http.StatusBadRequest)
+		return
+	}
+
+	// Redirect to the appropriate UI page
+	redirectTarget := h.callbackRedirectTarget(projectID, appID, action, status)
+	http.Redirect(w, r, redirectTarget, http.StatusFound)
+}
+
+// callbackRedirectTarget determines which UI page to redirect to after a callback.
+func (h *InstalledAppHandler) callbackRedirectTarget(projectID uuid.UUID, appID, action, status string) string {
+	pid := projectID.String()
+
+	// If cancelled, always go back to the app page
+	if status == "cancelled" {
+		return "/projects/" + pid + "/apps/" + appID
+	}
+
+	switch action {
+	case "uninstall":
+		return "/projects/" + pid
+	case "install":
+		return "/projects/" + pid + "/apps/" + appID
+	case "activate":
+		return "/projects/" + pid + "/apps/" + appID
+	default:
+		return "/projects/" + pid
 	}
 }
 

@@ -34,7 +34,7 @@ import { TOOL_GROUP_IDS } from '../constants/mcpToolMetadata';
 import { useConfig } from '../contexts/ConfigContext';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
-import type { DAGStatusResponse, Datasource, MCPConfigResponse, ServerStatusResponse } from '../types';
+import type { DAGStatusResponse, Datasource, InstalledApp, MCPConfigResponse, ServerStatusResponse } from '../types';
 
 // Developer tools added to the MCP Server by AI Data Liaison installation
 const DATA_LIAISON_DEVELOPER_TOOLS = [
@@ -62,6 +62,8 @@ const AIDataLiaisonPage = () => {
   const [mcpServerReady, setMcpServerReady] = useState(false);
   const [serverStatus, setServerStatus] = useState<ServerStatusResponse | null>(null);
   const [mcpConfig, setMcpConfig] = useState<MCPConfigResponse | null>(null);
+  const [installedApp, setInstalledApp] = useState<InstalledApp | null>(null);
+  const [activating, setActivating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [updatingConfig, setUpdatingConfig] = useState(false);
 
@@ -74,15 +76,17 @@ const AIDataLiaisonPage = () => {
 
     setLoading(true);
     try {
-      // Fetch MCP config, datasources, and server status in parallel
-      const [mcpConfigRes, datasourcesRes, serverStatusRes] = await Promise.all([
+      // Fetch MCP config, datasources, server status, and installed app in parallel
+      const [mcpConfigRes, datasourcesRes, serverStatusRes, installedAppRes] = await Promise.all([
         engineApi.getMCPConfig(pid),
         engineApi.listDataSources(pid),
         engineApi.getServerStatus(),
+        engineApi.getInstalledApp(pid, 'ai-data-liaison').catch(() => null),
       ]);
 
       setMcpConfig(mcpConfigRes.data ?? null);
       setServerStatus(serverStatusRes);
+      setInstalledApp(installedAppRes?.data ?? null);
 
       // Check if MCP Server is ready: ontology DAG completed implies all prereqs are met
       const ds: Datasource | null = datasourcesRes.data?.datasources?.[0] ?? null;
@@ -150,6 +154,29 @@ const AIDataLiaisonPage = () => {
     }
   };
 
+  const handleActivate = async () => {
+    if (!pid) return;
+
+    setActivating(true);
+    try {
+      const response = await engineApi.activateApp(pid, 'ai-data-liaison');
+      if (response.data?.redirectUrl) {
+        window.location.href = response.data.redirectUrl;
+        return;
+      }
+      // Activation succeeded without redirect — refresh data
+      await fetchChecklistData();
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to activate application',
+        variant: 'destructive',
+      });
+    } finally {
+      setActivating(false);
+    }
+  };
+
   const handleAllowOntologyMaintenanceChange = async (enabled: boolean) => {
     if (!pid) return;
 
@@ -208,6 +235,26 @@ const AIDataLiaisonPage = () => {
       status: loading ? 'loading' : isAccessible ? 'complete' : 'pending',
       link: `/projects/${pid}/server-setup`,
       linkText: isAccessible ? 'Review' : 'Configure',
+    });
+
+    // 3. Activate (always shown, but disabled until steps 1 and 2 are complete)
+    const prerequisitesMet = mcpServerReady && isAccessible;
+    const activated = installedApp?.activated_at != null;
+    items.push({
+      id: 'activate',
+      title: 'Activate AI Data Liaison',
+      description: activated
+        ? 'AI Data Liaison activated'
+        : prerequisitesMet
+          ? 'Activate to enable billing and start using the application'
+          : 'Complete the steps above before activating',
+      status: loading ? 'loading' : activated ? 'complete' : 'pending',
+      disabled: !prerequisitesMet && !activated,
+      ...(activated ? {} : {
+        onAction: handleActivate,
+        actionText: 'Activate',
+        actionDisabled: activating || !prerequisitesMet,
+      }),
     });
 
     return items;

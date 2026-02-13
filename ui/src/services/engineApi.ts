@@ -897,6 +897,20 @@ class EngineApiService {
   }
 
   /**
+   * Activate an app for a project
+   * POST /api/projects/{projectId}/apps/{appId}/activate
+   */
+  async activateApp(
+    projectId: string,
+    appId: string
+  ): Promise<ApiResponse<{ redirectUrl?: string; status?: string }>> {
+    return this.makeRequest<{ redirectUrl?: string; status?: string }>(
+      `/${projectId}/apps/${appId}/activate`,
+      { method: 'POST' }
+    );
+  }
+
+  /**
    * Uninstall an app from a project
    * DELETE /api/projects/{projectId}/apps/{appId}
    */

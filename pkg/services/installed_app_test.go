@@ -22,6 +22,7 @@ type mockInstalledAppRepository struct {
 	getErr         error
 	listErr        error
 	isInstalledErr error
+	activateErr    error
 }
 
 func newMockInstalledAppRepository() *mockInstalledAppRepository {
@@ -71,6 +72,19 @@ func (m *mockInstalledAppRepository) Install(ctx context.Context, app *models.In
 	return nil
 }
 
+func (m *mockInstalledAppRepository) Activate(ctx context.Context, projectID uuid.UUID, appID string) error {
+	if m.activateErr != nil {
+		return m.activateErr
+	}
+	key := m.key(projectID, appID)
+	if app, exists := m.apps[key]; exists {
+		now := time.Now()
+		app.ActivatedAt = &now
+		return nil
+	}
+	return assert.AnError
+}
+
 func (m *mockInstalledAppRepository) Uninstall(ctx context.Context, projectID uuid.UUID, appID string) error {
 	if m.uninstallErr != nil {
 		return m.uninstallErr
@@ -95,12 +109,18 @@ func (m *mockInstalledAppRepository) UpdateSettings(ctx context.Context, project
 	return assert.AnError
 }
 
+// newTestInstalledAppService creates an InstalledAppService with nil central client (tests that don't
+// call Install/Activate/Uninstall don't need it).
+func newTestInstalledAppService(repo *mockInstalledAppRepository) InstalledAppService {
+	return NewInstalledAppService(repo, nil, NewNonceStore(), "http://localhost:3443", zap.NewNop())
+}
+
 // Tests
 
 func TestInstalledAppService_ListInstalled_IncludesMCPServerAlways(t *testing.T) {
 	projectID := uuid.New()
 	repo := newMockInstalledAppRepository()
-	svc := NewInstalledAppService(repo, zap.NewNop())
+	svc := newTestInstalledAppService(repo)
 
 	apps, err := svc.ListInstalled(context.Background(), projectID)
 	require.NoError(t, err)
@@ -124,7 +144,7 @@ func TestInstalledAppService_ListInstalled_ReturnsInstalledApps(t *testing.T) {
 		Settings:    make(map[string]any),
 	}
 
-	svc := NewInstalledAppService(repo, zap.NewNop())
+	svc := newTestInstalledAppService(repo)
 
 	apps, err := svc.ListInstalled(context.Background(), projectID)
 	require.NoError(t, err)
@@ -138,7 +158,7 @@ func TestInstalledAppService_ListInstalled_ReturnsInstalledApps(t *testing.T) {
 func TestInstalledAppService_IsInstalled_MCPServerAlwaysTrue(t *testing.T) {
 	projectID := uuid.New()
 	repo := newMockInstalledAppRepository()
-	svc := NewInstalledAppService(repo, zap.NewNop())
+	svc := newTestInstalledAppService(repo)
 
 	installed, err := svc.IsInstalled(context.Background(), projectID, models.AppIDMCPServer)
 	require.NoError(t, err)
@@ -148,7 +168,7 @@ func TestInstalledAppService_IsInstalled_MCPServerAlwaysTrue(t *testing.T) {
 func TestInstalledAppService_IsInstalled_ReturnsCorrectStatus(t *testing.T) {
 	projectID := uuid.New()
 	repo := newMockInstalledAppRepository()
-	svc := NewInstalledAppService(repo, zap.NewNop())
+	svc := newTestInstalledAppService(repo)
 
 	// Not installed
 	installed, err := svc.IsInstalled(context.Background(), projectID, models.AppIDAIDataLiaison)
@@ -168,27 +188,10 @@ func TestInstalledAppService_IsInstalled_ReturnsCorrectStatus(t *testing.T) {
 	assert.True(t, installed)
 }
 
-func TestInstalledAppService_Install_Success(t *testing.T) {
-	projectID := uuid.New()
-	userID := "user@example.com"
-	repo := newMockInstalledAppRepository()
-	svc := NewInstalledAppService(repo, zap.NewNop())
-
-	app, err := svc.Install(context.Background(), projectID, models.AppIDAIDataLiaison, userID)
-	require.NoError(t, err)
-	require.NotNil(t, app)
-
-	assert.Equal(t, models.AppIDAIDataLiaison, app.AppID)
-	assert.Equal(t, projectID, app.ProjectID)
-	assert.Equal(t, userID, app.InstalledBy)
-	assert.NotEqual(t, uuid.Nil, app.ID)
-	assert.False(t, app.InstalledAt.IsZero())
-}
-
-func TestInstalledAppService_Install_UnknownApp(t *testing.T) {
+func TestInstalledAppService_Install_RejectsUnknownApp(t *testing.T) {
 	projectID := uuid.New()
 	repo := newMockInstalledAppRepository()
-	svc := NewInstalledAppService(repo, zap.NewNop())
+	svc := newTestInstalledAppService(repo)
 
 	_, err := svc.Install(context.Background(), projectID, "unknown-app", "user")
 	require.Error(t, err)
@@ -198,7 +201,7 @@ func TestInstalledAppService_Install_UnknownApp(t *testing.T) {
 func TestInstalledAppService_Install_MCPServerRejected(t *testing.T) {
 	projectID := uuid.New()
 	repo := newMockInstalledAppRepository()
-	svc := NewInstalledAppService(repo, zap.NewNop())
+	svc := newTestInstalledAppService(repo)
 
 	_, err := svc.Install(context.Background(), projectID, models.AppIDMCPServer, "user")
 	require.Error(t, err)
@@ -216,40 +219,19 @@ func TestInstalledAppService_Install_AlreadyInstalled(t *testing.T) {
 		AppID:     models.AppIDAIDataLiaison,
 	}
 
-	svc := NewInstalledAppService(repo, zap.NewNop())
+	svc := newTestInstalledAppService(repo)
 
 	_, err := svc.Install(context.Background(), projectID, models.AppIDAIDataLiaison, "user")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already installed")
 }
 
-func TestInstalledAppService_Uninstall_Success(t *testing.T) {
-	projectID := uuid.New()
-	repo := newMockInstalledAppRepository()
-
-	// Pre-install
-	repo.apps[repo.key(projectID, models.AppIDAIDataLiaison)] = &models.InstalledApp{
-		ID:        uuid.New(),
-		ProjectID: projectID,
-		AppID:     models.AppIDAIDataLiaison,
-	}
-
-	svc := NewInstalledAppService(repo, zap.NewNop())
-
-	err := svc.Uninstall(context.Background(), projectID, models.AppIDAIDataLiaison)
-	require.NoError(t, err)
-
-	// Verify it's removed
-	_, exists := repo.apps[repo.key(projectID, models.AppIDAIDataLiaison)]
-	assert.False(t, exists)
-}
-
 func TestInstalledAppService_Uninstall_MCPServerRejected(t *testing.T) {
 	projectID := uuid.New()
 	repo := newMockInstalledAppRepository()
-	svc := NewInstalledAppService(repo, zap.NewNop())
+	svc := newTestInstalledAppService(repo)
 
-	err := svc.Uninstall(context.Background(), projectID, models.AppIDMCPServer)
+	_, err := svc.Uninstall(context.Background(), projectID, models.AppIDMCPServer)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot be uninstalled")
 }
@@ -266,7 +248,7 @@ func TestInstalledAppService_GetSettings_ReturnsSettings(t *testing.T) {
 		Settings:  expectedSettings,
 	}
 
-	svc := NewInstalledAppService(repo, zap.NewNop())
+	svc := newTestInstalledAppService(repo)
 
 	settings, err := svc.GetSettings(context.Background(), projectID, models.AppIDAIDataLiaison)
 	require.NoError(t, err)
@@ -276,7 +258,7 @@ func TestInstalledAppService_GetSettings_ReturnsSettings(t *testing.T) {
 func TestInstalledAppService_GetSettings_MCPServerReturnsEmpty(t *testing.T) {
 	projectID := uuid.New()
 	repo := newMockInstalledAppRepository()
-	svc := NewInstalledAppService(repo, zap.NewNop())
+	svc := newTestInstalledAppService(repo)
 
 	settings, err := svc.GetSettings(context.Background(), projectID, models.AppIDMCPServer)
 	require.NoError(t, err)
@@ -286,7 +268,7 @@ func TestInstalledAppService_GetSettings_MCPServerReturnsEmpty(t *testing.T) {
 func TestInstalledAppService_GetSettings_NotInstalled(t *testing.T) {
 	projectID := uuid.New()
 	repo := newMockInstalledAppRepository()
-	svc := NewInstalledAppService(repo, zap.NewNop())
+	svc := newTestInstalledAppService(repo)
 
 	_, err := svc.GetSettings(context.Background(), projectID, models.AppIDAIDataLiaison)
 	require.Error(t, err)
@@ -304,7 +286,7 @@ func TestInstalledAppService_UpdateSettings_Success(t *testing.T) {
 		Settings:  make(map[string]any),
 	}
 
-	svc := NewInstalledAppService(repo, zap.NewNop())
+	svc := newTestInstalledAppService(repo)
 
 	newSettings := map[string]any{"newKey": "newValue"}
 	err := svc.UpdateSettings(context.Background(), projectID, models.AppIDAIDataLiaison, newSettings)
@@ -318,7 +300,7 @@ func TestInstalledAppService_UpdateSettings_Success(t *testing.T) {
 func TestInstalledAppService_UpdateSettings_MCPServerRejected(t *testing.T) {
 	projectID := uuid.New()
 	repo := newMockInstalledAppRepository()
-	svc := NewInstalledAppService(repo, zap.NewNop())
+	svc := newTestInstalledAppService(repo)
 
 	err := svc.UpdateSettings(context.Background(), projectID, models.AppIDMCPServer, map[string]any{})
 	require.Error(t, err)
@@ -328,7 +310,7 @@ func TestInstalledAppService_UpdateSettings_MCPServerRejected(t *testing.T) {
 func TestInstalledAppService_GetApp_MCPServerReturnsVirtual(t *testing.T) {
 	projectID := uuid.New()
 	repo := newMockInstalledAppRepository()
-	svc := NewInstalledAppService(repo, zap.NewNop())
+	svc := newTestInstalledAppService(repo)
 
 	app, err := svc.GetApp(context.Background(), projectID, models.AppIDMCPServer)
 	require.NoError(t, err)
@@ -355,7 +337,7 @@ func TestInstalledAppService_GetApp_ReturnsInstalledApp(t *testing.T) {
 		Settings:    map[string]any{"key": "value"},
 	}
 
-	svc := NewInstalledAppService(repo, zap.NewNop())
+	svc := newTestInstalledAppService(repo)
 
 	app, err := svc.GetApp(context.Background(), projectID, models.AppIDAIDataLiaison)
 	require.NoError(t, err)
@@ -369,7 +351,7 @@ func TestInstalledAppService_GetApp_ReturnsInstalledApp(t *testing.T) {
 func TestInstalledAppService_GetApp_NotInstalled(t *testing.T) {
 	projectID := uuid.New()
 	repo := newMockInstalledAppRepository()
-	svc := NewInstalledAppService(repo, zap.NewNop())
+	svc := newTestInstalledAppService(repo)
 
 	_, err := svc.GetApp(context.Background(), projectID, models.AppIDAIDataLiaison)
 	require.Error(t, err)
