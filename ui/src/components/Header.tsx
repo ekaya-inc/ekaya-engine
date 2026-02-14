@@ -1,4 +1,4 @@
-import { Settings, HelpCircle } from 'lucide-react';
+import { Settings } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import { useProject } from '../contexts/ProjectContext';
@@ -35,13 +35,6 @@ const Header = () => {
               title="Settings"
             >
               <Settings className="h-5 w-5" />
-            </button>
-            <button
-              onClick={() => navigate(`/projects/${pid}/help`)}
-              className="p-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-secondary transition-colors"
-              title="Help"
-            >
-              <HelpCircle className="h-5 w-5" />
             </button>
           </div>
         )}
