@@ -256,7 +256,7 @@ describe('AIDataLiaisonPage', () => {
       setupAllCompleteMocks({ isActivated: false });
       await renderAIDataLiaisonPage();
       expect(screen.getByText('3. Activate AI Data Liaison')).toBeInTheDocument();
-      expect(screen.getByText('Activate to enable billing and start using the application')).toBeInTheDocument();
+      expect(screen.getByText('Activate to start using the application')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /^activate$/i })).toBeInTheDocument();
     });
 

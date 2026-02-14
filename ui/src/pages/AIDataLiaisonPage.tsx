@@ -289,7 +289,7 @@ const AIDataLiaisonPage = () => {
       description: activated
         ? 'AI Data Liaison activated'
         : mcpServerReady
-          ? 'Activate to enable billing and start using the application'
+          ? 'Activate to start using the application'
           : 'Complete step 1 before activating',
       status: loading ? 'loading' : activated ? 'complete' : 'pending',
       disabled: !mcpServerReady && !activated,
