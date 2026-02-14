@@ -54,7 +54,7 @@ The alert system backend is **nearly complete**. The frontend exists but is **em
 | Alert summary counts | Complete | AuditPage summary header shows open alerts by severity |
 | TypeScript types | Complete | `ui/src/types/audit.ts` (AlertConfig, AuditAlert, AlertTypeSetting, ResolveAlertRequest) |
 | API methods | Complete | `ui/src/services/engineApi.ts` (getAuditAlerts, resolveAuditAlert, getAlertConfig, updateAlertConfig) |
-| Settings page integration | Complete | `ui/src/pages/SettingsPage.tsx` renders AlertConfigSection |
+| Settings page integration | **Commented out** | `ui/src/pages/SettingsPage.tsx` — AlertConfigSection import and render are commented out (component preserved in `AlertConfigSection.tsx`) |
 | Dashboard tile | None | Audit tile shows "security alerts" in description but no separate alerts tile |
 | Dedicated route | None | No `/alerts` route exists |
 
