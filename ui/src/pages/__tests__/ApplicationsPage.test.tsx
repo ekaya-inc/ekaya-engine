@@ -97,7 +97,8 @@ describe('ApplicationsPage', () => {
     renderPage();
 
     expect(screen.getByText('AI Data Liaison')).toBeInTheDocument();
-    expect(screen.getByText('AI Agents and Automation')).toBeInTheDocument();
+    // AI Agents tile is temporarily hidden
+    expect(screen.queryByText('AI Agents and Automation')).not.toBeInTheDocument();
     expect(screen.getByText('Product Kit [BETA]')).toBeInTheDocument();
     expect(screen.getByText('On-Premise Chat [BETA]')).toBeInTheDocument();
     expect(screen.getByText('Your own Data Application')).toBeInTheDocument();
@@ -117,11 +118,11 @@ describe('ApplicationsPage', () => {
   it('renders Install buttons for installable apps when not installed', () => {
     renderPage();
 
-    // Both AI Data Liaison and AI Agents should have Install buttons
+    // Only AI Data Liaison has Install button (AI Agents tile is temporarily hidden)
     const installButtons = screen.getAllByRole('button', { name: 'Install' });
-    expect(installButtons).toHaveLength(2);
+    expect(installButtons).toHaveLength(1);
     const learnMoreButtons = screen.getAllByRole('button', { name: /Learn More/i });
-    expect(learnMoreButtons).toHaveLength(2);
+    expect(learnMoreButtons).toHaveLength(1);
   });
 
   it('renders Installed badge and Configure button when AI Data Liaison is installed', () => {
@@ -132,9 +133,8 @@ describe('ApplicationsPage', () => {
     expect(
       screen.getByRole('button', { name: 'Configure' })
     ).toBeInTheDocument();
-    // AI Agents still has Install button (only AI Data Liaison is installed)
-    const installButtons = screen.getAllByRole('button', { name: 'Install' });
-    expect(installButtons).toHaveLength(1);
+    // No Install buttons remain (AI Agents tile is temporarily hidden)
+    expect(screen.queryByRole('button', { name: 'Install' })).not.toBeInTheDocument();
   });
 
   it('calls install and navigates when clicking Install on AI Data Liaison', async () => {
