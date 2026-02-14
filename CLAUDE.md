@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is **ekaya-engine** - a clean architecture rebuild of the Ekaya regional controller. The project was initialized from ekaya-region's infrastructure but with a minimal Go backend shell, designed for incremental, well-architected development.
+This is **ekaya-engine** - the Ekaya regional controller, built with clean architecture and designed for incremental, well-architected development.
 
 **Design Philosophy:**
 - Clean architecture with separation of concerns

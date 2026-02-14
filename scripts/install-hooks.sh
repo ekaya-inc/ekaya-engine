@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install git hooks for ekaya-region project
+# Install git hooks for ekaya-engine project
 
 set -e
 
@@ -8,7 +8,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 HOOKS_DIR="$PROJECT_ROOT/.githooks"
 GIT_HOOKS_DIR="$PROJECT_ROOT/.git/hooks"
 
-echo "🔧 Installing git hooks for ekaya-region..."
+echo "🔧 Installing git hooks for ekaya-engine..."
 
 # Check if we're in a git repository
 if [ ! -d "$PROJECT_ROOT/.git" ]; then

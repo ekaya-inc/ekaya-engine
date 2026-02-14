@@ -7,7 +7,7 @@ import * as authToken from './auth-token';
 vi.mock('../services/config', () => ({
   getCachedConfig: vi.fn(() => ({
     authServerUrl: 'http://localhost:5002',
-    oauthClientId: 'ekaya-region-localhost',
+    oauthClientId: 'ekaya-engine-localhost',
     baseUrl: 'http://localhost:3443',
     authorizationEndpoint: 'http://localhost:5002/authorize',
     tokenEndpoint: 'http://localhost:3443/mcp/oauth/token',
