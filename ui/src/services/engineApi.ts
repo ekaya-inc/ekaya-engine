@@ -917,10 +917,30 @@ class EngineApiService {
   async uninstallApp(
     projectId: string,
     appId: string
-  ): Promise<ApiResponse<void>> {
-    return this.makeRequest<void>(`/${projectId}/apps/${appId}`, {
+  ): Promise<ApiResponse<{ redirectUrl?: string; status?: string }>> {
+    return this.makeRequest<{ redirectUrl?: string; status?: string }>(`/${projectId}/apps/${appId}`, {
       method: 'DELETE',
     });
+  }
+
+  /**
+   * Complete an app lifecycle callback (after redirect from central)
+   * POST /api/projects/{projectId}/apps/{appId}/callback
+   */
+  async completeAppCallback(
+    projectId: string,
+    appId: string,
+    action: string,
+    status: string,
+    state: string
+  ): Promise<ApiResponse<{ action: string; status: string }>> {
+    return this.makeRequest<{ action: string; status: string }>(
+      `/${projectId}/apps/${appId}/callback`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ action, status, state }),
+      }
+    );
   }
 
   /**

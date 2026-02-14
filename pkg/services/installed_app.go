@@ -15,6 +15,14 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
 
+// CentralAppClient is the subset of central.Client used by InstalledAppService.
+// Defined as an interface to enable dependency injection and testing.
+type CentralAppClient interface {
+	InstallApp(ctx context.Context, baseURL, projectID, appID, token, callbackUrl string) (*central.AppActionResponse, error)
+	ActivateApp(ctx context.Context, baseURL, projectID, appID, token, callbackUrl string) (*central.AppActionResponse, error)
+	UninstallApp(ctx context.Context, baseURL, projectID, appID, token, callbackUrl string) (*central.AppActionResponse, error)
+}
+
 // AppActionResult is returned by Install, Activate, and Uninstall when central
 // may require a redirect for user interaction (e.g., billing flow).
 type AppActionResult struct {
@@ -48,7 +56,7 @@ type InstalledAppService interface {
 	Uninstall(ctx context.Context, projectID uuid.UUID, appID string) (*AppActionResult, error)
 
 	// CompleteCallback processes the callback from central after a redirect flow.
-	// Returns the action that was completed (for redirect target determination).
+	// Validates the nonce and completes the action (install/activate/uninstall) locally.
 	CompleteCallback(ctx context.Context, projectID uuid.UUID, appID, action, status, nonce, userID string) error
 
 	// GetSettings returns app-specific settings.
@@ -63,7 +71,7 @@ type InstalledAppService interface {
 
 type installedAppService struct {
 	repo          repositories.InstalledAppRepository
-	centralClient *central.Client
+	centralClient CentralAppClient
 	nonceStore    NonceStore
 	baseURL       string
 	logger        *zap.Logger
@@ -72,7 +80,7 @@ type installedAppService struct {
 // NewInstalledAppService creates a new installed app service.
 func NewInstalledAppService(
 	repo repositories.InstalledAppRepository,
-	centralClient *central.Client,
+	centralClient CentralAppClient,
 	nonceStore NonceStore,
 	baseURL string,
 	logger *zap.Logger,
@@ -401,11 +409,14 @@ func (s *installedAppService) saveInstall(ctx context.Context, projectID uuid.UU
 // buildCallbackURL constructs the engine callback URL for central redirects.
 func (s *installedAppService) buildCallbackURL(projectID, appID, action string) string {
 	nonce := s.nonceStore.Generate(action, projectID, appID)
-	callbackURL := fmt.Sprintf("%s/api/projects/%s/apps/%s/callback", s.baseURL, projectID, appID)
+	// Point to the UI route — central redirects the browser here, the SPA
+	// re-establishes auth context and calls the authenticated API callback.
+	callbackURL := fmt.Sprintf("%s/projects/%s/ai-data-liaison", s.baseURL, projectID)
 
 	params := url.Values{}
-	params.Set("action", action)
-	params.Set("state", nonce)
+	params.Set("callback_action", action)
+	params.Set("callback_state", nonce)
+	params.Set("callback_app", appID)
 
 	return callbackURL + "?" + params.Encode()
 }

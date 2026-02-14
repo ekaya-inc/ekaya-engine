@@ -11,6 +11,7 @@ vi.mock('../../services/engineApi', () => ({
   default: {
     uninstallApp: vi.fn(),
     activateApp: vi.fn(),
+    completeAppCallback: vi.fn(),
     getInstalledApp: vi.fn(),
     listDataSources: vi.fn(),
     getMCPConfig: vi.fn(),
@@ -243,10 +244,10 @@ describe('AIDataLiaisonPage', () => {
       expect(screen.getByText('Datasource, schema, AI, and ontology configured')).toBeInTheDocument();
     });
 
-    it('shows MCP Server accessible as pending when server is on localhost', async () => {
+    it('shows MCP Server accessible as optional when server is on localhost', async () => {
       await renderAIDataLiaisonPage();
       expect(screen.getByText('2. MCP Server accessible')).toBeInTheDocument();
-      expect(screen.getByText(/business users cannot connect/)).toBeInTheDocument();
+      expect(screen.getByText(/Optional/)).toBeInTheDocument();
     });
   });
 
@@ -263,7 +264,7 @@ describe('AIDataLiaisonPage', () => {
       setupMocks({ hasDatasource: true, hasOntology: false });
       await renderAIDataLiaisonPage();
       expect(screen.getByText(/Activate AI Data Liaison/)).toBeInTheDocument();
-      expect(screen.getByText('Complete the steps above before activating')).toBeInTheDocument();
+      expect(screen.getByText('Complete step 1 before activating')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /^activate$/i })).toBeDisabled();
     });
 
@@ -306,6 +307,35 @@ describe('AIDataLiaisonPage', () => {
           description: 'Activation failed',
           variant: 'destructive',
         });
+      });
+    });
+
+    it('redirects to central when activateApp returns redirectUrl', async () => {
+      setupAllCompleteMocks({ isActivated: false });
+      vi.mocked(engineApi.activateApp).mockResolvedValue({
+        success: true,
+        data: { redirectUrl: 'https://central.example.com/billing', status: 'pending_activation' },
+      });
+
+      const originalLocation = window.location;
+      Object.defineProperty(window, 'location', {
+        value: { ...originalLocation, href: '' },
+        writable: true,
+        configurable: true,
+      });
+
+      await renderAIDataLiaisonPage();
+      const activateButton = screen.getByRole('button', { name: /^activate$/i });
+      fireEvent.click(activateButton);
+
+      await waitFor(() => {
+        expect(window.location.href).toBe('https://central.example.com/billing');
+      });
+
+      Object.defineProperty(window, 'location', {
+        value: originalLocation,
+        writable: true,
+        configurable: true,
       });
     });
   });
@@ -549,6 +579,61 @@ describe('AIDataLiaisonPage', () => {
 
       // Resolve the promise to clean up
       resolvePromise({ success: true });
+    });
+
+    it('redirects to central when uninstallApp returns redirectUrl', async () => {
+      vi.mocked(engineApi.uninstallApp).mockResolvedValue({
+        success: true,
+        data: { redirectUrl: 'https://central.example.com/cancel-billing', status: 'pending_uninstall' },
+      });
+
+      const originalLocation = window.location;
+      Object.defineProperty(window, 'location', {
+        value: { ...originalLocation, href: '' },
+        writable: true,
+        configurable: true,
+      });
+
+      await renderAIDataLiaisonPage();
+      const uninstallButton = screen.getByRole('button', { name: /uninstall application/i });
+      fireEvent.click(uninstallButton);
+
+      const input = screen.getByPlaceholderText('uninstall application');
+      fireEvent.change(input, { target: { value: 'uninstall application' } });
+
+      fireEvent.click(getConfirmButton());
+
+      await waitFor(() => {
+        expect(window.location.href).toBe('https://central.example.com/cancel-billing');
+      });
+
+      expect(mockNavigate).not.toHaveBeenCalled();
+
+      Object.defineProperty(window, 'location', {
+        value: originalLocation,
+        writable: true,
+        configurable: true,
+      });
+    });
+
+    it('navigates locally when uninstallApp returns no redirectUrl', async () => {
+      vi.mocked(engineApi.uninstallApp).mockResolvedValue({
+        success: true,
+        data: { status: 'uninstalled' },
+      });
+
+      await renderAIDataLiaisonPage();
+      const uninstallButton = screen.getByRole('button', { name: /uninstall application/i });
+      fireEvent.click(uninstallButton);
+
+      const input = screen.getByPlaceholderText('uninstall application');
+      fireEvent.change(input, { target: { value: 'uninstall application' } });
+
+      fireEvent.click(getConfirmButton());
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1');
+      });
     });
   });
 });

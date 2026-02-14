@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/central"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
 
@@ -113,6 +115,37 @@ func (m *mockInstalledAppRepository) UpdateSettings(ctx context.Context, project
 // call Install/Activate/Uninstall don't need it).
 func newTestInstalledAppService(repo *mockInstalledAppRepository) InstalledAppService {
 	return NewInstalledAppService(repo, nil, NewNonceStore(), "http://localhost:3443", zap.NewNop())
+}
+
+// Mock central client for testing app lifecycle methods.
+type mockCentralClient struct {
+	installResp   *central.AppActionResponse
+	installErr    error
+	activateResp  *central.AppActionResponse
+	activateErr   error
+	uninstallResp *central.AppActionResponse
+	uninstallErr  error
+}
+
+func (m *mockCentralClient) InstallApp(_ context.Context, _, _, _, _, _ string) (*central.AppActionResponse, error) {
+	return m.installResp, m.installErr
+}
+
+func (m *mockCentralClient) ActivateApp(_ context.Context, _, _, _, _, _ string) (*central.AppActionResponse, error) {
+	return m.activateResp, m.activateErr
+}
+
+func (m *mockCentralClient) UninstallApp(_ context.Context, _, _, _, _, _ string) (*central.AppActionResponse, error) {
+	return m.uninstallResp, m.uninstallErr
+}
+
+func newTestInstalledAppServiceWithCentral(repo *mockInstalledAppRepository, cc CentralAppClient) InstalledAppService {
+	return NewInstalledAppService(repo, cc, NewNonceStore(), "http://localhost:3443", zap.NewNop())
+}
+
+func testAuthContext() context.Context {
+	ctx := context.WithValue(context.Background(), auth.TokenKey, "test-token")
+	return context.WithValue(ctx, auth.ClaimsKey, &auth.Claims{PAPI: "https://central.example.com"})
 }
 
 // Tests
@@ -356,4 +389,174 @@ func TestInstalledAppService_GetApp_NotInstalled(t *testing.T) {
 	_, err := svc.GetApp(context.Background(), projectID, models.AppIDAIDataLiaison)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not installed")
+}
+
+// --- Activate tests ---
+
+func TestInstalledAppService_Activate_RejectsMCPServer(t *testing.T) {
+	projectID := uuid.New()
+	repo := newMockInstalledAppRepository()
+	svc := newTestInstalledAppService(repo)
+
+	_, err := svc.Activate(context.Background(), projectID, models.AppIDMCPServer)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not require activation")
+}
+
+func TestInstalledAppService_Activate_ReturnsRedirectFromCentral(t *testing.T) {
+	projectID := uuid.New()
+	repo := newMockInstalledAppRepository()
+	cc := &mockCentralClient{
+		activateResp: &central.AppActionResponse{
+			Status:      "pending_activation",
+			RedirectUrl: "https://central.example.com/billing",
+		},
+	}
+	svc := newTestInstalledAppServiceWithCentral(repo, cc)
+
+	result, err := svc.Activate(testAuthContext(), projectID, models.AppIDAIDataLiaison)
+	require.NoError(t, err)
+	assert.Equal(t, "https://central.example.com/billing", result.RedirectUrl)
+	assert.Equal(t, "pending_activation", result.Status)
+}
+
+func TestInstalledAppService_Activate_CompletesLocallyWhenNoRedirect(t *testing.T) {
+	projectID := uuid.New()
+	repo := newMockInstalledAppRepository()
+	repo.apps[repo.key(projectID, models.AppIDAIDataLiaison)] = &models.InstalledApp{
+		ID:        uuid.New(),
+		ProjectID: projectID,
+		AppID:     models.AppIDAIDataLiaison,
+		Settings:  make(map[string]any),
+	}
+	cc := &mockCentralClient{
+		activateResp: &central.AppActionResponse{Status: "activated"},
+	}
+	svc := newTestInstalledAppServiceWithCentral(repo, cc)
+
+	result, err := svc.Activate(testAuthContext(), projectID, models.AppIDAIDataLiaison)
+	require.NoError(t, err)
+	assert.Empty(t, result.RedirectUrl)
+	assert.Equal(t, "activated", result.Status)
+
+	app := repo.apps[repo.key(projectID, models.AppIDAIDataLiaison)]
+	assert.NotNil(t, app.ActivatedAt)
+}
+
+// --- Uninstall tests ---
+
+func TestInstalledAppService_Uninstall_ReturnsRedirectFromCentral(t *testing.T) {
+	projectID := uuid.New()
+	repo := newMockInstalledAppRepository()
+	cc := &mockCentralClient{
+		uninstallResp: &central.AppActionResponse{
+			Status:      "pending_uninstall",
+			RedirectUrl: "https://central.example.com/cancel",
+		},
+	}
+	svc := newTestInstalledAppServiceWithCentral(repo, cc)
+
+	result, err := svc.Uninstall(testAuthContext(), projectID, models.AppIDAIDataLiaison)
+	require.NoError(t, err)
+	assert.Equal(t, "https://central.example.com/cancel", result.RedirectUrl)
+	assert.Equal(t, "pending_uninstall", result.Status)
+}
+
+func TestInstalledAppService_Uninstall_CompletesLocallyWhenNoRedirect(t *testing.T) {
+	projectID := uuid.New()
+	repo := newMockInstalledAppRepository()
+	repo.apps[repo.key(projectID, models.AppIDAIDataLiaison)] = &models.InstalledApp{
+		ID:        uuid.New(),
+		ProjectID: projectID,
+		AppID:     models.AppIDAIDataLiaison,
+		Settings:  make(map[string]any),
+	}
+	cc := &mockCentralClient{
+		uninstallResp: &central.AppActionResponse{Status: "uninstalled"},
+	}
+	svc := newTestInstalledAppServiceWithCentral(repo, cc)
+
+	result, err := svc.Uninstall(testAuthContext(), projectID, models.AppIDAIDataLiaison)
+	require.NoError(t, err)
+	assert.Empty(t, result.RedirectUrl)
+	assert.Equal(t, "uninstalled", result.Status)
+
+	_, exists := repo.apps[repo.key(projectID, models.AppIDAIDataLiaison)]
+	assert.False(t, exists)
+}
+
+// --- CompleteCallback tests ---
+
+func TestInstalledAppService_CompleteCallback_RejectsInvalidNonce(t *testing.T) {
+	projectID := uuid.New()
+	repo := newMockInstalledAppRepository()
+	svc := newTestInstalledAppService(repo)
+
+	err := svc.CompleteCallback(context.Background(), projectID, models.AppIDAIDataLiaison, "activate", "success", "invalid-nonce", "user@example.com")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid or expired")
+}
+
+func TestInstalledAppService_CompleteCallback_CompletesActivate(t *testing.T) {
+	projectID := uuid.New()
+	repo := newMockInstalledAppRepository()
+	repo.apps[repo.key(projectID, models.AppIDAIDataLiaison)] = &models.InstalledApp{
+		ID:        uuid.New(),
+		ProjectID: projectID,
+		AppID:     models.AppIDAIDataLiaison,
+		Settings:  make(map[string]any),
+	}
+
+	nonceStore := NewNonceStore()
+	svc := NewInstalledAppService(repo, nil, nonceStore, "http://localhost:3443", zap.NewNop())
+	nonce := nonceStore.Generate("activate", projectID.String(), models.AppIDAIDataLiaison)
+
+	err := svc.CompleteCallback(context.Background(), projectID, models.AppIDAIDataLiaison, "activate", "success", nonce, "user@example.com")
+	require.NoError(t, err)
+
+	app := repo.apps[repo.key(projectID, models.AppIDAIDataLiaison)]
+	assert.NotNil(t, app.ActivatedAt)
+}
+
+func TestInstalledAppService_CompleteCallback_CompletesUninstall(t *testing.T) {
+	projectID := uuid.New()
+	repo := newMockInstalledAppRepository()
+	repo.apps[repo.key(projectID, models.AppIDAIDataLiaison)] = &models.InstalledApp{
+		ID:        uuid.New(),
+		ProjectID: projectID,
+		AppID:     models.AppIDAIDataLiaison,
+		Settings:  make(map[string]any),
+	}
+
+	nonceStore := NewNonceStore()
+	svc := NewInstalledAppService(repo, nil, nonceStore, "http://localhost:3443", zap.NewNop())
+	nonce := nonceStore.Generate("uninstall", projectID.String(), models.AppIDAIDataLiaison)
+
+	err := svc.CompleteCallback(context.Background(), projectID, models.AppIDAIDataLiaison, "uninstall", "success", nonce, "user@example.com")
+	require.NoError(t, err)
+
+	_, exists := repo.apps[repo.key(projectID, models.AppIDAIDataLiaison)]
+	assert.False(t, exists)
+}
+
+func TestInstalledAppService_CompleteCallback_CancelledNoOps(t *testing.T) {
+	projectID := uuid.New()
+	repo := newMockInstalledAppRepository()
+	repo.apps[repo.key(projectID, models.AppIDAIDataLiaison)] = &models.InstalledApp{
+		ID:        uuid.New(),
+		ProjectID: projectID,
+		AppID:     models.AppIDAIDataLiaison,
+		Settings:  make(map[string]any),
+	}
+
+	nonceStore := NewNonceStore()
+	svc := NewInstalledAppService(repo, nil, nonceStore, "http://localhost:3443", zap.NewNop())
+	nonce := nonceStore.Generate("activate", projectID.String(), models.AppIDAIDataLiaison)
+
+	err := svc.CompleteCallback(context.Background(), projectID, models.AppIDAIDataLiaison, "activate", "cancelled", nonce, "user@example.com")
+	require.NoError(t, err)
+
+	// App should NOT have been activated
+	app := repo.apps[repo.key(projectID, models.AppIDAIDataLiaison)]
+	assert.Nil(t, app.ActivatedAt)
 }

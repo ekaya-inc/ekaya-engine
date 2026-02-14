@@ -8,7 +8,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import UserToolsSection from '../components/mcp/UserToolsSection';
 import SetupChecklist from '../components/SetupChecklist';
@@ -49,6 +49,7 @@ const DATA_LIAISON_DEVELOPER_TOOLS = [
 const AIDataLiaisonPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { config: appConfig } = useConfig();
   const { toast } = useToast();
 
@@ -117,6 +118,45 @@ const AIDataLiaisonPage = () => {
     fetchChecklistData();
   }, [fetchChecklistData]);
 
+  // Process callback from central redirect (e.g., after billing confirmation)
+  useEffect(() => {
+    const callbackAction = searchParams.get('callback_action');
+    const callbackState = searchParams.get('callback_state');
+    const callbackApp = searchParams.get('callback_app');
+
+    if (!callbackAction || !callbackState || !callbackApp || !pid) return;
+
+    // Clear callback params from URL immediately to prevent re-processing
+    setSearchParams({}, { replace: true });
+
+    const processCallback = async () => {
+      try {
+        const response = await engineApi.completeAppCallback(
+          pid, callbackApp, callbackAction, 'success', callbackState
+        );
+        if (response.error) {
+          toast({ title: 'Error', description: response.error, variant: 'destructive' });
+          return;
+        }
+        // Navigate based on completed action
+        if (callbackAction === 'uninstall') {
+          navigate(`/projects/${pid}`);
+        } else {
+          // For install/activate, refresh data to show updated state
+          await fetchChecklistData();
+        }
+      } catch (error) {
+        toast({
+          title: 'Error',
+          description: error instanceof Error ? error.message : 'Failed to complete action',
+          variant: 'destructive',
+        });
+      }
+    };
+
+    processCallback();
+  }, [searchParams, setSearchParams, pid, navigate, toast, fetchChecklistData]);
+
   const handleUninstall = async () => {
     if (confirmText !== 'uninstall application' || !pid) return;
 
@@ -129,6 +169,10 @@ const AIDataLiaisonPage = () => {
           description: response.error,
           variant: 'destructive',
         });
+        return;
+      }
+      if (response.data?.redirectUrl) {
+        window.location.href = response.data.redirectUrl;
         return;
       }
       navigate(`/projects/${pid}`);
@@ -225,35 +269,34 @@ const AIDataLiaisonPage = () => {
       linkText: mcpServerReady ? 'Manage' : 'Configure',
     });
 
-    // 2. MCP Server accessible to business users
+    // 2. MCP Server accessible to business users (optional — not required for activation)
     items.push({
       id: 'server-accessible',
       title: 'MCP Server accessible',
       description: isAccessible
         ? 'Server is reachable by business users over HTTPS'
-        : 'Server is on localhost \u2014 business users cannot connect',
+        : 'Optional \u2014 configure when ready to share with business users',
       status: loading ? 'loading' : isAccessible ? 'complete' : 'pending',
       link: `/projects/${pid}/server-setup`,
       linkText: isAccessible ? 'Review' : 'Configure',
     });
 
-    // 3. Activate (always shown, but disabled until steps 1 and 2 are complete)
-    const prerequisitesMet = mcpServerReady && isAccessible;
+    // 3. Activate (only requires step 1)
     const activated = installedApp?.activated_at != null;
     items.push({
       id: 'activate',
       title: 'Activate AI Data Liaison',
       description: activated
         ? 'AI Data Liaison activated'
-        : prerequisitesMet
+        : mcpServerReady
           ? 'Activate to enable billing and start using the application'
-          : 'Complete the steps above before activating',
+          : 'Complete step 1 before activating',
       status: loading ? 'loading' : activated ? 'complete' : 'pending',
-      disabled: !prerequisitesMet && !activated,
+      disabled: !mcpServerReady && !activated,
       ...(activated ? {} : {
         onAction: handleActivate,
         actionText: 'Activate',
-        actionDisabled: activating || !prerequisitesMet,
+        actionDisabled: activating || !mcpServerReady,
       }),
     });
 
