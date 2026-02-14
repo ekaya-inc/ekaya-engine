@@ -251,6 +251,14 @@ func (s *installedAppService) Uninstall(ctx context.Context, projectID uuid.UUID
 		return nil, fmt.Errorf("failed to notify central: %w", err)
 	}
 
+	s.logger.Info("Central uninstall response",
+		zap.String("project_id", projectID.String()),
+		zap.String("app_id", appID),
+		zap.String("status", centralResp.Status),
+		zap.String("redirect_url", centralResp.RedirectUrl),
+		zap.String("callback_url", callbackUrl),
+	)
+
 	// If central requires a redirect, return it without deleting
 	if centralResp.RedirectUrl != "" {
 		return &AppActionResult{
