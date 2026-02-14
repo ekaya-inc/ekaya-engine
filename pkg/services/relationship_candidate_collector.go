@@ -89,8 +89,8 @@ func (c *relationshipCandidateCollector) identifyFKSources(
 	columnTableMap := make(map[uuid.UUID]string)
 	tableIDToName := make(map[uuid.UUID]string)
 
-	// Get tables to resolve table names
-	tables, err := c.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
+	// Get selected tables only - candidates should not reference non-selected tables
+	tables, err := c.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list tables: %w", err)
 	}
@@ -262,8 +262,8 @@ func (c *relationshipCandidateCollector) identifyFKTargets(
 	ctx context.Context,
 	projectID, datasourceID uuid.UUID,
 ) ([]*FKTargetColumn, error) {
-	// Get tables first to resolve table names
-	tables, err := c.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
+	// Get selected tables only - candidates should not reference non-selected tables
+	tables, err := c.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
 	if err != nil {
 		return nil, fmt.Errorf("list tables: %w", err)
 	}
