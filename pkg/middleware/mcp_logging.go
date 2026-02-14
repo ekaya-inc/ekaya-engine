@@ -70,8 +70,14 @@ func MCPRequestLogger(logger *zap.Logger, cfg config.MCPConfig) func(http.Handle
 
 			// Parse JSON-RPC response to check for errors
 			var rpcResp jsonRPCResponse
-			if err := json.Unmarshal(recorder.body.Bytes(), &rpcResp); err != nil {
-				logger.Debug("Failed to parse MCP response JSON", zap.Error(err))
+			responseBody := recorder.body.String()
+			if err := json.Unmarshal([]byte(responseBody), &rpcResp); err != nil {
+				logger.Debug("Failed to parse MCP response JSON",
+					zap.Error(err),
+					zap.String("response_body", responseBody),
+					zap.String("tool", toolName),
+					zap.Int("response_length", len(responseBody)),
+				)
 				return
 			}
 

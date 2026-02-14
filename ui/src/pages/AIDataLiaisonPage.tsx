@@ -123,7 +123,7 @@ const AIDataLiaisonPage = () => {
     const callbackAction = searchParams.get('callback_action');
     const callbackState = searchParams.get('callback_state');
     const callbackApp = searchParams.get('callback_app');
-    const callbackStatus = searchParams.get('callback_status') || 'success';
+    const callbackStatus = searchParams.get('callback_status') ?? 'success';
 
     if (!callbackAction || !callbackState || !callbackApp || !pid) return;
 
