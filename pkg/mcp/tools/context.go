@@ -269,8 +269,8 @@ func handleContextWithoutOntology(
 		return nil, fmt.Errorf("failed to get default datasource: %w", err)
 	}
 
-	// Get schema information
-	schema, err := deps.SchemaService.GetDatasourceSchema(ctx, projectID, dsID)
+	// Get schema information (only selected tables/columns)
+	schema, err := deps.SchemaService.GetSelectedDatasourceSchema(ctx, projectID, dsID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get schema: %w", err)
 	}
@@ -365,8 +365,8 @@ func buildTablesFromSchema(
 		return nil, fmt.Errorf("failed to get default datasource: %w", err)
 	}
 
-	// Get schema information
-	schema, err := deps.SchemaService.GetDatasourceSchema(ctx, projectID, dsID)
+	// Get schema information (only selected tables/columns)
+	schema, err := deps.SchemaService.GetSelectedDatasourceSchema(ctx, projectID, dsID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get schema: %w", err)
 	}
@@ -535,7 +535,7 @@ func buildColumnDetails(
 
 	// Always fetch schema columns to get column features from metadata
 	var schemaColumns map[string]*models.SchemaColumn
-	cols, err := deps.SchemaRepo.GetColumnsByTables(ctx, projectID, []string{table.TableName}, false)
+	cols, err := deps.SchemaRepo.GetColumnsByTables(ctx, projectID, []string{table.TableName})
 	if err != nil {
 		deps.Logger.Warn("Failed to get schema columns",
 			zap.String("table", table.TableName),

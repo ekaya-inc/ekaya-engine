@@ -825,7 +825,11 @@ type mockSchemaRepoForFeatureExtraction struct {
 	columns []*models.SchemaColumn
 }
 
-func (m *mockSchemaRepoForFeatureExtraction) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+func (m *mockSchemaRepoForFeatureExtraction) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	return m.tables, nil
+}
+
+func (m *mockSchemaRepoForFeatureExtraction) ListAllTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
 	return m.tables, nil
 }
 
@@ -856,10 +860,13 @@ func (m *mockSchemaRepoForFeatureExtraction) SoftDeleteRemovedTables(ctx context
 func (m *mockSchemaRepoForFeatureExtraction) UpdateTableSelection(ctx context.Context, projectID, tableID uuid.UUID, isSelected bool) error {
 	return nil
 }
-func (m *mockSchemaRepoForFeatureExtraction) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
+func (m *mockSchemaRepoForFeatureExtraction) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }
-func (m *mockSchemaRepoForFeatureExtraction) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error) {
+func (m *mockSchemaRepoForFeatureExtraction) ListAllColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForFeatureExtraction) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error) {
 	return nil, nil
 }
 func (m *mockSchemaRepoForFeatureExtraction) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {

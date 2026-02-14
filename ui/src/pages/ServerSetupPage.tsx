@@ -3,7 +3,6 @@ import {
   ArrowLeft,
   CheckCircle2,
   Copy,
-  ExternalLink,
   Loader2,
   RefreshCw,
   Server,
@@ -219,12 +218,15 @@ const ServerSetupPage = () => {
                     Generate with <code className="bg-surface-secondary px-1 rounded">openssl</code> for
                     internal or testing use. Users&apos; browsers must trust the root CA.
                   </p>
-                  <div className="rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-3 py-2">
+                  <div className="rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-3 py-2 space-y-2">
                     <p className="text-xs text-amber-800 dark:text-amber-300">
-                      MCP clients using Node.js (Claude Code, Cursor) need the{' '}
-                      <code className="font-semibold">NODE_EXTRA_CA_CERTS</code> environment variable
-                      set to trust your CA certificate.
+                      MCP clients built on Node.js (Claude Code, Cursor) need to trust your CA:
                     </p>
+                    <div className="rounded bg-amber-100 dark:bg-amber-900/30 px-2 py-1.5 font-mono text-xs text-amber-900 dark:text-amber-200">
+                      <span className="opacity-60"># Add to your shell profile or MCP client config</span>
+                      <br />
+                      export NODE_EXTRA_CA_CERTS=&quot;/path/to/your/ca-cert.pem&quot;
+                    </div>
                   </div>
                 </div>
 
@@ -329,26 +331,6 @@ const ServerSetupPage = () => {
         </CardContent>
       </Card>
 
-      {/* Node.js hint - always visible */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <ExternalLink className="h-4 w-4 text-text-secondary" />
-            MCP Client Configuration
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-text-secondary mb-3">
-            If using self-signed certificates, MCP clients built on Node.js (Claude Code, Cursor)
-            need to trust your CA:
-          </p>
-          <div className="rounded-lg bg-surface-secondary border border-border-light p-3 font-mono text-sm">
-            <span className="text-text-secondary"># Add to your shell profile or MCP client config</span>
-            <br />
-            export NODE_EXTRA_CA_CERTS=<span className="text-brand-purple">&quot;/path/to/your/ca-cert.pem&quot;</span>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 };

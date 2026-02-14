@@ -27,9 +27,11 @@ type TableKey struct {
 // SchemaRepository provides data access for schema discovery tables.
 type SchemaRepository interface {
 	// Tables
-	// ListTablesByDatasource returns tables for a datasource.
-	// If selectedOnly is true, only tables with is_selected=true are returned.
-	ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error)
+	// ListTablesByDatasource returns selected tables for a datasource.
+	ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error)
+	// ListAllTablesByDatasource returns all tables (including non-selected) for a datasource.
+	// Use this only for schema management operations (refresh, UI display).
+	ListAllTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error)
 	GetTableByID(ctx context.Context, projectID, tableID uuid.UUID) (*models.SchemaTable, error)
 	GetTableByName(ctx context.Context, projectID, datasourceID uuid.UUID, schemaName, tableName string) (*models.SchemaTable, error)
 	// FindTableByName finds a table by name within a datasource (schema-agnostic).
@@ -40,13 +42,14 @@ type SchemaRepository interface {
 	UpdateTableSelection(ctx context.Context, projectID, tableID uuid.UUID, isSelected bool) error
 
 	// Columns
-	// ListColumnsByTable returns columns for a specific table.
-	// If selectedOnly is true, only columns with is_selected=true are returned.
-	ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error)
+	// ListColumnsByTable returns selected columns for a specific table.
+	ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error)
+	// ListAllColumnsByTable returns all columns (including non-selected) for a specific table.
+	// Use this only for schema management operations (sync, UI display, selection management).
+	ListAllColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error)
 	ListColumnsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error)
-	// GetColumnsByTables returns columns for multiple tables, grouped by table name.
-	// If selectedOnly is true, only columns with is_selected=true are returned.
-	GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error)
+	// GetColumnsByTables returns selected columns for multiple tables, grouped by table name.
+	GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error)
 	GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error)
 	GetColumnByID(ctx context.Context, projectID, columnID uuid.UUID) (*models.SchemaColumn, error)
 	GetColumnByName(ctx context.Context, tableID uuid.UUID, columnName string) (*models.SchemaColumn, error)
@@ -104,7 +107,7 @@ var _ SchemaRepository = (*schemaRepository)(nil)
 // Table Methods
 // ============================================================================
 
-func (r *schemaRepository) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+func (r *schemaRepository) listTablesByDatasourceInternal(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, fmt.Errorf("no tenant scope in context")
@@ -150,6 +153,16 @@ func (r *schemaRepository) ListTablesByDatasource(ctx context.Context, projectID
 	}
 
 	return tables, nil
+}
+
+// ListTablesByDatasource returns selected tables for a datasource (safe default).
+func (r *schemaRepository) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	return r.listTablesByDatasourceInternal(ctx, projectID, datasourceID, true)
+}
+
+// ListAllTablesByDatasource returns all tables (including non-selected) for a datasource.
+func (r *schemaRepository) ListAllTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	return r.listTablesByDatasourceInternal(ctx, projectID, datasourceID, false)
 }
 
 func (r *schemaRepository) GetTableByID(ctx context.Context, projectID, tableID uuid.UUID) (*models.SchemaTable, error) {
@@ -373,7 +386,17 @@ func (r *schemaRepository) UpdateTableSelection(ctx context.Context, projectID, 
 // Column Methods
 // ============================================================================
 
-func (r *schemaRepository) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
+// ListColumnsByTable returns selected columns for a table.
+func (r *schemaRepository) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return r.listColumnsByTableInternal(ctx, projectID, tableID, true)
+}
+
+// ListAllColumnsByTable returns all columns (including non-selected) for a table.
+func (r *schemaRepository) ListAllColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return r.listColumnsByTableInternal(ctx, projectID, tableID, false)
+}
+
+func (r *schemaRepository) listColumnsByTableInternal(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, fmt.Errorf("no tenant scope in context")
@@ -452,7 +475,7 @@ func (r *schemaRepository) ListColumnsByDatasource(ctx context.Context, projectI
 	return columns, nil
 }
 
-func (r *schemaRepository) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error) {
+func (r *schemaRepository) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, fmt.Errorf("no tenant scope in context")
@@ -473,11 +496,10 @@ func (r *schemaRepository) GetColumnsByTables(ctx context.Context, projectID uui
 		WHERE c.project_id = $1
 		  AND t.table_name = ANY($2)
 		  AND c.deleted_at IS NULL
-		  AND t.deleted_at IS NULL`
-	if selectedOnly {
-		query += ` AND c.is_selected = true`
-	}
-	query += ` ORDER BY t.table_name, c.ordinal_position`
+		  AND t.deleted_at IS NULL
+		  AND c.is_selected = true
+		  AND t.is_selected = true
+		ORDER BY t.table_name, c.ordinal_position`
 
 	rows, err := scope.Conn.Query(ctx, query, projectID, tableNames)
 	if err != nil {

@@ -52,9 +52,9 @@
   - Return `IndexResult` with success status, tables indexed count, embeddings generated count
 
 ### Step 3: Copy Knowledge Files
-- [ ] Copy `knowledge/postgres.md` from ekaya-region to ekaya-engine
-- [ ] Copy `knowledge/mssql_syntax.md` from ekaya-region to ekaya-engine
-- [ ] Copy `knowledge/clickhouse_syntax.md` from ekaya-region to ekaya-engine
+- [ ] Add `knowledge/postgres.md`
+- [ ] Add `knowledge/mssql_syntax.md`
+- [ ] Add `knowledge/clickhouse_syntax.md`
 - [ ] Create `pkg/services/text2sql_knowledge.go` to embed knowledge files for runtime access
 
 **Why embed knowledge?** Avoid file I/O at runtime. Embed files at compile time using `//go:embed` directive for fast access and portability.
@@ -285,9 +285,9 @@
 - `pkg/security/pipeline_test.go`
 
 **Knowledge Files:**
-- `knowledge/postgres.md` (copy from ekaya-region)
-- `knowledge/mssql_syntax.md` (copy from ekaya-region)
-- `knowledge/clickhouse_syntax.md` (copy from ekaya-region)
+- `knowledge/postgres.md`
+- `knowledge/mssql_syntax.md`
+- `knowledge/clickhouse_syntax.md`
 
 ## Files to Modify
 

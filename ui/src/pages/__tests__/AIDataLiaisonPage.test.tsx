@@ -10,6 +10,9 @@ import AIDataLiaisonPage from '../AIDataLiaisonPage';
 vi.mock('../../services/engineApi', () => ({
   default: {
     uninstallApp: vi.fn(),
+    activateApp: vi.fn(),
+    completeAppCallback: vi.fn(),
+    getInstalledApp: vi.fn(),
     listDataSources: vi.fn(),
     getMCPConfig: vi.fn(),
     getAIConfig: vi.fn(),
@@ -82,10 +85,23 @@ const setupMocks = (options: {
   hasMCPConfig?: boolean;
   hasSelectedTables?: boolean;
   hasAIConfig?: boolean;
+  isActivated?: boolean;
 } = {}) => {
-  const { hasDatasource = true, hasOntology = false, hasMCPConfig = true, hasSelectedTables = false, hasAIConfig = false } = options;
+  const { hasDatasource = true, hasOntology = false, hasMCPConfig = true, hasSelectedTables = false, hasAIConfig = false, isActivated = false } = options;
 
   vi.mocked(engineApi.getServerStatus).mockResolvedValue(null);
+
+  vi.mocked(engineApi.getInstalledApp).mockResolvedValue({
+    success: true,
+    data: {
+      id: 'inst-1',
+      project_id: 'proj-1',
+      app_id: 'ai-data-liaison',
+      installed_at: '2024-01-01',
+      settings: {},
+      ...(isActivated ? { activated_at: '2024-01-02' } : {}),
+    },
+  });
 
   vi.mocked(engineApi.listDataSources).mockResolvedValue({
     success: true,
@@ -133,13 +149,15 @@ const setupMocks = (options: {
   }
 };
 
-const setupAllCompleteMocks = () => {
+const setupAllCompleteMocks = (options: { isActivated?: boolean } = {}) => {
+  const { isActivated = true } = options;
   setupMocks({
     hasDatasource: true,
     hasSelectedTables: true,
     hasAIConfig: true,
     hasOntology: true,
     hasMCPConfig: true,
+    isActivated,
   });
   // Server must be accessible for all checklist items to be complete
   vi.mocked(engineApi.getServerStatus).mockResolvedValue({
@@ -226,10 +244,99 @@ describe('AIDataLiaisonPage', () => {
       expect(screen.getByText('Datasource, schema, AI, and ontology configured')).toBeInTheDocument();
     });
 
-    it('shows MCP Server accessible as pending when server is on localhost', async () => {
+    it('shows MCP Server accessible as optional when server is on localhost', async () => {
       await renderAIDataLiaisonPage();
       expect(screen.getByText('2. MCP Server accessible')).toBeInTheDocument();
-      expect(screen.getByText(/business users cannot connect/)).toBeInTheDocument();
+      expect(screen.getByText(/Optional/)).toBeInTheDocument();
+    });
+  });
+
+  describe('Activate Step', () => {
+    it('shows activate step when prerequisites are met but not activated', async () => {
+      setupAllCompleteMocks({ isActivated: false });
+      await renderAIDataLiaisonPage();
+      expect(screen.getByText('3. Activate AI Data Liaison')).toBeInTheDocument();
+      expect(screen.getByText('Activate to start using the application')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^activate$/i })).toBeInTheDocument();
+    });
+
+    it('shows activate step disabled when prerequisites are not met', async () => {
+      setupMocks({ hasDatasource: true, hasOntology: false });
+      await renderAIDataLiaisonPage();
+      expect(screen.getByText(/Activate AI Data Liaison/)).toBeInTheDocument();
+      expect(screen.getByText('Complete step 1 before activating')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^activate$/i })).toBeDisabled();
+    });
+
+    it('shows activated state when activated_at is set', async () => {
+      setupAllCompleteMocks({ isActivated: true });
+      await renderAIDataLiaisonPage();
+      expect(screen.getByText('3. Activate AI Data Liaison')).toBeInTheDocument();
+      expect(screen.getByText('AI Data Liaison activated')).toBeInTheDocument();
+      // No activate button when already activated
+      expect(screen.queryByRole('button', { name: /^activate$/i })).not.toBeInTheDocument();
+    });
+
+    it('calls activateApp when Activate button is clicked', async () => {
+      setupAllCompleteMocks({ isActivated: false });
+      vi.mocked(engineApi.activateApp).mockResolvedValue({
+        success: true,
+        data: { status: 'activated' },
+      });
+
+      await renderAIDataLiaisonPage();
+      const activateButton = screen.getByRole('button', { name: /^activate$/i });
+      fireEvent.click(activateButton);
+
+      await waitFor(() => {
+        expect(engineApi.activateApp).toHaveBeenCalledWith('proj-1', 'ai-data-liaison');
+      });
+    });
+
+    it('shows error toast when activation fails', async () => {
+      setupAllCompleteMocks({ isActivated: false });
+      vi.mocked(engineApi.activateApp).mockRejectedValue(new Error('Activation failed'));
+
+      await renderAIDataLiaisonPage();
+      const activateButton = screen.getByRole('button', { name: /^activate$/i });
+      fireEvent.click(activateButton);
+
+      await waitFor(() => {
+        expect(mockToast).toHaveBeenCalledWith({
+          title: 'Error',
+          description: 'Activation failed',
+          variant: 'destructive',
+        });
+      });
+    });
+
+    it('redirects to central when activateApp returns redirectUrl', async () => {
+      setupAllCompleteMocks({ isActivated: false });
+      vi.mocked(engineApi.activateApp).mockResolvedValue({
+        success: true,
+        data: { redirectUrl: 'https://central.example.com/billing', status: 'pending_activation' },
+      });
+
+      const originalLocation = window.location;
+      Object.defineProperty(window, 'location', {
+        value: { ...originalLocation, href: '' },
+        writable: true,
+        configurable: true,
+      });
+
+      await renderAIDataLiaisonPage();
+      const activateButton = screen.getByRole('button', { name: /^activate$/i });
+      fireEvent.click(activateButton);
+
+      await waitFor(() => {
+        expect(window.location.href).toBe('https://central.example.com/billing');
+      });
+
+      Object.defineProperty(window, 'location', {
+        value: originalLocation,
+        writable: true,
+        configurable: true,
+      });
     });
   });
 
@@ -472,6 +579,61 @@ describe('AIDataLiaisonPage', () => {
 
       // Resolve the promise to clean up
       resolvePromise({ success: true });
+    });
+
+    it('redirects to central when uninstallApp returns redirectUrl', async () => {
+      vi.mocked(engineApi.uninstallApp).mockResolvedValue({
+        success: true,
+        data: { redirectUrl: 'https://central.example.com/cancel-billing', status: 'pending_uninstall' },
+      });
+
+      const originalLocation = window.location;
+      Object.defineProperty(window, 'location', {
+        value: { ...originalLocation, href: '' },
+        writable: true,
+        configurable: true,
+      });
+
+      await renderAIDataLiaisonPage();
+      const uninstallButton = screen.getByRole('button', { name: /uninstall application/i });
+      fireEvent.click(uninstallButton);
+
+      const input = screen.getByPlaceholderText('uninstall application');
+      fireEvent.change(input, { target: { value: 'uninstall application' } });
+
+      fireEvent.click(getConfirmButton());
+
+      await waitFor(() => {
+        expect(window.location.href).toBe('https://central.example.com/cancel-billing');
+      });
+
+      expect(mockNavigate).not.toHaveBeenCalled();
+
+      Object.defineProperty(window, 'location', {
+        value: originalLocation,
+        writable: true,
+        configurable: true,
+      });
+    });
+
+    it('navigates locally when uninstallApp returns no redirectUrl', async () => {
+      vi.mocked(engineApi.uninstallApp).mockResolvedValue({
+        success: true,
+        data: { status: 'uninstalled' },
+      });
+
+      await renderAIDataLiaisonPage();
+      const uninstallButton = screen.getByRole('button', { name: /uninstall application/i });
+      fireEvent.click(uninstallButton);
+
+      const input = screen.getByPlaceholderText('uninstall application');
+      fireEvent.change(input, { target: { value: 'uninstall application' } });
+
+      fireEvent.click(getConfirmButton());
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1');
+      });
     });
   });
 });

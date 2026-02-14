@@ -70,14 +70,21 @@ type mockSchemaRepoForFinalization struct {
 	getColumnsByErr error
 }
 
-func (m *mockSchemaRepoForFinalization) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+func (m *mockSchemaRepoForFinalization) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
 	if m.listTablesErr != nil {
 		return nil, m.listTablesErr
 	}
 	return m.tables, nil
 }
 
-func (m *mockSchemaRepoForFinalization) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error) {
+func (m *mockSchemaRepoForFinalization) ListAllTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	if m.listTablesErr != nil {
+		return nil, m.listTablesErr
+	}
+	return m.tables, nil
+}
+
+func (m *mockSchemaRepoForFinalization) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error) {
 	if m.getColumnsByErr != nil {
 		return nil, m.getColumnsByErr
 	}
@@ -103,7 +110,10 @@ func (m *mockSchemaRepoForFinalization) SoftDeleteRemovedTables(ctx context.Cont
 func (m *mockSchemaRepoForFinalization) UpdateTableSelection(ctx context.Context, projectID, tableID uuid.UUID, isSelected bool) error {
 	return nil
 }
-func (m *mockSchemaRepoForFinalization) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
+func (m *mockSchemaRepoForFinalization) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForFinalization) ListAllColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }
 func (m *mockSchemaRepoForFinalization) ListColumnsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error) {

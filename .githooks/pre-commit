@@ -1,5 +1,5 @@
 #!/bin/sh
-# Pre-commit hook for ekaya-region
+# Pre-commit hook for ekaya-engine
 # Runs comprehensive checks before allowing commit
 
 set -e

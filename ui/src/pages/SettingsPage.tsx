@@ -2,7 +2,9 @@ import { Settings, ArrowLeft, Moon, Sun, Monitor, LogOut, Trash2, Loader2 } from
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
-import AlertConfigSection from "../components/AlertConfigSection";
+// AlertConfigSection hidden until Alerts tile/screen is implemented.
+// See plans/PLAN-alerts-tile-and-screen.md
+// import AlertConfigSection from "../components/AlertConfigSection";
 import { useTheme } from "../components/ThemeProvider";
 import { Button } from "../components/ui/Button";
 import {
@@ -165,8 +167,9 @@ const SettingsPage = () => {
           </CardContent>
         </Card>
 
-        {/* Alert Configuration */}
-        {pid && <AlertConfigSection projectId={pid} />}
+        {/* Alert Configuration — hidden until Alerts tile/screen is implemented.
+           See plans/PLAN-alerts-tile-and-screen.md */}
+        {/* {pid && <AlertConfigSection projectId={pid} />} */}
 
         {/* Account */}
         <Card>

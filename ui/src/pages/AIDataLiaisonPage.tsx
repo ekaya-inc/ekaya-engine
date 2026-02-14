@@ -8,7 +8,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import UserToolsSection from '../components/mcp/UserToolsSection';
 import SetupChecklist from '../components/SetupChecklist';
@@ -34,7 +34,7 @@ import { TOOL_GROUP_IDS } from '../constants/mcpToolMetadata';
 import { useConfig } from '../contexts/ConfigContext';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
-import type { DAGStatusResponse, Datasource, MCPConfigResponse, ServerStatusResponse } from '../types';
+import type { DAGStatusResponse, Datasource, InstalledApp, MCPConfigResponse, ServerStatusResponse } from '../types';
 
 // Developer tools added to the MCP Server by AI Data Liaison installation
 const DATA_LIAISON_DEVELOPER_TOOLS = [
@@ -49,6 +49,7 @@ const DATA_LIAISON_DEVELOPER_TOOLS = [
 const AIDataLiaisonPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { config: appConfig } = useConfig();
   const { toast } = useToast();
 
@@ -62,6 +63,8 @@ const AIDataLiaisonPage = () => {
   const [mcpServerReady, setMcpServerReady] = useState(false);
   const [serverStatus, setServerStatus] = useState<ServerStatusResponse | null>(null);
   const [mcpConfig, setMcpConfig] = useState<MCPConfigResponse | null>(null);
+  const [installedApp, setInstalledApp] = useState<InstalledApp | null>(null);
+  const [activating, setActivating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [updatingConfig, setUpdatingConfig] = useState(false);
 
@@ -74,15 +77,17 @@ const AIDataLiaisonPage = () => {
 
     setLoading(true);
     try {
-      // Fetch MCP config, datasources, and server status in parallel
-      const [mcpConfigRes, datasourcesRes, serverStatusRes] = await Promise.all([
+      // Fetch MCP config, datasources, server status, and installed app in parallel
+      const [mcpConfigRes, datasourcesRes, serverStatusRes, installedAppRes] = await Promise.all([
         engineApi.getMCPConfig(pid),
         engineApi.listDataSources(pid),
         engineApi.getServerStatus(),
+        engineApi.getInstalledApp(pid, 'ai-data-liaison').catch(() => null),
       ]);
 
       setMcpConfig(mcpConfigRes.data ?? null);
       setServerStatus(serverStatusRes);
+      setInstalledApp(installedAppRes?.data ?? null);
 
       // Check if MCP Server is ready: ontology DAG completed implies all prereqs are met
       const ds: Datasource | null = datasourcesRes.data?.datasources?.[0] ?? null;
@@ -113,6 +118,51 @@ const AIDataLiaisonPage = () => {
     fetchChecklistData();
   }, [fetchChecklistData]);
 
+  // Process callback from central redirect (e.g., after billing confirmation)
+  useEffect(() => {
+    const callbackAction = searchParams.get('callback_action');
+    const callbackState = searchParams.get('callback_state');
+    const callbackApp = searchParams.get('callback_app');
+    const callbackStatus = searchParams.get('callback_status') ?? 'success';
+
+    if (!callbackAction || !callbackState || !callbackApp || !pid) return;
+
+    // Clear callback params from URL immediately to prevent re-processing
+    setSearchParams({}, { replace: true });
+
+    if (callbackStatus === 'cancelled') {
+      // User cancelled in central — stay on current page, no action needed
+      return;
+    }
+
+    const processCallback = async () => {
+      try {
+        const response = await engineApi.completeAppCallback(
+          pid, callbackApp, callbackAction, callbackStatus, callbackState
+        );
+        if (response.error) {
+          toast({ title: 'Error', description: response.error, variant: 'destructive' });
+          return;
+        }
+        // Navigate based on completed action
+        if (callbackAction === 'uninstall') {
+          navigate(`/projects/${pid}`);
+        } else {
+          // For install/activate, refresh data to show updated state
+          await fetchChecklistData();
+        }
+      } catch (error) {
+        toast({
+          title: 'Error',
+          description: error instanceof Error ? error.message : 'Failed to complete action',
+          variant: 'destructive',
+        });
+      }
+    };
+
+    processCallback();
+  }, [searchParams, setSearchParams, pid, navigate, toast, fetchChecklistData]);
+
   const handleUninstall = async () => {
     if (confirmText !== 'uninstall application' || !pid) return;
 
@@ -125,6 +175,10 @@ const AIDataLiaisonPage = () => {
           description: response.error,
           variant: 'destructive',
         });
+        return;
+      }
+      if (response.data?.redirectUrl) {
+        window.location.href = response.data.redirectUrl;
         return;
       }
       navigate(`/projects/${pid}`);
@@ -147,6 +201,29 @@ const AIDataLiaisonPage = () => {
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy URL:', err);
+    }
+  };
+
+  const handleActivate = async () => {
+    if (!pid) return;
+
+    setActivating(true);
+    try {
+      const response = await engineApi.activateApp(pid, 'ai-data-liaison');
+      if (response.data?.redirectUrl) {
+        window.location.href = response.data.redirectUrl;
+        return;
+      }
+      // Activation succeeded without redirect — refresh data
+      await fetchChecklistData();
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to activate application',
+        variant: 'destructive',
+      });
+    } finally {
+      setActivating(false);
     }
   };
 
@@ -198,16 +275,35 @@ const AIDataLiaisonPage = () => {
       linkText: mcpServerReady ? 'Manage' : 'Configure',
     });
 
-    // 2. MCP Server accessible to business users
+    // 2. MCP Server accessible to business users (optional — not required for activation)
     items.push({
       id: 'server-accessible',
       title: 'MCP Server accessible',
       description: isAccessible
         ? 'Server is reachable by business users over HTTPS'
-        : 'Server is on localhost \u2014 business users cannot connect',
+        : 'Optional \u2014 configure when ready to share with business users',
       status: loading ? 'loading' : isAccessible ? 'complete' : 'pending',
       link: `/projects/${pid}/server-setup`,
       linkText: isAccessible ? 'Review' : 'Configure',
+    });
+
+    // 3. Activate (only requires step 1)
+    const activated = installedApp?.activated_at != null;
+    items.push({
+      id: 'activate',
+      title: 'Activate AI Data Liaison',
+      description: activated
+        ? 'AI Data Liaison activated'
+        : mcpServerReady
+          ? 'Activate to start using the application'
+          : 'Complete step 1 before activating',
+      status: loading ? 'loading' : activated ? 'complete' : 'pending',
+      disabled: !mcpServerReady && !activated,
+      ...(activated ? {} : {
+        onAction: handleActivate,
+        actionText: 'Activate',
+        actionDisabled: activating || !mcpServerReady,
+      }),
     });
 
     return items;

@@ -26,6 +26,9 @@ type InstalledAppRepository interface {
 	// Install adds an app to the project.
 	Install(ctx context.Context, app *models.InstalledApp) error
 
+	// Activate sets activated_at to now for an installed app.
+	Activate(ctx context.Context, projectID uuid.UUID, appID string) error
+
 	// Uninstall removes an app from the project.
 	Uninstall(ctx context.Context, projectID uuid.UUID, appID string) error
 
@@ -49,7 +52,7 @@ func (r *installedAppRepository) List(ctx context.Context, projectID uuid.UUID) 
 	}
 
 	query := `
-		SELECT id, project_id, app_id, installed_at, installed_by, settings
+		SELECT id, project_id, app_id, installed_at, installed_by, activated_at, settings
 		FROM engine_installed_apps
 		WHERE project_id = $1
 		ORDER BY installed_at ASC`
@@ -84,7 +87,7 @@ func (r *installedAppRepository) Get(ctx context.Context, projectID uuid.UUID, a
 	}
 
 	query := `
-		SELECT id, project_id, app_id, installed_at, installed_by, settings
+		SELECT id, project_id, app_id, installed_at, installed_by, activated_at, settings
 		FROM engine_installed_apps
 		WHERE project_id = $1 AND app_id = $2`
 
@@ -153,6 +156,30 @@ func (r *installedAppRepository) Install(ctx context.Context, app *models.Instal
 	return nil
 }
 
+// Activate sets activated_at to now for an installed app.
+func (r *installedAppRepository) Activate(ctx context.Context, projectID uuid.UUID, appID string) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		UPDATE engine_installed_apps
+		SET activated_at = NOW()
+		WHERE project_id = $1 AND app_id = $2`
+
+	result, err := scope.Conn.Exec(ctx, query, projectID, appID)
+	if err != nil {
+		return fmt.Errorf("failed to activate app: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("app not installed")
+	}
+
+	return nil
+}
+
 // Uninstall removes an app from the project.
 func (r *installedAppRepository) Uninstall(ctx context.Context, projectID uuid.UUID, appID string) error {
 	scope, ok := database.GetTenantScope(ctx)
@@ -215,6 +242,7 @@ func (r *installedAppRepository) scanApp(rows pgx.Rows) (*models.InstalledApp, e
 		&app.AppID,
 		&app.InstalledAt,
 		&installedBy,
+		&app.ActivatedAt,
 		&settingsJSON,
 	)
 	if err != nil {
@@ -244,6 +272,7 @@ func (r *installedAppRepository) scanAppRow(row pgx.Row) (*models.InstalledApp, 
 		&app.AppID,
 		&app.InstalledAt,
 		&installedBy,
+		&app.ActivatedAt,
 		&settingsJSON,
 	)
 	if err != nil {

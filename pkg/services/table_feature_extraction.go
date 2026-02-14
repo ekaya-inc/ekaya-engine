@@ -89,7 +89,7 @@ func (s *tableFeatureExtractionService) ExtractTableFeatures(
 	}
 
 	// Get all selected tables
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to list tables: %w", err)
 	}

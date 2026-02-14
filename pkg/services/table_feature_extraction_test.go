@@ -532,7 +532,14 @@ type mockSchemaRepoForTableFeatures struct {
 	getRelationshipDetailsErr error
 }
 
-func (m *mockSchemaRepoForTableFeatures) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+func (m *mockSchemaRepoForTableFeatures) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	if m.listTablesErr != nil {
+		return nil, m.listTablesErr
+	}
+	return m.tables, nil
+}
+
+func (m *mockSchemaRepoForTableFeatures) ListAllTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
 	if m.listTablesErr != nil {
 		return nil, m.listTablesErr
 	}

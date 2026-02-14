@@ -17,6 +17,10 @@ export interface ChecklistItem {
   status: 'pending' | 'complete' | 'error' | 'loading';
   link?: string;
   linkText?: string;
+  onAction?: () => void;
+  actionText?: string;
+  actionDisabled?: boolean;
+  disabled?: boolean;
 }
 
 interface SetupChecklistProps {
@@ -54,7 +58,7 @@ const SetupChecklist = ({
           {items.map((item, index) => (
             <div
               key={item.id}
-              className="flex items-start gap-3 rounded-lg border border-border-light p-3"
+              className={`flex items-start gap-3 rounded-lg border border-border-light p-3${item.disabled ? ' opacity-50' : ''}`}
             >
               <div className="mt-0.5">
                 {item.status === 'loading' ? (
@@ -75,7 +79,17 @@ const SetupChecklist = ({
                 </div>
                 <p className="text-sm text-text-secondary">{item.description}</p>
               </div>
-              {item.link && item.status !== 'complete' && (
+              {item.onAction && item.status !== 'complete' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={item.onAction}
+                  disabled={item.actionDisabled}
+                >
+                  {item.actionText ?? 'Action'}
+                </Button>
+              )}
+              {item.link && item.status !== 'complete' && !item.onAction && (
                 <Link to={item.link}>
                   <Button variant="outline" size="sm">
                     {item.linkText}

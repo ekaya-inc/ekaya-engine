@@ -50,7 +50,7 @@ func (n *PKMatchDiscoveryNode) Execute(ctx context.Context, dag *models.Ontology
 		zap.String("datasource_id", dag.DatasourceID.String()))
 
 	// Report initial progress
-	if err := n.ReportProgress(ctx, 0, 100, "Discovering relationships via pairwise SQL join analysis..."); err != nil {
+	if err := n.ReportProgress(ctx, 0, 0, "Discovering relationships via pairwise SQL join analysis..."); err != nil {
 		n.Logger().Warn("Failed to report progress", zap.Error(err))
 	}
 
@@ -69,7 +69,7 @@ func (n *PKMatchDiscoveryNode) Execute(ctx context.Context, dag *models.Ontology
 
 	// Report completion
 	msg := fmt.Sprintf("Discovered %d relationships via join analysis", result.InferredRelationships)
-	if err := n.ReportProgress(ctx, 100, 100, msg); err != nil {
+	if err := n.ReportProgress(ctx, 1, 1, msg); err != nil {
 		n.Logger().Warn("Failed to report progress", zap.Error(err))
 	}
 

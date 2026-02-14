@@ -356,16 +356,6 @@ func (m *mockSchemaService) GetDatasourceSchemaForPrompt(ctx context.Context, pr
 	return "Schema prompt for datasource", nil
 }
 
-func (m *mockSchemaService) GetDatasourceSchemaWithEntities(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) (string, error) {
-	if m.err != nil {
-		return "", m.err
-	}
-	if m.prompt != "" {
-		return m.prompt, nil
-	}
-	return "Schema with entities for datasource", nil
-}
-
 func (m *mockSchemaService) GetRelationshipsResponse(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RelationshipsResponse, error) {
 	if m.err != nil {
 		return nil, m.err
@@ -380,11 +370,19 @@ func (m *mockSchemaService) SelectAllTables(ctx context.Context, projectID, data
 	return m.err
 }
 
-func (m *mockSchemaService) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+func (m *mockSchemaService) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
 	return nil, m.err
 }
 
-func (m *mockSchemaService) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
+func (m *mockSchemaService) ListAllTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	return nil, m.err
+}
+
+func (m *mockSchemaService) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return nil, m.err
+}
+
+func (m *mockSchemaService) ListAllColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
 	return nil, m.err
 }
 

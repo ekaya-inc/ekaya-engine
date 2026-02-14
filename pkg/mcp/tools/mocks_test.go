@@ -333,19 +333,23 @@ func (m *mockSchemaService) GetDatasourceSchemaForPrompt(ctx context.Context, pr
 	return "", nil
 }
 
-func (m *mockSchemaService) GetDatasourceSchemaWithEntities(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) (string, error) {
-	return "", nil
-}
-
 func (m *mockSchemaService) SelectAllTables(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
 
-func (m *mockSchemaService) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+func (m *mockSchemaService) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
 	return nil, nil
 }
 
-func (m *mockSchemaService) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
+func (m *mockSchemaService) ListAllTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	return nil, nil
+}
+
+func (m *mockSchemaService) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+
+func (m *mockSchemaService) ListAllColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }
 
@@ -360,7 +364,11 @@ type mockSchemaRepository struct {
 	relationships []*models.SchemaRelationship
 }
 
-func (m *mockSchemaRepository) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+func (m *mockSchemaRepository) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	return m.tables, nil
+}
+
+func (m *mockSchemaRepository) ListAllTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
 	return m.tables, nil
 }
 func (m *mockSchemaRepository) GetTableByID(ctx context.Context, projectID, tableID uuid.UUID) (*models.SchemaTable, error) {
@@ -381,13 +389,16 @@ func (m *mockSchemaRepository) SoftDeleteRemovedTables(ctx context.Context, proj
 func (m *mockSchemaRepository) UpdateTableSelection(ctx context.Context, projectID, tableID uuid.UUID, isSelected bool) error {
 	return nil
 }
-func (m *mockSchemaRepository) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
+func (m *mockSchemaRepository) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepository) ListAllColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }
 func (m *mockSchemaRepository) ListColumnsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error) {
 	return m.columns, nil
 }
-func (m *mockSchemaRepository) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error) {
+func (m *mockSchemaRepository) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error) {
 	return nil, nil
 }
 func (m *mockSchemaRepository) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
@@ -498,11 +509,19 @@ func (m *mockInstalledAppService) IsInstalled(ctx context.Context, projectID uui
 	return m.installed[appID], nil
 }
 
-func (m *mockInstalledAppService) Install(ctx context.Context, projectID uuid.UUID, appID string, userID string) (*models.InstalledApp, error) {
+func (m *mockInstalledAppService) Install(ctx context.Context, projectID uuid.UUID, appID string, userID string) (*services.AppActionResult, error) {
 	return nil, nil
 }
 
-func (m *mockInstalledAppService) Uninstall(ctx context.Context, projectID uuid.UUID, appID string) error {
+func (m *mockInstalledAppService) Activate(ctx context.Context, projectID uuid.UUID, appID string) (*services.AppActionResult, error) {
+	return nil, nil
+}
+
+func (m *mockInstalledAppService) Uninstall(ctx context.Context, projectID uuid.UUID, appID string) (*services.AppActionResult, error) {
+	return nil, nil
+}
+
+func (m *mockInstalledAppService) CompleteCallback(ctx context.Context, projectID uuid.UUID, appID, action, status, nonce, userID string) error {
 	return nil
 }
 

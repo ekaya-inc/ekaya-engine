@@ -280,7 +280,7 @@ const ApplicationsPage = () => {
 
       {/* Application tiles - 2 column grid with smaller tiles */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {applications.map((app) => {
+        {applications.filter(app => app.id !== 'ai-agents').map((app) => {
           const Icon = app.icon;
           const colors = getColorClasses(app.color);
           const appIsInstalled = app.installable === true && isInstalled(app.id);

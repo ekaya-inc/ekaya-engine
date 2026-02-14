@@ -14,7 +14,7 @@ describe('initiateOAuthFlow', () => {
 
   const mockConfig = {
     authServerUrl: 'http://localhost:5002',
-    oauthClientId: 'ekaya-region-localhost',
+    oauthClientId: 'ekaya-engine-localhost',
     baseUrl: 'http://localhost:3443',
     authorizationEndpoint: 'http://localhost:5002/authorize',
     tokenEndpoint: 'http://localhost:3443/mcp/oauth/token',
@@ -106,7 +106,7 @@ describe('initiateOAuthFlow', () => {
 
     // Verify all required parameters are present
     expect(redirectUrl).toContain('response_type=code');
-    expect(redirectUrl).toContain('client_id=ekaya-region-localhost');
+    expect(redirectUrl).toContain('client_id=ekaya-engine-localhost');
     expect(redirectUrl).toContain('redirect_uri=http%3A%2F%2Flocalhost%3A3443%2Foauth%2Fcallback');
     expect(redirectUrl).toContain('scope=project%3Aaccess');
     expect(redirectUrl).toContain('state='); // State should be present

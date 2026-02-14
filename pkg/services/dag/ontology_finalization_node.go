@@ -45,7 +45,7 @@ func (n *OntologyFinalizationNode) Execute(ctx context.Context, dag *models.Onto
 		zap.String("project_id", dag.ProjectID.String()))
 
 	// Report initial progress
-	if err := n.ReportProgress(ctx, 0, 100, "Generating domain summary..."); err != nil {
+	if err := n.ReportProgress(ctx, 0, 0, "Generating domain summary..."); err != nil {
 		n.Logger().Warn("Failed to report progress", zap.Error(err))
 	}
 
@@ -55,7 +55,7 @@ func (n *OntologyFinalizationNode) Execute(ctx context.Context, dag *models.Onto
 	}
 
 	// Report completion
-	if err := n.ReportProgress(ctx, 100, 100, "Ontology finalization complete"); err != nil {
+	if err := n.ReportProgress(ctx, 1, 1, "Ontology finalization complete"); err != nil {
 		n.Logger().Warn("Failed to report progress", zap.Error(err))
 	}
 

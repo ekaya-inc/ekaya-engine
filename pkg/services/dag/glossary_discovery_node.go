@@ -45,7 +45,7 @@ func (n *GlossaryDiscoveryNode) Execute(ctx context.Context, dag *models.Ontolog
 		zap.String("project_id", dag.ProjectID.String()))
 
 	// Report initial progress
-	if err := n.ReportProgress(ctx, 0, 100, "Discovering business terms..."); err != nil {
+	if err := n.ReportProgress(ctx, 0, 0, "Discovering business terms..."); err != nil {
 		n.Logger().Warn("Failed to report progress", zap.Error(err))
 	}
 
@@ -66,7 +66,7 @@ func (n *GlossaryDiscoveryNode) Execute(ctx context.Context, dag *models.Ontolog
 	}
 
 	// Report completion
-	if err := n.ReportProgress(ctx, 100, 100, fmt.Sprintf("Discovered %d business terms", termCount)); err != nil {
+	if err := n.ReportProgress(ctx, 1, 1, fmt.Sprintf("Discovered %d business terms", termCount)); err != nil {
 		n.Logger().Warn("Failed to report progress", zap.Error(err))
 	}
 

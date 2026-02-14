@@ -19,6 +19,7 @@ export interface InstalledApp {
   app_id: string;
   installed_at: string;
   installed_by?: string;
+  activated_at?: string;
   settings: Record<string, unknown>;
 }
 

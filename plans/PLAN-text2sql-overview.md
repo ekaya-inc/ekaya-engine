@@ -38,7 +38,7 @@
 - **Adaptability:** System improves over time as query history grows
 - **Performance:** Cached high-confidence patterns skip expensive LLM calls (from claudontology)
 
-**Reference architecture:** ekaya-region implements this exact pattern in its text2sql system. We're adapting it for ekaya-engine's multi-tenant architecture with PostgreSQL customer databases.
+**Reference architecture:** We're implementing this pattern for ekaya-engine's multi-tenant architecture with PostgreSQL customer databases.
 
 ## Current State Analysis
 
@@ -47,7 +47,7 @@
 - **Database adapters** (`pkg/adapters/datasource/postgres/`) - PostgreSQL connection handling via pgxpool
 - **Schema discovery** (`pkg/services/schema.go`) - Already discovers tables, columns, foreign keys
 - **Query execution** (`pkg/services/query.go`) - Can execute SQL and return results
-- **Syntax knowledge** - We have `knowledge/postgres.md`, `knowledge/mssql_syntax.md`, `knowledge/clickhouse_syntax.md` from ekaya-region
+- **Syntax knowledge** - We have `knowledge/postgres.md`, `knowledge/mssql_syntax.md`, `knowledge/clickhouse_syntax.md`
 
 ### What DOES NOT EXIST
 - ❌ **Vector embeddings infrastructure** - No `vector_embeddings` table, no pgvector extension configuration

@@ -83,7 +83,7 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 	result := &LLMRelationshipDiscoveryResult{}
 
 	// Load tables and columns for resolving table/column metadata
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
 	if err != nil {
 		return nil, fmt.Errorf("list tables: %w", err)
 	}

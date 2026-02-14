@@ -1,5 +1,5 @@
 #!/bin/sh
-# Pre-push hook for ekaya-region
+# Pre-push hook for ekaya-engine
 # Runs comprehensive checks before pushing to remote
 
 set -e

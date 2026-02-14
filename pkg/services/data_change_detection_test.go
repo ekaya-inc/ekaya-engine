@@ -24,8 +24,12 @@ type mockSchemaRepoForDCD struct {
 	columnsByTable map[uuid.UUID][]*models.SchemaColumn
 }
 
-func (m *mockSchemaRepoForDCD) ListColumnsByTable(_ context.Context, _ uuid.UUID, tableID uuid.UUID, _ bool) ([]*models.SchemaColumn, error) {
+func (m *mockSchemaRepoForDCD) ListColumnsByTable(_ context.Context, _ uuid.UUID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
 	return m.columnsByTable[tableID], nil
+}
+
+func (m *mockSchemaRepoForDCD) ListAllColumnsByTable(_ context.Context, _ uuid.UUID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return nil, nil
 }
 
 // mockDiscovererForDCD implements only CheckValueOverlap.

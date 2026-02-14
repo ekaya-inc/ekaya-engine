@@ -168,7 +168,8 @@ func main() {
 	queryHistoryRepo := repositories.NewQueryHistoryRepository()
 	queryHistoryService := services.NewQueryHistoryService(queryHistoryRepo, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
-	installedAppService := services.NewInstalledAppService(installedAppRepo, logger)
+	nonceStore := services.NewNonceStore()
+	installedAppService := services.NewInstalledAppService(installedAppRepo, centralClient, nonceStore, cfg.BaseURL, logger)
 	mcpConfigService := services.NewMCPConfigService(mcpConfigRepo, queryService, projectService, installedAppService, cfg.BaseURL, logger)
 
 	// LLM factory for creating clients per project configuration
