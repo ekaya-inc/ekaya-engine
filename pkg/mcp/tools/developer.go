@@ -679,6 +679,21 @@ func registerSampleTool(s *server.MCPServer, deps *MCPToolDeps) {
 			limit = 10
 		}
 
+		// Verify table is selected by admin before allowing access
+		dsID, err := deps.ProjectService.GetDefaultDatasourceID(tenantCtx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get default datasource: %w", err)
+		}
+
+		selectedTables, err := deps.SchemaService.ListTablesByDatasource(tenantCtx, projectID, dsID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list selected tables: %w", err)
+		}
+
+		if err := validateTableSelected(selectedTables, schemaName, tableName); err != nil {
+			return NewErrorResult("table_not_selected", err.Error()), nil
+		}
+
 		// Get datasource config and create executor
 		dsType, dsConfig, err := getDefaultDatasourceConfig(tenantCtx, deps, projectID)
 		if err != nil {
@@ -1038,6 +1053,17 @@ func registerExplainQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 
 		return mcp.NewToolResultText(string(jsonResult)), nil
 	})
+}
+
+// validateTableSelected checks if the given table is in the list of selected tables.
+// Returns nil if the table is selected, or an error if not.
+func validateTableSelected(selectedTables []*models.SchemaTable, schemaName, tableName string) error {
+	for _, t := range selectedTables {
+		if t.TableName == tableName && t.SchemaName == schemaName {
+			return nil
+		}
+	}
+	return fmt.Errorf("table %q is not selected — admin has not granted access to this table", tableName)
 }
 
 // getOptionalBoolWithDefaultDev extracts an optional boolean argument with a default value.
