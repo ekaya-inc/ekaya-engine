@@ -51,8 +51,8 @@ func (n *ColumnEnrichmentNode) Execute(ctx context.Context, dag *models.Ontology
 	n.Logger().Info("Starting column enrichment",
 		zap.String("project_id", dag.ProjectID.String()))
 
-	// Report initial progress
-	if err := n.ReportProgress(ctx, 0, 100, "Enriching column metadata..."); err != nil {
+	// Report initial progress (total=0 hides the progress bar until the service reports real counts)
+	if err := n.ReportProgress(ctx, 0, 0, "Enriching column metadata..."); err != nil {
 		n.Logger().Warn("Failed to report progress", zap.Error(err))
 	}
 
@@ -74,7 +74,8 @@ func (n *ColumnEnrichmentNode) Execute(ctx context.Context, dag *models.Ontology
 	if len(result.TablesFailed) > 0 {
 		msg = fmt.Sprintf("Enriched %d tables (%d failed)", len(result.TablesEnriched), len(result.TablesFailed))
 	}
-	if err := n.ReportProgress(ctx, 100, 100, msg); err != nil {
+	total := len(result.TablesEnriched) + len(result.TablesFailed)
+	if err := n.ReportProgress(ctx, total, total, msg); err != nil {
 		n.Logger().Warn("Failed to report progress", zap.Error(err))
 	}
 

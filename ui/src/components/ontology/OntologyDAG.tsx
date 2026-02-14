@@ -693,7 +693,7 @@ export const OntologyDAG = ({
                       node.name !== 'PKMatchDiscovery' &&
                       node.status === 'running' &&
                       node.progress &&
-                      node.progress.total > 0 && (
+                      node.progress.total > 1 && (
                         <div className="mt-2">
                           <div className="flex items-center gap-2 text-xs text-text-tertiary mb-1">
                             <span>
