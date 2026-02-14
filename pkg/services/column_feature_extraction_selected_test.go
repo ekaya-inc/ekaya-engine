@@ -17,20 +17,21 @@ type minimalSchemaRepo struct {
 	repositories.SchemaRepository // embed to satisfy interface; unused methods will panic
 	tables                        []*models.SchemaTable
 	columns                       []*models.SchemaColumn
-	selectedOnlyArg               bool // captures the selectedOnly arg passed to ListTablesByDatasource
+	listTablesCalled              bool // tracks whether ListTablesByDatasource was called
 }
 
-func (m *minimalSchemaRepo) ListTablesByDatasource(_ context.Context, _, _ uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
-	m.selectedOnlyArg = selectedOnly
-	if selectedOnly {
-		var out []*models.SchemaTable
-		for _, t := range m.tables {
-			if t.IsSelected {
-				out = append(out, t)
-			}
+func (m *minimalSchemaRepo) ListTablesByDatasource(_ context.Context, _, _ uuid.UUID) ([]*models.SchemaTable, error) {
+	m.listTablesCalled = true
+	var out []*models.SchemaTable
+	for _, t := range m.tables {
+		if t.IsSelected {
+			out = append(out, t)
 		}
-		return out, nil
 	}
+	return out, nil
+}
+
+func (m *minimalSchemaRepo) ListAllTablesByDatasource(_ context.Context, _, _ uuid.UUID) ([]*models.SchemaTable, error) {
 	return m.tables, nil
 }
 
@@ -84,9 +85,9 @@ func TestPhase1_OnlyProcessesSelectedColumns(t *testing.T) {
 		t.Fatalf("runPhase1DataCollection failed: %v", err)
 	}
 
-	// Verify selectedOnly=true was passed
-	if !schemaRepo.selectedOnlyArg {
-		t.Error("ListTablesByDatasource was called with selectedOnly=false, expected true")
+	// Verify ListTablesByDatasource was called (always returns selected tables)
+	if !schemaRepo.listTablesCalled {
+		t.Error("ListTablesByDatasource was not called")
 	}
 
 	// Should only have 2 columns: users.id and users.name

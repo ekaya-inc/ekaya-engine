@@ -993,7 +993,11 @@ type mockSchemaRepoForRelDiscovery struct {
 	createdRels   []*models.SchemaRelationship // Track relationships created via UpsertRelationshipWithMetrics
 }
 
-func (m *mockSchemaRepoForRelDiscovery) ListTablesByDatasource(_ context.Context, _, _ uuid.UUID, _ bool) ([]*models.SchemaTable, error) {
+func (m *mockSchemaRepoForRelDiscovery) ListTablesByDatasource(_ context.Context, _, _ uuid.UUID) ([]*models.SchemaTable, error) {
+	return m.tables, nil
+}
+
+func (m *mockSchemaRepoForRelDiscovery) ListAllTablesByDatasource(_ context.Context, _, _ uuid.UUID) ([]*models.SchemaTable, error) {
 	return m.tables, nil
 }
 

@@ -90,7 +90,11 @@ func (r *testColEnrichmentSchemaRepo) FindTableByName(ctx context.Context, proje
 	return nil, nil
 }
 
-func (r *testColEnrichmentSchemaRepo) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+func (r *testColEnrichmentSchemaRepo) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	return nil, nil
+}
+
+func (r *testColEnrichmentSchemaRepo) ListAllTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
 	return nil, nil
 }
 

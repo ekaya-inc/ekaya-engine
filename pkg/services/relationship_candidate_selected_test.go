@@ -13,23 +13,20 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
 
-// selectedAwareSchemaRepo tracks whether selectedOnly=true was passed.
+// selectedAwareSchemaRepo provides selected vs all tables via separate methods.
 type selectedAwareSchemaRepo struct {
 	repositories.SchemaRepository
 
 	selectedTables []*models.SchemaTable
 	allTables      []*models.SchemaTable
 	allColumns     []*models.SchemaColumn
-
-	// Track calls to verify selectedOnly parameter
-	listTablesSelectedOnlyValues []bool
 }
 
-func (m *selectedAwareSchemaRepo) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
-	m.listTablesSelectedOnlyValues = append(m.listTablesSelectedOnlyValues, selectedOnly)
-	if selectedOnly {
-		return m.selectedTables, nil
-	}
+func (m *selectedAwareSchemaRepo) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	return m.selectedTables, nil
+}
+
+func (m *selectedAwareSchemaRepo) ListAllTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
 	return m.allTables, nil
 }
 
@@ -96,11 +93,6 @@ func TestIdentifyFKSources_OnlyUsesSelectedTables(t *testing.T) {
 	sources, _, err := collector.identifyFKSources(context.Background(), projectID, datasourceID)
 	require.NoError(t, err)
 
-	// Verify selectedOnly=true was passed
-	require.NotEmpty(t, schemaRepo.listTablesSelectedOnlyValues, "ListTablesByDatasource should have been called")
-	assert.True(t, schemaRepo.listTablesSelectedOnlyValues[0],
-		"identifyFKSources must pass selectedOnly=true to ListTablesByDatasource")
-
 	// Only the column from the selected table should be a source
 	var sourceTableNames []string
 	for _, s := range sources {
@@ -139,11 +131,6 @@ func TestIdentifyFKTargets_OnlyUsesSelectedTables(t *testing.T) {
 
 	targets, err := collector.identifyFKTargets(context.Background(), projectID, datasourceID)
 	require.NoError(t, err)
-
-	// Verify selectedOnly=true was passed
-	require.NotEmpty(t, schemaRepo.listTablesSelectedOnlyValues, "ListTablesByDatasource should have been called")
-	assert.True(t, schemaRepo.listTablesSelectedOnlyValues[0],
-		"identifyFKTargets must pass selectedOnly=true to ListTablesByDatasource")
 
 	// Only the PK from the selected table should be a target
 	var targetTableNames []string

@@ -65,9 +65,11 @@ type SchemaService interface {
 	// Used after schema refresh to auto-select newly discovered tables.
 	SelectAllTables(ctx context.Context, projectID, datasourceID uuid.UUID) error
 
-	// ListTablesByDatasource returns tables for a datasource.
-	// If selectedOnly is true, only tables with is_selected=true are returned.
-	ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error)
+	// ListTablesByDatasource returns selected tables for a datasource.
+	ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error)
+	// ListAllTablesByDatasource returns all tables (including non-selected) for a datasource.
+	// Use this only for schema management operations (refresh, UI display).
+	ListAllTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error)
 
 	// ListColumnsByTable returns columns for a specific table.
 	// If selectedOnly is true, only columns with is_selected=true are returned.
@@ -138,7 +140,7 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 	}
 
 	// Get existing tables before refresh to track what's new/removed
-	existingTables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
+	existingTables, err := s.schemaRepo.ListAllTablesByDatasource(ctx, projectID, datasourceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list existing tables: %w", err)
 	}
@@ -462,8 +464,8 @@ func (s *schemaService) syncForeignKeys(
 
 // GetDatasourceSchema returns the complete schema for a datasource.
 func (s *schemaService) GetDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.DatasourceSchema, error) {
-	// Get all tables
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
+	// Get all tables (including non-selected for UI display)
+	tables, err := s.schemaRepo.ListAllTablesByDatasource(ctx, projectID, datasourceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tables: %w", err)
 	}
@@ -980,9 +982,14 @@ func (s *schemaService) SelectAllTables(ctx context.Context, projectID, datasour
 	return nil
 }
 
-// ListTablesByDatasource delegates to the schema repository.
-func (s *schemaService) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
-	return s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, selectedOnly)
+// ListTablesByDatasource returns selected tables for a datasource.
+func (s *schemaService) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	return s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
+}
+
+// ListAllTablesByDatasource returns all tables (including non-selected) for a datasource.
+func (s *schemaService) ListAllTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	return s.schemaRepo.ListAllTablesByDatasource(ctx, projectID, datasourceID)
 }
 
 // ListColumnsByTable delegates to the schema repository.

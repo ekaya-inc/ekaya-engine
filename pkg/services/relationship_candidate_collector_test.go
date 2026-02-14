@@ -45,7 +45,14 @@ func (m *mockSchemaRepoForCandidateCollector) ListColumnsByDatasource(ctx contex
 	return m.allColumns, nil
 }
 
-func (m *mockSchemaRepoForCandidateCollector) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+func (m *mockSchemaRepoForCandidateCollector) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	if m.tablesErr != nil {
+		return nil, m.tablesErr
+	}
+	return m.tables, nil
+}
+
+func (m *mockSchemaRepoForCandidateCollector) ListAllTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
 	if m.tablesErr != nil {
 		return nil, m.tablesErr
 	}

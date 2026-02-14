@@ -493,7 +493,7 @@ func (s *glossaryService) SuggestTerms(ctx context.Context, projectID uuid.UUID)
 	}
 
 	// Get tables for context (replaces entity concept)
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil, true)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil)
 	if err != nil {
 		return nil, fmt.Errorf("get tables: %w", err)
 	}
@@ -794,7 +794,7 @@ func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, 
 	}
 
 	// Get tables for context (replaces entity concept)
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil, true)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil)
 	if err != nil {
 		return 0, fmt.Errorf("get tables: %w", err)
 	}
@@ -939,7 +939,7 @@ func (s *glossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, on
 	}
 
 	// Get tables for context (replaces entity concept)
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil, true)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil)
 	if err != nil {
 		return fmt.Errorf("get tables: %w", err)
 	}

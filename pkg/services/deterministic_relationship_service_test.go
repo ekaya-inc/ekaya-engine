@@ -1398,7 +1398,11 @@ func (m *mockTestSchemaRepo) GetColumns(ctx context.Context, datasourceID uuid.U
 	return nil, nil
 }
 
-func (m *mockTestSchemaRepo) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+func (m *mockTestSchemaRepo) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	return m.tables, nil
+}
+
+func (m *mockTestSchemaRepo) ListAllTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
 	return m.tables, nil
 }
 

@@ -108,7 +108,7 @@ func (s *columnEnrichmentService) EnrichProject(ctx context.Context, projectID u
 
 	// If no tableNames provided, fetch all selected tables
 	if len(tableNames) == 0 {
-		tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil, true)
+		tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil)
 		if err != nil {
 			return nil, fmt.Errorf("fetch selected tables: %w", err)
 		}

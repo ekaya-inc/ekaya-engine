@@ -156,7 +156,7 @@ func (h *OntologyEnrichmentHandler) GetEnrichment(w http.ResponseWriter, r *http
 	}
 
 	// Get all tables for the datasource
-	tables, err := h.schemaService.ListTablesByDatasource(ctx, projectID, dsID, true)
+	tables, err := h.schemaService.ListTablesByDatasource(ctx, projectID, dsID)
 	if err != nil {
 		h.logger.Error("Failed to list tables", zap.Error(err))
 		_ = ErrorResponse(w, http.StatusInternalServerError, "list_tables_failed", err.Error())

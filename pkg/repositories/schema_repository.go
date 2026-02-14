@@ -27,9 +27,11 @@ type TableKey struct {
 // SchemaRepository provides data access for schema discovery tables.
 type SchemaRepository interface {
 	// Tables
-	// ListTablesByDatasource returns tables for a datasource.
-	// If selectedOnly is true, only tables with is_selected=true are returned.
-	ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error)
+	// ListTablesByDatasource returns selected tables for a datasource.
+	ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error)
+	// ListAllTablesByDatasource returns all tables (including non-selected) for a datasource.
+	// Use this only for schema management operations (refresh, UI display).
+	ListAllTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error)
 	GetTableByID(ctx context.Context, projectID, tableID uuid.UUID) (*models.SchemaTable, error)
 	GetTableByName(ctx context.Context, projectID, datasourceID uuid.UUID, schemaName, tableName string) (*models.SchemaTable, error)
 	// FindTableByName finds a table by name within a datasource (schema-agnostic).
@@ -104,7 +106,7 @@ var _ SchemaRepository = (*schemaRepository)(nil)
 // Table Methods
 // ============================================================================
 
-func (r *schemaRepository) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+func (r *schemaRepository) listTablesByDatasourceInternal(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, fmt.Errorf("no tenant scope in context")
@@ -150,6 +152,16 @@ func (r *schemaRepository) ListTablesByDatasource(ctx context.Context, projectID
 	}
 
 	return tables, nil
+}
+
+// ListTablesByDatasource returns selected tables for a datasource (safe default).
+func (r *schemaRepository) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	return r.listTablesByDatasourceInternal(ctx, projectID, datasourceID, true)
+}
+
+// ListAllTablesByDatasource returns all tables (including non-selected) for a datasource.
+func (r *schemaRepository) ListAllTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	return r.listTablesByDatasourceInternal(ctx, projectID, datasourceID, false)
 }
 
 func (r *schemaRepository) GetTableByID(ctx context.Context, projectID, tableID uuid.UUID) (*models.SchemaTable, error) {

@@ -86,7 +86,7 @@ func NewDeterministicRelationshipService(
 
 func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback RelationshipProgressCallback) (*FKDiscoveryResult, error) {
 	// Load tables and columns
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
 	if err != nil {
 		return nil, fmt.Errorf("list tables: %w", err)
 	}
@@ -613,7 +613,7 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 	s.logger.Info("Starting PK-match relationship discovery")
 
 	// Load tables and columns
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
 	if err != nil {
 		return nil, fmt.Errorf("list tables: %w", err)
 	}

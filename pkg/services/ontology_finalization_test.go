@@ -70,7 +70,14 @@ type mockSchemaRepoForFinalization struct {
 	getColumnsByErr error
 }
 
-func (m *mockSchemaRepoForFinalization) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+func (m *mockSchemaRepoForFinalization) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	if m.listTablesErr != nil {
+		return nil, m.listTablesErr
+	}
+	return m.tables, nil
+}
+
+func (m *mockSchemaRepoForFinalization) ListAllTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
 	if m.listTablesErr != nil {
 		return nil, m.listTablesErr
 	}

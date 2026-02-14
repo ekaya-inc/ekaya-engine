@@ -239,7 +239,7 @@ func (s *columnFeatureExtractionService) runPhase1DataCollection(
 	}
 
 	// Get selected tables only — admin controls which tables are processed
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tables: %w", err)
 	}
@@ -2361,8 +2361,8 @@ func (s *columnFeatureExtractionService) runPhase4FKResolution(
 		return fmt.Errorf("get primary key columns: %w", err)
 	}
 
-	// Get all tables to build tableID -> table lookup
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
+	// Get selected tables to build tableID -> table lookup
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
 	if err != nil {
 		return fmt.Errorf("list tables: %w", err)
 	}

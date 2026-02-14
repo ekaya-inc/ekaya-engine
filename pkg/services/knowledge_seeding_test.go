@@ -132,7 +132,11 @@ func (m *mockSchemaServiceForSeeding) SelectAllTables(ctx context.Context, proje
 	return nil
 }
 
-func (m *mockSchemaServiceForSeeding) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+func (m *mockSchemaServiceForSeeding) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	return nil, nil
+}
+
+func (m *mockSchemaServiceForSeeding) ListAllTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
 	return nil, nil
 }
 

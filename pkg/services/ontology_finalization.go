@@ -67,7 +67,7 @@ func (s *ontologyFinalizationService) Finalize(ctx context.Context, projectID uu
 	}
 
 	// Get all tables for the project to build conventions
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil, true) // uuid.Nil gets all datasources
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil) // uuid.Nil gets all datasources
 	if err != nil {
 		return fmt.Errorf("list tables: %w", err)
 	}

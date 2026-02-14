@@ -164,8 +164,8 @@ func (e *OntologyToolExecutor) querySchemaMetadata(ctx context.Context, argument
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	// Get all tables for the datasource
-	tables, err := e.schemaRepo.ListTablesByDatasource(ctx, e.projectID, e.datasourceID, false)
+	// Get selected tables for the datasource
+	tables, err := e.schemaRepo.ListTablesByDatasource(ctx, e.projectID, e.datasourceID)
 	if err != nil {
 		return "", fmt.Errorf("failed to list tables: %w", err)
 	}
