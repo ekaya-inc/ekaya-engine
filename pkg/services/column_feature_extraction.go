@@ -238,8 +238,8 @@ func (s *columnFeatureExtractionService) runPhase1DataCollection(
 		progressCallback(0, 1, "Collecting column metadata...")
 	}
 
-	// Get all tables to build a tableID -> tableName lookup
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
+	// Get selected tables only — admin controls which tables are processed
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tables: %w", err)
 	}
@@ -258,6 +258,15 @@ func (s *columnFeatureExtractionService) runPhase1DataCollection(
 	if err != nil {
 		return nil, fmt.Errorf("failed to list columns: %w", err)
 	}
+
+	// Filter to selected columns in selected tables only
+	selectedColumns := make([]*models.SchemaColumn, 0, len(columns))
+	for _, col := range columns {
+		if _, inSelectedTable := tableNameByID[col.SchemaTableID]; inSelectedTable && col.IsSelected {
+			selectedColumns = append(selectedColumns, col)
+		}
+	}
+	columns = selectedColumns
 
 	totalColumns := len(columns)
 	s.logger.Info("Found columns to process",
