@@ -123,16 +123,22 @@ const AIDataLiaisonPage = () => {
     const callbackAction = searchParams.get('callback_action');
     const callbackState = searchParams.get('callback_state');
     const callbackApp = searchParams.get('callback_app');
+    const callbackStatus = searchParams.get('callback_status') || 'success';
 
     if (!callbackAction || !callbackState || !callbackApp || !pid) return;
 
     // Clear callback params from URL immediately to prevent re-processing
     setSearchParams({}, { replace: true });
 
+    if (callbackStatus === 'cancelled') {
+      // User cancelled in central — stay on current page, no action needed
+      return;
+    }
+
     const processCallback = async () => {
       try {
         const response = await engineApi.completeAppCallback(
-          pid, callbackApp, callbackAction, 'success', callbackState
+          pid, callbackApp, callbackAction, callbackStatus, callbackState
         );
         if (response.error) {
           toast({ title: 'Error', description: response.error, variant: 'destructive' });
