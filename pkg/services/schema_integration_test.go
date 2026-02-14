@@ -273,7 +273,7 @@ func TestSchemaService_SaveSelections_Integration(t *testing.T) {
 	}
 
 	// Verify column selections
-	usersColumns, err := tc.repo.ListColumnsByTable(ctx, tc.projectID, usersTable.ID, false)
+	usersColumns, err := tc.repo.ListAllColumnsByTable(ctx, tc.projectID, usersTable.ID)
 	if err != nil {
 		t.Fatalf("ListColumnsByTable failed: %v", err)
 	}
@@ -331,7 +331,7 @@ func TestSchemaService_SaveSelections_Deselect_Integration(t *testing.T) {
 	}
 
 	// Verify column deselected
-	columns, err := tc.repo.ListColumnsByTable(ctx, tc.projectID, table.ID, false)
+	columns, err := tc.repo.ListAllColumnsByTable(ctx, tc.projectID, table.ID)
 	if err != nil {
 		t.Fatalf("ListColumnsByTable failed: %v", err)
 	}

@@ -56,11 +56,6 @@ type SchemaService interface {
 	// GetDatasourceSchemaForPrompt returns schema formatted for LLM context.
 	GetDatasourceSchemaForPrompt(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) (string, error)
 
-	// GetDatasourceSchemaWithEntities returns schema formatted for LLM context.
-	// Note: Entity semantic information has been removed for v1.0 simplification.
-	// This method now delegates to GetDatasourceSchemaForPrompt for backward compatibility.
-	GetDatasourceSchemaWithEntities(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) (string, error)
-
 	// SelectAllTables marks all tables and columns for this datasource as selected.
 	// Used after schema refresh to auto-select newly discovered tables.
 	SelectAllTables(ctx context.Context, projectID, datasourceID uuid.UUID) error
@@ -71,9 +66,11 @@ type SchemaService interface {
 	// Use this only for schema management operations (refresh, UI display).
 	ListAllTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error)
 
-	// ListColumnsByTable returns columns for a specific table.
-	// If selectedOnly is true, only columns with is_selected=true are returned.
-	ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error)
+	// ListColumnsByTable returns selected columns for a specific table.
+	ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error)
+	// ListAllColumnsByTable returns all columns (including non-selected) for a specific table.
+	// Use this only for schema management operations (sync, UI display, selection management).
+	ListAllColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error)
 
 	// GetColumnMetadataByProject retrieves all column metadata for a project.
 	GetColumnMetadataByProject(ctx context.Context, projectID uuid.UUID) ([]*models.ColumnMetadata, error)
@@ -299,7 +296,7 @@ func (s *schemaService) syncColumnsForTable(
 	tableFQN := table.SchemaName + "." + table.TableName
 
 	// Get existing columns before sync to detect changes
-	existingColumns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID, false)
+	existingColumns, err := s.schemaRepo.ListAllColumnsByTable(ctx, projectID, table.ID)
 	if err != nil {
 		return nil, fmt.Errorf("list existing columns: %w", err)
 	}
@@ -588,7 +585,7 @@ func (s *schemaService) GetDatasourceTable(ctx context.Context, projectID, datas
 	}
 
 	// Get columns
-	columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID, false)
+	columns, err := s.schemaRepo.ListAllColumnsByTable(ctx, projectID, table.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list columns: %w", err)
 	}
@@ -813,7 +810,7 @@ func (s *schemaService) SaveSelections(ctx context.Context, projectID, datasourc
 	// Update column selections
 	for tableID, selectedColumnIDs := range columnSelections {
 		// Get all columns for this table to determine which should be deselected
-		columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, tableID, false)
+		columns, err := s.schemaRepo.ListAllColumnsByTable(ctx, projectID, tableID)
 		if err != nil {
 			return fmt.Errorf("failed to list columns for table %s: %w", tableID.String(), err)
 		}
@@ -967,13 +964,6 @@ func (s *schemaService) GetDatasourceSchemaForPrompt(ctx context.Context, projec
 	return sb.String(), nil
 }
 
-// GetDatasourceSchemaWithEntities returns schema formatted for LLM context.
-// Note: Entity semantic information has been removed for v1.0 simplification.
-// This method now delegates to GetDatasourceSchemaForPrompt for backward compatibility.
-func (s *schemaService) GetDatasourceSchemaWithEntities(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) (string, error) {
-	return s.GetDatasourceSchemaForPrompt(ctx, projectID, datasourceID, selectedOnly)
-}
-
 // SelectAllTables marks all tables and columns for this datasource as selected.
 func (s *schemaService) SelectAllTables(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	if err := s.schemaRepo.SelectAllTablesAndColumns(ctx, projectID, datasourceID); err != nil {
@@ -992,9 +982,14 @@ func (s *schemaService) ListAllTablesByDatasource(ctx context.Context, projectID
 	return s.schemaRepo.ListAllTablesByDatasource(ctx, projectID, datasourceID)
 }
 
-// ListColumnsByTable delegates to the schema repository.
-func (s *schemaService) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
-	return s.schemaRepo.ListColumnsByTable(ctx, projectID, tableID, selectedOnly)
+// ListColumnsByTable delegates to the schema repository (selected columns only).
+func (s *schemaService) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return s.schemaRepo.ListColumnsByTable(ctx, projectID, tableID)
+}
+
+// ListAllColumnsByTable delegates to the schema repository (all columns including non-selected).
+func (s *schemaService) ListAllColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return s.schemaRepo.ListAllColumnsByTable(ctx, projectID, tableID)
 }
 
 // GetColumnMetadataByProject delegates to the column metadata repository.

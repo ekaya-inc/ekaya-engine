@@ -125,9 +125,6 @@ func (m *mockSchemaServiceForSeeding) GetDatasourceSchemaForPrompt(ctx context.C
 	}
 	return m.schemaForPrompt, nil
 }
-func (m *mockSchemaServiceForSeeding) GetDatasourceSchemaWithEntities(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) (string, error) {
-	return "", nil
-}
 func (m *mockSchemaServiceForSeeding) SelectAllTables(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
@@ -140,7 +137,11 @@ func (m *mockSchemaServiceForSeeding) ListAllTablesByDatasource(ctx context.Cont
 	return nil, nil
 }
 
-func (m *mockSchemaServiceForSeeding) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
+func (m *mockSchemaServiceForSeeding) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+
+func (m *mockSchemaServiceForSeeding) ListAllColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }
 

@@ -953,7 +953,7 @@ func (s *glossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, on
 			tableNames = append(tableNames, t.TableName)
 		}
 		// Fetch columns for all tables in one query
-		schemaColumnsByTable, err = s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames, true)
+		schemaColumnsByTable, err = s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames)
 		if err != nil {
 			s.logger.Warn("Failed to get schema columns, continuing without",
 				zap.String("project_id", projectID.String()),

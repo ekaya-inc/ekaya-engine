@@ -204,7 +204,7 @@ func (e *OntologyToolExecutor) querySchemaMetadata(ctx context.Context, argument
 		}
 
 		// Get columns for this table
-		columns, err := e.schemaRepo.ListColumnsByTable(ctx, e.projectID, t.ID, false)
+		columns, err := e.schemaRepo.ListAllColumnsByTable(ctx, e.projectID, t.ID)
 		if err != nil {
 			e.logger.Error("Failed to get columns for table",
 				zap.String("table", t.TableName),

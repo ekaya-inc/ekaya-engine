@@ -163,7 +163,20 @@ func (m *mockSchemaRepository) UpdateTableSelection(ctx context.Context, project
 	return nil
 }
 
-func (m *mockSchemaRepository) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
+func (m *mockSchemaRepository) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+	if m.listColumnsErr != nil {
+		return nil, m.listColumnsErr
+	}
+	var result []*models.SchemaColumn
+	for _, c := range m.columns {
+		if c.SchemaTableID == tableID {
+			result = append(result, c)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockSchemaRepository) ListAllColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
 	if m.listColumnsErr != nil {
 		return nil, m.listColumnsErr
 	}
@@ -355,7 +368,7 @@ func (m *mockSchemaRepository) GetNonPKColumnsByExactType(ctx context.Context, p
 	return nil, nil
 }
 
-func (m *mockSchemaRepository) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error) {
+func (m *mockSchemaRepository) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error) {
 	if m.columnsByTable != nil {
 		return m.columnsByTable, nil
 	}

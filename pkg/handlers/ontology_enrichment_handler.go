@@ -181,7 +181,7 @@ func (h *OntologyEnrichmentHandler) GetEnrichment(w http.ResponseWriter, r *http
 	tableResponses := make([]TableColumnsResponse, 0, len(tables))
 	for _, table := range tables {
 		// Get columns for this table
-		columns, err := h.schemaService.ListColumnsByTable(ctx, projectID, table.ID, true)
+		columns, err := h.schemaService.ListColumnsByTable(ctx, projectID, table.ID)
 		if err != nil {
 			h.logger.Warn("Failed to list columns for table",
 				zap.String("table_name", table.TableName),

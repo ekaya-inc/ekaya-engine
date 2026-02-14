@@ -84,7 +84,7 @@ func (s *ontologyFinalizationService) Finalize(ctx context.Context, projectID uu
 	}
 
 	// Get all columns for these tables (needed for ColumnFeatures analysis and convention discovery)
-	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames, true)
+	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames)
 	if err != nil {
 		return fmt.Errorf("get columns by tables: %w", err)
 	}

@@ -299,7 +299,7 @@ func (s *incrementalDAGService) processEnumUpdate(_ context.Context, change *mod
 // Helper methods
 
 func (s *incrementalDAGService) getTableColumns(ctx context.Context, projectID uuid.UUID, tableName string) ([]*models.SchemaColumn, error) {
-	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, []string{tableName}, true)
+	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, []string{tableName})
 	if err != nil {
 		return nil, err
 	}
