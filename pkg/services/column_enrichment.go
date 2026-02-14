@@ -990,6 +990,7 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 					Priority: q.Priority,
 					Question: q.Question,
 					Context:  q.Context,
+					Tables:   []string{tableCtx.TableName},
 				}
 			}
 			questionModels := ConvertQuestionInputs(questionInputs, projectID, ontology.ID, nil)

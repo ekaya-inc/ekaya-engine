@@ -750,6 +750,8 @@ func (s *columnFeatureExtractionService) createQuestionsFromUncertainClassificat
 				Priority: 3, // Medium priority
 				Context: fmt.Sprintf("Column: %s.%s, Type: %s, Null Rate: %.1f%%",
 					profile.TableName, profile.ColumnName, profile.DataType, profile.NullRate*100),
+				Tables:  []string{profile.TableName},
+				Columns: []string{profile.TableName + "." + profile.ColumnName},
 			})
 		}
 	}
