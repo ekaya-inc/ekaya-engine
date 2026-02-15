@@ -1,9 +1,3 @@
-//go:build ignore
-
-// TODO: This test needs significant refactoring after schema refactors:
-// - NewOntologyFinalizationService signature changed (added ColumnMetadataRepository)
-// - EntitySummary methods removed from OntologyRepository
-
 package services
 
 import (
@@ -119,9 +113,6 @@ func (m *mockSchemaRepoForFinalization) ListAllColumnsByTable(ctx context.Contex
 func (m *mockSchemaRepoForFinalization) ListColumnsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }
-func (m *mockSchemaRepoForFinalization) GetColumnsWithFeaturesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) (map[string][]*models.SchemaColumn, error) {
-	return nil, nil
-}
 func (m *mockSchemaRepoForFinalization) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 0, nil
 }
@@ -140,13 +131,7 @@ func (m *mockSchemaRepoForFinalization) SoftDeleteRemovedColumns(ctx context.Con
 func (m *mockSchemaRepoForFinalization) UpdateColumnSelection(ctx context.Context, projectID, columnID uuid.UUID, isSelected bool) error {
 	return nil
 }
-func (m *mockSchemaRepoForFinalization) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64, sampleValues []string) error {
-	return nil
-}
-func (m *mockSchemaRepoForFinalization) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
-	return nil
-}
-func (m *mockSchemaRepoForFinalization) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
+func (m *mockSchemaRepoForFinalization) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64) error {
 	return nil
 }
 func (m *mockSchemaRepoForFinalization) ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
@@ -195,9 +180,6 @@ func (m *mockSchemaRepoForFinalization) GetNonPKColumnsByExactType(ctx context.C
 	return nil, nil
 }
 func (m *mockSchemaRepoForFinalization) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
-	return nil
-}
-func (m *mockSchemaRepoForFinalization) ClearColumnFeaturesByProject(ctx context.Context, projectID uuid.UUID) error {
 	return nil
 }
 
@@ -264,6 +246,75 @@ func (m *mockLLMFactoryForFinalization) CreateStreamingClient(ctx context.Contex
 	return nil, nil
 }
 
+type mockConversationRepoForFinalization struct{}
+
+func (m *mockConversationRepoForFinalization) Save(ctx context.Context, conv *models.LLMConversation) error {
+	return nil
+}
+func (m *mockConversationRepoForFinalization) Update(ctx context.Context, conv *models.LLMConversation) error {
+	return nil
+}
+func (m *mockConversationRepoForFinalization) UpdateStatus(ctx context.Context, id uuid.UUID, status, errorMessage string) error {
+	return nil
+}
+func (m *mockConversationRepoForFinalization) GetByProject(ctx context.Context, projectID uuid.UUID, limit int) ([]*models.LLMConversation, error) {
+	return nil, nil
+}
+func (m *mockConversationRepoForFinalization) GetByContext(ctx context.Context, projectID uuid.UUID, key, value string) ([]*models.LLMConversation, error) {
+	return nil, nil
+}
+func (m *mockConversationRepoForFinalization) GetByConversationID(ctx context.Context, conversationID uuid.UUID) ([]*models.LLMConversation, error) {
+	return nil, nil
+}
+func (m *mockConversationRepoForFinalization) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
+type mockColumnMetadataRepoForFinalization struct {
+	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata
+}
+
+func (m *mockColumnMetadataRepoForFinalization) Upsert(ctx context.Context, meta *models.ColumnMetadata) error {
+	return nil
+}
+func (m *mockColumnMetadataRepoForFinalization) UpsertFromExtraction(ctx context.Context, meta *models.ColumnMetadata) error {
+	return nil
+}
+func (m *mockColumnMetadataRepoForFinalization) GetBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
+	if m.metadataByColumnID != nil {
+		return m.metadataByColumnID[schemaColumnID], nil
+	}
+	return nil, nil
+}
+func (m *mockColumnMetadataRepoForFinalization) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.ColumnMetadata, error) {
+	return nil, nil
+}
+func (m *mockColumnMetadataRepoForFinalization) GetBySchemaColumnIDs(ctx context.Context, schemaColumnIDs []uuid.UUID) ([]*models.ColumnMetadata, error) {
+	if m.metadataByColumnID == nil {
+		return []*models.ColumnMetadata{}, nil
+	}
+	var result []*models.ColumnMetadata
+	for _, id := range schemaColumnIDs {
+		if meta, ok := m.metadataByColumnID[id]; ok {
+			result = append(result, meta)
+		}
+	}
+	return result, nil
+}
+func (m *mockColumnMetadataRepoForFinalization) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+func (m *mockColumnMetadataRepoForFinalization) DeleteBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) error {
+	return nil
+}
+
+// noopTenantCtxForFinalization is a no-op TenantContextFunc for unit tests.
+func noopTenantCtxForFinalization() TenantContextFunc {
+	return func(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error) {
+		return ctx, func() {}, nil
+	}
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -273,11 +324,9 @@ func TestOntologyFinalization_GeneratesDomainDescription(t *testing.T) {
 	projectID := uuid.New()
 	ontologyID := uuid.New()
 
-	desc1 := "Users of the platform"
-	desc2 := "Customer orders"
 	tables := []*models.SchemaTable{
-		{TableName: "users", Description: &desc1},
-		{TableName: "orders", Description: &desc2},
+		{TableName: "users"},
+		{TableName: "orders"},
 	}
 
 	ontologyRepo := &mockOntologyRepoForFinalization{
@@ -302,8 +351,8 @@ func TestOntologyFinalization_GeneratesDomainDescription(t *testing.T) {
 	logger := zap.NewNop()
 
 	svc := NewOntologyFinalizationService(
-		ontologyRepo, schemaRepo, nil,
-		llmFactory, nil, logger,
+		ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{},
+		&mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger,
 	)
 
 	err := svc.Finalize(ctx, projectID)
@@ -335,8 +384,8 @@ func TestOntologyFinalization_SkipsIfNoTables(t *testing.T) {
 	logger := zap.NewNop()
 
 	svc := NewOntologyFinalizationService(
-		ontologyRepo, schemaRepo, nil,
-		llmFactory, nil, logger,
+		ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{},
+		&mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger,
 	)
 
 	err := svc.Finalize(ctx, projectID)
@@ -359,8 +408,8 @@ func TestOntologyFinalization_SkipsIfNoActiveOntology(t *testing.T) {
 	logger := zap.NewNop()
 
 	svc := NewOntologyFinalizationService(
-		ontologyRepo, schemaRepo, nil,
-		llmFactory, nil, logger,
+		ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{},
+		&mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger,
 	)
 
 	err := svc.Finalize(ctx, projectID)
@@ -399,8 +448,8 @@ func TestOntologyFinalization_LLMFailure(t *testing.T) {
 	logger := zap.NewNop()
 
 	svc := NewOntologyFinalizationService(
-		ontologyRepo, schemaRepo, nil,
-		llmFactory, nil, logger,
+		ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{},
+		&mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger,
 	)
 
 	err := svc.Finalize(ctx, projectID)
@@ -448,7 +497,7 @@ func TestOntologyFinalization_DiscoversSoftDelete_Timestamp(t *testing.T) {
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, nil, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -494,7 +543,7 @@ func TestOntologyFinalization_DiscoversSoftDelete_Boolean(t *testing.T) {
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, nil, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -536,7 +585,7 @@ func TestOntologyFinalization_DiscoversSoftDelete_Coverage(t *testing.T) {
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, nil, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -574,7 +623,7 @@ func TestOntologyFinalization_DiscoversCurrency_Cents(t *testing.T) {
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, nil, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -614,7 +663,7 @@ func TestOntologyFinalization_DiscoversCurrency_Dollars(t *testing.T) {
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, nil, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -659,7 +708,7 @@ func TestOntologyFinalization_DiscoversAuditColumns_WithCoverage(t *testing.T) {
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, nil, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -714,7 +763,7 @@ func TestOntologyFinalization_NoConventions(t *testing.T) {
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, nil, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -737,35 +786,39 @@ func TestOntologyFinalization_ExtractsColumnFeatureInsights_SoftDelete(t *testin
 		{TableName: "orders"},
 	}
 
-	// Columns with ColumnFeatures indicating soft-delete
+	// Create column IDs for metadata lookup
+	usersDeletedAtID := uuid.New()
+	ordersDeletedAtID := uuid.New()
+
+	// Columns with IDs for metadata lookup
 	columnsByTable := map[string][]*models.SchemaColumn{
 		"users": {
-			{ColumnName: "id", DataType: "uuid"},
-			{
-				ColumnName: "deleted_at",
-				DataType:   "timestamptz",
-				Metadata: map[string]any{
-					"column_features": map[string]any{
-						"timestamp_features": map[string]any{
-							"is_soft_delete":    true,
-							"timestamp_purpose": "soft_delete",
-						},
-					},
+			{ID: uuid.New(), ColumnName: "id", DataType: "uuid"},
+			{ID: usersDeletedAtID, ColumnName: "deleted_at", DataType: "timestamptz"},
+		},
+		"orders": {
+			{ID: uuid.New(), ColumnName: "id", DataType: "uuid"},
+			{ID: ordersDeletedAtID, ColumnName: "deleted_at", DataType: "timestamptz"},
+		},
+	}
+
+	// ColumnMetadata with TimestampFeatures indicating soft-delete
+	metadataByColumnID := map[uuid.UUID]*models.ColumnMetadata{
+		usersDeletedAtID: {
+			SchemaColumnID: usersDeletedAtID,
+			Features: models.ColumnMetadataFeatures{
+				TimestampFeatures: &models.TimestampFeatures{
+					IsSoftDelete:     true,
+					TimestampPurpose: models.TimestampPurposeSoftDelete,
 				},
 			},
 		},
-		"orders": {
-			{ColumnName: "id", DataType: "uuid"},
-			{
-				ColumnName: "deleted_at",
-				DataType:   "timestamptz",
-				Metadata: map[string]any{
-					"column_features": map[string]any{
-						"timestamp_features": map[string]any{
-							"is_soft_delete":    true,
-							"timestamp_purpose": "soft_delete",
-						},
-					},
+		ordersDeletedAtID: {
+			SchemaColumnID: ordersDeletedAtID,
+			Features: models.ColumnMetadataFeatures{
+				TimestampFeatures: &models.TimestampFeatures{
+					IsSoftDelete:     true,
+					TimestampPurpose: models.TimestampPurposeSoftDelete,
 				},
 			},
 		},
@@ -775,11 +828,12 @@ func TestOntologyFinalization_ExtractsColumnFeatureInsights_SoftDelete(t *testin
 		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
 	}
 	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
+	colMetaRepo := &mockColumnMetadataRepoForFinalization{metadataByColumnID: metadataByColumnID}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, nil, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, colMetaRepo, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -805,59 +859,61 @@ func TestOntologyFinalization_ExtractsColumnFeatureInsights_AuditColumns(t *test
 		{TableName: "orders"},
 	}
 
-	// Columns with ColumnFeatures indicating audit fields
+	// Create column IDs for metadata lookup
+	usersCreatedAtID := uuid.New()
+	usersUpdatedAtID := uuid.New()
+	ordersCreatedAtID := uuid.New()
+	ordersUpdatedAtID := uuid.New()
+
+	// Columns with IDs for metadata lookup
 	columnsByTable := map[string][]*models.SchemaColumn{
 		"users": {
-			{ColumnName: "id", DataType: "uuid"},
-			{
-				ColumnName: "created_at",
-				DataType:   "timestamptz",
-				Metadata: map[string]any{
-					"column_features": map[string]any{
-						"timestamp_features": map[string]any{
-							"is_audit_field":    true,
-							"timestamp_purpose": "audit_created",
-						},
-					},
-				},
-			},
-			{
-				ColumnName: "updated_at",
-				DataType:   "timestamptz",
-				Metadata: map[string]any{
-					"column_features": map[string]any{
-						"timestamp_features": map[string]any{
-							"is_audit_field":    true,
-							"timestamp_purpose": "audit_updated",
-						},
-					},
+			{ID: uuid.New(), ColumnName: "id", DataType: "uuid"},
+			{ID: usersCreatedAtID, ColumnName: "created_at", DataType: "timestamptz"},
+			{ID: usersUpdatedAtID, ColumnName: "updated_at", DataType: "timestamptz"},
+		},
+		"orders": {
+			{ID: uuid.New(), ColumnName: "id", DataType: "uuid"},
+			{ID: ordersCreatedAtID, ColumnName: "created_at", DataType: "timestamptz"},
+			{ID: ordersUpdatedAtID, ColumnName: "updated_at", DataType: "timestamptz"},
+		},
+	}
+
+	// ColumnMetadata with TimestampFeatures indicating audit fields
+	metadataByColumnID := map[uuid.UUID]*models.ColumnMetadata{
+		usersCreatedAtID: {
+			SchemaColumnID: usersCreatedAtID,
+			Features: models.ColumnMetadataFeatures{
+				TimestampFeatures: &models.TimestampFeatures{
+					IsAuditField:     true,
+					TimestampPurpose: models.TimestampPurposeAuditCreated,
 				},
 			},
 		},
-		"orders": {
-			{ColumnName: "id", DataType: "uuid"},
-			{
-				ColumnName: "created_at",
-				DataType:   "timestamptz",
-				Metadata: map[string]any{
-					"column_features": map[string]any{
-						"timestamp_features": map[string]any{
-							"is_audit_field":    true,
-							"timestamp_purpose": "audit_created",
-						},
-					},
+		usersUpdatedAtID: {
+			SchemaColumnID: usersUpdatedAtID,
+			Features: models.ColumnMetadataFeatures{
+				TimestampFeatures: &models.TimestampFeatures{
+					IsAuditField:     true,
+					TimestampPurpose: models.TimestampPurposeAuditUpdated,
 				},
 			},
-			{
-				ColumnName: "updated_at",
-				DataType:   "timestamptz",
-				Metadata: map[string]any{
-					"column_features": map[string]any{
-						"timestamp_features": map[string]any{
-							"is_audit_field":    true,
-							"timestamp_purpose": "audit_updated",
-						},
-					},
+		},
+		ordersCreatedAtID: {
+			SchemaColumnID: ordersCreatedAtID,
+			Features: models.ColumnMetadataFeatures{
+				TimestampFeatures: &models.TimestampFeatures{
+					IsAuditField:     true,
+					TimestampPurpose: models.TimestampPurposeAuditCreated,
+				},
+			},
+		},
+		ordersUpdatedAtID: {
+			SchemaColumnID: ordersUpdatedAtID,
+			Features: models.ColumnMetadataFeatures{
+				TimestampFeatures: &models.TimestampFeatures{
+					IsAuditField:     true,
+					TimestampPurpose: models.TimestampPurposeAuditUpdated,
 				},
 			},
 		},
@@ -867,11 +923,12 @@ func TestOntologyFinalization_ExtractsColumnFeatureInsights_AuditColumns(t *test
 		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
 	}
 	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
+	colMetaRepo := &mockColumnMetadataRepoForFinalization{metadataByColumnID: metadataByColumnID}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, nil, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, colMetaRepo, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -929,7 +986,7 @@ func TestOntologyFinalization_FallsBackToPatternDetection_WhenNoColumnFeatures(t
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, nil, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)

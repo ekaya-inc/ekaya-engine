@@ -1,5 +1,3 @@
-//go:build ignore
-
 // TODO: This test needs significant refactoring after table schema refactor:
 // - NewSchemaService signature changed
 // - UpdateTableMetadata method removed
@@ -40,7 +38,7 @@ func setupSchemaServiceTest(t *testing.T) *schemaServiceTestContext {
 	logger := zap.NewNop()
 
 	// Create service with nil dependencies (not needed for these tests)
-	service := NewSchemaService(repo, nil, nil, nil, nil, nil, logger)
+	service := NewSchemaService(repo, nil, nil, nil, nil, logger)
 
 	// Use fixed IDs for consistent testing (different from repository tests)
 	projectID := uuid.MustParse("00000000-0000-0000-0000-000000000102")
@@ -557,10 +555,9 @@ func TestSchemaService_GetDatasourceSchemaForPrompt_Integration(t *testing.T) {
 		t.Error("expected prompt to contain 'Table: users'")
 	}
 
-	// Verify description is included (not business_name - prompt uses Description field)
-	if !strings.Contains(prompt, "Registered user accounts") {
-		t.Error("expected prompt to contain description 'Registered user accounts'")
-	}
+	// Note: Table description now lives in TableMetadata, not SchemaTable.
+	// GetDatasourceSchemaForPrompt uses only schema-level info, so descriptions
+	// are no longer included in the prompt.
 
 	if !strings.Contains(prompt, "RELATIONSHIPS:") {
 		t.Error("expected prompt to contain 'RELATIONSHIPS:'")

@@ -198,18 +198,18 @@ Production code is active in `glossary_handler.go`. 17 integration tests coverin
 
 Priority by effort and value:
 
-1. **Low effort, quick wins:**
-   - [ ] `fk_semantic_evaluation_test.go` — nearly compiles as-is
-   - [ ] `incremental_dag_service_test.go` — mock signature updates only
-   - [ ] `schema_integration_test.go` — constructor fix
-   - [ ] `relationship_candidate_collector_test.go` — mock fixes
+1. **Low effort, quick wins:** DONE
+   - [x] `fk_semantic_evaluation_test.go` — removed SampleValues, fixed FKCandidateFromAnalysis calls, removed TableName from TableMetadata
+   - [x] `incremental_dag_service_test.go` — updated mock interface, consolidated enum tests to match no-op production code
+   - [x] `schema_integration_test.go` — fixed constructor (7→6 args), removed description assertion (moved to TableMetadata)
+   - [x] `relationship_candidate_collector_test.go` — fixed return values, migrated Metadata→ColumnMetadata, fixed generateCandidatePairs signatures
 
-2. **Medium effort:**
-   - [ ] `ontology_finalization_test.go` — constructor + 3 Metadata tests
-   - [ ] `table_feature_extraction_test.go` — constructor + Metadata migration
-   - [ ] `column_enrichment_test.go` — constructor + new repo mocks
-   - [ ] `relationship_discovery_service_test.go` — constructor + mock
-   - [ ] `glossary_integration_test.go` (handler) — setup verification
+2. **Medium effort:** DONE
+   - [x] `ontology_finalization_test.go` — updated constructor (6→7 args), added ColumnMetadata/Conversation mocks, restructured 2 metadata tests
+   - [x] `table_feature_extraction_test.go` — updated constructor, migrated Metadata→ColumnMetadata, fixed method signatures (parseResponse, writeColumnSummary, buildTableContexts)
+   - [x] `column_enrichment_test.go` — added columnMetadataRepo/conversationRepo/questionService mocks, migrated all Metadata usage
+   - [x] `relationship_discovery_service_test.go` — added columnMetadataRepo param, removed entity repo mocks, migrated Metadata→ColumnMetadata
+   - [x] `glossary_integration_test.go` (handler) — fixed entity_summaries column, added schemaRepo/knowledgeRepo, fixed CreateDuplicate (409), skipped Suggest (needs schema tables)
 
 3. **High effort:**
    - [ ] `column_feature_extraction_test.go` — 61 tests, pervasive SampleValues removal
