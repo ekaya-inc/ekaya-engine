@@ -36,8 +36,18 @@ func (m *mockProjectService) GetByIDWithoutTenant(ctx context.Context, id uuid.U
 	return m.GetByID(ctx, id)
 }
 
-func (m *mockProjectService) Delete(ctx context.Context, id uuid.UUID) error {
-	return m.err
+func (m *mockProjectService) Delete(ctx context.Context, id uuid.UUID) (*services.DeleteResult, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &services.DeleteResult{}, nil
+}
+
+func (m *mockProjectService) CompleteDeleteCallback(ctx context.Context, projectID uuid.UUID, action, status, nonce string) (*services.DeleteCallbackResult, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &services.DeleteCallbackResult{}, nil
 }
 
 func (m *mockProjectService) Provision(ctx context.Context, projectID uuid.UUID, name string, params map[string]interface{}) (*services.ProvisionResult, error) {

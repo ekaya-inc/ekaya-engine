@@ -109,8 +109,12 @@ func (m *mockProjectServiceForOntology) GetByIDWithoutTenant(ctx context.Context
 	return nil, nil
 }
 
-func (m *mockProjectServiceForOntology) Delete(ctx context.Context, id uuid.UUID) error {
-	return nil
+func (m *mockProjectServiceForOntology) Delete(ctx context.Context, id uuid.UUID) (*DeleteResult, error) {
+	return &DeleteResult{}, nil
+}
+
+func (m *mockProjectServiceForOntology) CompleteDeleteCallback(ctx context.Context, projectID uuid.UUID, action, status, nonce string) (*DeleteCallbackResult, error) {
+	return &DeleteCallbackResult{}, nil
 }
 
 func (m *mockProjectServiceForOntology) GetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID) (uuid.UUID, error) {

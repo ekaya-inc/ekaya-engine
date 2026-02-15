@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -18,6 +19,22 @@ import (
 
 // ErrOntologyNotFound is returned when no active ontology exists for a project.
 var ErrOntologyNotFound = errors.New("no active ontology found for project")
+
+// CentralProjectClient is the subset of central.Client used by ProjectService for deletion.
+type CentralProjectClient interface {
+	DeleteProject(ctx context.Context, baseURL, projectID, token, callbackUrl string) (*central.AppActionResponse, error)
+}
+
+// DeleteResult is returned by Delete when central may require a redirect.
+type DeleteResult struct {
+	RedirectUrl string // If set, redirect the user here (central confirmation page)
+	Status      string // e.g., "pending_delete", "deleted"
+}
+
+// DeleteCallbackResult is returned by CompleteDeleteCallback after processing.
+type DeleteCallbackResult struct {
+	ProjectsPageURL string // Central's projects list URL for post-deletion redirect
+}
 
 // ProvisionResult contains the result of provisioning a project.
 type ProvisionResult struct {
@@ -51,7 +68,8 @@ type ProjectService interface {
 	ProvisionFromClaims(ctx context.Context, claims *auth.Claims) (*ProvisionResult, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*models.Project, error)
 	GetByIDWithoutTenant(ctx context.Context, id uuid.UUID) (*models.Project, error)
-	Delete(ctx context.Context, id uuid.UUID) error
+	Delete(ctx context.Context, id uuid.UUID) (*DeleteResult, error)
+	CompleteDeleteCallback(ctx context.Context, projectID uuid.UUID, action, status, nonce string) (*DeleteCallbackResult, error)
 	GetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID) (uuid.UUID, error)
 	SetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID, datasourceID uuid.UUID) error
 	SyncFromCentralAsync(projectID uuid.UUID, papiURL, token string)
@@ -73,15 +91,17 @@ type ProjectService interface {
 
 // projectService implements ProjectService.
 type projectService struct {
-	db                 *database.DB
-	projectRepo        repositories.ProjectRepository
-	userRepo           repositories.UserRepository
-	ontologyRepo       repositories.OntologyRepository
-	mcpConfigRepo      repositories.MCPConfigRepository
-	agentAPIKeyService AgentAPIKeyService
-	centralClient      *central.Client
-	baseURL            string
-	logger             *zap.Logger
+	db                   *database.DB
+	projectRepo          repositories.ProjectRepository
+	userRepo             repositories.UserRepository
+	ontologyRepo         repositories.OntologyRepository
+	mcpConfigRepo        repositories.MCPConfigRepository
+	agentAPIKeyService   AgentAPIKeyService
+	centralClient        *central.Client
+	centralProjectClient CentralProjectClient
+	nonceStore           NonceStore
+	baseURL              string
+	logger               *zap.Logger
 }
 
 // NewProjectService creates a new project service with dependencies.
@@ -93,19 +113,22 @@ func NewProjectService(
 	mcpConfigRepo repositories.MCPConfigRepository,
 	agentAPIKeyService AgentAPIKeyService,
 	centralClient *central.Client,
+	nonceStore NonceStore,
 	baseURL string,
 	logger *zap.Logger,
 ) ProjectService {
 	return &projectService{
-		db:                 db,
-		projectRepo:        projectRepo,
-		userRepo:           userRepo,
-		ontologyRepo:       ontologyRepo,
-		mcpConfigRepo:      mcpConfigRepo,
-		agentAPIKeyService: agentAPIKeyService,
-		centralClient:      centralClient,
-		baseURL:            baseURL,
-		logger:             logger,
+		db:                   db,
+		projectRepo:          projectRepo,
+		userRepo:             userRepo,
+		ontologyRepo:         ontologyRepo,
+		mcpConfigRepo:        mcpConfigRepo,
+		agentAPIKeyService:   agentAPIKeyService,
+		centralClient:        centralClient,
+		centralProjectClient: centralClient,
+		nonceStore:           nonceStore,
+		baseURL:              baseURL,
+		logger:               logger,
 	}
 }
 
@@ -299,10 +322,119 @@ func (s *projectService) GetByIDWithoutTenant(ctx context.Context, id uuid.UUID)
 	return s.projectRepo.Get(ctx, id)
 }
 
-// Delete removes a project and all associated data.
+// Delete initiates project deletion. If central requires a redirect for billing cleanup,
+// returns a DeleteResult with RedirectUrl. Otherwise deletes locally.
 // Assumes tenant context is already set by middleware.
-func (s *projectService) Delete(ctx context.Context, id uuid.UUID) error {
-	return s.projectRepo.Delete(ctx, id)
+func (s *projectService) Delete(ctx context.Context, id uuid.UUID) (*DeleteResult, error) {
+	token, papiURL, err := s.getAuthContext(ctx)
+	if err != nil {
+		// No central context (e.g., standalone mode) — delete locally
+		s.logger.Warn("No auth context for central delete, deleting locally",
+			zap.String("project_id", id.String()),
+			zap.Error(err))
+		if err := s.projectRepo.Delete(ctx, id); err != nil {
+			return nil, fmt.Errorf("failed to delete project: %w", err)
+		}
+		return &DeleteResult{Status: "deleted"}, nil
+	}
+
+	// Build callback URL pointing to the Settings page
+	callbackUrl := s.buildDeleteCallbackURL(id.String())
+
+	centralResp, err := s.centralProjectClient.DeleteProject(ctx, papiURL, id.String(), token, callbackUrl)
+	if err != nil {
+		return nil, fmt.Errorf("failed to notify central: %w", err)
+	}
+
+	s.logger.Info("Central delete response",
+		zap.String("project_id", id.String()),
+		zap.String("status", centralResp.Status),
+		zap.String("redirect_url", centralResp.RedirectUrl),
+		zap.String("callback_url", callbackUrl),
+	)
+
+	// If central requires a redirect (billing confirmation), return it without deleting
+	if centralResp.RedirectUrl != "" {
+		return &DeleteResult{
+			RedirectUrl: centralResp.RedirectUrl,
+			Status:      centralResp.Status,
+		}, nil
+	}
+
+	// No redirect — central handled it immediately, delete locally
+	if err := s.projectRepo.Delete(ctx, id); err != nil {
+		return nil, fmt.Errorf("failed to delete project: %w", err)
+	}
+
+	return &DeleteResult{Status: centralResp.Status}, nil
+}
+
+// CompleteDeleteCallback processes the callback from central after a redirect flow.
+// Returns the projects_page_url so the frontend can redirect there after deletion.
+func (s *projectService) CompleteDeleteCallback(ctx context.Context, projectID uuid.UUID, action, status, nonce string) (*DeleteCallbackResult, error) {
+	if !s.nonceStore.Validate(nonce, "delete", projectID.String(), "project") {
+		return nil, fmt.Errorf("invalid or expired callback nonce")
+	}
+
+	if status == "cancelled" {
+		s.logger.Info("Project delete cancelled by user",
+			zap.String("project_id", projectID.String()),
+		)
+		return &DeleteCallbackResult{}, nil
+	}
+
+	if status != "success" {
+		return nil, fmt.Errorf("unexpected callback status: %s", status)
+	}
+
+	// Read project before deletion to extract projects_page_url for the redirect
+	var projectsPageURL string
+	project, err := s.projectRepo.Get(ctx, projectID)
+	if err == nil && project.Parameters != nil {
+		if v, ok := project.Parameters["projects_page_url"].(string); ok {
+			projectsPageURL = v
+		}
+	}
+
+	if err := s.projectRepo.Delete(ctx, projectID); err != nil {
+		return nil, fmt.Errorf("failed to delete project: %w", err)
+	}
+
+	s.logger.Info("Project deleted via callback",
+		zap.String("project_id", projectID.String()),
+	)
+	return &DeleteCallbackResult{ProjectsPageURL: projectsPageURL}, nil
+}
+
+// buildDeleteCallbackURL constructs the engine callback URL for project deletion.
+func (s *projectService) buildDeleteCallbackURL(projectID string) string {
+	nonce := s.nonceStore.Generate("delete", projectID, "project")
+	callbackURL := fmt.Sprintf("%s/projects/%s/settings", s.baseURL, projectID)
+
+	params := url.Values{}
+	params.Set("callback_action", "delete")
+	params.Set("callback_state", nonce)
+
+	return callbackURL + "?" + params.Encode()
+}
+
+// getAuthContext extracts the JWT token and central API URL from the request context.
+func (s *projectService) getAuthContext(ctx context.Context) (token, papiURL string, err error) {
+	t, ok := auth.GetToken(ctx)
+	if !ok {
+		return "", "", fmt.Errorf("no auth token in context")
+	}
+
+	claims, ok := auth.GetClaims(ctx)
+	if !ok {
+		return "", "", fmt.Errorf("no auth claims in context")
+	}
+
+	if claims.PAPI == "" {
+		return "", "", fmt.Errorf("no central API URL in token claims")
+	}
+
+	return t, claims.PAPI, nil
 }
 
 // GetDefaultDatasourceID retrieves the default datasource ID from project parameters.

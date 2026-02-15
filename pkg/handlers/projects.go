@@ -55,6 +55,8 @@ func (h *ProjectsHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *aut
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Get)))
 	mux.HandleFunc("DELETE /api/projects/{pid}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Delete)))
+	mux.HandleFunc("POST /api/projects/{pid}/delete-callback",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.DeleteCallback)))
 	mux.HandleFunc("PATCH /api/projects/{pid}/auth-server-url",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.UpdateAuthServerURL)))
 	mux.HandleFunc("POST /api/projects/{pid}/sync-server-url",
@@ -180,7 +182,7 @@ func (h *ProjectsHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 // Delete handles DELETE /api/projects/{pid}
-// Deletes a project and all associated data.
+// Initiates project deletion. May return a redirect URL if central requires user confirmation.
 func (h *ProjectsHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	pidStr := r.PathValue("pid")
 
@@ -192,7 +194,8 @@ func (h *ProjectsHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.projectService.Delete(r.Context(), projectID); err != nil {
+	result, err := h.projectService.Delete(r.Context(), projectID)
+	if err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			if err := ErrorResponse(w, http.StatusNotFound, "not_found", "Project not found"); err != nil {
 				h.logger.Error("Failed to write error response", zap.Error(err))
@@ -208,7 +211,79 @@ func (h *ProjectsHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If central requires a redirect (e.g., billing confirmation), return 200 with redirect URL
+	if result.RedirectUrl != "" {
+		if err := WriteJSON(w, http.StatusOK, map[string]any{
+			"success": true,
+			"data":    map[string]string{"redirectUrl": result.RedirectUrl},
+		}); err != nil {
+			h.logger.Error("Failed to write response", zap.Error(err))
+		}
+		return
+	}
+
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// DeleteCallback handles POST /api/projects/{pid}/delete-callback
+// Called by the SPA after central redirects back following project deletion confirmation.
+// Security: JWT auth + tenant middleware + single-use nonce.
+func (h *ProjectsHandler) DeleteCallback(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	var req struct {
+		Action string `json:"action"`
+		Status string `json:"status"`
+		State  string `json:"state"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_request", "Invalid request body"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if req.Action == "" || req.Status == "" || req.State == "" {
+		if err := ErrorResponse(w, http.StatusBadRequest, "missing_params", "action, status, and state are required"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if req.Action != "delete" {
+		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_action", "Expected action 'delete'"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	result, err := h.projectService.CompleteDeleteCallback(r.Context(), projectID, req.Action, req.Status, req.State)
+	if err != nil {
+		h.logger.Error("Failed to complete delete callback",
+			zap.String("project_id", projectID.String()),
+			zap.String("action", req.Action),
+			zap.String("status", req.Status),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusBadRequest, "callback_failed", "Callback processing failed"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	data := map[string]string{"action": req.Action, "status": req.Status}
+	if result.ProjectsPageURL != "" {
+		data["redirect_url"] = result.ProjectsPageURL
+	}
+
+	if err := WriteJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"data":    data,
+	}); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
 }
 
 // UpdateAuthServerURLRequest is the request body for updating auth server URL.

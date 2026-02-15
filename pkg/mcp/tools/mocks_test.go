@@ -193,8 +193,12 @@ func (m *mockProjectService) GetByIDWithoutTenant(ctx context.Context, id uuid.U
 	return nil, nil
 }
 
-func (m *mockProjectService) Delete(ctx context.Context, id uuid.UUID) error {
-	return nil
+func (m *mockProjectService) Delete(ctx context.Context, id uuid.UUID) (*services.DeleteResult, error) {
+	return &services.DeleteResult{}, nil
+}
+
+func (m *mockProjectService) CompleteDeleteCallback(ctx context.Context, projectID uuid.UUID, action, status, nonce string) (*services.DeleteCallbackResult, error) {
+	return &services.DeleteCallbackResult{}, nil
 }
 
 func (m *mockProjectService) GetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID) (uuid.UUID, error) {

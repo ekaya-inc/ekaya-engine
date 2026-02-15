@@ -567,8 +567,12 @@ func (m *mockProjectServiceForDatasource) GetByID(ctx context.Context, id uuid.U
 func (m *mockProjectServiceForDatasource) GetByIDWithoutTenant(ctx context.Context, id uuid.UUID) (*models.Project, error) {
 	return nil, errors.New("not implemented")
 }
-func (m *mockProjectServiceForDatasource) Delete(ctx context.Context, id uuid.UUID) error {
-	return errors.New("not implemented")
+func (m *mockProjectServiceForDatasource) Delete(ctx context.Context, id uuid.UUID) (*DeleteResult, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (m *mockProjectServiceForDatasource) CompleteDeleteCallback(ctx context.Context, projectID uuid.UUID, action, status, nonce string) (*DeleteCallbackResult, error) {
+	return nil, errors.New("not implemented")
 }
 func (m *mockProjectServiceForDatasource) GetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID) (uuid.UUID, error) {
 	return m.defaultDatasourceID, nil
