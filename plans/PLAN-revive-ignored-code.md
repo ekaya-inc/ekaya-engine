@@ -1,6 +1,6 @@
 # PLAN: Revive Ignored Test Code
 
-**Status:** REVIEWED — Ready for implementation
+**Status:** COMPLETE
 **Branch:** TBD
 **Context:** 16 test files (~30,856 lines) were excluded via `//go:build ignore`. Each was classified as dead code, duplicated, or missing coverage.
 
@@ -211,6 +211,6 @@ Priority by effort and value:
    - [x] `relationship_discovery_service_test.go` — added columnMetadataRepo param, removed entity repo mocks, migrated Metadata→ColumnMetadata
    - [x] `glossary_integration_test.go` (handler) — fixed entity_summaries column, added schemaRepo/knowledgeRepo, fixed CreateDuplicate (409), skipped Suggest (needs schema tables)
 
-3. **High effort:**
-   - [ ] `column_feature_extraction_test.go` — 61 tests, pervasive SampleValues removal
-   - [ ] `glossary_service_test.go` — 111 tests, constructor + entity removal
+3. **High effort:** DONE
+   - [x] `column_feature_extraction_test.go` — removed SampleValues, fixed constructor, added ColumnMetadata mock, fixed UpdateColumnStats signature, rewrote Phase 6 store tests
+   - [x] `glossary_service_test.go` — removed entity repo mock, converted OntologyEntity→SchemaTable throughout, fixed constructor (added knowledgeRepo/schemaRepo), all 97 tests passing
