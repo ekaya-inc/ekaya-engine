@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -39,14 +38,6 @@ func registerGetSchemaContextTool(s *server.MCPServer, deps *SchemaToolDeps) {
 				"For example, visits.host_id represents entity 'user' with role 'host' vs visits.visitor_id as 'user' with role 'visitor'. "+
 				"Use this to understand the semantic meaning of foreign keys and generate accurate SQL joins.",
 		),
-		mcp.WithBoolean(
-			"selected_only",
-			mcp.Description("If true, only return selected tables/columns (default: false)"),
-		),
-		mcp.WithBoolean(
-			"include_entities",
-			mcp.Description("If true, include entity/role annotations (default: true). Set to false for standard schema without semantics."),
-		),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
@@ -70,77 +61,21 @@ func registerGetSchemaContextTool(s *server.MCPServer, deps *SchemaToolDeps) {
 			return nil, fmt.Errorf("failed to get default datasource: %w", err)
 		}
 
-		// Parse and validate options
-		selectedOnly := false
-		if args, ok := req.Params.Arguments.(map[string]any); ok {
-			if val, exists := args["selected_only"]; exists {
-				boolVal, ok := val.(bool)
-				if !ok {
-					return NewErrorResultWithDetails(
-						"invalid_parameters",
-						fmt.Sprintf("parameter 'selected_only' must be a boolean, got %T", val),
-						map[string]any{
-							"parameter":     "selected_only",
-							"expected_type": "boolean",
-							"actual_type":   fmt.Sprintf("%T", val),
-						},
-					), nil
-				}
-				selectedOnly = boolVal
-			}
-		}
-
-		includeEntities := true
-		if args, ok := req.Params.Arguments.(map[string]any); ok {
-			if val, exists := args["include_entities"]; exists {
-				boolVal, ok := val.(bool)
-				if !ok {
-					return NewErrorResultWithDetails(
-						"invalid_parameters",
-						fmt.Sprintf("parameter 'include_entities' must be a boolean, got %T", val),
-						map[string]any{
-							"parameter":     "include_entities",
-							"expected_type": "boolean",
-							"actual_type":   fmt.Sprintf("%T", val),
-						},
-					), nil
-				}
-				includeEntities = boolVal
-			}
-		}
-
-		// Get schema context with or without entity enrichment
-		var schemaContext string
-		if includeEntities {
-			schemaContext, err = deps.SchemaService.GetDatasourceSchemaWithEntities(tenantCtx, projectID, dsID, selectedOnly)
-		} else {
-			schemaContext, err = deps.SchemaService.GetDatasourceSchemaForPrompt(tenantCtx, projectID, dsID, selectedOnly)
-		}
+		// Get selected-only schema context
+		schemaContext, err := deps.SchemaService.GetDatasourceSchemaForPrompt(tenantCtx, projectID, dsID, true)
 		if err != nil {
-			// Check if this is a "no ontology" error - actionable
-			if isOntologyNotFoundError(err) {
-				return NewErrorResult(
-					"ontology_not_found",
-					"no active ontology found for project - cannot provide semantic annotations. Use include_entities=false for raw schema, or extract ontology first",
-				), nil
-			}
-			// System errors (database connection, timeout, etc.) remain as Go errors
 			return nil, fmt.Errorf("failed to get schema context: %w", err)
 		}
 
 		// Format response
 		response := struct {
-			SchemaContext    string `json:"schema_context"`
-			ProjectID        string `json:"project_id"`
-			DatasourceID     string `json:"datasource_id"`
-			SelectedOnly     bool   `json:"selected_only"`
-			IncludesEntities bool   `json:"includes_entities"`
+			SchemaContext string `json:"schema_context"`
+			ProjectID     string `json:"project_id"`
+			DatasourceID  string `json:"datasource_id"`
 		}{
-			SchemaContext:    schemaContext,
-			ProjectID:        projectID.String(),
-			DatasourceID:     dsID.String(),
-			SelectedOnly:     selectedOnly,
-			IncludesEntities: includeEntities,
+			SchemaContext: schemaContext,
+			ProjectID:     projectID.String(),
+			DatasourceID:  dsID.String(),
 		}
 
 		jsonResult, _ := json.Marshal(response)
@@ -156,14 +91,4 @@ func getOptionalBool(req mcp.CallToolRequest, key string) (bool, bool) {
 		}
 	}
 	return false, false
-}
-
-// isOntologyNotFoundError checks if an error is related to missing ontology.
-func isOntologyNotFoundError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errMsg := err.Error()
-	return strings.Contains(errMsg, "no active ontology") ||
-		strings.Contains(errMsg, "ontology not found")
 }

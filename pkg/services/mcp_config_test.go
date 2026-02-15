@@ -186,8 +186,12 @@ func (m *mockProjectServiceForMCP) GetByIDWithoutTenant(ctx context.Context, id 
 	return nil, nil
 }
 
-func (m *mockProjectServiceForMCP) Delete(ctx context.Context, id uuid.UUID) error {
-	return nil
+func (m *mockProjectServiceForMCP) Delete(ctx context.Context, id uuid.UUID) (*DeleteResult, error) {
+	return &DeleteResult{}, nil
+}
+
+func (m *mockProjectServiceForMCP) CompleteDeleteCallback(ctx context.Context, projectID uuid.UUID, action, status, nonce string) (*DeleteCallbackResult, error) {
+	return &DeleteCallbackResult{}, nil
 }
 
 func (m *mockProjectServiceForMCP) GetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID) (uuid.UUID, error) {
@@ -1057,11 +1061,19 @@ func (m *mockInstalledAppServiceForMCP) IsInstalled(ctx context.Context, project
 	return m.installed[appID], nil
 }
 
-func (m *mockInstalledAppServiceForMCP) Install(ctx context.Context, projectID uuid.UUID, appID string, userID string) (*models.InstalledApp, error) {
+func (m *mockInstalledAppServiceForMCP) Install(ctx context.Context, projectID uuid.UUID, appID string, userID string) (*AppActionResult, error) {
 	return nil, nil
 }
 
-func (m *mockInstalledAppServiceForMCP) Uninstall(ctx context.Context, projectID uuid.UUID, appID string) error {
+func (m *mockInstalledAppServiceForMCP) Activate(ctx context.Context, projectID uuid.UUID, appID string) (*AppActionResult, error) {
+	return nil, nil
+}
+
+func (m *mockInstalledAppServiceForMCP) Uninstall(ctx context.Context, projectID uuid.UUID, appID string) (*AppActionResult, error) {
+	return nil, nil
+}
+
+func (m *mockInstalledAppServiceForMCP) CompleteCallback(ctx context.Context, projectID uuid.UUID, appID, action, status, nonce, userID string) error {
 	return nil
 }
 

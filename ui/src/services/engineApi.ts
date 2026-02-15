@@ -900,16 +900,50 @@ class EngineApiService {
   }
 
   /**
+   * Activate an app for a project
+   * POST /api/projects/{projectId}/apps/{appId}/activate
+   */
+  async activateApp(
+    projectId: string,
+    appId: string
+  ): Promise<ApiResponse<{ redirectUrl?: string; status?: string }>> {
+    return this.makeRequest<{ redirectUrl?: string; status?: string }>(
+      `/${projectId}/apps/${appId}/activate`,
+      { method: 'POST' }
+    );
+  }
+
+  /**
    * Uninstall an app from a project
    * DELETE /api/projects/{projectId}/apps/{appId}
    */
   async uninstallApp(
     projectId: string,
     appId: string
-  ): Promise<ApiResponse<void>> {
-    return this.makeRequest<void>(`/${projectId}/apps/${appId}`, {
+  ): Promise<ApiResponse<{ redirectUrl?: string; status?: string }>> {
+    return this.makeRequest<{ redirectUrl?: string; status?: string }>(`/${projectId}/apps/${appId}`, {
       method: 'DELETE',
     });
+  }
+
+  /**
+   * Complete an app lifecycle callback (after redirect from central)
+   * POST /api/projects/{projectId}/apps/{appId}/callback
+   */
+  async completeAppCallback(
+    projectId: string,
+    appId: string,
+    action: string,
+    status: string,
+    state: string
+  ): Promise<ApiResponse<{ action: string; status: string }>> {
+    return this.makeRequest<{ action: string; status: string }>(
+      `/${projectId}/apps/${appId}/callback`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ action, status, state }),
+      }
+    );
   }
 
   /**
@@ -1262,10 +1296,11 @@ class EngineApiService {
   }
 
   /**
-   * Delete project and all associated data
+   * Delete project and all associated data.
    * DELETE /api/projects/{projectId}
+   * Returns redirectUrl if central requires user confirmation, or void if deleted directly.
    */
-  async deleteProject(projectId: string): Promise<void> {
+  async deleteProject(projectId: string): Promise<{ redirectUrl?: string } | void> {
     const url = `${this.baseURL}/${projectId}`;
     const response = await fetchWithAuth(url, { method: 'DELETE' });
     if (!response.ok) {
@@ -1274,7 +1309,30 @@ class EngineApiService {
         data.error ?? data.message ?? `HTTP ${response.status}: ${response.statusText}`
       );
     }
-    // DELETE returns 204 No Content on success
+    // 204 = deleted directly, 200 = may have redirect
+    if (response.status === 200) {
+      const data = await response.json();
+      return data.data as { redirectUrl?: string };
+    }
+  }
+
+  /**
+   * Complete a project delete callback (after redirect from central)
+   * POST /api/projects/{projectId}/delete-callback
+   */
+  async completeDeleteCallback(
+    projectId: string,
+    action: string,
+    status: string,
+    state: string
+  ): Promise<ApiResponse<{ action: string; status: string; redirect_url?: string }>> {
+    return this.makeRequest<{ action: string; status: string; redirect_url?: string }>(
+      `/${projectId}/delete-callback`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ action, status, state }),
+      }
+    );
   }
 }
 

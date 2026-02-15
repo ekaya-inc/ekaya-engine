@@ -57,7 +57,11 @@ export const AIAnsweringGuide = ({ questionCount }: AIAnsweringGuideProps) => {
           </h4>
           <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
             <li>
-              Connect your MCP Client (e.g., Claude Code) to this project&apos;s{' '}
+              Open your MCP Client (e.g., Claude Code) in the directory that has access to the
+              source code operating on this datasource
+            </li>
+            <li>
+              Connect it to this project&apos;s{' '}
               <Link
                 to={`/projects/${pid}/mcp-server`}
                 className="text-primary hover:underline inline-flex items-center gap-1"
@@ -67,18 +71,8 @@ export const AIAnsweringGuide = ({ questionCount }: AIAnsweringGuideProps) => {
               </Link>
             </li>
             <li>
-              Use <code className="bg-surface-tertiary px-1.5 py-0.5 rounded text-xs font-mono">list_ontology_questions</code> to
-              see pending questions
-            </li>
-            <li>
-              Research each question using your codebase, documentation, or domain knowledge
-            </li>
-            <li>
-              Update the ontology using tools like <code className="bg-surface-tertiary px-1.5 py-0.5 rounded text-xs font-mono">update_column</code> or{' '}
-              <code className="bg-surface-tertiary px-1.5 py-0.5 rounded text-xs font-mono">update_project_knowledge</code>
-            </li>
-            <li>
-              Mark questions resolved with <code className="bg-surface-tertiary px-1.5 py-0.5 rounded text-xs font-mono">resolve_ontology_question</code>
+              Ask it to &ldquo;answer all ontology questions&rdquo; &mdash; it will use the
+              available tools to research each question and update the ontology automatically
             </li>
           </ol>
         </div>

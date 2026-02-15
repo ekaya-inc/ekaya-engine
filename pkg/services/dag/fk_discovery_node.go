@@ -50,7 +50,7 @@ func (n *FKDiscoveryNode) Execute(ctx context.Context, dag *models.OntologyDAG) 
 		zap.String("datasource_id", dag.DatasourceID.String()))
 
 	// Report initial progress
-	if err := n.ReportProgress(ctx, 0, 100, "Discovering FK relationships from database constraints..."); err != nil {
+	if err := n.ReportProgress(ctx, 0, 0, "Discovering FK relationships from database constraints..."); err != nil {
 		n.Logger().Warn("Failed to report progress", zap.Error(err))
 	}
 
@@ -69,7 +69,7 @@ func (n *FKDiscoveryNode) Execute(ctx context.Context, dag *models.OntologyDAG) 
 
 	// Report completion
 	msg := fmt.Sprintf("Discovered %d FK relationships from database constraints", result.FKRelationships)
-	if err := n.ReportProgress(ctx, 100, 100, msg); err != nil {
+	if err := n.ReportProgress(ctx, 1, 1, msg); err != nil {
 		n.Logger().Warn("Failed to report progress", zap.Error(err))
 	}
 

@@ -71,7 +71,12 @@ func (m *scenarioProjectService) GetByID(ctx context.Context, id uuid.UUID) (*mo
 func (m *scenarioProjectService) GetByIDWithoutTenant(ctx context.Context, id uuid.UUID) (*models.Project, error) {
 	return nil, nil
 }
-func (m *scenarioProjectService) Delete(ctx context.Context, id uuid.UUID) error { return nil }
+func (m *scenarioProjectService) Delete(ctx context.Context, id uuid.UUID) (*services.DeleteResult, error) {
+	return &services.DeleteResult{}, nil
+}
+func (m *scenarioProjectService) CompleteDeleteCallback(ctx context.Context, projectID uuid.UUID, action, status, nonce string) (*services.DeleteCallbackResult, error) {
+	return &services.DeleteCallbackResult{}, nil
+}
 func (m *scenarioProjectService) SetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID, datasourceID uuid.UUID) error {
 	return nil
 }

@@ -98,6 +98,10 @@ func registerGetColumnMetadataTool(s *server.MCPServer, deps *ColumnToolDeps) {
 			return NewErrorResult("TABLE_NOT_FOUND",
 				fmt.Sprintf("table %q not found in schema registry", table)), nil
 		}
+		if !schemaTable.IsSelected {
+			return NewErrorResult("table_not_selected",
+				fmt.Sprintf("table %q is not selected for MCP access", table)), nil
+		}
 
 		// Validate column exists in table
 		schemaColumn, err := deps.SchemaRepo.GetColumnByName(tenantCtx, schemaTable.ID, column)
@@ -406,6 +410,10 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 			return NewErrorResult("TABLE_NOT_FOUND",
 				fmt.Sprintf("table %q not found in schema registry. Run refresh_schema() after creating tables.", table)), nil
 		}
+		if !schemaTable.IsSelected {
+			return NewErrorResult("table_not_selected",
+				fmt.Sprintf("table %q is not selected for MCP access", table)), nil
+		}
 
 		// Validate column exists in table
 		schemaColumn, err := deps.SchemaRepo.GetColumnByName(tenantCtx, schemaTable.ID, column)
@@ -605,10 +613,37 @@ func registerDeleteColumnMetadataTool(s *server.MCPServer, deps *ColumnToolDeps)
 		if err != nil {
 			return nil, err
 		}
+		table = trimString(table)
+		if table == "" {
+			return NewErrorResult("invalid_parameters", "parameter 'table' cannot be empty"), nil
+		}
 
 		column, err := req.RequireString("column")
 		if err != nil {
 			return nil, err
+		}
+		column = trimString(column)
+		if column == "" {
+			return NewErrorResult("invalid_parameters", "parameter 'column' cannot be empty"), nil
+		}
+
+		// Validate table exists and is selected for MCP access
+		datasourceID, err := deps.ProjectService.GetDefaultDatasourceID(tenantCtx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get datasource: %w", err)
+		}
+
+		schemaTable, err := deps.SchemaRepo.FindTableByName(tenantCtx, projectID, datasourceID, table)
+		if err != nil {
+			return nil, fmt.Errorf("failed to lookup table: %w", err)
+		}
+		if schemaTable == nil {
+			return NewErrorResult("TABLE_NOT_FOUND",
+				fmt.Sprintf("table %q not found in schema registry", table)), nil
+		}
+		if !schemaTable.IsSelected {
+			return NewErrorResult("table_not_selected",
+				fmt.Sprintf("table %q is not selected for MCP access", table)), nil
 		}
 
 		// Get or create active ontology (enables immediate use without extraction)

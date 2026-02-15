@@ -24,7 +24,7 @@ function generateRandomString(length = 32): string {
  *
  * Required parameters sent to auth server:
  * - response_type: 'code' (authorization code flow)
- * - client_id: From config (e.g., 'ekaya-region-localhost')
+ * - client_id: From config (e.g., 'ekaya-engine-localhost')
  * - redirect_uri: Where auth server sends user after authentication
  * - scope: 'project:access'
  * - state: Random CSRF token

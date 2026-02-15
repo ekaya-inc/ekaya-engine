@@ -49,7 +49,7 @@ async function saveAuthUrlToProject(
 
 /**
  * Extract auth_url from the current page's URL query parameters
- * This is passed by ekaya-central when redirecting users to ekaya-region
+ * This is passed by ekaya-central when redirecting users to ekaya-engine
  */
 export function getAuthUrlFromQuery(): string | null {
   const params = new URLSearchParams(window.location.search);

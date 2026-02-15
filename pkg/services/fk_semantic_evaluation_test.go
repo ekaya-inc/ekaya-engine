@@ -1,9 +1,3 @@
-//go:build ignore
-// +build ignore
-
-// TODO: This test file needs refactoring for the column schema refactor
-// See plans/PLAN-column-schema-refactor.md for details
-
 package services
 
 import (
@@ -506,7 +500,6 @@ func TestFKCandidateFromAnalysis(t *testing.T) {
 		ColumnName:    "user_id",
 		DataType:      "uuid",
 		DistinctCount: ptr(int64(500)),
-		SampleValues:  []string{"a1b2c3", "d4e5f6", "g7h8i9"},
 	}
 	sourceTable := &models.SchemaTable{
 		SchemaName: "public",
@@ -529,13 +522,9 @@ func TestFKCandidateFromAnalysis(t *testing.T) {
 		OrphanCount:    0,
 		MaxSourceValue: ptr(int64(12345)),
 	}
-	targetEntity := &models.OntologyEntity{
-		Name:        "User",
-		Description: "A platform user account",
-	}
 
 	// Execute (nil table metadata for backward compatibility)
-	candidate := FKCandidateFromAnalysis(sourceCol, sourceTable, targetCol, targetTable, joinResult, targetEntity, nil, nil)
+	candidate := FKCandidateFromAnalysis(sourceCol, sourceTable, targetCol, targetTable, joinResult, nil, nil)
 
 	// Assert
 	assert.Equal(t, "public", candidate.SourceSchema)
@@ -544,7 +533,6 @@ func TestFKCandidateFromAnalysis(t *testing.T) {
 	assert.Equal(t, "uuid", candidate.SourceDataType)
 	assert.Equal(t, int64(500), *candidate.SourceDistinct)
 	assert.Equal(t, int64(10000), *candidate.SourceRowCount)
-	assert.Equal(t, []string{"a1b2c3", "d4e5f6", "g7h8i9"}, candidate.SourceSamples)
 
 	assert.Equal(t, "public", candidate.TargetSchema)
 	assert.Equal(t, "users", candidate.TargetTable)
@@ -558,8 +546,9 @@ func TestFKCandidateFromAnalysis(t *testing.T) {
 	assert.Equal(t, int64(0), candidate.OrphanCount)
 	assert.Equal(t, int64(12345), *candidate.MaxSourceValue)
 
-	assert.Equal(t, "User", candidate.TargetEntityName)
-	assert.Equal(t, "A platform user account", candidate.TargetEntityDescription)
+	// Entity context has been removed for v1.0 entity simplification
+	assert.Equal(t, "", candidate.TargetEntityName)
+	assert.Equal(t, "", candidate.TargetEntityDescription)
 }
 
 func TestFKCandidateFromAnalysis_NilEntity(t *testing.T) {
@@ -583,8 +572,8 @@ func TestFKCandidateFromAnalysis_NilEntity(t *testing.T) {
 		OrphanCount: 0,
 	}
 
-	// Execute with nil entity and nil table metadata
-	candidate := FKCandidateFromAnalysis(sourceCol, sourceTable, targetCol, targetTable, joinResult, nil, nil, nil)
+	// Execute with nil table metadata
+	candidate := FKCandidateFromAnalysis(sourceCol, sourceTable, targetCol, targetTable, joinResult, nil, nil)
 
 	// Assert - entity fields should be empty
 	assert.Equal(t, "", candidate.TargetEntityName)
@@ -616,16 +605,14 @@ func TestFKCandidateFromAnalysis_WithTableDescriptions(t *testing.T) {
 
 	// Table metadata from TableFeatureExtraction
 	sourceTableMeta := &models.TableMetadata{
-		TableName:   "account_authentications",
 		Description: ptr("Tracks authentication methods and identity providers for user accounts"),
 	}
 	targetTableMeta := &models.TableMetadata{
-		TableName:   "jobs",
 		Description: ptr("Background processing tasks and job queue entries"),
 	}
 
 	// Execute with table metadata
-	candidate := FKCandidateFromAnalysis(sourceCol, sourceTable, targetCol, targetTable, joinResult, nil, sourceTableMeta, targetTableMeta)
+	candidate := FKCandidateFromAnalysis(sourceCol, sourceTable, targetCol, targetTable, joinResult, sourceTableMeta, targetTableMeta)
 
 	// Assert - table descriptions should be populated
 	assert.Equal(t, "Tracks authentication methods and identity providers for user accounts", candidate.SourceTableDescription)
@@ -655,16 +642,14 @@ func TestFKCandidateFromAnalysis_TableDescriptionsNilDescription(t *testing.T) {
 
 	// Table metadata with nil description
 	sourceTableMeta := &models.TableMetadata{
-		TableName:   "orders",
 		Description: nil, // No description extracted yet
 	}
 	targetTableMeta := &models.TableMetadata{
-		TableName:   "users",
 		Description: ptr("Platform user accounts"),
 	}
 
 	// Execute
-	candidate := FKCandidateFromAnalysis(sourceCol, sourceTable, targetCol, targetTable, joinResult, nil, sourceTableMeta, targetTableMeta)
+	candidate := FKCandidateFromAnalysis(sourceCol, sourceTable, targetCol, targetTable, joinResult, sourceTableMeta, targetTableMeta)
 
 	// Assert - source description should be empty, target should be populated
 	assert.Equal(t, "", candidate.SourceTableDescription)

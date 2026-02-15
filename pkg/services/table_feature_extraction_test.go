@@ -1,9 +1,3 @@
-//go:build ignore
-// +build ignore
-
-// TODO: This test uses SchemaColumn.Metadata which no longer exists.
-// Needs refactoring to use ColumnMetadataRepository.
-
 package services
 
 import (
@@ -20,6 +14,32 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
+
+// ============================================================================
+// Helper: build ColumnMetadata from purpose/role/description/semanticType/identifierFeatures
+// ============================================================================
+
+func tfeColMeta(colID uuid.UUID, purpose, role, description, semanticType string, idFeatures *models.IdentifierFeatures) *models.ColumnMetadata {
+	meta := &models.ColumnMetadata{
+		SchemaColumnID: colID,
+	}
+	if purpose != "" {
+		meta.Purpose = &purpose
+	}
+	if role != "" {
+		meta.Role = &role
+	}
+	if description != "" {
+		meta.Description = &description
+	}
+	if semanticType != "" {
+		meta.SemanticType = &semanticType
+	}
+	if idFeatures != nil {
+		meta.Features.IdentifierFeatures = idFeatures
+	}
+	return meta
+}
 
 // ============================================================================
 // Prompt Building Tests
@@ -40,60 +60,41 @@ func TestTableFeatureExtraction_BuildPrompt(t *testing.T) {
 	}
 
 	// Create columns with different feature types
+	colID1 := uuid.New()
+	colID2 := uuid.New()
+	colID3 := uuid.New()
+	colID4 := uuid.New()
+
 	columns := []*models.SchemaColumn{
 		{
-			ID:           uuid.New(),
+			ID:           colID1,
 			ColumnName:   "id",
 			DataType:     "uuid",
 			IsPrimaryKey: true,
-			Metadata: map[string]any{
-				"column_features": map[string]any{
-					"purpose":       "identifier",
-					"role":          "primary_key",
-					"description":   "Unique user identifier",
-					"semantic_type": "uuid",
-				},
-			},
 		},
 		{
-			ID:         uuid.New(),
+			ID:         colID2,
 			ColumnName: "email",
 			DataType:   "varchar(255)",
-			Metadata: map[string]any{
-				"column_features": map[string]any{
-					"purpose":       "identifier",
-					"role":          "attribute",
-					"description":   "User email address",
-					"semantic_type": "email",
-				},
-			},
 		},
 		{
-			ID:         uuid.New(),
+			ID:         colID3,
 			ColumnName: "created_at",
 			DataType:   "timestamp",
-			Metadata: map[string]any{
-				"column_features": map[string]any{
-					"purpose":       "timestamp",
-					"role":          "attribute",
-					"description":   "When the user account was created",
-					"semantic_type": "audit_created",
-				},
-			},
 		},
 		{
-			ID:         uuid.New(),
+			ID:         colID4,
 			ColumnName: "status",
 			DataType:   "varchar(50)",
-			Metadata: map[string]any{
-				"column_features": map[string]any{
-					"purpose":       "enum",
-					"role":          "attribute",
-					"description":   "Account status",
-					"semantic_type": "status_enum",
-				},
-			},
 		},
+	}
+
+	// Build metadata map
+	metadataByColumnID := map[uuid.UUID]*models.ColumnMetadata{
+		colID1: tfeColMeta(colID1, "identifier", "primary_key", "Unique user identifier", "uuid", nil),
+		colID2: tfeColMeta(colID2, "identifier", "attribute", "User email address", "email", nil),
+		colID3: tfeColMeta(colID3, "timestamp", "attribute", "When the user account was created", "audit_created", nil),
+		colID4: tfeColMeta(colID4, "enum", "attribute", "Account status", "status_enum", nil),
 	}
 
 	// Create a relationship
@@ -108,9 +109,10 @@ func TestTableFeatureExtraction_BuildPrompt(t *testing.T) {
 	}
 
 	tc := &tableContext{
-		Table:         table,
-		Columns:       columns,
-		Relationships: relationships,
+		Table:              table,
+		Columns:            columns,
+		Relationships:      relationships,
+		MetadataByColumnID: metadataByColumnID,
 	}
 
 	prompt := svc.buildPrompt(tc)
@@ -152,24 +154,24 @@ func TestTableFeatureExtraction_BuildPrompt_NoRelationships(t *testing.T) {
 		TableName: "settings",
 	}
 
+	colID := uuid.New()
 	columns := []*models.SchemaColumn{
 		{
-			ID:         uuid.New(),
+			ID:         colID,
 			ColumnName: "key",
 			DataType:   "varchar(100)",
-			Metadata: map[string]any{
-				"column_features": map[string]any{
-					"purpose": "identifier",
-					"role":    "attribute",
-				},
-			},
 		},
 	}
 
+	metadataByColumnID := map[uuid.UUID]*models.ColumnMetadata{
+		colID: tfeColMeta(colID, "identifier", "attribute", "", "", nil),
+	}
+
 	tc := &tableContext{
-		Table:         table,
-		Columns:       columns,
-		Relationships: nil,
+		Table:              table,
+		Columns:            columns,
+		Relationships:      nil,
+		MetadataByColumnID: metadataByColumnID,
 	}
 
 	prompt := svc.buildPrompt(tc)
@@ -191,64 +193,50 @@ func TestTableFeatureExtraction_BuildPrompt_ColumnGrouping(t *testing.T) {
 	}
 
 	// Create columns with various roles
+	colID1 := uuid.New()
+	colID2 := uuid.New()
+	colID3 := uuid.New()
+	colID4 := uuid.New()
+
 	columns := []*models.SchemaColumn{
 		// Primary key
 		{
-			ID:         uuid.New(),
+			ID:         colID1,
 			ColumnName: "id",
 			DataType:   "uuid",
-			Metadata: map[string]any{
-				"column_features": map[string]any{
-					"purpose": "identifier",
-					"role":    "primary_key",
-				},
-			},
 		},
 		// Foreign key
 		{
-			ID:         uuid.New(),
+			ID:         colID2,
 			ColumnName: "user_id",
 			DataType:   "uuid",
-			Metadata: map[string]any{
-				"column_features": map[string]any{
-					"purpose": "identifier",
-					"role":    "foreign_key",
-					"identifier_features": map[string]any{
-						"fk_target_table": "users",
-					},
-				},
-			},
 		},
 		// Measure
 		{
-			ID:         uuid.New(),
+			ID:         colID3,
 			ColumnName: "total_amount",
 			DataType:   "numeric(10,2)",
-			Metadata: map[string]any{
-				"column_features": map[string]any{
-					"purpose": "measure",
-					"role":    "measure",
-				},
-			},
 		},
 		// Enum
 		{
-			ID:         uuid.New(),
+			ID:         colID4,
 			ColumnName: "status",
 			DataType:   "varchar(50)",
-			Metadata: map[string]any{
-				"column_features": map[string]any{
-					"purpose": "enum",
-					"role":    "attribute",
-				},
-			},
 		},
 	}
 
+	metadataByColumnID := map[uuid.UUID]*models.ColumnMetadata{
+		colID1: tfeColMeta(colID1, "identifier", "primary_key", "", "", nil),
+		colID2: tfeColMeta(colID2, "identifier", "foreign_key", "", "", &models.IdentifierFeatures{FKTargetTable: "users"}),
+		colID3: tfeColMeta(colID3, "measure", "measure", "", "", nil),
+		colID4: tfeColMeta(colID4, "enum", "attribute", "", "", nil),
+	}
+
 	tc := &tableContext{
-		Table:         table,
-		Columns:       columns,
-		Relationships: nil,
+		Table:              table,
+		Columns:            columns,
+		Relationships:      nil,
+		MetadataByColumnID: metadataByColumnID,
 	}
 
 	prompt := svc.buildPrompt(tc)
@@ -335,7 +323,8 @@ func TestTableFeatureExtraction_ParseResponse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := svc.parseResponse(tt.tableName, tt.response)
+			schemaTableID := uuid.New()
+			result, err := svc.parseResponse(schemaTableID, tt.tableName, tt.response)
 
 			if tt.wantErr {
 				if err == nil {
@@ -381,17 +370,17 @@ func TestTableFeatureExtraction_BuildTableContexts(t *testing.T) {
 	tables := []*models.SchemaTable{
 		{ID: tableID1, TableName: "users"},
 		{ID: tableID2, TableName: "orders"},
-		{ID: tableID3, TableName: "settings"}, // No features
+		{ID: tableID3, TableName: "settings"}, // No columns
 	}
 
-	// Create columns by table (only users and orders have features)
+	// Create columns by table (only users and orders have columns)
 	columnsByTable := map[string][]*models.SchemaColumn{
 		"users": {
-			{ID: uuid.New(), ColumnName: "id", Metadata: map[string]any{"column_features": map[string]any{}}},
+			{ID: uuid.New(), ColumnName: "id"},
 		},
 		"orders": {
-			{ID: uuid.New(), ColumnName: "id", Metadata: map[string]any{"column_features": map[string]any{}}},
-			{ID: uuid.New(), ColumnName: "user_id", Metadata: map[string]any{"column_features": map[string]any{}}},
+			{ID: uuid.New(), ColumnName: "id"},
+			{ID: uuid.New(), ColumnName: "user_id"},
 		},
 	}
 
@@ -405,7 +394,9 @@ func TestTableFeatureExtraction_BuildTableContexts(t *testing.T) {
 		},
 	}
 
-	contexts := svc.buildTableContexts(tables, columnsByTable, relationships)
+	metadataByColumnID := map[uuid.UUID]*models.ColumnMetadata{}
+
+	contexts := svc.buildTableContexts(tables, columnsByTable, relationships, metadataByColumnID)
 
 	// Should have 2 contexts (users and orders, not settings)
 	if len(contexts) != 2 {
@@ -458,6 +449,7 @@ func TestTableFeatureExtraction_WriteColumnSummary(t *testing.T) {
 	tests := []struct {
 		name       string
 		column     *models.SchemaColumn
+		meta       *models.ColumnMetadata
 		wantSubstr []string
 	}{
 		{
@@ -466,6 +458,7 @@ func TestTableFeatureExtraction_WriteColumnSummary(t *testing.T) {
 				ColumnName: "raw_col",
 				DataType:   "text",
 			},
+			meta:       nil,
 			wantSubstr: []string{"raw_col", "text"},
 		},
 		{
@@ -473,14 +466,8 @@ func TestTableFeatureExtraction_WriteColumnSummary(t *testing.T) {
 			column: &models.SchemaColumn{
 				ColumnName: "email",
 				DataType:   "varchar(255)",
-				Metadata: map[string]any{
-					"column_features": map[string]any{
-						"purpose":       "identifier",
-						"semantic_type": "email",
-						"description":   "User email address",
-					},
-				},
 			},
+			meta:       tfeColMeta(uuid.New(), "identifier", "", "User email address", "email", nil),
 			wantSubstr: []string{"email", "varchar(255)", "User email address"},
 		},
 		{
@@ -488,16 +475,8 @@ func TestTableFeatureExtraction_WriteColumnSummary(t *testing.T) {
 			column: &models.SchemaColumn{
 				ColumnName: "user_id",
 				DataType:   "uuid",
-				Metadata: map[string]any{
-					"column_features": map[string]any{
-						"purpose": "identifier",
-						"role":    "foreign_key",
-						"identifier_features": map[string]any{
-							"fk_target_table": "users",
-						},
-					},
-				},
 			},
+			meta:       tfeColMeta(uuid.New(), "identifier", "foreign_key", "", "", &models.IdentifierFeatures{FKTargetTable: "users"}),
 			wantSubstr: []string{"user_id", "uuid", "→ users"},
 		},
 	}
@@ -505,7 +484,7 @@ func TestTableFeatureExtraction_WriteColumnSummary(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var sb strings.Builder
-			svc.writeColumnSummary(&sb, tt.column)
+			svc.writeColumnSummary(&sb, tt.column, tt.meta)
 			result := sb.String()
 
 			for _, substr := range tt.wantSubstr {
@@ -525,42 +504,63 @@ func TestTableFeatureExtraction_WriteColumnSummary(t *testing.T) {
 type mockSchemaRepoForTableFeatures struct {
 	repositories.SchemaRepository
 	tables                    []*models.SchemaTable
-	columnsByTable            map[string][]*models.SchemaColumn
+	columns                   []*models.SchemaColumn
 	relationshipDetails       []*models.RelationshipDetail
 	listTablesErr             error
-	getColumnsWithFeaturesErr error
+	listColumnsErr            error
 	getRelationshipDetailsErr error
 }
 
-func (m *mockSchemaRepoForTableFeatures) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+func (m *mockSchemaRepoForTableFeatures) ListTablesByDatasource(_ context.Context, _, _ uuid.UUID) ([]*models.SchemaTable, error) {
 	if m.listTablesErr != nil {
 		return nil, m.listTablesErr
 	}
 	return m.tables, nil
 }
 
-func (m *mockSchemaRepoForTableFeatures) GetColumnsWithFeaturesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) (map[string][]*models.SchemaColumn, error) {
-	if m.getColumnsWithFeaturesErr != nil {
-		return nil, m.getColumnsWithFeaturesErr
+func (m *mockSchemaRepoForTableFeatures) ListAllTablesByDatasource(_ context.Context, _, _ uuid.UUID) ([]*models.SchemaTable, error) {
+	if m.listTablesErr != nil {
+		return nil, m.listTablesErr
 	}
-	return m.columnsByTable, nil
+	return m.tables, nil
 }
 
-func (m *mockSchemaRepoForTableFeatures) GetRelationshipDetails(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.RelationshipDetail, error) {
+func (m *mockSchemaRepoForTableFeatures) ListColumnsByDatasource(_ context.Context, _, _ uuid.UUID) ([]*models.SchemaColumn, error) {
+	if m.listColumnsErr != nil {
+		return nil, m.listColumnsErr
+	}
+	return m.columns, nil
+}
+
+func (m *mockSchemaRepoForTableFeatures) GetRelationshipDetails(_ context.Context, _, _ uuid.UUID) ([]*models.RelationshipDetail, error) {
 	if m.getRelationshipDetailsErr != nil {
 		return nil, m.getRelationshipDetailsErr
 	}
 	return m.relationshipDetails, nil
 }
 
-// mockTableMetadataRepo tracks upserts for testing.
-type mockTableMetadataRepo struct {
+// mockColumnMetadataRepoForTableFeatures provides mock column metadata for table feature extraction.
+type mockColumnMetadataRepoForTableFeatures struct {
+	repositories.ColumnMetadataRepository
+	metadataList []*models.ColumnMetadata
+	err          error
+}
+
+func (m *mockColumnMetadataRepoForTableFeatures) GetBySchemaColumnIDs(_ context.Context, _ []uuid.UUID) ([]*models.ColumnMetadata, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.metadataList, nil
+}
+
+// mockTableMetadataRepoForTableFeatures tracks upserts for testing.
+type mockTableMetadataRepoForTableFeatures struct {
 	repositories.TableMetadataRepository
 	upsertedMetadata []*models.TableMetadata
 	upsertErr        error
 }
 
-func (m *mockTableMetadataRepo) Upsert(ctx context.Context, meta *models.TableMetadata) error {
+func (m *mockTableMetadataRepoForTableFeatures) UpsertFromExtraction(_ context.Context, meta *models.TableMetadata) error {
 	if m.upsertErr != nil {
 		return m.upsertErr
 	}
@@ -575,7 +575,7 @@ type mockLLMClientForTableFeatures struct {
 	callCount       int32
 }
 
-func (m *mockLLMClientForTableFeatures) GenerateResponse(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+func (m *mockLLMClientForTableFeatures) GenerateResponse(_ context.Context, _ string, _ string, _ float64, _ bool) (*llm.GenerateResponseResult, error) {
 	atomic.AddInt32(&m.callCount, 1)
 	if m.generateErr != nil {
 		return nil, m.generateErr
@@ -588,11 +588,11 @@ func (m *mockLLMClientForTableFeatures) GenerateResponse(ctx context.Context, pr
 	}, nil
 }
 
-func (m *mockLLMClientForTableFeatures) CreateEmbedding(ctx context.Context, input string, model string) ([]float32, error) {
+func (m *mockLLMClientForTableFeatures) CreateEmbedding(_ context.Context, _ string, _ string) ([]float32, error) {
 	return nil, nil
 }
 
-func (m *mockLLMClientForTableFeatures) CreateEmbeddings(ctx context.Context, inputs []string, model string) ([][]float32, error) {
+func (m *mockLLMClientForTableFeatures) CreateEmbeddings(_ context.Context, _ []string, _ string) ([][]float32, error) {
 	return nil, nil
 }
 
@@ -609,15 +609,15 @@ type mockLLMFactoryForTableFeatures struct {
 	client *mockLLMClientForTableFeatures
 }
 
-func (m *mockLLMFactoryForTableFeatures) CreateForProject(ctx context.Context, projectID uuid.UUID) (llm.LLMClient, error) {
+func (m *mockLLMFactoryForTableFeatures) CreateForProject(_ context.Context, _ uuid.UUID) (llm.LLMClient, error) {
 	return m.client, nil
 }
 
-func (m *mockLLMFactoryForTableFeatures) CreateEmbeddingClient(ctx context.Context, projectID uuid.UUID) (llm.LLMClient, error) {
+func (m *mockLLMFactoryForTableFeatures) CreateEmbeddingClient(_ context.Context, _ uuid.UUID) (llm.LLMClient, error) {
 	return m.client, nil
 }
 
-func (m *mockLLMFactoryForTableFeatures) CreateStreamingClient(ctx context.Context, projectID uuid.UUID) (*llm.StreamingClient, error) {
+func (m *mockLLMFactoryForTableFeatures) CreateStreamingClient(_ context.Context, _ uuid.UUID) (*llm.StreamingClient, error) {
 	return nil, nil
 }
 
@@ -637,29 +637,35 @@ func TestTableFeatureExtraction_ExtractTableFeatures_Success(t *testing.T) {
 
 	// Create mock repositories
 	tableID := uuid.New()
+	colID := uuid.New()
 	mockSchemaRepo := &mockSchemaRepoForTableFeatures{
 		tables: []*models.SchemaTable{
 			{ID: tableID, TableName: "users"},
 		},
-		columnsByTable: map[string][]*models.SchemaColumn{
-			"users": {
-				{
-					ID:         uuid.New(),
-					ColumnName: "id",
-					DataType:   "uuid",
-					Metadata:   map[string]any{"column_features": map[string]any{"purpose": "identifier"}},
-				},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            colID,
+				SchemaTableID: tableID,
+				ColumnName:    "id",
+				DataType:      "uuid",
 			},
 		},
 		relationshipDetails: nil,
 	}
 
-	mockMetadataRepo := &mockTableMetadataRepo{}
+	mockColMetadataRepo := &mockColumnMetadataRepoForTableFeatures{
+		metadataList: []*models.ColumnMetadata{
+			tfeColMeta(colID, "identifier", "", "", "", nil),
+		},
+	}
+
+	mockMetadataRepo := &mockTableMetadataRepoForTableFeatures{}
 
 	// Create service
 	workerPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 2}, zap.NewNop())
 	svc := NewTableFeatureExtractionService(
 		mockSchemaRepo,
+		mockColMetadataRepo,
 		mockMetadataRepo,
 		&mockLLMFactoryForTableFeatures{client: mockLLM},
 		workerPool,
@@ -697,15 +703,17 @@ func TestTableFeatureExtraction_ExtractTableFeatures_Success(t *testing.T) {
 func TestTableFeatureExtraction_ExtractTableFeatures_NoTables(t *testing.T) {
 	mockSchemaRepo := &mockSchemaRepoForTableFeatures{
 		tables:              []*models.SchemaTable{},
-		columnsByTable:      map[string][]*models.SchemaColumn{},
+		columns:             []*models.SchemaColumn{},
 		relationshipDetails: nil,
 	}
 
-	mockMetadataRepo := &mockTableMetadataRepo{}
+	mockColMetadataRepo := &mockColumnMetadataRepoForTableFeatures{}
+	mockMetadataRepo := &mockTableMetadataRepoForTableFeatures{}
 
 	workerPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 2}, zap.NewNop())
 	svc := NewTableFeatureExtractionService(
 		mockSchemaRepo,
+		mockColMetadataRepo,
 		mockMetadataRepo,
 		nil, // no LLM needed
 		workerPool,
@@ -728,15 +736,17 @@ func TestTableFeatureExtraction_ExtractTableFeatures_NoColumnsWithFeatures(t *te
 		tables: []*models.SchemaTable{
 			{ID: uuid.New(), TableName: "users"},
 		},
-		columnsByTable:      map[string][]*models.SchemaColumn{}, // No columns with features
+		columns:             []*models.SchemaColumn{}, // No columns
 		relationshipDetails: nil,
 	}
 
-	mockMetadataRepo := &mockTableMetadataRepo{}
+	mockColMetadataRepo := &mockColumnMetadataRepoForTableFeatures{}
+	mockMetadataRepo := &mockTableMetadataRepoForTableFeatures{}
 
 	workerPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 2}, zap.NewNop())
 	svc := NewTableFeatureExtractionService(
 		mockSchemaRepo,
+		mockColMetadataRepo,
 		mockMetadataRepo,
 		nil,
 		workerPool,
@@ -766,27 +776,36 @@ func TestTableFeatureExtraction_ExtractTableFeatures_ProgressCallback(t *testing
 		responseContent: string(responseJSON),
 	}
 
+	tableID1 := uuid.New()
+	tableID2 := uuid.New()
+	colID1 := uuid.New()
+	colID2 := uuid.New()
+
 	mockSchemaRepo := &mockSchemaRepoForTableFeatures{
 		tables: []*models.SchemaTable{
-			{ID: uuid.New(), TableName: "users"},
-			{ID: uuid.New(), TableName: "orders"},
+			{ID: tableID1, TableName: "users"},
+			{ID: tableID2, TableName: "orders"},
 		},
-		columnsByTable: map[string][]*models.SchemaColumn{
-			"users": {
-				{ID: uuid.New(), ColumnName: "id", Metadata: map[string]any{"column_features": map[string]any{}}},
-			},
-			"orders": {
-				{ID: uuid.New(), ColumnName: "id", Metadata: map[string]any{"column_features": map[string]any{}}},
-			},
+		columns: []*models.SchemaColumn{
+			{ID: colID1, SchemaTableID: tableID1, ColumnName: "id"},
+			{ID: colID2, SchemaTableID: tableID2, ColumnName: "id"},
 		},
 		relationshipDetails: nil,
 	}
 
-	mockMetadataRepo := &mockTableMetadataRepo{}
+	mockColMetadataRepo := &mockColumnMetadataRepoForTableFeatures{
+		metadataList: []*models.ColumnMetadata{
+			{SchemaColumnID: colID1},
+			{SchemaColumnID: colID2},
+		},
+	}
+
+	mockMetadataRepo := &mockTableMetadataRepoForTableFeatures{}
 
 	workerPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 2}, zap.NewNop())
 	svc := NewTableFeatureExtractionService(
 		mockSchemaRepo,
+		mockColMetadataRepo,
 		mockMetadataRepo,
 		&mockLLMFactoryForTableFeatures{client: mockLLM},
 		workerPool,

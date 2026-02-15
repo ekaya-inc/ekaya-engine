@@ -156,7 +156,7 @@ func (h *OntologyEnrichmentHandler) GetEnrichment(w http.ResponseWriter, r *http
 	}
 
 	// Get all tables for the datasource
-	tables, err := h.schemaService.ListTablesByDatasource(ctx, projectID, dsID, false)
+	tables, err := h.schemaService.ListTablesByDatasource(ctx, projectID, dsID)
 	if err != nil {
 		h.logger.Error("Failed to list tables", zap.Error(err))
 		_ = ErrorResponse(w, http.StatusInternalServerError, "list_tables_failed", err.Error())
@@ -181,7 +181,7 @@ func (h *OntologyEnrichmentHandler) GetEnrichment(w http.ResponseWriter, r *http
 	tableResponses := make([]TableColumnsResponse, 0, len(tables))
 	for _, table := range tables {
 		// Get columns for this table
-		columns, err := h.schemaService.ListColumnsByTable(ctx, projectID, table.ID, false)
+		columns, err := h.schemaService.ListColumnsByTable(ctx, projectID, table.ID)
 		if err != nil {
 			h.logger.Warn("Failed to list columns for table",
 				zap.String("table_name", table.TableName),

@@ -164,8 +164,8 @@ func (e *OntologyToolExecutor) querySchemaMetadata(ctx context.Context, argument
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	// Get all tables for the datasource
-	tables, err := e.schemaRepo.ListTablesByDatasource(ctx, e.projectID, e.datasourceID, false)
+	// Get selected tables for the datasource
+	tables, err := e.schemaRepo.ListTablesByDatasource(ctx, e.projectID, e.datasourceID)
 	if err != nil {
 		return "", fmt.Errorf("failed to list tables: %w", err)
 	}
@@ -204,7 +204,7 @@ func (e *OntologyToolExecutor) querySchemaMetadata(ctx context.Context, argument
 		}
 
 		// Get columns for this table
-		columns, err := e.schemaRepo.ListColumnsByTable(ctx, e.projectID, t.ID, false)
+		columns, err := e.schemaRepo.ListAllColumnsByTable(ctx, e.projectID, t.ID)
 		if err != nil {
 			e.logger.Error("Failed to get columns for table",
 				zap.String("table", t.TableName),

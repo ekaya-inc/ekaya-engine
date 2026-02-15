@@ -158,7 +158,8 @@ func main() {
 	centralClient := central.NewClient(logger)
 
 	// Create services
-	projectService := services.NewProjectService(db, projectRepo, userRepo, ontologyRepo, mcpConfigRepo, agentAPIKeyService, centralClient, cfg.BaseURL, logger)
+	nonceStore := services.NewNonceStore()
+	projectService := services.NewProjectService(db, projectRepo, userRepo, ontologyRepo, mcpConfigRepo, agentAPIKeyService, centralClient, nonceStore, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, ontologyRepo, credentialEncryptor, adapterFactory, projectService, logger)
 	schemaService := services.NewSchemaService(schemaRepo, ontologyRepo, columnMetadataRepo, datasourceService, adapterFactory, logger)
@@ -168,7 +169,7 @@ func main() {
 	queryHistoryRepo := repositories.NewQueryHistoryRepository()
 	queryHistoryService := services.NewQueryHistoryService(queryHistoryRepo, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
-	installedAppService := services.NewInstalledAppService(installedAppRepo, logger)
+	installedAppService := services.NewInstalledAppService(installedAppRepo, centralClient, nonceStore, cfg.BaseURL, logger)
 	mcpConfigService := services.NewMCPConfigService(mcpConfigRepo, queryService, projectService, installedAppService, cfg.BaseURL, logger)
 
 	// LLM factory for creating clients per project configuration

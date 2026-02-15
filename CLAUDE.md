@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is **ekaya-engine** - a clean architecture rebuild of the Ekaya regional controller. The project was initialized from ekaya-region's infrastructure but with a minimal Go backend shell, designed for incremental, well-architected development.
+This is **ekaya-engine** - the Ekaya regional controller, built with clean architecture and designed for incremental, well-architected development.
 
 **Design Philosophy:**
 - Clean architecture with separation of concerns
@@ -97,6 +97,7 @@ pkg/
 3. **Repositories are data-only** - SQL queries, external API calls
 4. **Dependency injection** - Services accept interfaces, not concrete types
 5. **Fail fast** - Return errors immediately, don't continue on failure
+6. **User JWT for all access checks** - We do not mint service JWTs. The user's JWT (issued by ekaya-central) is forwarded for all calls to central. Almost all project-level settings require `"role": "admin"` in the claims.
 
 ### Example Pattern
 

@@ -108,6 +108,52 @@ func TestConvertQuestionInputs_PriorityClamping(t *testing.T) {
 	assert.Equal(t, 5, result[2].Priority)
 }
 
+func TestConvertQuestionInputs_AffectsPopulated(t *testing.T) {
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	inputs := []OntologyQuestionInput{
+		{
+			Category: "enumeration",
+			Priority: 1,
+			Question: "What do offer_type values 1, 2, 3 represent?",
+			Context:  "Column: offers.offer_type",
+			Tables:   []string{"offers"},
+			Columns:  []string{"offers.offer_type"},
+		},
+		{
+			Category: "business_rules",
+			Priority: 2,
+			Question: "When is a user marked as is_available?",
+			Context:  "Column: users.is_available",
+			Tables:   []string{"users"},
+		},
+		{
+			Category: "terminology",
+			Priority: 3,
+			Question: "No table context question?",
+			Context:  "Some context",
+			// No Tables or Columns - Affects should be nil
+		},
+	}
+
+	result := ConvertQuestionInputs(inputs, projectID, ontologyID, nil)
+	require.Len(t, result, 3)
+
+	// First: both tables and columns set
+	require.NotNil(t, result[0].Affects)
+	assert.Equal(t, []string{"offers"}, result[0].Affects.Tables)
+	assert.Equal(t, []string{"offers.offer_type"}, result[0].Affects.Columns)
+
+	// Second: only tables set
+	require.NotNil(t, result[1].Affects)
+	assert.Equal(t, []string{"users"}, result[1].Affects.Tables)
+	assert.Nil(t, result[1].Affects.Columns)
+
+	// Third: no tables or columns - Affects should be nil
+	assert.Nil(t, result[2].Affects)
+}
+
 func TestConvertQuestionInputs_WorkflowIDOptional(t *testing.T) {
 	projectID := uuid.New()
 	ontologyID := uuid.New()

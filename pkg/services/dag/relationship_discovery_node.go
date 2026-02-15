@@ -64,7 +64,7 @@ func (n *RelationshipDiscoveryNode) Execute(ctx context.Context, dag *models.Ont
 		zap.String("datasource_id", dag.DatasourceID.String()))
 
 	// Report initial progress
-	if err := n.ReportProgress(ctx, 0, 100, "Starting LLM-validated relationship discovery..."); err != nil {
+	if err := n.ReportProgress(ctx, 0, 0, "Starting LLM-validated relationship discovery..."); err != nil {
 		n.Logger().Warn("Failed to report progress", zap.Error(err))
 	}
 

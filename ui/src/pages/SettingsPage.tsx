@@ -1,8 +1,10 @@
 import { Settings, ArrowLeft, Moon, Sun, Monitor, LogOut, Trash2, Loader2 } from "lucide-react";
-import { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
-import AlertConfigSection from "../components/AlertConfigSection";
+// AlertConfigSection hidden until Alerts tile/screen is implemented.
+// See plans/PLAN-alerts-tile-and-screen.md
+// import AlertConfigSection from "../components/AlertConfigSection";
 import { useTheme } from "../components/ThemeProvider";
 import { Button } from "../components/ui/Button";
 import {
@@ -22,18 +24,66 @@ import {
 } from "../components/ui/Dialog";
 import { Input } from "../components/ui/Input";
 import { useProject } from "../contexts/ProjectContext";
+import { useToast } from "../hooks/useToast";
 import engineApi from "../services/engineApi";
 
 const SettingsPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { theme, setTheme } = useTheme();
   const { projectName, urls } = useProject();
+  const { toast } = useToast();
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Process callback from central redirect (after delete confirmation)
+  useEffect(() => {
+    const callbackAction = searchParams.get("callback_action");
+    const callbackState = searchParams.get("callback_state");
+    const callbackStatus = searchParams.get("callback_status") ?? "success";
+
+    if (!callbackAction || !callbackState || !pid) return;
+    if (callbackAction !== "delete") return;
+
+    // Clear callback params from URL immediately to prevent re-processing
+    setSearchParams({}, { replace: true });
+
+    if (callbackStatus === "cancelled") {
+      toast({ title: "Deletion cancelled", description: "Project was not deleted." });
+      return;
+    }
+
+    const processCallback = async () => {
+      try {
+        const response = await engineApi.completeDeleteCallback(
+          pid, "delete", callbackStatus, callbackState
+        );
+        if (response.error) {
+          toast({ title: "Error", description: response.error, variant: "destructive" });
+          return;
+        }
+        // Project deleted — redirect to central projects list
+        const redirectUrl = response.data?.redirect_url ?? urls.projectsPageUrl;
+        if (redirectUrl) {
+          window.location.href = redirectUrl;
+        } else {
+          window.location.href = "/";
+        }
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: error instanceof Error ? error.message : "Failed to complete deletion",
+          variant: "destructive",
+        });
+      }
+    };
+
+    processCallback();
+  }, [searchParams, setSearchParams, pid, urls.projectsPageUrl, toast]);
 
   const handleDeleteProject = async () => {
     if (!pid || deleteConfirmation !== "delete project") return;
@@ -42,12 +92,16 @@ const SettingsPage = () => {
     setDeleteError(null);
 
     try {
-      await engineApi.deleteProject(pid);
-      // Redirect to ekaya-central project page
-      if (urls.projectPageUrl) {
-        window.location.href = urls.projectPageUrl;
+      const result = await engineApi.deleteProject(pid);
+      // If central requires a redirect (billing confirmation), follow it
+      if (result && result.redirectUrl) {
+        window.location.href = result.redirectUrl;
+        return;
+      }
+      // No redirect — deleted directly, go to central projects list
+      if (urls.projectsPageUrl) {
+        window.location.href = urls.projectsPageUrl;
       } else {
-        // Fallback: navigate to root which will trigger re-auth
         window.location.href = "/";
       }
     } catch (error) {
@@ -165,8 +219,9 @@ const SettingsPage = () => {
           </CardContent>
         </Card>
 
-        {/* Alert Configuration */}
-        {pid && <AlertConfigSection projectId={pid} />}
+        {/* Alert Configuration — hidden until Alerts tile/screen is implemented.
+           See plans/PLAN-alerts-tile-and-screen.md */}
+        {/* {pid && <AlertConfigSection projectId={pid} />} */}
 
         {/* Account */}
         <Card>

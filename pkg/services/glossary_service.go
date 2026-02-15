@@ -493,7 +493,7 @@ func (s *glossaryService) SuggestTerms(ctx context.Context, projectID uuid.UUID)
 	}
 
 	// Get tables for context (replaces entity concept)
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil, true)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil)
 	if err != nil {
 		return nil, fmt.Errorf("get tables: %w", err)
 	}
@@ -657,10 +657,17 @@ func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntolog
 		sb.WriteString("\n")
 	}
 
-	// Include column details if available
+	// Include column details if available (only for selected tables)
 	if len(ontology.ColumnDetails) > 0 {
+		selectedTableNames := make(map[string]bool, len(tables))
+		for _, t := range tables {
+			selectedTableNames[t.TableName] = true
+		}
 		sb.WriteString("## Key Columns\n\n")
 		for tableName, columns := range ontology.ColumnDetails {
+			if !selectedTableNames[tableName] {
+				continue
+			}
 			// Only show columns with roles (measures, dimensions) or FK associations
 			relevantCols := make([]models.ColumnDetail, 0)
 			for _, col := range columns {
@@ -787,7 +794,7 @@ func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, 
 	}
 
 	// Get tables for context (replaces entity concept)
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil, true)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil)
 	if err != nil {
 		return 0, fmt.Errorf("get tables: %w", err)
 	}
@@ -932,7 +939,7 @@ func (s *glossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, on
 	}
 
 	// Get tables for context (replaces entity concept)
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil, true)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil)
 	if err != nil {
 		return fmt.Errorf("get tables: %w", err)
 	}
@@ -946,7 +953,7 @@ func (s *glossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, on
 			tableNames = append(tableNames, t.TableName)
 		}
 		// Fetch columns for all tables in one query
-		schemaColumnsByTable, err = s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames, false)
+		schemaColumnsByTable, err = s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames)
 		if err != nil {
 			s.logger.Warn("Failed to get schema columns, continuing without",
 				zap.String("project_id", projectID.String()),

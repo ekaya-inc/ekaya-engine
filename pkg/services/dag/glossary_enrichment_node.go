@@ -45,7 +45,7 @@ func (n *GlossaryEnrichmentNode) Execute(ctx context.Context, dag *models.Ontolo
 		zap.String("project_id", dag.ProjectID.String()))
 
 	// Report initial progress
-	if err := n.ReportProgress(ctx, 0, 100, "Generating SQL definitions for glossary terms..."); err != nil {
+	if err := n.ReportProgress(ctx, 0, 0, "Generating SQL definitions for glossary terms..."); err != nil {
 		n.Logger().Warn("Failed to report progress", zap.Error(err))
 	}
 
@@ -64,7 +64,7 @@ func (n *GlossaryEnrichmentNode) Execute(ctx context.Context, dag *models.Ontolo
 	}
 
 	// Report completion
-	if err := n.ReportProgress(ctx, 100, 100, "Glossary enrichment complete"); err != nil {
+	if err := n.ReportProgress(ctx, 1, 1, "Glossary enrichment complete"); err != nil {
 		n.Logger().Warn("Failed to report progress", zap.Error(err))
 	}
 

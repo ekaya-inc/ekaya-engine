@@ -1,12 +1,3 @@
-//go:build ignore
-// +build ignore
-
-// TODO: This test file needs refactoring for the column schema refactor:
-// - SchemaColumn.Metadata was removed
-// - Column features are now stored in engine_ontology_column_metadata.features JSONB
-// - Method signatures changed to take map[uuid.UUID]*models.ColumnMetadata parameter
-// See plans/PLAN-column-schema-refactor.md for details
-
 package services
 
 import (
@@ -67,7 +58,7 @@ type testColEnrichmentSchemaRepo struct {
 	columnsByTable map[string][]*models.SchemaColumn
 }
 
-func (r *testColEnrichmentSchemaRepo) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error) {
+func (r *testColEnrichmentSchemaRepo) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error) {
 	result := make(map[string][]*models.SchemaColumn)
 	for _, tableName := range tableNames {
 		if cols, ok := r.columnsByTable[tableName]; ok {
@@ -90,7 +81,11 @@ func (r *testColEnrichmentSchemaRepo) FindTableByName(ctx context.Context, proje
 	return nil, nil
 }
 
-func (r *testColEnrichmentSchemaRepo) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+func (r *testColEnrichmentSchemaRepo) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	return nil, nil
+}
+
+func (r *testColEnrichmentSchemaRepo) ListAllTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
 	return nil, nil
 }
 
@@ -114,15 +109,14 @@ func (r *testColEnrichmentSchemaRepo) UpdateTableSelection(ctx context.Context, 
 	return nil
 }
 
-func (r *testColEnrichmentSchemaRepo) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
+func (r *testColEnrichmentSchemaRepo) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (r *testColEnrichmentSchemaRepo) ListAllColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }
 
 func (r *testColEnrichmentSchemaRepo) ListColumnsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error) {
-	return nil, nil
-}
-
-func (r *testColEnrichmentSchemaRepo) GetColumnsWithFeaturesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) (map[string][]*models.SchemaColumn, error) {
 	return nil, nil
 }
 
@@ -142,11 +136,7 @@ func (r *testColEnrichmentSchemaRepo) UpdateColumnSelection(ctx context.Context,
 	return nil
 }
 
-func (r *testColEnrichmentSchemaRepo) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
-	return nil
-}
-
-func (r *testColEnrichmentSchemaRepo) GetColumnByName(ctx context.Context, projectID uuid.UUID, columnName string) (*models.SchemaColumn, error) {
+func (r *testColEnrichmentSchemaRepo) GetColumnByName(ctx context.Context, tableID uuid.UUID, columnName string) (*models.SchemaColumn, error) {
 	return nil, nil
 }
 
@@ -229,6 +219,116 @@ func (r *testColEnrichmentSchemaRepo) DeleteInferredRelationshipsByProject(ctx c
 	return 0, nil
 }
 
+// Mock column metadata repository for column enrichment testing
+type testColEnrichmentColumnMetadataRepo struct {
+	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata
+}
+
+func (r *testColEnrichmentColumnMetadataRepo) Upsert(ctx context.Context, meta *models.ColumnMetadata) error {
+	return nil
+}
+
+func (r *testColEnrichmentColumnMetadataRepo) UpsertFromExtraction(ctx context.Context, meta *models.ColumnMetadata) error {
+	return nil
+}
+
+func (r *testColEnrichmentColumnMetadataRepo) GetBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
+	if r.metadataByColumnID != nil {
+		return r.metadataByColumnID[schemaColumnID], nil
+	}
+	return nil, nil
+}
+
+func (r *testColEnrichmentColumnMetadataRepo) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.ColumnMetadata, error) {
+	return nil, nil
+}
+
+func (r *testColEnrichmentColumnMetadataRepo) GetBySchemaColumnIDs(ctx context.Context, schemaColumnIDs []uuid.UUID) ([]*models.ColumnMetadata, error) {
+	var result []*models.ColumnMetadata
+	if r.metadataByColumnID != nil {
+		for _, id := range schemaColumnIDs {
+			if meta, ok := r.metadataByColumnID[id]; ok {
+				result = append(result, meta)
+			}
+		}
+	}
+	return result, nil
+}
+
+func (r *testColEnrichmentColumnMetadataRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (r *testColEnrichmentColumnMetadataRepo) DeleteBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) error {
+	return nil
+}
+
+// Mock conversation repository for column enrichment testing
+type testColEnrichmentConversationRepo struct{}
+
+func (r *testColEnrichmentConversationRepo) Save(ctx context.Context, conv *models.LLMConversation) error {
+	return nil
+}
+
+func (r *testColEnrichmentConversationRepo) Update(ctx context.Context, conv *models.LLMConversation) error {
+	return nil
+}
+
+func (r *testColEnrichmentConversationRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status, errorMessage string) error {
+	return nil
+}
+
+func (r *testColEnrichmentConversationRepo) GetByProject(ctx context.Context, projectID uuid.UUID, limit int) ([]*models.LLMConversation, error) {
+	return nil, nil
+}
+
+func (r *testColEnrichmentConversationRepo) GetByContext(ctx context.Context, projectID uuid.UUID, key, value string) ([]*models.LLMConversation, error) {
+	return nil, nil
+}
+
+func (r *testColEnrichmentConversationRepo) GetByConversationID(ctx context.Context, conversationID uuid.UUID) ([]*models.LLMConversation, error) {
+	return nil, nil
+}
+
+func (r *testColEnrichmentConversationRepo) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
+// Mock question service for column enrichment testing
+type testColEnrichmentQuestionService struct{}
+
+func (s *testColEnrichmentQuestionService) GetNextQuestion(ctx context.Context, projectID uuid.UUID, includeSkipped bool) (*models.OntologyQuestion, error) {
+	return nil, nil
+}
+
+func (s *testColEnrichmentQuestionService) GetPendingQuestions(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyQuestion, error) {
+	return nil, nil
+}
+
+func (s *testColEnrichmentQuestionService) GetPendingCount(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (s *testColEnrichmentQuestionService) GetPendingCounts(ctx context.Context, projectID uuid.UUID) (*repositories.QuestionCounts, error) {
+	return nil, nil
+}
+
+func (s *testColEnrichmentQuestionService) AnswerQuestion(ctx context.Context, questionID uuid.UUID, answer string, userID string) (*models.AnswerResult, error) {
+	return nil, nil
+}
+
+func (s *testColEnrichmentQuestionService) SkipQuestion(ctx context.Context, questionID uuid.UUID) error {
+	return nil
+}
+
+func (s *testColEnrichmentQuestionService) DeleteQuestion(ctx context.Context, questionID uuid.UUID) error {
+	return nil
+}
+
+func (s *testColEnrichmentQuestionService) CreateQuestions(ctx context.Context, questions []*models.OntologyQuestion) error {
+	return nil
+}
+
 // Mock datasource service for testing
 type testColEnrichmentDatasourceService struct {
 	datasourceID uuid.UUID
@@ -261,6 +361,10 @@ func (s *testColEnrichmentDatasourceService) List(ctx context.Context, projectID
 			},
 		},
 	}, nil
+}
+
+func (s *testColEnrichmentDatasourceService) Rename(ctx context.Context, id uuid.UUID, name string) error {
+	return nil
 }
 
 func (s *testColEnrichmentDatasourceService) Update(ctx context.Context, id uuid.UUID, name, dsType, provider string, config map[string]any) error {
@@ -383,13 +487,14 @@ func TestColumnEnrichmentService_EnrichProject_Success(t *testing.T) {
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:   ontologyRepo,
-		schemaRepo:     schemaRepo,
-		dsSvc:          &testColEnrichmentDatasourceService{},
-		llmFactory:     llmFactory,
-		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:         zap.NewNop(),
+		ontologyRepo:       ontologyRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
+		dsSvc:              &testColEnrichmentDatasourceService{},
+		llmFactory:         llmFactory,
+		workerPool:         llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:     llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:             zap.NewNop(),
 	}
 
 	// Execute
@@ -450,13 +555,14 @@ func TestColumnEnrichmentService_EnrichProject_WithRetryOnTransientError(t *test
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:   ontologyRepo,
-		schemaRepo:     schemaRepo,
-		dsSvc:          &testColEnrichmentDatasourceService{},
-		llmFactory:     llmFactory,
-		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:         zap.NewNop(),
+		ontologyRepo:       ontologyRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
+		dsSvc:              &testColEnrichmentDatasourceService{},
+		llmFactory:         llmFactory,
+		workerPool:         llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:     llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:             zap.NewNop(),
 	}
 
 	// Execute
@@ -497,13 +603,14 @@ func TestColumnEnrichmentService_EnrichProject_NonRetryableError(t *testing.T) {
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:   ontologyRepo,
-		schemaRepo:     schemaRepo,
-		dsSvc:          &testColEnrichmentDatasourceService{},
-		llmFactory:     llmFactory,
-		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:         zap.NewNop(),
+		ontologyRepo:       ontologyRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
+		dsSvc:              &testColEnrichmentDatasourceService{},
+		llmFactory:         llmFactory,
+		workerPool:         llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:     llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:             zap.NewNop(),
 	}
 
 	// Execute
@@ -560,13 +667,14 @@ func TestColumnEnrichmentService_EnrichProject_LargeTable(t *testing.T) {
 	llmFactory := &testColEnrichmentLLMFactory{client: client}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:   ontologyRepo,
-		schemaRepo:     schemaRepo,
-		dsSvc:          &testColEnrichmentDatasourceService{},
-		llmFactory:     llmFactory,
-		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:         zap.NewNop(),
+		ontologyRepo:       ontologyRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
+		dsSvc:              &testColEnrichmentDatasourceService{},
+		llmFactory:         llmFactory,
+		workerPool:         llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:     llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:             zap.NewNop(),
 	}
 
 	// Execute
@@ -610,13 +718,14 @@ func TestColumnEnrichmentService_EnrichProject_ProgressCallback(t *testing.T) {
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:   ontologyRepo,
-		schemaRepo:     schemaRepo,
-		dsSvc:          &testColEnrichmentDatasourceService{},
-		llmFactory:     llmFactory,
-		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:         zap.NewNop(),
+		ontologyRepo:       ontologyRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
+		dsSvc:              &testColEnrichmentDatasourceService{},
+		llmFactory:         llmFactory,
+		workerPool:         llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:     llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:             zap.NewNop(),
 	}
 
 	// Track progress callbacks
@@ -656,13 +765,14 @@ func TestColumnEnrichmentService_EnrichProject_EmptyProject(t *testing.T) {
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:   ontologyRepo,
-		schemaRepo:     schemaRepo,
-		dsSvc:          &testColEnrichmentDatasourceService{},
-		llmFactory:     llmFactory,
-		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:         zap.NewNop(),
+		ontologyRepo:       ontologyRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
+		dsSvc:              &testColEnrichmentDatasourceService{},
+		llmFactory:         llmFactory,
+		workerPool:         llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:     llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:             zap.NewNop(),
 	}
 
 	// Execute
@@ -709,13 +819,14 @@ func TestColumnEnrichmentService_EnrichProject_PartialFailure(t *testing.T) {
 	llmFactory := &testColEnrichmentLLMFactory{client: client}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:   ontologyRepo,
-		schemaRepo:     schemaRepo,
-		dsSvc:          &testColEnrichmentDatasourceService{},
-		llmFactory:     llmFactory,
-		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:         zap.NewNop(),
+		ontologyRepo:       ontologyRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
+		dsSvc:              &testColEnrichmentDatasourceService{},
+		llmFactory:         llmFactory,
+		workerPool:         llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:     llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:             zap.NewNop(),
 	}
 
 	// Execute
@@ -806,13 +917,14 @@ func TestColumnEnrichmentService_EnrichTable_WithForeignKeys(t *testing.T) {
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:   ontologyRepo,
-		schemaRepo:     schemaRepo,
-		dsSvc:          &testColEnrichmentDatasourceService{},
-		llmFactory:     llmFactory,
-		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:         zap.NewNop(),
+		ontologyRepo:       ontologyRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
+		dsSvc:              &testColEnrichmentDatasourceService{},
+		llmFactory:         llmFactory,
+		workerPool:         llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:     llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:             zap.NewNop(),
 	}
 
 	// Execute
@@ -873,13 +985,14 @@ func TestColumnEnrichmentService_EnrichTable_WithEnumValues(t *testing.T) {
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:   ontologyRepo,
-		schemaRepo:     schemaRepo,
-		dsSvc:          &testColEnrichmentDatasourceService{},
-		llmFactory:     llmFactory,
-		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:         zap.NewNop(),
+		ontologyRepo:       ontologyRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
+		dsSvc:              &testColEnrichmentDatasourceService{},
+		llmFactory:         llmFactory,
+		workerPool:         llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:     llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:             zap.NewNop(),
 	}
 
 	// Execute
@@ -910,17 +1023,32 @@ func TestColumnEnrichmentService_identifyEnumCandidates(t *testing.T) {
 	distinctCount5 := int64(5)
 	distinctCount100 := int64(100)
 
+	orderStatusID := uuid.New()
+	userTypeID := uuid.New()
+
 	columns := []*models.SchemaColumn{
 		{ColumnName: "id", DataType: "bigint"},
-		{ColumnName: "order_status", DataType: "varchar"},
-		{ColumnName: "user_type", DataType: "varchar"},
+		{ID: orderStatusID, ColumnName: "order_status", DataType: "varchar"},
+		{ID: userTypeID, ColumnName: "user_type", DataType: "varchar"},
 		{ColumnName: "email", DataType: "varchar", DistinctCount: &distinctCount100},
 		{ColumnName: "priority_level", DataType: "varchar", DistinctCount: &distinctCount5},
 	}
 
-	candidates := service.identifyEnumCandidates(columns)
+	enumPath := string(models.ClassificationPathEnum)
+	metadataByColumnID := map[uuid.UUID]*models.ColumnMetadata{
+		orderStatusID: {
+			SchemaColumnID:     orderStatusID,
+			ClassificationPath: &enumPath,
+		},
+		userTypeID: {
+			SchemaColumnID:    userTypeID,
+			NeedsEnumAnalysis: true,
+		},
+	}
 
-	// Should identify columns with enum patterns or low cardinality
+	candidates := service.identifyEnumCandidates(columns, metadataByColumnID)
+
+	// Should identify columns with enum metadata or low cardinality
 	assert.GreaterOrEqual(t, len(candidates), 3, "Should find at least 3 enum candidates")
 
 	candidateNames := make(map[string]bool)
@@ -928,13 +1056,14 @@ func TestColumnEnrichmentService_identifyEnumCandidates(t *testing.T) {
 		candidateNames[c.ColumnName] = true
 	}
 
-	assert.True(t, candidateNames["order_status"], "Should identify 'order_status' as enum")
-	assert.True(t, candidateNames["user_type"], "Should identify 'user_type' as enum")
+	assert.True(t, candidateNames["order_status"], "Should identify 'order_status' as enum (via metadata classification)")
+	assert.True(t, candidateNames["user_type"], "Should identify 'user_type' as enum (via metadata NeedsEnumAnalysis)")
 	assert.True(t, candidateNames["priority_level"], "Should identify 'priority_level' as enum (low cardinality)")
 	assert.False(t, candidateNames["id"], "Should not identify 'id' as enum")
 }
 
-// TestColumnEnrichmentService_EnrichTable_NoTable tests that enrichment fails when table is not found
+// TestColumnEnrichmentService_EnrichTable_NoTable tests that enrichment succeeds but does nothing
+// when the table is not found in the schema (creates minimal context, finds no columns).
 func TestColumnEnrichmentService_EnrichTable_NoTable(t *testing.T) {
 	projectID := uuid.New()
 
@@ -945,21 +1074,25 @@ func TestColumnEnrichmentService_EnrichTable_NoTable(t *testing.T) {
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:   ontologyRepo,
-		schemaRepo:     schemaRepo,
-		dsSvc:          &testColEnrichmentDatasourceService{},
-		llmFactory:     llmFactory,
-		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:         zap.NewNop(),
+		ontologyRepo:       ontologyRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
+		dsSvc:              &testColEnrichmentDatasourceService{},
+		llmFactory:         llmFactory,
+		workerPool:         llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:     llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:             zap.NewNop(),
 	}
 
 	// Execute
 	err := service.EnrichTable(context.Background(), projectID, "nonexistent_table")
 
-	// Verify - should fail when table is not found
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "table not found")
+	// Verify - should succeed but do nothing (no columns found)
+	require.NoError(t, err)
+
+	// Verify LLM was not called
+	client := llmFactory.client.(*testColEnrichmentLLMClient)
+	assert.Equal(t, 0, client.callCount, "Should not call LLM for nonexistent table")
 }
 
 func TestColumnEnrichmentService_EnrichTable_NoColumns(t *testing.T) {
@@ -976,13 +1109,14 @@ func TestColumnEnrichmentService_EnrichTable_NoColumns(t *testing.T) {
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:   ontologyRepo,
-		schemaRepo:     schemaRepo,
-		dsSvc:          &testColEnrichmentDatasourceService{},
-		llmFactory:     llmFactory,
-		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:         zap.NewNop(),
+		ontologyRepo:       ontologyRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
+		dsSvc:              &testColEnrichmentDatasourceService{},
+		llmFactory:         llmFactory,
+		workerPool:         llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:     llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:             zap.NewNop(),
 	}
 
 	// Execute
@@ -1034,13 +1168,14 @@ func TestColumnEnrichmentService_EnrichProject_ContinuesOnFailure(t *testing.T) 
 	})
 
 	service := &columnEnrichmentService{
-		ontologyRepo:   ontologyRepo,
-		schemaRepo:     schemaRepo,
-		dsSvc:          &testColEnrichmentDatasourceService{},
-		llmFactory:     llmFactory,
-		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker: highThresholdCircuit,
-		logger:         zap.NewNop(),
+		ontologyRepo:       ontologyRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
+		dsSvc:              &testColEnrichmentDatasourceService{},
+		llmFactory:         llmFactory,
+		workerPool:         llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:     highThresholdCircuit,
+		logger:             zap.NewNop(),
 	}
 
 	// Execute
@@ -1374,13 +1509,14 @@ func TestColumnEnrichmentService_EnrichTable_IntegerEnumInference(t *testing.T) 
 	llmFactory := &testColEnrichmentLLMFactory{client: llmClient}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:   ontologyRepo,
-		schemaRepo:     schemaRepo,
-		dsSvc:          &testColEnrichmentDatasourceService{},
-		llmFactory:     llmFactory,
-		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:         zap.NewNop(),
+		ontologyRepo:       ontologyRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
+		dsSvc:              &testColEnrichmentDatasourceService{},
+		llmFactory:         llmFactory,
+		workerPool:         llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:     llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:             zap.NewNop(),
 	}
 
 	// Execute
@@ -1784,7 +1920,7 @@ func TestColumnEnrichmentService_convertToColumnDetails_WithEnumDefinitions(t *t
 	fkInfo := map[string]string{}
 	enumDistributions := map[string]*datasource.EnumDistributionResult{}
 
-	details := service.convertToColumnDetails("billing_transactions", enrichments, columns, fkInfo, enumSamples, enumDefs, enumDistributions)
+	details := service.convertToColumnDetails("billing_transactions", enrichments, columns, fkInfo, enumSamples, enumDefs, enumDistributions, make(map[uuid.UUID]*models.ColumnMetadata))
 
 	require.Equal(t, 3, len(details))
 
@@ -2036,67 +2172,105 @@ func TestApplyEnumDistributions_PartialMatch(t *testing.T) {
 	assert.Nil(t, unknownVal.Count, "Values not in distribution should not have count set")
 }
 
-// TestFindCompletionTimestampColumn verifies completion timestamp column detection.
+// TestFindCompletionTimestampColumn verifies completion timestamp column detection via ColumnMetadata.
 func TestFindCompletionTimestampColumn(t *testing.T) {
+	completedAtID := uuid.New()
+	finishedAtID := uuid.New()
+	createdAtID := uuid.New()
+	updatedAtID := uuid.New()
+
 	tests := []struct {
-		name     string
-		columns  []*models.SchemaColumn
-		expected string
+		name               string
+		columns            []*models.SchemaColumn
+		metadataByColumnID map[uuid.UUID]*models.ColumnMetadata
+		expected           string
 	}{
 		{
-			name: "finds completed_at",
+			name: "finds column with completion purpose in metadata",
 			columns: []*models.SchemaColumn{
 				{ColumnName: "id", DataType: "integer"},
 				{ColumnName: "status", DataType: "varchar"},
-				{ColumnName: "completed_at", DataType: "timestamp"},
-				{ColumnName: "created_at", DataType: "timestamp"},
+				{ID: completedAtID, ColumnName: "completed_at", DataType: "timestamp"},
+				{ID: createdAtID, ColumnName: "created_at", DataType: "timestamp"},
+			},
+			metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+				completedAtID: {
+					SchemaColumnID: completedAtID,
+					Features: models.ColumnMetadataFeatures{
+						TimestampFeatures: &models.TimestampFeatures{
+							TimestampPurpose: models.TimestampPurposeCompletion,
+						},
+					},
+				},
+				createdAtID: {
+					SchemaColumnID: createdAtID,
+					Features: models.ColumnMetadataFeatures{
+						TimestampFeatures: &models.TimestampFeatures{
+							TimestampPurpose: models.TimestampPurposeAuditCreated,
+						},
+					},
+				},
 			},
 			expected: "completed_at",
 		},
 		{
-			name: "finds finished_at",
+			name: "finds finished_at with completion purpose",
 			columns: []*models.SchemaColumn{
 				{ColumnName: "id", DataType: "integer"},
-				{ColumnName: "finished_at", DataType: "timestamp with time zone"},
+				{ID: finishedAtID, ColumnName: "finished_at", DataType: "timestamp with time zone"},
+			},
+			metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+				finishedAtID: {
+					SchemaColumnID: finishedAtID,
+					Features: models.ColumnMetadataFeatures{
+						TimestampFeatures: &models.TimestampFeatures{
+							TimestampPurpose: models.TimestampPurposeCompletion,
+						},
+					},
+				},
 			},
 			expected: "finished_at",
 		},
 		{
-			name: "finds ended_at",
-			columns: []*models.SchemaColumn{
-				{ColumnName: "ended_at", DataType: "datetime"},
-			},
-			expected: "ended_at",
-		},
-		{
-			name: "fallback to completion-like column",
-			columns: []*models.SchemaColumn{
-				{ColumnName: "job_completion_time", DataType: "timestamp"},
-			},
-			expected: "job_completion_time",
-		},
-		{
-			name: "ignores non-timestamp columns",
-			columns: []*models.SchemaColumn{
-				{ColumnName: "completed_at", DataType: "varchar"}, // Not a timestamp!
-				{ColumnName: "status", DataType: "varchar"},
-			},
-			expected: "",
-		},
-		{
-			name: "returns empty when no completion column",
+			name: "returns empty when no completion metadata",
 			columns: []*models.SchemaColumn{
 				{ColumnName: "id", DataType: "integer"},
-				{ColumnName: "created_at", DataType: "timestamp"},
-				{ColumnName: "updated_at", DataType: "timestamp"},
+				{ID: createdAtID, ColumnName: "created_at", DataType: "timestamp"},
+				{ID: updatedAtID, ColumnName: "updated_at", DataType: "timestamp"},
+			},
+			metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+				createdAtID: {
+					SchemaColumnID: createdAtID,
+					Features: models.ColumnMetadataFeatures{
+						TimestampFeatures: &models.TimestampFeatures{
+							TimestampPurpose: models.TimestampPurposeAuditCreated,
+						},
+					},
+				},
+				updatedAtID: {
+					SchemaColumnID: updatedAtID,
+					Features: models.ColumnMetadataFeatures{
+						TimestampFeatures: &models.TimestampFeatures{
+							TimestampPurpose: models.TimestampPurposeAuditUpdated,
+						},
+					},
+				},
 			},
 			expected: "",
+		},
+		{
+			name: "returns empty when no metadata available",
+			columns: []*models.SchemaColumn{
+				{ColumnName: "completed_at", DataType: "timestamp"},
+			},
+			metadataByColumnID: make(map[uuid.UUID]*models.ColumnMetadata),
+			expected:           "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := findCompletionTimestampColumn(tt.columns)
+			result := findCompletionTimestampColumn(tt.columns, tt.metadataByColumnID)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -2139,44 +2313,56 @@ func findEnumValue(values []models.EnumValue, target string) *models.EnumValue {
 }
 
 // TestFilterColumnsForLLM tests the logic for separating columns that need LLM enrichment
-// from those with high-confidence ColumnFeatures.
+// from those with high-confidence ColumnMetadata.
 func TestFilterColumnsForLLM(t *testing.T) {
 	service := &columnEnrichmentService{
 		logger: zap.NewNop(),
 	}
 
-	tests := []struct {
+	ptrFloat := func(f float64) *float64 { return &f }
+	ptrStr := func(s string) *string { return &s }
+
+	type testCase struct {
 		name                     string
 		columns                  []*models.SchemaColumn
+		metadataByColumnID       map[uuid.UUID]*models.ColumnMetadata
 		expectedNeedLLM          int
 		expectedSynthetic        int
 		expectedSyntheticColumns []string
-	}{
+	}
+
+	// Pre-generate IDs for columns that need metadata
+	idColID := uuid.New()
+	statusColID := uuid.New()
+	valueColID := uuid.New()
+	statusEnumColID := uuid.New()
+	hostIDColID := uuid.New()
+
+	tests := []testCase{
 		{
 			name: "all columns need LLM - no features",
 			columns: []*models.SchemaColumn{
 				{ColumnName: "id", DataType: "bigint"},
 				{ColumnName: "name", DataType: "varchar"},
 			},
-			expectedNeedLLM:   2,
-			expectedSynthetic: 0,
+			metadataByColumnID: make(map[uuid.UUID]*models.ColumnMetadata),
+			expectedNeedLLM:    2,
+			expectedSynthetic:  0,
 		},
 		{
 			name: "high confidence column skips LLM",
 			columns: []*models.SchemaColumn{
-				{
-					ColumnName: "id",
-					DataType:   "bigint",
-					Metadata: map[string]any{
-						"column_features": map[string]any{
-							"confidence":    0.95,
-							"description":   "Unique identifier for the user",
-							"semantic_type": "identifier",
-							"role":          "primary_key",
-						},
-					},
-				},
+				{ID: idColID, ColumnName: "id", DataType: "bigint"},
 				{ColumnName: "name", DataType: "varchar"},
+			},
+			metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+				idColID: {
+					SchemaColumnID: idColID,
+					Confidence:     ptrFloat(0.95),
+					Description:    ptrStr("Unique identifier for the user"),
+					SemanticType:   ptrStr("identifier"),
+					Role:           ptrStr("primary_key"),
+				},
 			},
 			expectedNeedLLM:          1,
 			expectedSynthetic:        1,
@@ -2185,17 +2371,15 @@ func TestFilterColumnsForLLM(t *testing.T) {
 		{
 			name: "low confidence column needs LLM",
 			columns: []*models.SchemaColumn{
-				{
-					ColumnName: "status",
-					DataType:   "varchar",
-					Metadata: map[string]any{
-						"column_features": map[string]any{
-							"confidence":    0.6, // Below threshold
-							"description":   "Status value",
-							"semantic_type": "enum",
-							"role":          "dimension",
-						},
-					},
+				{ID: statusColID, ColumnName: "status", DataType: "varchar"},
+			},
+			metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+				statusColID: {
+					SchemaColumnID: statusColID,
+					Confidence:     ptrFloat(0.6), // Below threshold
+					Description:    ptrStr("Status value"),
+					SemanticType:   ptrStr("enum"),
+					Role:           ptrStr("dimension"),
 				},
 			},
 			expectedNeedLLM:   1,
@@ -2204,17 +2388,15 @@ func TestFilterColumnsForLLM(t *testing.T) {
 		{
 			name: "high confidence but missing description needs LLM",
 			columns: []*models.SchemaColumn{
-				{
-					ColumnName: "value",
-					DataType:   "numeric",
-					Metadata: map[string]any{
-						"column_features": map[string]any{
-							"confidence":    0.95,
-							"description":   "", // Empty description
-							"semantic_type": "measure",
-							"role":          "measure",
-						},
-					},
+				{ID: valueColID, ColumnName: "value", DataType: "numeric"},
+			},
+			metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+				valueColID: {
+					SchemaColumnID: valueColID,
+					Confidence:     ptrFloat(0.95),
+					Description:    ptrStr(""), // Empty description
+					SemanticType:   ptrStr("measure"),
+					Role:           ptrStr("measure"),
 				},
 			},
 			expectedNeedLLM:   1,
@@ -2223,33 +2405,21 @@ func TestFilterColumnsForLLM(t *testing.T) {
 		{
 			name: "column with enum features copies enum values",
 			columns: []*models.SchemaColumn{
-				{
-					ColumnName: "status",
-					DataType:   "varchar",
-					Metadata: map[string]any{
-						"column_features": map[string]any{
-							"confidence":    0.95,
-							"description":   "Order status",
-							"semantic_type": "status",
-							"role":          "dimension",
-							"enum_features": map[string]any{
-								"is_state_machine": true,
-								"values": []any{
-									map[string]any{
-										"value":      "pending",
-										"label":      "Pending",
-										"category":   "initial",
-										"count":      float64(100),
-										"percentage": float64(25.0),
-									},
-									map[string]any{
-										"value":      "completed",
-										"label":      "Completed",
-										"category":   "terminal_success",
-										"count":      float64(300),
-										"percentage": float64(75.0),
-									},
-								},
+				{ID: statusEnumColID, ColumnName: "status", DataType: "varchar"},
+			},
+			metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+				statusEnumColID: {
+					SchemaColumnID: statusEnumColID,
+					Confidence:     ptrFloat(0.95),
+					Description:    ptrStr("Order status"),
+					SemanticType:   ptrStr("status"),
+					Role:           ptrStr("dimension"),
+					Features: models.ColumnMetadataFeatures{
+						EnumFeatures: &models.EnumFeatures{
+							IsStateMachine: true,
+							Values: []models.ColumnEnumValue{
+								{Value: "pending", Label: "Pending", Category: "initial", Count: 100, Percentage: 25.0},
+								{Value: "completed", Label: "Completed", Category: "terminal_success", Count: 300, Percentage: 75.0},
 							},
 						},
 					},
@@ -2262,22 +2432,21 @@ func TestFilterColumnsForLLM(t *testing.T) {
 		{
 			name: "column with identifier features copies FK association",
 			columns: []*models.SchemaColumn{
-				{
-					ColumnName: "host_id",
-					DataType:   "uuid",
-					Metadata: map[string]any{
-						"column_features": map[string]any{
-							"confidence":    0.95,
-							"description":   "Reference to the host user",
-							"semantic_type": "foreign_key",
-							"role":          "foreign_key",
-							"identifier_features": map[string]any{
-								"identifier_type":   "foreign_key",
-								"entity_referenced": "host",
-								"fk_target_table":   "users",
-								"fk_target_column":  "id",
-								"fk_confidence":     0.98,
-							},
+				{ID: hostIDColID, ColumnName: "host_id", DataType: "uuid"},
+			},
+			metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+				hostIDColID: {
+					SchemaColumnID: hostIDColID,
+					Confidence:     ptrFloat(0.95),
+					Description:    ptrStr("Reference to the host user"),
+					SemanticType:   ptrStr("foreign_key"),
+					Role:           ptrStr("foreign_key"),
+					Features: models.ColumnMetadataFeatures{
+						IdentifierFeatures: &models.IdentifierFeatures{
+							IdentifierType:   "foreign_key",
+							EntityReferenced: "host",
+							FKTargetTable:    "users",
+							FKTargetColumn:   "id",
 						},
 					},
 				},
@@ -2290,7 +2459,7 @@ func TestFilterColumnsForLLM(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			needLLM, synthetic := service.filterColumnsForLLM(tt.columns)
+			needLLM, synthetic := service.filterColumnsForLLM(tt.columns, tt.metadataByColumnID)
 
 			assert.Equal(t, tt.expectedNeedLLM, len(needLLM), "columns needing LLM count")
 			assert.Equal(t, tt.expectedSynthetic, len(synthetic), "synthetic enrichment count")
@@ -2316,16 +2485,24 @@ func TestFilterColumnsForLLM(t *testing.T) {
 	}
 }
 
-// TestConvertToColumnDetails_ColumnFeaturesMerge tests that ColumnFeatures are properly
+// TestConvertToColumnDetails_ColumnFeaturesMerge tests that ColumnMetadata features are properly
 // merged into ColumnDetail output.
 func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
 	service := &columnEnrichmentService{
 		logger: zap.NewNop(),
 	}
 
+	ptrFloat := func(f float64) *float64 { return &f }
+	ptrStr := func(s string) *string { return &s }
+
+	deletedAtColID := uuid.New()
+	statusColID := uuid.New()
+	visitorIDColID := uuid.New()
+
 	tests := []struct {
 		name                 string
 		columns              []*models.SchemaColumn
+		metadataByColumnID   map[uuid.UUID]*models.ColumnMetadata
 		enrichments          []columnEnrichment
 		fkInfo               map[string]string
 		expectedDescription  string
@@ -2335,21 +2512,21 @@ func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
 		expectedEnumCount    int
 	}{
 		{
-			name: "ColumnFeatures SemanticType takes precedence over LLM",
+			name: "ColumnMetadata SemanticType takes precedence over LLM",
 			columns: []*models.SchemaColumn{
-				{
-					ColumnName: "deleted_at",
-					DataType:   "timestamp",
-					Metadata: map[string]any{
-						"column_features": map[string]any{
-							"confidence":    0.95,
-							"description":   "Soft delete timestamp",
-							"semantic_type": "soft_delete",
-							"role":          "attribute",
-							"timestamp_features": map[string]any{
-								"is_soft_delete":    true,
-								"timestamp_purpose": "soft_delete",
-							},
+				{ID: deletedAtColID, ColumnName: "deleted_at", DataType: "timestamp"},
+			},
+			metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+				deletedAtColID: {
+					SchemaColumnID: deletedAtColID,
+					Confidence:     ptrFloat(0.95),
+					Description:    ptrStr("Soft delete timestamp"),
+					SemanticType:   ptrStr("soft_delete"),
+					Role:           ptrStr("attribute"),
+					Features: models.ColumnMetadataFeatures{
+						TimestampFeatures: &models.TimestampFeatures{
+							IsSoftDelete:     true,
+							TimestampPurpose: "soft_delete",
 						},
 					},
 				},
@@ -2364,27 +2541,27 @@ func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
 			},
 			fkInfo:               make(map[string]string),
 			expectedDescription:  "When the record was deleted", // LLM desc used when Features desc empty
-			expectedSemanticType: "soft_delete",                 // ColumnFeatures takes precedence
+			expectedSemanticType: "soft_delete",                 // ColumnMetadata takes precedence
 			expectedRole:         "attribute",
 		},
 		{
 			name: "EnumFeatures values are copied to EnumValues",
 			columns: []*models.SchemaColumn{
-				{
-					ColumnName: "status",
-					DataType:   "varchar",
-					Metadata: map[string]any{
-						"column_features": map[string]any{
-							"confidence":    0.95,
-							"description":   "Order status",
-							"semantic_type": "status",
-							"role":          "dimension",
-							"enum_features": map[string]any{
-								"values": []any{
-									map[string]any{"value": "pending", "label": "Pending", "category": "initial", "count": float64(10), "percentage": float64(20.0)},
-									map[string]any{"value": "active", "label": "Active", "category": "in_progress", "count": float64(30), "percentage": float64(60.0)},
-									map[string]any{"value": "done", "label": "Done", "category": "terminal_success", "count": float64(10), "percentage": float64(20.0)},
-								},
+				{ID: statusColID, ColumnName: "status", DataType: "varchar"},
+			},
+			metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+				statusColID: {
+					SchemaColumnID: statusColID,
+					Confidence:     ptrFloat(0.95),
+					Description:    ptrStr("Order status"),
+					SemanticType:   ptrStr("status"),
+					Role:           ptrStr("dimension"),
+					Features: models.ColumnMetadataFeatures{
+						EnumFeatures: &models.EnumFeatures{
+							Values: []models.ColumnEnumValue{
+								{Value: "pending", Label: "Pending", Category: "initial", Count: 10, Percentage: 20.0},
+								{Value: "active", Label: "Active", Category: "in_progress", Count: 30, Percentage: 60.0},
+								{Value: "done", Label: "Done", Category: "terminal_success", Count: 10, Percentage: 20.0},
 							},
 						},
 					},
@@ -2407,19 +2584,19 @@ func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
 		{
 			name: "IdentifierFeatures EntityReferenced becomes FKAssociation",
 			columns: []*models.SchemaColumn{
-				{
-					ColumnName: "visitor_id",
-					DataType:   "uuid",
-					Metadata: map[string]any{
-						"column_features": map[string]any{
-							"confidence":    0.95,
-							"description":   "Reference to visiting user",
-							"semantic_type": "foreign_key",
-							"role":          "foreign_key",
-							"identifier_features": map[string]any{
-								"entity_referenced": "visitor",
-								"fk_target_table":   "users",
-							},
+				{ID: visitorIDColID, ColumnName: "visitor_id", DataType: "uuid"},
+			},
+			metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+				visitorIDColID: {
+					SchemaColumnID: visitorIDColID,
+					Confidence:     ptrFloat(0.95),
+					Description:    ptrStr("Reference to visiting user"),
+					SemanticType:   ptrStr("foreign_key"),
+					Role:           ptrStr("foreign_key"),
+					Features: models.ColumnMetadataFeatures{
+						IdentifierFeatures: &models.IdentifierFeatures{
+							EntityReferenced: "visitor",
+							FKTargetTable:    "users",
 						},
 					},
 				},
@@ -2435,7 +2612,7 @@ func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
 			},
 			fkInfo:               make(map[string]string),
 			expectedDescription:  "LLM FK description",
-			expectedSemanticType: "foreign_key", // ColumnFeatures takes precedence
+			expectedSemanticType: "foreign_key", // ColumnMetadata takes precedence
 			expectedRole:         "foreign_key",
 			expectedFKAssoc:      "visitor",
 		},
@@ -2451,6 +2628,7 @@ func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
 				nil, // enumSamples
 				nil, // enumDefs
 				nil, // enumDistributions
+				tt.metadataByColumnID,
 			)
 
 			require.Equal(t, 1, len(details))
@@ -2472,29 +2650,40 @@ func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
 }
 
 // TestEnrichProject_SkipsLLMForHighConfidenceColumns verifies that the service
-// skips LLM calls for columns with high-confidence ColumnFeatures.
+// skips LLM calls for columns with high-confidence ColumnMetadata.
 func TestEnrichProject_SkipsLLMForHighConfidenceColumns(t *testing.T) {
 	projectID := uuid.New()
 
-	// Two columns: one with high-confidence features, one without
+	ptrFloat := func(f float64) *float64 { return &f }
+	ptrStr := func(s string) *string { return &s }
+
+	idColID := uuid.New()
+
+	// Two columns: one with high-confidence metadata, one without
 	columns := []*models.SchemaColumn{
 		{
+			ID:           idColID,
 			ColumnName:   "id",
 			DataType:     "bigint",
 			IsPrimaryKey: true,
-			Metadata: map[string]any{
-				"column_features": map[string]any{
-					"confidence":    0.95,
-					"description":   "Unique user identifier",
-					"semantic_type": "identifier",
-					"role":          "primary_key",
-				},
-			},
 		},
 		{
-			// This column has no features, so needs LLM
+			// This column has no metadata, so needs LLM
 			ColumnName: "email",
 			DataType:   "varchar",
+		},
+	}
+
+	// Build column metadata for the high-confidence column
+	colMetadataRepo := &testColEnrichmentColumnMetadataRepo{
+		metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+			idColID: {
+				SchemaColumnID: idColID,
+				Confidence:     ptrFloat(0.95),
+				Description:    ptrStr("Unique user identifier"),
+				SemanticType:   ptrStr("identifier"),
+				Role:           ptrStr("primary_key"),
+			},
 		},
 	}
 
@@ -2525,13 +2714,14 @@ func TestEnrichProject_SkipsLLMForHighConfidenceColumns(t *testing.T) {
 	llmFactory := &testColEnrichmentLLMFactory{client: llmClient}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:   ontologyRepo,
-		schemaRepo:     schemaRepo,
-		dsSvc:          &testColEnrichmentDatasourceService{},
-		llmFactory:     llmFactory,
-		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:         zap.NewNop(),
+		ontologyRepo:       ontologyRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: colMetadataRepo,
+		dsSvc:              &testColEnrichmentDatasourceService{},
+		llmFactory:         llmFactory,
+		workerPool:         llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:     llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:             zap.NewNop(),
 	}
 
 	// Execute
@@ -2574,35 +2764,46 @@ func TestEnrichProject_SkipsLLMForHighConfidenceColumns(t *testing.T) {
 }
 
 // TestEnrichProject_AllColumnsHighConfidence verifies that no LLM calls are made
-// when all columns have high-confidence ColumnFeatures.
+// when all columns have high-confidence ColumnMetadata.
 func TestEnrichProject_AllColumnsHighConfidence(t *testing.T) {
 	projectID := uuid.New()
 
-	// All columns have high-confidence features
+	ptrFloat := func(f float64) *float64 { return &f }
+	ptrStr := func(s string) *string { return &s }
+
+	idColID := uuid.New()
+	emailColID := uuid.New()
+
+	// All columns have high-confidence metadata
 	columns := []*models.SchemaColumn{
 		{
+			ID:           idColID,
 			ColumnName:   "id",
 			DataType:     "bigint",
 			IsPrimaryKey: true,
-			Metadata: map[string]any{
-				"column_features": map[string]any{
-					"confidence":    0.95,
-					"description":   "Unique user identifier",
-					"semantic_type": "identifier",
-					"role":          "primary_key",
-				},
-			},
 		},
 		{
+			ID:         emailColID,
 			ColumnName: "email",
 			DataType:   "varchar",
-			Metadata: map[string]any{
-				"column_features": map[string]any{
-					"confidence":    0.92,
-					"description":   "User's email address",
-					"semantic_type": "email",
-					"role":          "attribute",
-				},
+		},
+	}
+
+	colMetadataRepo := &testColEnrichmentColumnMetadataRepo{
+		metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+			idColID: {
+				SchemaColumnID: idColID,
+				Confidence:     ptrFloat(0.95),
+				Description:    ptrStr("Unique user identifier"),
+				SemanticType:   ptrStr("identifier"),
+				Role:           ptrStr("primary_key"),
+			},
+			emailColID: {
+				SchemaColumnID: emailColID,
+				Confidence:     ptrFloat(0.92),
+				Description:    ptrStr("User's email address"),
+				SemanticType:   ptrStr("email"),
+				Role:           ptrStr("attribute"),
 			},
 		},
 	}
@@ -2621,13 +2822,14 @@ func TestEnrichProject_AllColumnsHighConfidence(t *testing.T) {
 	llmFactory := &testColEnrichmentLLMFactory{client: llmClient}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:   ontologyRepo,
-		schemaRepo:     schemaRepo,
-		dsSvc:          &testColEnrichmentDatasourceService{},
-		llmFactory:     llmFactory,
-		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:         zap.NewNop(),
+		ontologyRepo:       ontologyRepo,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: colMetadataRepo,
+		dsSvc:              &testColEnrichmentDatasourceService{},
+		llmFactory:         llmFactory,
+		workerPool:         llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:     llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:             zap.NewNop(),
 	}
 
 	// Execute

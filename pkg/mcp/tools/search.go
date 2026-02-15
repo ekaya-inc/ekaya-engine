@@ -197,6 +197,7 @@ func searchTables(ctx context.Context, _ *SearchToolDeps, projectID uuid.UUID, q
 		LEFT JOIN engine_ontology_table_metadata tm ON tm.schema_table_id = st.id
 		WHERE st.project_id = $2
 			AND st.deleted_at IS NULL
+			AND st.is_selected = true
 			AND (
 				LOWER(st.table_name) LIKE '%' || $1 || '%'
 				OR LOWER(tm.description) LIKE '%' || $1 || '%'
@@ -273,6 +274,8 @@ func searchColumns(ctx context.Context, _ *SearchToolDeps, projectID uuid.UUID, 
 		WHERE sc.project_id = $2
 			AND sc.deleted_at IS NULL
 			AND st.deleted_at IS NULL
+			AND st.is_selected = true
+			AND sc.is_selected = true
 			AND (
 				LOWER(sc.column_name) LIKE '%' || $1 || '%'
 				OR LOWER(cm.purpose) LIKE '%' || $1 || '%'

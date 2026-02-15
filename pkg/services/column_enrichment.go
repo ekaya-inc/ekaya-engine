@@ -108,7 +108,7 @@ func (s *columnEnrichmentService) EnrichProject(ctx context.Context, projectID u
 
 	// If no tableNames provided, fetch all selected tables
 	if len(tableNames) == 0 {
-		tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil, true)
+		tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil)
 		if err != nil {
 			return nil, fmt.Errorf("fetch selected tables: %w", err)
 		}
@@ -354,7 +354,7 @@ func (s *columnEnrichmentService) getTableContext(ctx context.Context, projectID
 
 // getColumnsForTable retrieves schema columns for a given table name.
 func (s *columnEnrichmentService) getColumnsForTable(ctx context.Context, projectID uuid.UUID, tableName string) ([]*models.SchemaColumn, error) {
-	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, []string{tableName}, true)
+	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, []string{tableName})
 	if err != nil {
 		return nil, err
 	}
@@ -990,6 +990,7 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 					Priority: q.Priority,
 					Question: q.Question,
 					Context:  q.Context,
+					Tables:   []string{tableCtx.TableName},
 				}
 			}
 			questionModels := ConvertQuestionInputs(questionInputs, projectID, ontology.ID, nil)

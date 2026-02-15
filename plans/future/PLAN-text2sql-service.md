@@ -280,7 +280,7 @@ func min(a, b int) int {
 5. **SQL extraction** - Parse SQL from markdown code blocks
 6. **Async storage** - Store (question, SQL) for future learning
 
-## Knowledge Files (Copy from ekaya-region)
+## Knowledge Files
 
 **Files to copy directly:**
 - `knowledge/postgres.md` → Comprehensive PostgreSQL syntax reference

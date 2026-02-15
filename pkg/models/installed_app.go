@@ -27,5 +27,6 @@ type InstalledApp struct {
 	AppID       string         `json:"app_id"`
 	InstalledAt time.Time      `json:"installed_at"`
 	InstalledBy string         `json:"installed_by,omitempty"`
+	ActivatedAt *time.Time     `json:"activated_at,omitempty"`
 	Settings    map[string]any `json:"settings"`
 }
