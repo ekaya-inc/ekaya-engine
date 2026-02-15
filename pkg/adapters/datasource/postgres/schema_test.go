@@ -1,4 +1,4 @@
-//go:build integration
+//go:build integration && (postgres || all_adapters)
 
 package postgres
 
