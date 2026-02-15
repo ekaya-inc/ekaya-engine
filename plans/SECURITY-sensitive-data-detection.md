@@ -159,10 +159,11 @@ CREATE TABLE engine_sensitive_column_decisions (
 4. **P1**: Schema Selection UI with Allow/Block buttons
 5. **P2**: MCP tool integration (honor decisions in get_context, probe_column)
 
-## Related Issues
+## Related Plans
 
 - ISSUES-ontology-benchmark-2026-01-30.md #1: Sensitive Data Exposure in sample_values
 - Subtasks 1.1, 1.2, 1.3 cover the redaction implementation
+- **PLAN-alerts-tile-and-screen.md** — The `sensitive_table_access` alert trigger (Question 4) depends on this plan's detection and admin decision infrastructure. Implement together so that columns/tables marked sensitive here feed into the alert trigger there.
 
 ## Open Questions
 

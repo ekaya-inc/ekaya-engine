@@ -1,9 +1,3 @@
-//go:build ignore
-// +build ignore
-
-// TODO: This test has constructor signature mismatches for NewLLMRelationshipDiscoveryService
-// and SchemaColumn.Metadata references. Needs refactoring to use ColumnMetadataRepository.
-
 package services
 
 import (
@@ -35,6 +29,7 @@ func TestNewLLMRelationshipDiscoveryService(t *testing.T) {
 		nil, // datasourceService
 		nil, // adapterFactory
 		nil, // schemaRepo
+		nil, // columnMetadataRepo
 		logger,
 	)
 
@@ -65,7 +60,7 @@ func TestBuildExistingSchemaRelationshipSet(t *testing.T) {
 	logger := zap.NewNop()
 
 	svc := NewLLMRelationshipDiscoveryService(
-		nil, nil, nil, nil, nil, logger,
+		nil, nil, nil, nil, nil, nil, logger,
 	).(*llmRelationshipDiscoveryService)
 
 	// Create test tables and columns
@@ -119,7 +114,7 @@ func TestBuildExistingSchemaRelationshipSet_EmptyInput(t *testing.T) {
 	logger := zap.NewNop()
 
 	svc := NewLLMRelationshipDiscoveryService(
-		nil, nil, nil, nil, nil, logger,
+		nil, nil, nil, nil, nil, nil, logger,
 	).(*llmRelationshipDiscoveryService)
 
 	relSet := svc.buildExistingSchemaRelationshipSet(
@@ -136,7 +131,7 @@ func TestBuildExistingSchemaRelationshipSet_NilInput(t *testing.T) {
 	logger := zap.NewNop()
 
 	svc := NewLLMRelationshipDiscoveryService(
-		nil, nil, nil, nil, nil, logger,
+		nil, nil, nil, nil, nil, nil, logger,
 	).(*llmRelationshipDiscoveryService)
 
 	relSet := svc.buildExistingSchemaRelationshipSet(nil, nil, nil)
@@ -333,11 +328,8 @@ func TestRelationshipDiscoveryService_ColumnFeaturesFKPreserved(t *testing.T) {
 	logger := zap.NewNop()
 	projectID := uuid.New()
 	datasourceID := uuid.New()
-	ontologyID := uuid.New()
 	ordersTableID := uuid.New()
 	usersTableID := uuid.New()
-	sourceEntityID := uuid.New()
-	targetEntityID := uuid.New()
 
 	// Create a mock LLM client that tracks calls
 	mockLLMClient := &mockRelDiscoveryLLMClient{
@@ -352,18 +344,6 @@ func TestRelationshipDiscoveryService_ColumnFeaturesFKPreserved(t *testing.T) {
 		ColumnName:    "user_id",
 		DataType:      "uuid",
 		IsPrimaryKey:  false,
-		Metadata: map[string]any{
-			"column_features": map[string]any{
-				"classification_path": "uuid",
-				"role":                "foreign_key",
-				"purpose":             "identifier",
-				"identifier_features": map[string]any{
-					"fk_target_table":  "users",
-					"fk_target_column": "id",
-					"fk_confidence":    0.95, // High confidence - should be preserved
-				},
-			},
-		},
 	}
 
 	// Target column (PK)
@@ -376,26 +356,6 @@ func TestRelationshipDiscoveryService_ColumnFeaturesFKPreserved(t *testing.T) {
 	}
 
 	// Mock repos and services
-	_ = &mockOntologyRepoForRelDiscovery{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
-
-	_ = &mockEntityRepoForRelDiscovery{
-		entities: []*models.OntologyEntity{
-			{ID: sourceEntityID, Name: "Order", PrimaryTable: "orders"},
-			{ID: targetEntityID, Name: "User", PrimaryTable: "users"},
-		},
-	}
-
-	_ = &mockRelationshipRepoForRelDiscovery{
-		relationships: []*models.EntityRelationship{},
-		createdRels:   []*models.EntityRelationship{},
-	}
-
 	mockSchemaRepo := &mockSchemaRepoForRelDiscovery{
 		tables: []*models.SchemaTable{
 			{ID: ordersTableID, SchemaName: "public", TableName: "orders"},
@@ -427,6 +387,22 @@ func TestRelationshipDiscoveryService_ColumnFeaturesFKPreserved(t *testing.T) {
 		},
 	}
 
+	// Mock column metadata repo to return ColumnMetadata with FK target info
+	mockColumnMetadataRepo := &mockColumnMetadataRepoForRelDiscovery{
+		metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+			paymentUserIDCol.ID: {
+				SchemaColumnID: paymentUserIDCol.ID,
+				Features: models.ColumnMetadataFeatures{
+					IdentifierFeatures: &models.IdentifierFeatures{
+						FKTargetTable:  "users",
+						FKTargetColumn: "id",
+						FKConfidence:   0.95, // High confidence - should be preserved
+					},
+				},
+			},
+		},
+	}
+
 	// The candidate collector should NOT return this as a candidate since it's already
 	// handled by preserveColumnFeaturesFKs. But we'll use a collector that returns empty
 	// to verify no LLM calls are made for the pre-resolved FK.
@@ -445,6 +421,7 @@ func TestRelationshipDiscoveryService_ColumnFeaturesFKPreserved(t *testing.T) {
 		mockDatasourceSvc,
 		mockAdapterFactory,
 		mockSchemaRepo,
+		mockColumnMetadataRepo,
 		logger,
 	)
 
@@ -473,11 +450,8 @@ func TestRelationshipDiscoveryService_UUIDTextToUUIDPK_LLMValidates(t *testing.T
 	logger := zap.NewNop()
 	projectID := uuid.New()
 	datasourceID := uuid.New()
-	ontologyID := uuid.New()
 	ordersTableID := uuid.New()
 	usersTableID := uuid.New()
-	sourceEntityID := uuid.New()
-	targetEntityID := uuid.New()
 
 	// Create a mock LLM client that returns valid FK for orders.user_id -> users.id
 	mockLLMClient := &mockRelDiscoveryLLMClient{
@@ -494,26 +468,6 @@ func TestRelationshipDiscoveryService_UUIDTextToUUIDPK_LLMValidates(t *testing.T
 	}
 
 	// Mock repos and services
-	_ = &mockOntologyRepoForRelDiscovery{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
-
-	_ = &mockEntityRepoForRelDiscovery{
-		entities: []*models.OntologyEntity{
-			{ID: sourceEntityID, Name: "Order", PrimaryTable: "orders"},
-			{ID: targetEntityID, Name: "User", PrimaryTable: "users"},
-		},
-	}
-
-	_ = &mockRelationshipRepoForRelDiscovery{
-		relationships: []*models.EntityRelationship{},
-		createdRels:   []*models.EntityRelationship{},
-	}
-
 	mockSchemaRepo := &mockSchemaRepoForRelDiscovery{
 		tables: []*models.SchemaTable{
 			{ID: ordersTableID, SchemaName: "public", TableName: "orders"},
@@ -592,6 +546,7 @@ func TestRelationshipDiscoveryService_UUIDTextToUUIDPK_LLMValidates(t *testing.T
 		mockDatasourceSvc,
 		mockAdapterFactory,
 		mockSchemaRepo,
+		nil, // columnMetadataRepo - no ColumnFeatures FKs in this test
 		logger,
 	)
 
@@ -629,11 +584,8 @@ func TestRelationshipDiscoveryService_IDToTimestamp_LLMRejects(t *testing.T) {
 	logger := zap.NewNop()
 	projectID := uuid.New()
 	datasourceID := uuid.New()
-	ontologyID := uuid.New()
 	eventsTableID := uuid.New()
 	logsTableID := uuid.New()
-	sourceEntityID := uuid.New()
-	targetEntityID := uuid.New()
 
 	// Create a mock LLM client that rejects the nonsensical FK candidate
 	mockLLMClient := &mockRelDiscoveryLLMClient{
@@ -650,26 +602,6 @@ func TestRelationshipDiscoveryService_IDToTimestamp_LLMRejects(t *testing.T) {
 	}
 
 	// Mock repos and services
-	_ = &mockOntologyRepoForRelDiscovery{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
-
-	_ = &mockEntityRepoForRelDiscovery{
-		entities: []*models.OntologyEntity{
-			{ID: sourceEntityID, Name: "Event", PrimaryTable: "events"},
-			{ID: targetEntityID, Name: "Log", PrimaryTable: "logs"},
-		},
-	}
-
-	_ = &mockRelationshipRepoForRelDiscovery{
-		relationships: []*models.EntityRelationship{},
-		createdRels:   []*models.EntityRelationship{},
-	}
-
 	mockSchemaRepo := &mockSchemaRepoForRelDiscovery{
 		tables: []*models.SchemaTable{
 			{ID: eventsTableID, SchemaName: "public", TableName: "events"},
@@ -748,6 +680,7 @@ func TestRelationshipDiscoveryService_IDToTimestamp_LLMRejects(t *testing.T) {
 		mockDatasourceSvc,
 		mockAdapterFactory,
 		mockSchemaRepo,
+		nil, // columnMetadataRepo - no ColumnFeatures FKs in this test
 		logger,
 	)
 
@@ -781,13 +714,9 @@ func TestRelationshipDiscoveryService_VerifyLLMCallsSlice(t *testing.T) {
 	logger := zap.NewNop()
 	projectID := uuid.New()
 	datasourceID := uuid.New()
-	ontologyID := uuid.New()
 	ordersTableID := uuid.New()
 	usersTableID := uuid.New()
 	productsTableID := uuid.New()
-	sourceEntityID := uuid.New()
-	targetEntityID := uuid.New()
-	productEntityID := uuid.New()
 
 	// Create a mock LLM client with multiple responses
 	mockLLMClient := &mockRelDiscoveryLLMClient{
@@ -815,27 +744,6 @@ func TestRelationshipDiscoveryService_VerifyLLMCallsSlice(t *testing.T) {
 	}
 
 	// Mock repos and services
-	_ = &mockOntologyRepoForRelDiscovery{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
-
-	_ = &mockEntityRepoForRelDiscovery{
-		entities: []*models.OntologyEntity{
-			{ID: sourceEntityID, Name: "Order", PrimaryTable: "orders"},
-			{ID: targetEntityID, Name: "User", PrimaryTable: "users"},
-			{ID: productEntityID, Name: "Product", PrimaryTable: "products"},
-		},
-	}
-
-	_ = &mockRelationshipRepoForRelDiscovery{
-		relationships: []*models.EntityRelationship{},
-		createdRels:   []*models.EntityRelationship{},
-	}
-
 	mockSchemaRepo := &mockSchemaRepoForRelDiscovery{
 		tables: []*models.SchemaTable{
 			{ID: ordersTableID, SchemaName: "public", TableName: "orders"},
@@ -915,6 +823,7 @@ func TestRelationshipDiscoveryService_VerifyLLMCallsSlice(t *testing.T) {
 		mockDatasourceSvc,
 		mockAdapterFactory,
 		mockSchemaRepo,
+		nil, // columnMetadataRepo - no ColumnFeatures FKs in this test
 		logger,
 	)
 
@@ -951,39 +860,6 @@ func TestRelationshipDiscoveryService_VerifyLLMCallsSlice(t *testing.T) {
 // ============================================================================
 // Mock implementations for integration tests
 // ============================================================================
-
-type mockOntologyRepoForRelDiscovery struct {
-	repositories.OntologyRepository
-	activeOntology *models.TieredOntology
-}
-
-func (m *mockOntologyRepoForRelDiscovery) GetActive(_ context.Context, _ uuid.UUID) (*models.TieredOntology, error) {
-	return m.activeOntology, nil
-}
-
-type mockEntityRepoForRelDiscovery struct {
-	repositories.OntologyEntityRepository
-	entities []*models.OntologyEntity
-}
-
-func (m *mockEntityRepoForRelDiscovery) GetByOntology(_ context.Context, _ uuid.UUID) ([]*models.OntologyEntity, error) {
-	return m.entities, nil
-}
-
-type mockRelationshipRepoForRelDiscovery struct {
-	repositories.EntityRelationshipRepository
-	relationships []*models.EntityRelationship
-	createdRels   []*models.EntityRelationship
-}
-
-func (m *mockRelationshipRepoForRelDiscovery) GetByOntology(_ context.Context, _ uuid.UUID) ([]*models.EntityRelationship, error) {
-	return m.relationships, nil
-}
-
-func (m *mockRelationshipRepoForRelDiscovery) Create(_ context.Context, rel *models.EntityRelationship) error {
-	m.createdRels = append(m.createdRels, rel)
-	return nil
-}
 
 type mockSchemaRepoForRelDiscovery struct {
 	repositories.SchemaRepository
@@ -1059,3 +935,43 @@ func (m *mockSchemaDiscovererForRelDiscovery) AnalyzeJoin(_ context.Context, _, 
 func (m *mockSchemaDiscovererForRelDiscovery) Close() error {
 	return nil
 }
+
+type mockColumnMetadataRepoForRelDiscovery struct {
+	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata
+}
+
+func (m *mockColumnMetadataRepoForRelDiscovery) Upsert(_ context.Context, _ *models.ColumnMetadata) error {
+	return nil
+}
+
+func (m *mockColumnMetadataRepoForRelDiscovery) UpsertFromExtraction(_ context.Context, _ *models.ColumnMetadata) error {
+	return nil
+}
+
+func (m *mockColumnMetadataRepoForRelDiscovery) GetBySchemaColumnID(_ context.Context, id uuid.UUID) (*models.ColumnMetadata, error) {
+	return m.metadataByColumnID[id], nil
+}
+
+func (m *mockColumnMetadataRepoForRelDiscovery) GetByProject(_ context.Context, _ uuid.UUID) ([]*models.ColumnMetadata, error) {
+	return nil, nil
+}
+
+func (m *mockColumnMetadataRepoForRelDiscovery) GetBySchemaColumnIDs(_ context.Context, ids []uuid.UUID) ([]*models.ColumnMetadata, error) {
+	var result []*models.ColumnMetadata
+	for _, id := range ids {
+		if meta, ok := m.metadataByColumnID[id]; ok {
+			result = append(result, meta)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockColumnMetadataRepoForRelDiscovery) Delete(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *mockColumnMetadataRepoForRelDiscovery) DeleteBySchemaColumnID(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+var _ repositories.ColumnMetadataRepository = (*mockColumnMetadataRepoForRelDiscovery)(nil)

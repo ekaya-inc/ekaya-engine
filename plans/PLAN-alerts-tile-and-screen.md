@@ -183,6 +183,8 @@ The `sensitive_table_access` alert type is defined in models and shown in the co
 
 **Why this blocks:** If in scope, it adds work to Phase 3 (the alerts page would show a non-functional alert type without it) and requires a new task for the trigger implementation. If deferred, the UI should either hide the type or show it as "coming soon."
 
+**Dependency:** The trigger implementation requires **SECURITY-sensitive-data-detection.md** — specifically the admin decision infrastructure (Phase 3-4) that lets admins mark columns/tables as sensitive. Without that, there's no source of truth for which tables are "sensitive." These plans should be implemented together.
+
 **Answer:**
 > _(record answer here)_
 

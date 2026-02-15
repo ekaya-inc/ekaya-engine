@@ -1,9 +1,3 @@
-//go:build ignore
-// +build ignore
-
-// TODO: This test has signature mismatches with identifyFKSources
-// and mock type mismatches. Needs refactoring.
-
 package services
 
 import (
@@ -169,28 +163,6 @@ func newTestCandidateCollectorWithMetadata(schemaRepo *mockSchemaRepoForCandidat
 		dsSvc:              &mockDatasourceServiceForCandidateCollector{},
 		logger:             zap.NewNop(),
 	}
-}
-
-// createColumnMetadataFromFeatures creates a ColumnMetadata from ColumnFeatures for tests.
-func createColumnMetadataFromFeatures(columnID uuid.UUID, features *models.ColumnFeatures) *models.ColumnMetadata {
-	if features == nil {
-		return nil
-	}
-	meta := &models.ColumnMetadata{
-		ID:             uuid.New(),
-		SchemaColumnID: columnID,
-	}
-	if features.Purpose != "" {
-		meta.Purpose = &features.Purpose
-	}
-	if features.Role != "" {
-		meta.Role = &features.Role
-	}
-	if features.ClassificationPath != "" {
-		path := string(features.ClassificationPath)
-		meta.ClassificationPath = &path
-	}
-	return meta
 }
 
 // ============================================================================
@@ -593,7 +565,7 @@ func TestIdentifyFKSources_Success(t *testing.T) {
 
 	collector := newTestCandidateCollectorWithMetadata(schemaRepo, metadataRepo)
 
-	sources, _, _, err := collector.identifyFKSources(context.Background(), projectID, datasourceID)
+	sources, _, err := collector.identifyFKSources(context.Background(), projectID, datasourceID)
 	require.NoError(t, err)
 
 	// Should have 2 sources (user_id and account_id), not the PK
@@ -642,7 +614,7 @@ func TestIdentifyFKSources_JoinableFallback(t *testing.T) {
 
 	collector := newTestCandidateCollectorWithMetadata(schemaRepo, metadataRepo)
 
-	sources, _, _, err := collector.identifyFKSources(context.Background(), projectID, datasourceID)
+	sources, _, err := collector.identifyFKSources(context.Background(), projectID, datasourceID)
 	require.NoError(t, err)
 
 	// Should have 1 source from joinable fallback
@@ -682,7 +654,7 @@ func TestIdentifyFKSources_ExcludesJoinableTimestamp(t *testing.T) {
 
 	collector := newTestCandidateCollectorWithMetadata(schemaRepo, metadataRepo)
 
-	sources, _, _, err := collector.identifyFKSources(context.Background(), projectID, datasourceID)
+	sources, _, err := collector.identifyFKSources(context.Background(), projectID, datasourceID)
 	require.NoError(t, err)
 
 	assert.Len(t, sources, 0, "timestamp should be excluded even if joinable")
@@ -728,7 +700,7 @@ func TestIdentifyFKSources_NoDuplicates(t *testing.T) {
 
 	collector := newTestCandidateCollectorWithMetadata(schemaRepo, metadataRepo)
 
-	sources, _, _, err := collector.identifyFKSources(context.Background(), projectID, datasourceID)
+	sources, _, err := collector.identifyFKSources(context.Background(), projectID, datasourceID)
 	require.NoError(t, err)
 
 	assert.Len(t, sources, 1, "column should appear only once")
@@ -739,21 +711,8 @@ func TestIdentifyFKSources_ErrorHandling(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
-	t.Run("GetColumnsWithFeaturesByDatasource error", func(t *testing.T) {
-		repo := &mockSchemaRepoForCandidateCollector{
-			allColumnsErr: errors.New("database error"),
-		}
-
-		collector := newTestCandidateCollector(repo)
-
-		_, _, err := collector.identifyFKSources(context.Background(), projectID, datasourceID)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "get columns with features")
-	})
-
 	t.Run("ListColumnsByDatasource error", func(t *testing.T) {
 		repo := &mockSchemaRepoForCandidateCollector{
-			allColumns:    map[string][]*models.SchemaColumn{},
 			allColumnsErr: errors.New("database error"),
 		}
 
@@ -766,7 +725,6 @@ func TestIdentifyFKSources_ErrorHandling(t *testing.T) {
 
 	t.Run("ListTablesByDatasource error", func(t *testing.T) {
 		repo := &mockSchemaRepoForCandidateCollector{
-			allColumns: map[string][]*models.SchemaColumn{},
 			allColumns: []*models.SchemaColumn{},
 			tablesErr:  errors.New("database error"),
 		}
@@ -784,14 +742,13 @@ func TestIdentifyFKSources_EmptyDataset(t *testing.T) {
 	datasourceID := uuid.New()
 
 	repo := &mockSchemaRepoForCandidateCollector{
-		allColumns: map[string][]*models.SchemaColumn{},
 		allColumns: []*models.SchemaColumn{},
 		tables:     []*models.SchemaTable{},
 	}
 
 	collector := newTestCandidateCollector(repo)
 
-	sources, _, _, err := collector.identifyFKSources(context.Background(), projectID, datasourceID)
+	sources, _, err := collector.identifyFKSources(context.Background(), projectID, datasourceID)
 	require.NoError(t, err)
 	assert.Len(t, sources, 0, "empty dataset should return empty sources")
 }
@@ -813,14 +770,13 @@ func TestIdentifyFKSources_SkipsColumnsWithoutTableName(t *testing.T) {
 	}
 
 	repo := &mockSchemaRepoForCandidateCollector{
-		allColumns: map[string][]*models.SchemaColumn{},
 		allColumns: []*models.SchemaColumn{col},
 		tables:     []*models.SchemaTable{}, // Empty - no tables to resolve
 	}
 
 	collector := newTestCandidateCollector(repo)
 
-	sources, _, _, err := collector.identifyFKSources(context.Background(), projectID, datasourceID)
+	sources, _, err := collector.identifyFKSources(context.Background(), projectID, datasourceID)
 	require.NoError(t, err)
 
 	// Column should be skipped because table name cannot be resolved
@@ -839,20 +795,24 @@ func TestFKSourceColumn_Fields(t *testing.T) {
 		DataType:     "uuid",
 		IsPrimaryKey: false,
 	}
-	features := &models.ColumnFeatures{
-		Role:               models.RoleForeignKey,
-		Purpose:            models.PurposeIdentifier,
-		ClassificationPath: models.ClassificationPathUUID,
+	role := models.RoleForeignKey
+	purpose := models.PurposeIdentifier
+	classPath := string(models.ClassificationPathUUID)
+	metadata := &models.ColumnMetadata{
+		SchemaColumnID:     colID,
+		Role:               &role,
+		Purpose:            &purpose,
+		ClassificationPath: &classPath,
 	}
 
 	fkSource := &FKSourceColumn{
 		Column:    col,
-		Features:  features,
+		Metadata:  metadata,
 		TableName: "orders",
 	}
 
 	assert.Equal(t, col, fkSource.Column)
-	assert.Equal(t, features, fkSource.Metadata)
+	assert.Equal(t, metadata, fkSource.Metadata)
 	assert.Equal(t, "orders", fkSource.TableName)
 	assert.Equal(t, "user_id", fkSource.Column.ColumnName)
 }
@@ -868,17 +828,23 @@ func TestCollectCandidates_GeneratesCandidatePairs(t *testing.T) {
 	usersTableID := uuid.New()
 
 	// FK source column
+	isJoinable := true
 	userIDCol := &models.SchemaColumn{
 		ID:            uuid.New(),
 		SchemaTableID: ordersTableID,
 		ColumnName:    "user_id",
 		DataType:      "uuid",
 		IsPrimaryKey:  false,
-		Metadata: map[string]any{
-			"column_features": map[string]any{
-				"role":                "foreign_key",
-				"classification_path": "uuid",
-			},
+		IsJoinable:    &isJoinable,
+	}
+
+	fkRole := models.RoleForeignKey
+	fkClassPath := string(models.ClassificationPathUUID)
+	metadataByColumnID := map[uuid.UUID]*models.ColumnMetadata{
+		userIDCol.ID: {
+			SchemaColumnID:     userIDCol.ID,
+			Role:               &fkRole,
+			ClassificationPath: &fkClassPath,
 		},
 	}
 
@@ -892,9 +858,6 @@ func TestCollectCandidates_GeneratesCandidatePairs(t *testing.T) {
 	}
 
 	repo := &mockSchemaRepoForCandidateCollector{
-		allColumns: map[string][]*models.SchemaColumn{
-			"orders": {userIDCol},
-		},
 		allColumns: []*models.SchemaColumn{userIDCol, usersPKCol},
 		tables: []*models.SchemaTable{
 			{ID: ordersTableID, TableName: "orders"},
@@ -902,7 +865,7 @@ func TestCollectCandidates_GeneratesCandidatePairs(t *testing.T) {
 		},
 	}
 
-	collector := NewRelationshipCandidateCollector(repo, &mockColumnMetadataRepoForCandidateCollector{metadataByColumnID: make(map[uuid.UUID]*models.ColumnMetadata)}, &mockAdapterFactoryForCandidateCollector{}, &mockDatasourceServiceForCandidateCollector{}, zap.NewNop())
+	collector := NewRelationshipCandidateCollector(repo, &mockColumnMetadataRepoForCandidateCollector{metadataByColumnID: metadataByColumnID}, &mockAdapterFactoryForCandidateCollector{}, &mockDatasourceServiceForCandidateCollector{}, zap.NewNop())
 
 	// Track progress callbacks
 	progressCalls := 0
@@ -931,31 +894,32 @@ func TestCollectCandidates_NoTargets(t *testing.T) {
 	ordersTableID := uuid.New()
 
 	// FK source column but no PK/unique target columns
+	isJoinable := true
 	userIDCol := &models.SchemaColumn{
 		ID:            uuid.New(),
 		SchemaTableID: ordersTableID,
 		ColumnName:    "user_id",
 		DataType:      "uuid",
 		IsPrimaryKey:  false,
-		Metadata: map[string]any{
-			"column_features": map[string]any{
-				"role":                "foreign_key",
-				"classification_path": "uuid",
-			},
+		IsJoinable:    &isJoinable,
+	}
+
+	fkRole := models.RoleForeignKey
+	metadataByColumnID := map[uuid.UUID]*models.ColumnMetadata{
+		userIDCol.ID: {
+			SchemaColumnID: userIDCol.ID,
+			Role:           &fkRole,
 		},
 	}
 
 	repo := &mockSchemaRepoForCandidateCollector{
-		allColumns: map[string][]*models.SchemaColumn{
-			"orders": {userIDCol},
-		},
 		allColumns: []*models.SchemaColumn{userIDCol},
 		tables: []*models.SchemaTable{
 			{ID: ordersTableID, TableName: "orders"},
 		},
 	}
 
-	collector := NewRelationshipCandidateCollector(repo, &mockColumnMetadataRepoForCandidateCollector{metadataByColumnID: make(map[uuid.UUID]*models.ColumnMetadata)}, &mockAdapterFactoryForCandidateCollector{}, &mockDatasourceServiceForCandidateCollector{}, zap.NewNop())
+	collector := NewRelationshipCandidateCollector(repo, &mockColumnMetadataRepoForCandidateCollector{metadataByColumnID: metadataByColumnID}, &mockAdapterFactoryForCandidateCollector{}, &mockDatasourceServiceForCandidateCollector{}, zap.NewNop())
 
 	result, err := collector.CollectCandidates(context.Background(), projectID, datasourceID, nil)
 	require.NoError(t, err)
@@ -1532,6 +1496,8 @@ func TestGenerateCandidatePairs_BasicPairing(t *testing.T) {
 	collector := newTestCandidateCollector(nil)
 
 	// Create source columns
+	fkRole := models.RoleForeignKey
+	fkPurpose := models.PurposeIdentifier
 	sources := []*FKSourceColumn{
 		{
 			Column: &models.SchemaColumn{
@@ -1540,9 +1506,9 @@ func TestGenerateCandidatePairs_BasicPairing(t *testing.T) {
 				DataType:     "uuid",
 				IsPrimaryKey: false,
 			},
-			Features: &models.ColumnFeatures{
-				Role:    models.RoleForeignKey,
-				Purpose: models.PurposeIdentifier,
+			Metadata: &models.ColumnMetadata{
+				Role:    &fkRole,
+				Purpose: &fkPurpose,
 			},
 			TableName: "orders",
 		},
@@ -1553,9 +1519,9 @@ func TestGenerateCandidatePairs_BasicPairing(t *testing.T) {
 				DataType:     "uuid",
 				IsPrimaryKey: false,
 			},
-			Features: &models.ColumnFeatures{
-				Role:    models.RoleForeignKey,
-				Purpose: models.PurposeIdentifier,
+			Metadata: &models.ColumnMetadata{
+				Role:    &fkRole,
+				Purpose: &fkPurpose,
 			},
 			TableName: "orders",
 		},
@@ -1585,7 +1551,7 @@ func TestGenerateCandidatePairs_BasicPairing(t *testing.T) {
 		},
 	}
 
-	candidates := collector.generateCandidatePairs(sources, targets)
+	candidates := collector.generateCandidatePairs(sources, targets, nil)
 
 	// 2 sources × 2 targets = 4 candidates
 	assert.Len(t, candidates, 4, "expected 4 candidate pairs (2 sources × 2 targets)")
@@ -1630,7 +1596,7 @@ func TestGenerateCandidatePairs_SkipsSelfReferences(t *testing.T) {
 		},
 	}
 
-	candidates := collector.generateCandidatePairs(sources, targets)
+	candidates := collector.generateCandidatePairs(sources, targets, nil)
 
 	// Self-reference should be skipped
 	assert.Len(t, candidates, 0, "self-reference (same table.column) should be skipped")
@@ -1666,7 +1632,7 @@ func TestGenerateCandidatePairs_SkipsIncompatibleTypes(t *testing.T) {
 		},
 	}
 
-	candidates := collector.generateCandidatePairs(sources, targets)
+	candidates := collector.generateCandidatePairs(sources, targets, nil)
 
 	// Incompatible types should be skipped
 	assert.Len(t, candidates, 0, "uuid → integer should be skipped (incompatible types)")
@@ -1675,7 +1641,9 @@ func TestGenerateCandidatePairs_SkipsIncompatibleTypes(t *testing.T) {
 func TestGenerateCandidatePairs_PopulatesColumnFeatures(t *testing.T) {
 	collector := newTestCandidateCollector(nil)
 
-	// Source with features
+	// Source with metadata
+	fkRole := models.RoleForeignKey
+	fkPurpose := models.PurposeIdentifier
 	sources := []*FKSourceColumn{
 		{
 			Column: &models.SchemaColumn{
@@ -1684,25 +1652,28 @@ func TestGenerateCandidatePairs_PopulatesColumnFeatures(t *testing.T) {
 				DataType:     "uuid",
 				IsPrimaryKey: false,
 			},
-			Features: &models.ColumnFeatures{
-				Role:    models.RoleForeignKey,
-				Purpose: models.PurposeIdentifier,
+			Metadata: &models.ColumnMetadata{
+				Role:    &fkRole,
+				Purpose: &fkPurpose,
 			},
 			TableName: "orders",
 		},
 	}
 
-	// Target with features (stored in metadata)
+	// Target with metadata (passed via metadataByColumnID)
 	targetCol := &models.SchemaColumn{
 		ID:           uuid.New(),
 		ColumnName:   "id",
 		DataType:     "uuid",
 		IsPrimaryKey: true,
-		Metadata: map[string]any{
-			"column_features": map[string]any{
-				"role":    "primary_key",
-				"purpose": "identifier",
-			},
+	}
+	pkRole := "primary_key"
+	idPurpose := "identifier"
+	targetMetadataMap := map[uuid.UUID]*models.ColumnMetadata{
+		targetCol.ID: {
+			SchemaColumnID: targetCol.ID,
+			Role:           &pkRole,
+			Purpose:        &idPurpose,
 		},
 	}
 	targets := []*FKTargetColumn{
@@ -1713,15 +1684,15 @@ func TestGenerateCandidatePairs_PopulatesColumnFeatures(t *testing.T) {
 		},
 	}
 
-	candidates := collector.generateCandidatePairs(sources, targets)
+	candidates := collector.generateCandidatePairs(sources, targets, targetMetadataMap)
 
 	require.Len(t, candidates, 1)
 
-	// Verify source features are populated
+	// Verify source metadata fields are populated
 	assert.Equal(t, models.RoleForeignKey, candidates[0].SourceRole)
 	assert.Equal(t, models.PurposeIdentifier, candidates[0].SourcePurpose)
 
-	// Verify target features are populated from metadata
+	// Verify target metadata fields are populated from metadataByColumnID
 	assert.Equal(t, "primary_key", candidates[0].TargetRole)
 	assert.Equal(t, "identifier", candidates[0].TargetPurpose)
 }
@@ -1729,7 +1700,7 @@ func TestGenerateCandidatePairs_PopulatesColumnFeatures(t *testing.T) {
 func TestGenerateCandidatePairs_HandlesNilFeatures(t *testing.T) {
 	collector := newTestCandidateCollector(nil)
 
-	// Source without features
+	// Source without metadata
 	sources := []*FKSourceColumn{
 		{
 			Column: &models.SchemaColumn{
@@ -1738,12 +1709,12 @@ func TestGenerateCandidatePairs_HandlesNilFeatures(t *testing.T) {
 				DataType:     "uuid",
 				IsPrimaryKey: false,
 			},
-			Features:  nil, // No features
+			Metadata:  nil, // No metadata
 			TableName: "orders",
 		},
 	}
 
-	// Target without features
+	// Target without metadata
 	targets := []*FKTargetColumn{
 		{
 			Column: &models.SchemaColumn{
@@ -1751,18 +1722,17 @@ func TestGenerateCandidatePairs_HandlesNilFeatures(t *testing.T) {
 				ColumnName:   "id",
 				DataType:     "uuid",
 				IsPrimaryKey: true,
-				// No Metadata
 			},
 			TableName: "users",
 			IsUnique:  true,
 		},
 	}
 
-	candidates := collector.generateCandidatePairs(sources, targets)
+	candidates := collector.generateCandidatePairs(sources, targets, nil)
 
 	require.Len(t, candidates, 1)
 
-	// Features should be empty strings when nil
+	// Metadata fields should be empty strings when nil
 	assert.Empty(t, candidates[0].SourceRole)
 	assert.Empty(t, candidates[0].SourcePurpose)
 	assert.Empty(t, candidates[0].TargetRole)
@@ -1800,7 +1770,7 @@ func TestGenerateCandidatePairs_PopulatesColumnIDs(t *testing.T) {
 		},
 	}
 
-	candidates := collector.generateCandidatePairs(sources, targets)
+	candidates := collector.generateCandidatePairs(sources, targets, nil)
 
 	require.Len(t, candidates, 1)
 
@@ -1826,7 +1796,7 @@ func TestGenerateCandidatePairs_EmptyInputs(t *testing.T) {
 			},
 		}
 
-		candidates := collector.generateCandidatePairs([]*FKSourceColumn{}, targets)
+		candidates := collector.generateCandidatePairs([]*FKSourceColumn{}, targets, nil)
 		assert.Len(t, candidates, 0, "empty sources should produce no candidates")
 	})
 
@@ -1843,12 +1813,12 @@ func TestGenerateCandidatePairs_EmptyInputs(t *testing.T) {
 			},
 		}
 
-		candidates := collector.generateCandidatePairs(sources, []*FKTargetColumn{})
+		candidates := collector.generateCandidatePairs(sources, []*FKTargetColumn{}, nil)
 		assert.Len(t, candidates, 0, "empty targets should produce no candidates")
 	})
 
 	t.Run("both empty", func(t *testing.T) {
-		candidates := collector.generateCandidatePairs([]*FKSourceColumn{}, []*FKTargetColumn{})
+		candidates := collector.generateCandidatePairs([]*FKSourceColumn{}, []*FKTargetColumn{}, nil)
 		assert.Len(t, candidates, 0, "empty inputs should produce no candidates")
 	})
 }
@@ -1921,7 +1891,7 @@ func TestGenerateCandidatePairs_MixedTypeCompatibility(t *testing.T) {
 		},
 	}
 
-	candidates := collector.generateCandidatePairs(sources, targets)
+	candidates := collector.generateCandidatePairs(sources, targets, nil)
 
 	// Expected pairs (only type-compatible):
 	// - user_id (uuid) → users.id (uuid) ✓
@@ -1977,7 +1947,7 @@ func TestGenerateCandidatePairs_SameTableDifferentColumns(t *testing.T) {
 		},
 	}
 
-	candidates := collector.generateCandidatePairs(sources, targets)
+	candidates := collector.generateCandidatePairs(sources, targets, nil)
 
 	// Same table but different column should NOT be skipped
 	// (This is a valid self-referential FK pattern)
@@ -1994,6 +1964,8 @@ func TestGenerateCandidatePairs_PopulatesAllFields(t *testing.T) {
 	sourceColID := uuid.New()
 	targetColID := uuid.New()
 
+	fkRole := models.RoleForeignKey
+	fkPurpose := models.PurposeIdentifier
 	sources := []*FKSourceColumn{
 		{
 			Column: &models.SchemaColumn{
@@ -2002,9 +1974,9 @@ func TestGenerateCandidatePairs_PopulatesAllFields(t *testing.T) {
 				DataType:     "uuid",
 				IsPrimaryKey: false,
 			},
-			Features: &models.ColumnFeatures{
-				Role:    models.RoleForeignKey,
-				Purpose: models.PurposeIdentifier,
+			Metadata: &models.ColumnMetadata{
+				Role:    &fkRole,
+				Purpose: &fkPurpose,
 			},
 			TableName: "orders",
 		},
@@ -2023,7 +1995,7 @@ func TestGenerateCandidatePairs_PopulatesAllFields(t *testing.T) {
 		},
 	}
 
-	candidates := collector.generateCandidatePairs(sources, targets)
+	candidates := collector.generateCandidatePairs(sources, targets, nil)
 
 	require.Len(t, candidates, 1)
 	c := candidates[0]
@@ -2395,7 +2367,6 @@ func TestCollectCandidates_DatasourceGetError(t *testing.T) {
 	datasourceID := uuid.New()
 
 	repo := &mockSchemaRepoForCandidateCollector{
-		allColumns: map[string][]*models.SchemaColumn{},
 		allColumns: []*models.SchemaColumn{},
 		tables:     []*models.SchemaTable{},
 	}
@@ -2416,7 +2387,6 @@ func TestCollectCandidates_AdapterCreationError(t *testing.T) {
 	datasourceID := uuid.New()
 
 	repo := &mockSchemaRepoForCandidateCollector{
-		allColumns: map[string][]*models.SchemaColumn{},
 		allColumns: []*models.SchemaColumn{},
 		tables:     []*models.SchemaTable{},
 	}
@@ -2439,17 +2409,23 @@ func TestCollectCandidates_CollectsJoinStatistics(t *testing.T) {
 	usersTableID := uuid.New()
 
 	// FK source column
+	isJoinable := true
 	userIDCol := &models.SchemaColumn{
 		ID:            uuid.New(),
 		SchemaTableID: ordersTableID,
 		ColumnName:    "user_id",
 		DataType:      "uuid",
 		IsPrimaryKey:  false,
-		Metadata: map[string]any{
-			"column_features": map[string]any{
-				"role":                "foreign_key",
-				"classification_path": "uuid",
-			},
+		IsJoinable:    &isJoinable,
+	}
+
+	fkRole := models.RoleForeignKey
+	fkClassPath := string(models.ClassificationPathUUID)
+	metadataByColumnID := map[uuid.UUID]*models.ColumnMetadata{
+		userIDCol.ID: {
+			SchemaColumnID:     userIDCol.ID,
+			Role:               &fkRole,
+			ClassificationPath: &fkClassPath,
 		},
 	}
 
@@ -2463,9 +2439,6 @@ func TestCollectCandidates_CollectsJoinStatistics(t *testing.T) {
 	}
 
 	repo := &mockSchemaRepoForCandidateCollector{
-		allColumns: map[string][]*models.SchemaColumn{
-			"orders": {userIDCol},
-		},
 		allColumns: []*models.SchemaColumn{userIDCol, usersPKCol},
 		tables: []*models.SchemaTable{
 			{ID: ordersTableID, TableName: "orders"},
@@ -2507,7 +2480,7 @@ func TestCollectCandidates_CollectsJoinStatistics(t *testing.T) {
 		schemaDiscoverer: mockAdapter,
 	}
 
-	collector := NewRelationshipCandidateCollector(repo, &mockColumnMetadataRepoForCandidateCollector{metadataByColumnID: make(map[uuid.UUID]*models.ColumnMetadata)}, adapterFactory, &mockDatasourceServiceForCandidateCollector{}, zap.NewNop())
+	collector := NewRelationshipCandidateCollector(repo, &mockColumnMetadataRepoForCandidateCollector{metadataByColumnID: metadataByColumnID}, adapterFactory, &mockDatasourceServiceForCandidateCollector{}, zap.NewNop())
 
 	result, err := collector.CollectCandidates(context.Background(), projectID, datasourceID, nil)
 	require.NoError(t, err)
@@ -2544,17 +2517,23 @@ func TestCollectCandidates_ContinuesOnNonFatalErrors(t *testing.T) {
 	usersTableID := uuid.New()
 
 	// FK source column
+	isJoinable := true
 	userIDCol := &models.SchemaColumn{
 		ID:            uuid.New(),
 		SchemaTableID: ordersTableID,
 		ColumnName:    "user_id",
 		DataType:      "uuid",
 		IsPrimaryKey:  false,
-		Metadata: map[string]any{
-			"column_features": map[string]any{
-				"role":                "foreign_key",
-				"classification_path": "uuid",
-			},
+		IsJoinable:    &isJoinable,
+	}
+
+	fkRole := models.RoleForeignKey
+	fkClassPath := string(models.ClassificationPathUUID)
+	metadataByColumnID := map[uuid.UUID]*models.ColumnMetadata{
+		userIDCol.ID: {
+			SchemaColumnID:     userIDCol.ID,
+			Role:               &fkRole,
+			ClassificationPath: &fkClassPath,
 		},
 	}
 
@@ -2568,9 +2547,6 @@ func TestCollectCandidates_ContinuesOnNonFatalErrors(t *testing.T) {
 	}
 
 	repo := &mockSchemaRepoForCandidateCollector{
-		allColumns: map[string][]*models.SchemaColumn{
-			"orders": {userIDCol},
-		},
 		allColumns: []*models.SchemaColumn{userIDCol, usersPKCol},
 		tables: []*models.SchemaTable{
 			{ID: ordersTableID, TableName: "orders"},
@@ -2595,7 +2571,7 @@ func TestCollectCandidates_ContinuesOnNonFatalErrors(t *testing.T) {
 		schemaDiscoverer: mockAdapter,
 	}
 
-	collector := NewRelationshipCandidateCollector(repo, &mockColumnMetadataRepoForCandidateCollector{metadataByColumnID: make(map[uuid.UUID]*models.ColumnMetadata)}, adapterFactory, &mockDatasourceServiceForCandidateCollector{}, zap.NewNop())
+	collector := NewRelationshipCandidateCollector(repo, &mockColumnMetadataRepoForCandidateCollector{metadataByColumnID: metadataByColumnID}, adapterFactory, &mockDatasourceServiceForCandidateCollector{}, zap.NewNop())
 
 	// Should still succeed - sample/stats errors are logged but not fatal
 	result, err := collector.CollectCandidates(context.Background(), projectID, datasourceID, nil)
