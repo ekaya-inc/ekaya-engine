@@ -1,6 +1,6 @@
 # PLAN: Delete Project via Central Redirect (ekaya-engine)
 
-**Status:** TODO
+**Status:** COMPLETE
 **Depends on:** ekaya-central `PLAN-delete-project.md`
 
 ## Problem
