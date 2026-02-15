@@ -24,7 +24,7 @@ func TestProjectService_UpdateAuthServerURL_Success(t *testing.T) {
 	ensureTestProject(t, engineDB, projectID, "Update Auth URL Test")
 
 	projectRepo := repositories.NewProjectRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, nil, "", zap.NewNop())
 
 	authURL := "http://localhost:5002"
 	err := service.UpdateAuthServerURL(context.Background(), projectID, authURL)
@@ -65,7 +65,7 @@ func TestProjectService_UpdateAuthServerURL_InitializesParametersIfNil(t *testin
 	}
 
 	projectRepo := repositories.NewProjectRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, nil, "", zap.NewNop())
 
 	authURL := "https://auth.example.com"
 	err = service.UpdateAuthServerURL(context.Background(), projectID, authURL)
@@ -106,7 +106,7 @@ func TestProjectService_UpdateAuthServerURL_PreservesExistingParameters(t *testi
 	}
 
 	projectRepo := repositories.NewProjectRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, nil, "", zap.NewNop())
 
 	authURL := "http://localhost:5002"
 	err = service.UpdateAuthServerURL(context.Background(), projectID, authURL)
@@ -152,7 +152,7 @@ func TestProjectService_UpdateAuthServerURL_PreservesExistingParameters(t *testi
 func TestProjectService_UpdateAuthServerURL_ProjectNotFound(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectRepo := repositories.NewProjectRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, nil, "", zap.NewNop())
 
 	// Use a non-existent project ID
 	nonExistentID := uuid.New()
@@ -186,7 +186,7 @@ func TestProjectService_GetAuthServerURL_Success(t *testing.T) {
 	}
 
 	projectRepo := repositories.NewProjectRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, nil, "", zap.NewNop())
 
 	authURL, err := service.GetAuthServerURL(context.Background(), projectID)
 	if err != nil {
@@ -206,7 +206,7 @@ func TestProjectService_GetAuthServerURL_NotSet(t *testing.T) {
 	ensureTestProject(t, engineDB, projectID, "Get Auth URL Not Set Test")
 
 	projectRepo := repositories.NewProjectRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, nil, "", zap.NewNop())
 
 	authURL, err := service.GetAuthServerURL(context.Background(), projectID)
 	if err != nil {
@@ -221,7 +221,7 @@ func TestProjectService_GetAuthServerURL_NotSet(t *testing.T) {
 func TestProjectService_GetAuthServerURL_ProjectNotFound(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectRepo := repositories.NewProjectRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, nil, "", zap.NewNop())
 
 	// Use a non-existent project ID
 	nonExistentID := uuid.New()
@@ -240,7 +240,7 @@ func TestProjectService_UpdateAndGetAuthServerURL_RoundTrip(t *testing.T) {
 	ensureTestProject(t, engineDB, projectID, "Round Trip Test")
 
 	projectRepo := repositories.NewProjectRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, nil, "", zap.NewNop())
 
 	// Update auth_server_url
 	authURL := "http://localhost:5002"
@@ -301,7 +301,7 @@ func TestProjectService_Provision_CreatesEmptyOntology(t *testing.T) {
 	userRepo := repositories.NewUserRepository()
 	ontologyRepo := repositories.NewOntologyRepository()
 
-	service := NewProjectService(engineDB.DB, projectRepo, userRepo, ontologyRepo, nil, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, userRepo, ontologyRepo, nil, nil, nil, nil, "", zap.NewNop())
 
 	// Provision new project
 	result, err := service.Provision(ctx, projectID, "Empty Ontology Test", nil)
@@ -359,7 +359,7 @@ func TestProjectService_GetOntologySettings_DefaultsToLegacyPatternMatching(t *t
 	ensureTestProject(t, engineDB, projectID, "Default Ontology Settings Test")
 
 	projectRepo := repositories.NewProjectRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, nil, "", zap.NewNop())
 
 	// Set up tenant context
 	ctx := context.Background()
@@ -389,7 +389,7 @@ func TestProjectService_SetOntologySettings_Success(t *testing.T) {
 	ensureTestProject(t, engineDB, projectID, "Set Ontology Settings Test")
 
 	projectRepo := repositories.NewProjectRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, nil, "", zap.NewNop())
 
 	// Set up tenant context
 	ctx := context.Background()
@@ -426,7 +426,7 @@ func TestProjectService_SetOntologySettings_RoundTrip(t *testing.T) {
 	ensureTestProject(t, engineDB, projectID, "Ontology Settings Round Trip Test")
 
 	projectRepo := repositories.NewProjectRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, nil, "", zap.NewNop())
 
 	// Set up tenant context
 	ctx := context.Background()
@@ -494,7 +494,7 @@ func TestProjectService_SetOntologySettings_PreservesOtherParameters(t *testing.
 	}
 
 	projectRepo := repositories.NewProjectRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, nil, "", zap.NewNop())
 
 	// Set up tenant context for the service call
 	tenantScope, err := engineDB.DB.WithTenant(ctx, projectID)
@@ -550,7 +550,7 @@ func TestProjectService_Provision_WithMCPServerApp(t *testing.T) {
 
 	projectRepo := repositories.NewProjectRepository()
 	ontologyRepo := repositories.NewOntologyRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, ontologyRepo, nil, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, ontologyRepo, nil, nil, nil, nil, "", zap.NewNop())
 
 	// Provision with mcp-server application
 	params := map[string]interface{}{
@@ -603,7 +603,7 @@ func TestProjectService_Provision_WithNoApps_FallsBackToMCP(t *testing.T) {
 
 	projectRepo := repositories.NewProjectRepository()
 	ontologyRepo := repositories.NewOntologyRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, ontologyRepo, nil, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, ontologyRepo, nil, nil, nil, nil, "", zap.NewNop())
 
 	// Provision without applications (backward compat)
 	result, err := service.Provision(ctx, projectID, "No Apps Fallback Test", nil)
@@ -643,7 +643,7 @@ func TestProjectService_Provision_WithNonMCPApp_SkipsMCPSetup(t *testing.T) {
 
 	projectRepo := repositories.NewProjectRepository()
 	ontologyRepo := repositories.NewOntologyRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, ontologyRepo, nil, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, ontologyRepo, nil, nil, nil, nil, "", zap.NewNop())
 
 	// Provision with only ai-data-liaison (no mcp-server)
 	params := map[string]interface{}{

@@ -181,6 +181,63 @@ func (c *Client) UninstallApp(ctx context.Context, baseURL, projectID, appID, to
 	return c.doAppAction(ctx, baseURL, projectID, appID, "uninstall", token, callbackUrl)
 }
 
+// DeleteProject notifies ekaya-central that a project is being deleted.
+// Central returns a redirect URL where the user confirms deletion (billing cleanup, etc.).
+// callbackUrl is the engine URL that central should redirect to after the user confirms or cancels.
+func (c *Client) DeleteProject(ctx context.Context, baseURL, projectID, token, callbackUrl string) (*AppActionResponse, error) {
+	endpoint, err := buildURL(baseURL, "api", "v1", "projects", projectID, "delete")
+	if err != nil {
+		return nil, fmt.Errorf("failed to build URL: %w", err)
+	}
+
+	body, err := json.Marshal(map[string]string{"callbackUrl": callbackUrl})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	c.logger.Info("Calling ekaya-central project delete",
+		zap.String("url", endpoint),
+		zap.String("project_id", projectID))
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call ekaya-central: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		c.logger.Error("ekaya-central project delete failed",
+			zap.Int("status", resp.StatusCode),
+			zap.String("body", string(respBody)))
+		return nil, fmt.Errorf("ekaya-central returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result AppActionResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	c.logger.Info("ekaya-central project delete response",
+		zap.String("status", result.Status),
+		zap.Bool("has_redirect", result.RedirectUrl != ""))
+
+	return &result, nil
+}
+
 // doAppAction executes an app lifecycle action (install, activate, uninstall) against ekaya-central.
 func (c *Client) doAppAction(ctx context.Context, baseURL, projectID, appID, action, token, callbackUrl string) (*AppActionResponse, error) {
 	endpoint, err := buildURL(baseURL, "api", "v1", "projects", projectID, "apps", appID, action)
