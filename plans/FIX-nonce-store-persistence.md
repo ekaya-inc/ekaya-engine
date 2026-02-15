@@ -63,11 +63,13 @@ Update `NonceStore` interface implementation to use the repository instead of th
 
 **TTL:** Use 15 minutes. Activation redirects to Central and back should complete well within that window.
 
-### 4. Add periodic cleanup
+### 4. Add cleanup to retention scheduler
 
-Either:
-- A goroutine in the nonce store that runs `DeleteExpired()` every 5 minutes, or
-- Call `DeleteExpired()` opportunistically inside `Generate()` (simpler, no background goroutine)
+The `RetentionService` (`pkg/services/retention_service.go`) already runs a background scheduler (`RunScheduler`) that prunes old data on a ticker. Add nonce cleanup to this existing loop rather than creating a separate goroutine.
+
+- Inject `NonceRepository` into `retentionService`
+- In `pruneAllProjects()`, call `nonceRepo.DeleteExpired(ctx)` once per scheduler tick (before or after the per-project loop — nonces are global, not per-project)
+- Log the count of expired nonces deleted alongside the existing retention log lines
 
 ### 5. Fix cancel-path nonce leak
 
@@ -89,4 +91,5 @@ To: remove the early return so cancelled callbacks flow through `processCallback
 - Modify: `pkg/services/nonce_store.go` — DB-backed implementation
 - Modify: `pkg/services/installed_app.go` — pass context to nonce methods
 - Modify: `ui/src/pages/AIDataLiaisonPage.tsx` — remove cancel early-return
-- Modify: `pkg/server/server.go` (or wherever DI wiring happens) — inject repository into nonce store
+- Modify: `pkg/services/retention_service.go` — inject `NonceRepository`, call `DeleteExpired()` in scheduler loop
+- Modify: `pkg/server/server.go` (or wherever DI wiring happens) — inject repository into nonce store and retention service
