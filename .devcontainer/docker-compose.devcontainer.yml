@@ -1,12 +1,14 @@
-version: '3.8'
-
 services:
   devcontainer:
-    image: mcr.microsoft.com/devcontainers/go:1-1.24-bookworm
+    image: mcr.microsoft.com/devcontainers/go:1-1.25-bookworm
     volumes:
       - ..:/workspace:cached
     environment:
-      DATABASE_URL: postgresql://ekaya:localdev@postgres:5432/ekaya_engine
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ekaya
+      PGPASSWORD: localdev
+      PGDATABASE: ekaya_engine
       AUTH_ENABLE_VERIFICATION: "false"
     command: sleep infinity
     depends_on:
