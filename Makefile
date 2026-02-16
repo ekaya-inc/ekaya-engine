@@ -1,5 +1,5 @@
 # ekaya-engine Makefile
-.PHONY: help install install-hooks install-air clean test fmt lint check run debug build dev-ui dev-server dev-build-docker ping dev-up dev-down dev-build-container connect-postgres DANGER-recreate-database build-test-image push-test-image pull-test-image quickstart-build quickstart-run quickstart-push
+.PHONY: help install install-hooks install-air clean test fmt lint check run debug build dev-ui dev-server dev-build-docker ping dev-up dev-down dev-build-container connect-postgres DANGER-recreate-database build-test-image push-test-image pull-test-image build-quickstart run-quickstart push-quickstart
 
 # Variables
 # Note: All images are published to GitHub Container Registry
@@ -289,16 +289,19 @@ ping: ## Test the /ping endpoint locally and on deployed environments
 	@echo "$(GREEN)✓ Ping tests complete$(NC)"
 
 # Development environment commands
-dev-up: ## Start local Postgres container
-	@echo "$(YELLOW)Starting local development environment...$(NC)"
-	@docker-compose -f docker-compose.dev.yml up -d
-	@echo "$(YELLOW)Waiting for services to be healthy...$(NC)"
-	@sleep 5
-	@echo "$(GREEN)✓ PostgreSQL available at: localhost:5432$(NC)"
+dev-up: ## Start Ekaya Engine + PostgreSQL via deploy/docker
+	@if [ ! -f deploy/docker/config.yaml ]; then \
+		echo "$(RED)Error: deploy/docker/config.yaml not found$(NC)"; \
+		echo "Run: cp config.yaml.example deploy/docker/config.yaml"; \
+		exit 1; \
+	fi
+	@echo "$(YELLOW)Starting Ekaya Engine + PostgreSQL...$(NC)"
+	@docker-compose -f deploy/docker/docker-compose.yml up -d --build
+	@echo "$(GREEN)✓ Ekaya Engine available at: https://localhost:3443$(NC)"
 
-dev-down: ## Stop local development containers
-	@echo "$(YELLOW)Stopping local development environment...$(NC)"
-	@docker-compose -f docker-compose.dev.yml down
+dev-down: ## Stop Ekaya Engine + PostgreSQL containers
+	@echo "$(YELLOW)Stopping containers...$(NC)"
+	@docker-compose -f deploy/docker/docker-compose.yml down
 	@echo "$(GREEN)✓ Environment stopped$(NC)"
 
 connect-postgres: ## Connect to PostgreSQL via psql (uses .env variables)
@@ -369,7 +372,7 @@ pull-test-image: ## Pull test image from ghcr.io
 	@echo "$(GREEN)✓ Test image pulled: $(TEST_IMAGE_PATH):latest$(NC)"
 
 # Quickstart image targets
-quickstart-build: ## Build the all-in-one quickstart Docker image
+build-quickstart: ## Build the all-in-one quickstart Docker image
 	@echo "$(YELLOW)Building quickstart image...$(NC)"
 	@docker build \
 		--build-arg VERSION=$(VERSION) \
@@ -386,11 +389,11 @@ quickstart-build: ## Build the all-in-one quickstart Docker image
 	@echo "Run with:"
 	@echo "  docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data $(QUICKSTART_IMAGE_NAME):local"
 
-quickstart-run: quickstart-build ## Build and run the quickstart image
+run-quickstart: ## Pull and run the quickstart image from ghcr.io
 	@echo "$(YELLOW)Starting quickstart container...$(NC)"
-	@docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data $(QUICKSTART_IMAGE_NAME):local
+	@docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data $(QUICKSTART_IMAGE_PATH):latest
 
-quickstart-push: quickstart-build ## Build and push quickstart image to ghcr.io (requires GITHUB_TOKEN)
+push-quickstart: build-quickstart ## Build and push quickstart image to ghcr.io (requires GITHUB_TOKEN)
 	@echo "$(YELLOW)Pushing quickstart image to ghcr.io...$(NC)"
 	@if [ -z "$$GITHUB_TOKEN" ]; then echo "$(RED)Error: GITHUB_TOKEN not set$(NC)"; exit 1; fi
 	@echo "$$GITHUB_TOKEN" | docker login ghcr.io -u $(shell git config user.email || echo "user") --password-stdin
