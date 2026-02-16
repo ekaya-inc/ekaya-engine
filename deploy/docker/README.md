@@ -1,10 +1,12 @@
 # Docker Deployment
 
-Build a self-contained Docker image with your config and TLS certs baked in -- no volume mounts needed at runtime.
+Build a self-contained Docker image with your config and TLS certs baked in for production deployment.
 
 ## TLS and HTTPS
 
-Ekaya Engine uses OAuth 2.1 with PKCE, which requires the browser's Web Crypto API. Web Crypto only works in secure contexts:
+Ekaya Engine uses OAuth 2.1 with PKCE, which requires the browser's Web Crypto API.
+
+Web Crypto only works in secure contexts:
 
 - `http://localhost:3443` -- works (browsers treat localhost as secure)
 - `https://your.domain.com` -- works with a valid TLS certificate
@@ -18,7 +20,7 @@ If TLS terminates at a reverse proxy or load balancer, skip `tls_cert_path` / `t
 
 ### 1. Create config.yaml
 
-```
+```bash
 cp ../../config.yaml.example config.yaml
 ```
 
@@ -31,24 +33,31 @@ project_credentials_key: "..."   # encrypts datasource credentials; CANNOT be ch
 oauth_session_secret: "..."      # signs OAuth session cookies; all servers in a cluster must share this value
 ```
 
-**TLS** (skip if terminated upstream):
+**TLS** -- **REQUIRED**
+
+This is the URL that everyone will use to access this server:
 
 ```yaml
 base_url: "https://data.yourcompany.com:3443"
+```
+
+The TLS Certificates for the base_url:
+
+```yaml
 tls_cert_path: "/app/certs/cert.pem"    # path inside the container
 tls_key_path: "/app/certs/key.pem"      # path inside the container
 ```
 
 ### 2. Place TLS certificates
 
-```
-cp /path/to/cert.pem certs/cert.pem
-cp /path/to/key.pem certs/key.pem
+```bash
+cp ./certs/cert.pem certs/cert.pem
+cp ./certs/key.pem certs/key.pem
 ```
 
 ### 3. Build the image
 
-```
+```bash
 docker build -t ekaya-engine-deploy .
 ```
 
@@ -66,7 +75,7 @@ Runs Ekaya Engine + PostgreSQL 17 in separate containers. Data persists in a nam
 
 Set `pg_user: "ekaya"` and `pg_database: "ekaya_engine"` in config.yaml to match the compose defaults, then:
 
-```
+```bash
 PGPASSWORD=your-password docker-compose up -d
 ```
 
@@ -76,15 +85,21 @@ The `PGPASSWORD` env var sets the PostgreSQL container's password and overrides 
 
 Point config.yaml at your own PostgreSQL server (managed, on-prem, etc.) by setting `pg_host`, `pg_port`, `pg_user`, `pg_password`, `pg_database`, and `pg_sslmode` under `engine_database`.
 
-```
+You only need to run the Ekaya Engine.
+
+```bash
 docker run -p 3443:3443 ekaya-engine-deploy
 ```
 
 Requirements:
+
 - PostgreSQL >= 14
-- A database and role for Ekaya Engine (migrations run automatically)
-- For RLS enforcement: role should have `NOSUPERUSER NOBYPASSRLS`
+- A database and role for Ekaya Engine see [../../README.md](../../README.md) for details.
 
-### C. Quickstart (evaluation only)
+Note: migrations run automatically when the server runs.
 
-For evaluation or single-user setups, run the quickstart container (which embeds PostgreSQL), then point this deploy image at it. Variants A or B are recommended for production.
+### C. Simple Single-Instance
+
+The `ekaya-engine-deploy` defaults to the Postgres instance running inside its container.
+
+This configuration does not require a separate PostgreSQL instance running but is not recommended for production use and does not support multiple Ekaya Engine instances for capacity or failover.

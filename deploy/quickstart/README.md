@@ -1,25 +1,24 @@
 # Ekaya Engine Quickstart Image
 
-All-in-one Docker image for running Ekaya Engine locally. Authenticates through production ekaya-central (us.ekaya.ai).
+All-in-one Docker image for running Ekaya Engine and PostgreSQL locally.
+
+To set your own base URL with HTTPS (required for OAuth) with multiple deployment options, see [READMD.md](../docker/README.md).
 
 ## Quick Start
 
-```bash
-docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data ghcr.io/ekaya-inc/engine-quickstart:latest
-```
-
-Open http://localhost:3443
-
-## With LLM Features
-
-For ontology extraction and AI features, provide your Anthropic API key:
+From the repo root:
 
 ```bash
-docker run -p 3443:3443 \
-  -e ANTHROPIC_API_KEY=sk-ant-... \
-  -v ekaya-data:/var/lib/postgresql/data \
-  ghcr.io/ekaya-inc/engine-quickstart:latest
+make run-quickstart
 ```
+
+Or run directly:
+
+```bash
+docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data ghcr.io/ekaya-inc/ekaya-engine-quickstart:latest
+```
+
+Then open your browser to [http://localhost:3443](http://localhost:3443).
 
 ## Data Persistence
 
@@ -30,16 +29,3 @@ To start fresh, remove the volume:
 ```bash
 docker volume rm ekaya-data
 ```
-
-## What's Included
-
-- PostgreSQL 17
-- Ekaya Engine with UI
-
-## Not for Production
-
-This image is for evaluation only:
-- Uses static encryption key
-- Single-container architecture
-
-For production, see the main deployment documentation.
