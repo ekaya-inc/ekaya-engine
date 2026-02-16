@@ -1,0 +1,29 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ekaya_engine
+      POSTGRES_USER: ekaya
+      POSTGRES_PASSWORD: ${PGPASSWORD:?Set PGPASSWORD environment variable}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ekaya -d ekaya_engine"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  ekaya-engine:
+    build: .
+    ports:
+      - "3443:3443"
+    environment:
+      - PGHOST=postgres
+      - PGPORT=5432
+      - PGPASSWORD=${PGPASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

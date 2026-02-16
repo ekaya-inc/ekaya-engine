@@ -2,10 +2,8 @@
 # Quickstart Image - All-in-one for demo/trial
 # ============================================
 # Usage:
-#   docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data ghcr.io/ekaya-inc/engine-quickstart:latest
+#   docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data ghcr.io/ekaya-inc/ekaya-engine-quickstart:latest
 #
-# For LLM features (ontology extraction):
-#   docker run -p 3443:3443 -e ANTHROPIC_API_KEY=sk-... -v ekaya-data:/var/lib/postgresql/data ghcr.io/ekaya-inc/engine-quickstart:latest
 
 # UI Build stage
 FROM node:22-alpine AS ui-builder

@@ -53,8 +53,11 @@ jobs:
           go mod download
           cd ui && npm ci
 
+      - name: Build UI (required for Go embed)
+        run: cd ui && npm run build
+
       - name: Run all tests (unit + integration)
-        run: go test ./... -timeout 5m
+        run: go test -tags=all_adapters ./... -timeout 5m
 
       - name: Frontend tests
         run: cd ui && npm test -- --run

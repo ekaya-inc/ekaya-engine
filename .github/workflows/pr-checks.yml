@@ -64,7 +64,7 @@ jobs:
         run: golangci-lint run --timeout=5m
 
       - name: Run unit tests (skip integration tests)
-        run: go test ./... -short -timeout 5m
+        run: go test -tags=all_adapters ./... -short -timeout 5m
 
       - name: Frontend lint
         run: cd ui && npm run lint
