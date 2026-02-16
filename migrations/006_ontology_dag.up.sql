@@ -73,10 +73,12 @@ CREATE TRIGGER update_engine_dag_nodes_updated_at
 
 -- RLS
 ALTER TABLE engine_ontology_dag ENABLE ROW LEVEL SECURITY;
+ALTER TABLE engine_ontology_dag FORCE ROW LEVEL SECURITY;
 CREATE POLICY ontology_dag_access ON engine_ontology_dag FOR ALL
     USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
 
 ALTER TABLE engine_dag_nodes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE engine_dag_nodes FORCE ROW LEVEL SECURITY;
 CREATE POLICY dag_nodes_access ON engine_dag_nodes FOR ALL
     USING (current_setting('app.current_project_id', true) IS NULL OR dag_id IN (
         SELECT id FROM engine_ontology_dag WHERE project_id = current_setting('app.current_project_id', true)::uuid

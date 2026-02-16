@@ -46,10 +46,12 @@ CREATE INDEX idx_engine_users_user ON engine_users USING btree (user_id);
 
 -- RLS for projects (allows null project_id for admin access)
 ALTER TABLE engine_projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE engine_projects FORCE ROW LEVEL SECURITY;
 CREATE POLICY project_access ON engine_projects FOR ALL
     USING (current_setting('app.current_project_id', true) IS NULL OR id = current_setting('app.current_project_id', true)::uuid);
 
 -- RLS for users
 ALTER TABLE engine_users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE engine_users FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON engine_users FOR ALL
     USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);

@@ -65,12 +65,11 @@ CREATE TRIGGER update_engine_ontology_questions_updated_at
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Project-level facts learned during refinement
+-- Note: ontology_id and key columns removed — facts have project-lifecycle scope
 CREATE TABLE engine_project_knowledge (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     project_id uuid NOT NULL,
-    ontology_id uuid,
     fact_type character varying(100) NOT NULL,
-    key character varying(255) NOT NULL,
     value text NOT NULL,
     context text,
 
@@ -86,23 +85,19 @@ CREATE TABLE engine_project_knowledge (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     PRIMARY KEY (id),
     CONSTRAINT engine_project_knowledge_project_id_fkey FOREIGN KEY (project_id) REFERENCES engine_projects(id) ON DELETE CASCADE,
-    CONSTRAINT engine_project_knowledge_ontology_id_fkey FOREIGN KEY (ontology_id) REFERENCES engine_ontologies(id) ON DELETE CASCADE,
     CONSTRAINT engine_project_knowledge_source_check CHECK (source IN ('inferred', 'mcp', 'manual')),
     CONSTRAINT engine_project_knowledge_last_edit_source_check CHECK (last_edit_source IS NULL OR last_edit_source IN ('inferred', 'mcp', 'manual')),
     CONSTRAINT engine_project_knowledge_created_by_fkey FOREIGN KEY (project_id, created_by) REFERENCES engine_users(project_id, user_id),
     CONSTRAINT engine_project_knowledge_updated_by_fkey FOREIGN KEY (project_id, updated_by) REFERENCES engine_users(project_id, user_id)
 );
 
-COMMENT ON COLUMN engine_project_knowledge.ontology_id IS 'Optional link to specific ontology version for CASCADE delete';
 COMMENT ON COLUMN engine_project_knowledge.source IS 'How this fact was created: inferred (Engine), mcp (Claude), manual (UI)';
 COMMENT ON COLUMN engine_project_knowledge.last_edit_source IS 'How this fact was last modified (null if never edited after creation)';
 COMMENT ON COLUMN engine_project_knowledge.created_by IS 'UUID of user who triggered creation (from JWT)';
 COMMENT ON COLUMN engine_project_knowledge.updated_by IS 'UUID of user who last updated this fact';
 
 CREATE INDEX idx_engine_project_knowledge_project ON engine_project_knowledge USING btree (project_id);
-CREATE INDEX idx_engine_project_knowledge_type ON engine_project_knowledge USING btree (project_id, fact_type);
-CREATE INDEX idx_engine_project_knowledge_ontology ON engine_project_knowledge USING btree (ontology_id);
-CREATE UNIQUE INDEX idx_engine_project_knowledge_unique ON engine_project_knowledge USING btree (project_id, ontology_id, fact_type, key);
+CREATE INDEX idx_engine_project_knowledge_project_type ON engine_project_knowledge USING btree (project_id, fact_type);
 
 CREATE TRIGGER update_engine_project_knowledge_updated_at
     BEFORE UPDATE ON engine_project_knowledge
@@ -110,13 +105,16 @@ CREATE TRIGGER update_engine_project_knowledge_updated_at
 
 -- RLS
 ALTER TABLE engine_ontology_chat_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE engine_ontology_chat_messages FORCE ROW LEVEL SECURITY;
 CREATE POLICY ontology_chat_messages_access ON engine_ontology_chat_messages FOR ALL
     USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
 
 ALTER TABLE engine_ontology_questions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE engine_ontology_questions FORCE ROW LEVEL SECURITY;
 CREATE POLICY ontology_questions_access ON engine_ontology_questions FOR ALL
     USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
 
 ALTER TABLE engine_project_knowledge ENABLE ROW LEVEL SECURITY;
+ALTER TABLE engine_project_knowledge FORCE ROW LEVEL SECURITY;
 CREATE POLICY project_knowledge_access ON engine_project_knowledge FOR ALL
     USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
