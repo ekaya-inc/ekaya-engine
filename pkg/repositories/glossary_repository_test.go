@@ -386,8 +386,9 @@ func TestGlossaryRepository_Update_Success(t *testing.T) {
 	original := tc.createTestTerm(ctx, "CAC", "Customer Acquisition Cost")
 	originalCreatedAt := original.CreatedAt
 
-	// Wait to ensure updated_at will be different (PostgreSQL NOW() has millisecond precision)
-	time.Sleep(50 * time.Millisecond)
+	// Wait to ensure updated_at will be different (PostgreSQL NOW() has microsecond precision
+	// but Docker container timing can be coarse)
+	time.Sleep(200 * time.Millisecond)
 
 	// Update the term
 	original.Definition = "Updated: Total cost to acquire a new customer"

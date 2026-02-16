@@ -33,6 +33,7 @@ dist/
 
 # Claude Code settings
 .claude/
+CLAUDE.md
 CLAUDE.local.md
 
 # Environment files

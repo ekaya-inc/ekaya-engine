@@ -26,5 +26,6 @@ CREATE TRIGGER update_engine_datasources_updated_at
 
 -- RLS
 ALTER TABLE engine_datasources ENABLE ROW LEVEL SECURITY;
+ALTER TABLE engine_datasources FORCE ROW LEVEL SECURITY;
 CREATE POLICY datasource_access ON engine_datasources FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());

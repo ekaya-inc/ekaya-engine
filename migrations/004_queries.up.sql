@@ -97,9 +97,11 @@ CREATE INDEX idx_query_executions_modifying ON engine_query_executions USING btr
 
 -- RLS
 ALTER TABLE engine_queries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE engine_queries FORCE ROW LEVEL SECURITY;
 CREATE POLICY queries_access ON engine_queries FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());
 
 ALTER TABLE engine_query_executions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE engine_query_executions FORCE ROW LEVEL SECURITY;
 CREATE POLICY query_executions_access ON engine_query_executions FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());
