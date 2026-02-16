@@ -309,22 +309,35 @@ connect-postgres: ## Connect to PostgreSQL via psql (uses .env variables)
 		-d $${PGDATABASE:-ekaya_engine}
 
 # DANGEROUS: Drop and recreate the engine database
+# Uses the default system PostgreSQL user (not $$PGUSER) for admin operations,
+# then creates/updates the application role ($$PGUSER) as non-superuser with RLS enforcement.
 DANGER-recreate-database: ## Drop and recreate $${PGDATABASE:-ekaya_engine} (requires CONFIRM=YES)
-	@echo "$(RED)⚠️  This will DROP and RECREATE the database '$${PGDATABASE:-ekaya_engine}' on $${PGHOST:-localhost}:$${PGPORT:-5432} as user $${PGUSER:-ekaya}$(NC)"
+	@echo "$(RED)⚠️  This will DROP and RECREATE the database '$${PGDATABASE:-ekaya_engine}' on $${PGHOST:-localhost}:$${PGPORT:-5432}$(NC)"
 	@[ "$${CONFIRM}" = "YES" ] || (echo "$(RED)Aborting. Re-run with CONFIRM=YES$(NC)"; exit 1)
-	@echo "$(YELLOW)Terminating active sessions...$(NC)"
-	@PGPASSWORD=$${PGPASSWORD} psql -v ON_ERROR_STOP=1 \
-		-h $${PGHOST:-localhost} -p $${PGPORT:-5432} -U $${PGUSER:-ekaya} -d postgres \
-		-c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$${PGDATABASE:-ekaya_engine}' AND pid <> pg_backend_pid();"
-	@echo "$(YELLOW)Dropping database if it exists...$(NC)"
-	@PGPASSWORD=$${PGPASSWORD} psql -v ON_ERROR_STOP=1 \
-		-h $${PGHOST:-localhost} -p $${PGPORT:-5432} -U $${PGUSER:-ekaya} -d postgres \
-		-c "DROP DATABASE IF EXISTS \"$${PGDATABASE:-ekaya_engine}\";"
-	@echo "$(YELLOW)Creating database...$(NC)"
-	@PGPASSWORD=$${PGPASSWORD} psql -v ON_ERROR_STOP=1 \
-		-h $${PGHOST:-localhost} -p $${PGPORT:-5432} -U $${PGUSER:-ekaya} -d postgres \
-		-c "CREATE DATABASE \"$${PGDATABASE:-ekaya_engine}\";"
-	@echo "$(GREEN)✓ Recreated database: $${PGDATABASE:-ekaya_engine}$(NC)"
+	@APP_USER="$${PGUSER:-ekaya}" && \
+	APP_PASS="$${PGPASSWORD}" && \
+	DB_NAME="$${PGDATABASE:-ekaya_engine}" && \
+	DB_HOST="$${PGHOST:-localhost}" && \
+	DB_PORT="$${PGPORT:-5432}" && \
+	unset PGUSER PGPASSWORD && \
+	echo "$(YELLOW)Terminating active sessions...$(NC)" && \
+	psql -v ON_ERROR_STOP=1 -h "$$DB_HOST" -p "$$DB_PORT" -d postgres \
+		-c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$$DB_NAME' AND pid <> pg_backend_pid();" && \
+	echo "$(YELLOW)Dropping database if it exists...$(NC)" && \
+	psql -v ON_ERROR_STOP=1 -h "$$DB_HOST" -p "$$DB_PORT" -d postgres \
+		-c "DROP DATABASE IF EXISTS \"$$DB_NAME\";" && \
+	echo "$(YELLOW)Creating database...$(NC)" && \
+	psql -v ON_ERROR_STOP=1 -h "$$DB_HOST" -p "$$DB_PORT" -d postgres \
+		-c "CREATE DATABASE \"$$DB_NAME\";" && \
+	echo "$(YELLOW)Setting up application role '$$APP_USER' (non-superuser, RLS enforced)...$(NC)" && \
+	(psql -h "$$DB_HOST" -p "$$DB_PORT" -d postgres \
+		-c "CREATE ROLE \"$$APP_USER\" WITH LOGIN PASSWORD '$$APP_PASS' NOSUPERUSER NOBYPASSRLS;" 2>/dev/null || true) && \
+	psql -v ON_ERROR_STOP=1 -h "$$DB_HOST" -p "$$DB_PORT" -d postgres \
+		-c "ALTER ROLE \"$$APP_USER\" WITH LOGIN PASSWORD '$$APP_PASS' NOSUPERUSER NOBYPASSRLS;" \
+		-c "GRANT ALL PRIVILEGES ON DATABASE \"$$DB_NAME\" TO \"$$APP_USER\";" && \
+	psql -v ON_ERROR_STOP=1 -h "$$DB_HOST" -p "$$DB_PORT" -d "$$DB_NAME" \
+		-c "GRANT ALL ON SCHEMA public TO \"$$APP_USER\";" && \
+	echo "$(GREEN)✓ Recreated database: $$DB_NAME (role '$$APP_USER' configured with RLS enforcement)$(NC)"
 
 dev-build-container: ## Build devcontainer environment
 	@echo "$(YELLOW)Building devcontainer environment...$(NC)"
