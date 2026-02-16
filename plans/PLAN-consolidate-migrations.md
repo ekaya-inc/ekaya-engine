@@ -1,14 +1,24 @@
 # PLAN: Consolidate Migrations for Open Source Release
 
-**Status:** PLANNED
-**Branch:** (new branch from main)
-**Goal:** Replace 30 incremental migrations (with ALTER TABLEs, destructive refactors, and dead table creation/deletion) with clean, minimal migrations that create the final-state schema directly.
+**Status:** COMPLETE
+**Branch:** `ddanieli/big-bang-migration`
+**Goal:** Replace 30 incremental migrations (with ALTER TABLEs, destructive refactors, and dead table creation/deletion) with clean, minimal migrations that create the final-state schema directly. Enforce RLS for the application database role.
 
 ## Context
 
 The current migrations directory has 30 files (001-030, gap at 019) that evolved organically during development. Many migrations create tables that later migrations drop entirely (entity tables), add columns that get removed, or do destructive drop-and-recreate refactors. For a public open-source release, new users should get a clean set of migrations that create the final schema in one pass without wasteful intermediate steps.
 
 **Prerequisite:** Drop and recreate the database after applying. No data migration needed.
+
+## RLS Enforcement
+
+In addition to the migration consolidation, this branch adds proper Row-Level Security enforcement:
+
+1. **`FORCE ROW LEVEL SECURITY`** on all 26 tables — ensures the table owner (`ekaya`) is subject to RLS policies, not just non-owner users.
+2. **`rls_tenant_id()` helper function** — normalizes the `app.current_project_id` GUC to a proper UUID or NULL. PostgreSQL custom GUCs default to `''` (empty string, not SQL NULL) after `RESET` or `set_config(NULL)`, which caused `''::uuid` cast errors. The function handles both `NULL` and `''` as "no tenant filter".
+3. **Makefile `DANGER-recreate-database`** — now creates the database as the system superuser, then sets up `ekaya` with `NOSUPERUSER NOBYPASSRLS` and grants appropriate privileges. This eliminates the `bypassrls` warning at startup and enables local RLS testing.
+
+**Verified:** Tenant isolation tested with the `ekaya` user — setting `app.current_project_id` correctly filters rows to a single project, while unset/reset shows all rows.
 
 ## Analysis: What Exists vs. What's Needed
 
@@ -127,21 +137,25 @@ Consolidate into **10 logical migration files** grouped by domain, each creating
 
 ## Implementation Checklist
 
-- [ ] Create new branch `ddanieli/consolidate-migrations`
-- [ ] Delete all 60 existing migration files (30 up + 30 down)
-- [ ] Write `001_foundation.up.sql` and `.down.sql` — copy from current 001
-- [ ] Write `002_datasources.up.sql` and `.down.sql` — copy from current 002
-- [ ] Write `003_schema.up.sql` and `.down.sql` — use final schema from 023
-- [ ] Write `004_queries.up.sql` and `.down.sql` — copy from current 004
-- [ ] Write `005_ontology.up.sql` and `.down.sql` — modified 005 (no entities, no entity_summaries)
-- [ ] Write `006_ontology_dag.up.sql` and `.down.sql` — copy from current 006
-- [ ] Write `007_ontology_support.up.sql` and `.down.sql` — modified 007 (no ontology_id/key on project_knowledge)
-- [ ] Write `008_ontology_metadata.up.sql` and `.down.sql` — from final 023 (column_metadata + table_metadata)
-- [ ] Write `009_llm_and_config.up.sql` and `.down.sql` — merge 008/009/010/011/013/014 with folded-in ALTER changes
-- [ ] Write `010_mcp_audit.up.sql` and `.down.sql` — merge 024/025/027
-- [ ] Verify `embed.go` still works (glob pattern `*.sql` unchanged)
-- [ ] Run `make check` to confirm all tests pass with the new migration set
-- [ ] Manually test: drop database, restart server, verify migrations apply cleanly
+- [x] Create new branch `ddanieli/big-bang-migration`
+- [x] Delete all 60 existing migration files (30 up + 30 down)
+- [x] Write `001_foundation.up.sql` and `.down.sql` — copy from current 001, add `rls_tenant_id()` function
+- [x] Write `002_datasources.up.sql` and `.down.sql` — copy from current 002
+- [x] Write `003_schema.up.sql` and `.down.sql` — use final schema from 023
+- [x] Write `004_queries.up.sql` and `.down.sql` — copy from current 004
+- [x] Write `005_ontology.up.sql` and `.down.sql` — modified 005 (no entities, no entity_summaries)
+- [x] Write `006_ontology_dag.up.sql` and `.down.sql` — copy from current 006
+- [x] Write `007_ontology_support.up.sql` and `.down.sql` — modified 007 (no ontology_id/key on project_knowledge)
+- [x] Write `008_ontology_metadata.up.sql` and `.down.sql` — from final 023 (column_metadata + table_metadata)
+- [x] Write `009_llm_and_config.up.sql` and `.down.sql` — merge 008/009/010/011/013/014 with folded-in ALTER changes
+- [x] Write `010_mcp_audit.up.sql` and `.down.sql` — merge 024/025/027
+- [x] Add `FORCE ROW LEVEL SECURITY` to all 26 tables
+- [x] Add `rls_tenant_id()` helper and update all 26 RLS policies to use it
+- [x] Update Makefile `DANGER-recreate-database` to create `ekaya` as non-superuser
+- [x] Verify `embed.go` still works (glob pattern `*.sql` unchanged)
+- [x] Run `make check` to confirm all tests pass with the new migration set
+- [x] Manually test: drop database, restart server, verify migrations apply cleanly
+- [x] Verify RLS tenant isolation with `ekaya` user (set_config filters to single project)
 
 ## Files Changed
 
@@ -164,6 +178,9 @@ All files in `migrations/` except `embed.go`:
 ### Unchanged
 - `migrations/embed.go` — no changes needed
 - No Go code changes — all table names, column names, and constraints remain identical to the current final state
+
+### Non-Migration Changes
+- `Makefile` — `DANGER-recreate-database` uses system superuser for admin ops, creates `ekaya` role with `NOSUPERUSER NOBYPASSRLS`
 
 ## Risks & Mitigations
 
