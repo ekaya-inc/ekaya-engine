@@ -174,8 +174,7 @@ const ProjectDashboard = () => {
         description: 'Configure the tools AI can use to access your data via Model Context Protocol (MCP), the industry standard for integration.',
         icon: Server,
         path: `/projects/${pid}/mcp-server`,
-        disabled: !isConnected, // Requires datasource
-        disabledReason: 'Requires a datasource to be configured.',
+        disabled: false,
         color: 'cyan',
       },
     ];

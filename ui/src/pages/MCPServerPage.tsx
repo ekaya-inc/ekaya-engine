@@ -131,7 +131,7 @@ const MCPServerPage = () => {
 
     // 3. AI configured
     const isAIConfigured = !!aiConfig?.config_type && aiConfig.config_type !== 'none';
-    items.push({
+    const aiConfigItem: ChecklistItem = {
       id: 'ai-config',
       title: 'AI configured',
       description: isAIConfigured
@@ -140,9 +140,12 @@ const MCPServerPage = () => {
           ? 'Configure an AI model for ontology extraction'
           : 'Configure datasource and select schema first',
       status: loading ? 'loading' : isAIConfigured ? 'complete' : 'pending',
-      link: `/projects/${pid}/ai-config`,
-      linkText: isAIConfigured ? 'Manage' : 'Configure',
-    });
+    };
+    if (datasource && hasSelectedTables) {
+      aiConfigItem.link = `/projects/${pid}/ai-config`;
+      aiConfigItem.linkText = isAIConfigured ? 'Manage' : 'Configure';
+    }
+    items.push(aiConfigItem);
 
     // 4. Ontology extracted
     const ontologyComplete = dagStatus?.status === 'completed';
@@ -177,6 +180,7 @@ const MCPServerPage = () => {
 
     // 5. Critical ontology questions answered
     const questionsComplete = questionCounts !== null && questionCounts.required === 0;
+    const hasQuestions = questionCounts !== null && (questionCounts.required > 0 || questionsComplete);
     const questionsItem: ChecklistItem = {
       id: 'questions',
       title: 'Critical Ontology Questions answered',
@@ -192,9 +196,11 @@ const MCPServerPage = () => {
         : questionsComplete
           ? 'complete'
           : 'pending',
-      link: `/projects/${pid}/ontology-questions`,
-      linkText: questionsComplete ? 'Manage' : 'Answer',
     };
+    if (ontologyComplete && hasQuestions) {
+      questionsItem.link = `/projects/${pid}/ontology-questions`;
+      questionsItem.linkText = questionsComplete ? 'Manage' : 'Answer';
+    }
     items.push(questionsItem);
 
     return items;
