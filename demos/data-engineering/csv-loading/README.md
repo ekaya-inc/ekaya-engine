@@ -8,10 +8,11 @@ Load CSV files into PostgreSQL using Claude Code and Ekaya's MCP Server.
 
 1. Start the Ekaya Quickstart container:
    ```bash
-   docker run -d --name ekaya-quickstart \
+   docker run --pull always -d --name ekaya-quickstart \
      -p 3443:3443 \
      -p 5432:5432 \
-     ekaya/quickstart:latest
+     -v ekaya-data:/var/lib/postgresql/data \
+     ghcr.io/ekaya-inc/ekaya-engine-quickstart:latest
    ```
 
 2. Set up the Python environment:

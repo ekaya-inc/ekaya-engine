@@ -391,7 +391,7 @@ build-quickstart: ## Build the all-in-one quickstart Docker image
 
 run-quickstart: ## Pull and run the quickstart image from ghcr.io
 	@echo "$(YELLOW)Starting quickstart container...$(NC)"
-	@docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data $(QUICKSTART_IMAGE_PATH):latest
+	@docker run --pull always -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data $(QUICKSTART_IMAGE_PATH):latest
 
 push-quickstart: build-quickstart ## Build and push quickstart image to ghcr.io (requires GITHUB_TOKEN)
 	@echo "$(YELLOW)Pushing quickstart image to ghcr.io...$(NC)"

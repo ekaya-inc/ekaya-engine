@@ -15,7 +15,7 @@ make run-quickstart
 Or run directly:
 
 ```bash
-docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data ghcr.io/ekaya-inc/ekaya-engine-quickstart:latest
+docker run --pull always -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data ghcr.io/ekaya-inc/ekaya-engine-quickstart:latest
 ```
 
 Then open your browser to [http://localhost:3443](http://localhost:3443).

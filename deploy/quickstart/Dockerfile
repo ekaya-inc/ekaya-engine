@@ -2,7 +2,7 @@
 # Quickstart Image - All-in-one for demo/trial
 # ============================================
 # Usage:
-#   docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data ghcr.io/ekaya-inc/ekaya-engine-quickstart:latest
+#   docker run --pull always -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data ghcr.io/ekaya-inc/ekaya-engine-quickstart:latest
 #
 
 # UI Build stage
