@@ -27,4 +27,4 @@ CREATE TRIGGER update_engine_ontologies_updated_at
 ALTER TABLE engine_ontologies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE engine_ontologies FORCE ROW LEVEL SECURITY;
 CREATE POLICY ontologies_access ON engine_ontologies FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());

@@ -40,7 +40,7 @@ CREATE INDEX idx_llm_conversations_context ON engine_llm_conversations USING gin
 ALTER TABLE engine_llm_conversations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE engine_llm_conversations FORCE ROW LEVEL SECURITY;
 CREATE POLICY llm_conversations_access ON engine_llm_conversations FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());
 
 -- MCP server configuration (with audit_retention_days and alert_config folded in)
 CREATE TABLE engine_mcp_config (
@@ -68,7 +68,7 @@ CREATE TRIGGER update_engine_mcp_config_updated_at
 ALTER TABLE engine_mcp_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE engine_mcp_config FORCE ROW LEVEL SECURITY;
 CREATE POLICY mcp_config_access ON engine_mcp_config FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());
 
 -- Business glossary with metric definitions (defining_sql nullable per migration 029)
 CREATE TABLE engine_business_glossary (
@@ -223,8 +223,7 @@ CREATE TABLE engine_installed_apps (
 ALTER TABLE engine_installed_apps ENABLE ROW LEVEL SECURITY;
 ALTER TABLE engine_installed_apps FORCE ROW LEVEL SECURITY;
 CREATE POLICY installed_apps_access ON engine_installed_apps FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL
-        OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());
 
 -- Index for listing apps by project
 CREATE INDEX idx_installed_apps_project ON engine_installed_apps(project_id);
@@ -272,25 +271,25 @@ CREATE INDEX idx_audit_log_time ON engine_audit_log(project_id, created_at DESC)
 ALTER TABLE engine_business_glossary ENABLE ROW LEVEL SECURITY;
 ALTER TABLE engine_business_glossary FORCE ROW LEVEL SECURITY;
 CREATE POLICY business_glossary_access ON engine_business_glossary FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid)
-    WITH CHECK (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id())
+    WITH CHECK (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());
 
 ALTER TABLE engine_glossary_aliases ENABLE ROW LEVEL SECURITY;
 ALTER TABLE engine_glossary_aliases FORCE ROW LEVEL SECURITY;
 CREATE POLICY glossary_aliases_access ON engine_glossary_aliases FOR ALL
     USING (glossary_id IN (
         SELECT id FROM engine_business_glossary
-        WHERE current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid
+        WHERE rls_tenant_id() IS NULL OR project_id = rls_tenant_id()
     ));
 
 ALTER TABLE engine_ontology_pending_changes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE engine_ontology_pending_changes FORCE ROW LEVEL SECURITY;
 CREATE POLICY pending_changes_access ON engine_ontology_pending_changes FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid)
-    WITH CHECK (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id())
+    WITH CHECK (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());
 
 ALTER TABLE engine_audit_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE engine_audit_log FORCE ROW LEVEL SECURITY;
 CREATE POLICY audit_log_access ON engine_audit_log FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid)
-    WITH CHECK (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id())
+    WITH CHECK (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());

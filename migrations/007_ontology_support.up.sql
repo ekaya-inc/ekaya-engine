@@ -107,14 +107,14 @@ CREATE TRIGGER update_engine_project_knowledge_updated_at
 ALTER TABLE engine_ontology_chat_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE engine_ontology_chat_messages FORCE ROW LEVEL SECURITY;
 CREATE POLICY ontology_chat_messages_access ON engine_ontology_chat_messages FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());
 
 ALTER TABLE engine_ontology_questions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE engine_ontology_questions FORCE ROW LEVEL SECURITY;
 CREATE POLICY ontology_questions_access ON engine_ontology_questions FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());
 
 ALTER TABLE engine_project_knowledge ENABLE ROW LEVEL SECURITY;
 ALTER TABLE engine_project_knowledge FORCE ROW LEVEL SECURITY;
 CREATE POLICY project_knowledge_access ON engine_project_knowledge FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());

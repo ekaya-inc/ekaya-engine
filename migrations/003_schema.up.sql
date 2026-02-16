@@ -42,8 +42,7 @@ CREATE TRIGGER update_engine_schema_tables_updated_at
 ALTER TABLE engine_schema_tables ENABLE ROW LEVEL SECURITY;
 ALTER TABLE engine_schema_tables FORCE ROW LEVEL SECURITY;
 CREATE POLICY schema_tables_access ON engine_schema_tables FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL
-           OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());
 
 -- Schema columns (discovered columns with stats)
 CREATE TABLE engine_schema_columns (
@@ -105,8 +104,7 @@ CREATE TRIGGER update_engine_schema_columns_updated_at
 ALTER TABLE engine_schema_columns ENABLE ROW LEVEL SECURITY;
 ALTER TABLE engine_schema_columns FORCE ROW LEVEL SECURITY;
 CREATE POLICY schema_columns_access ON engine_schema_columns FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL
-           OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());
 
 -- Schema relationships (FK/inferred column relationships)
 CREATE TABLE engine_schema_relationships (
@@ -161,5 +159,4 @@ CREATE TRIGGER update_engine_schema_relationships_updated_at
 ALTER TABLE engine_schema_relationships ENABLE ROW LEVEL SECURITY;
 ALTER TABLE engine_schema_relationships FORCE ROW LEVEL SECURITY;
 CREATE POLICY schema_relationships_access ON engine_schema_relationships FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL
-           OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());

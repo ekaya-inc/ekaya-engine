@@ -52,8 +52,8 @@ CREATE INDEX idx_mcp_audit_security ON engine_mcp_audit_log(project_id, security
 ALTER TABLE engine_mcp_audit_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE engine_mcp_audit_log FORCE ROW LEVEL SECURITY;
 CREATE POLICY mcp_audit_log_access ON engine_mcp_audit_log FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid)
-    WITH CHECK (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id())
+    WITH CHECK (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());
 
 -- Query history for MCP query learning
 CREATE TABLE engine_mcp_query_history (
@@ -103,8 +103,8 @@ CREATE INDEX idx_query_history_tables ON engine_mcp_query_history USING GIN(tabl
 ALTER TABLE engine_mcp_query_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE engine_mcp_query_history FORCE ROW LEVEL SECURITY;
 CREATE POLICY query_history_access ON engine_mcp_query_history FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid)
-    WITH CHECK (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id())
+    WITH CHECK (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());
 
 -- Alerts for security and governance notifications on MCP audit activity
 CREATE TABLE engine_mcp_audit_alerts (
@@ -142,5 +142,5 @@ CREATE INDEX idx_audit_alerts_project_time ON engine_mcp_audit_alerts(project_id
 ALTER TABLE engine_mcp_audit_alerts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE engine_mcp_audit_alerts FORCE ROW LEVEL SECURITY;
 CREATE POLICY audit_alerts_access ON engine_mcp_audit_alerts FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid)
-    WITH CHECK (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id())
+    WITH CHECK (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());

@@ -100,8 +100,8 @@ CREATE TRIGGER update_engine_column_metadata_updated_at
 ALTER TABLE engine_ontology_column_metadata ENABLE ROW LEVEL SECURITY;
 ALTER TABLE engine_ontology_column_metadata FORCE ROW LEVEL SECURITY;
 CREATE POLICY column_metadata_access ON engine_ontology_column_metadata FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid)
-    WITH CHECK (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id())
+    WITH CHECK (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());
 
 -- Table-level semantic annotations
 CREATE TABLE engine_ontology_table_metadata (
@@ -185,5 +185,5 @@ CREATE TRIGGER update_engine_table_metadata_updated_at
 ALTER TABLE engine_ontology_table_metadata ENABLE ROW LEVEL SECURITY;
 ALTER TABLE engine_ontology_table_metadata FORCE ROW LEVEL SECURITY;
 CREATE POLICY table_metadata_access ON engine_ontology_table_metadata FOR ALL
-    USING (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid)
-    WITH CHECK (current_setting('app.current_project_id', true) IS NULL OR project_id = current_setting('app.current_project_id', true)::uuid);
+    USING (rls_tenant_id() IS NULL OR project_id = rls_tenant_id())
+    WITH CHECK (rls_tenant_id() IS NULL OR project_id = rls_tenant_id());
