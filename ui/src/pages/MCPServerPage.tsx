@@ -161,9 +161,9 @@ const MCPServerPage = () => {
           ? `Extracting... (${dagStatus?.current_node ?? 'starting'})`
           : ontologyFailed
             ? 'Extraction failed - click to retry'
-            : datasource
+            : datasource && hasSelectedTables && isAIConfigured
               ? 'Extract semantic understanding from your schema'
-              : 'Configure datasource first',
+              : 'Configure datasource, select schema, and configure AI first',
       status: loading
         ? 'loading'
         : ontologyComplete
@@ -173,7 +173,7 @@ const MCPServerPage = () => {
             : 'pending',
       linkText: ontologyComplete ? 'Manage' : ontologyFailed ? 'Retry' : 'Configure',
     };
-    if (datasource) {
+    if (datasource && hasSelectedTables && isAIConfigured) {
       ontologyItem.link = `/projects/${pid}/ontology`;
     }
     items.push(ontologyItem);
