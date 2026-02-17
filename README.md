@@ -1,6 +1,6 @@
 # ekaya-engine
 
-<video src="https://cdn.ekaya.ai/videos/ekaya-demo-ai-liaison.mp4" width="100%" autoplay muted loop></video>
+[![Watch the demo](docs/images/demo-poster.jpg)](https://cdn.ekaya.ai/videos/ekaya-demo-ai-liaison.mp4)
 
 Ekaya Engine connects AI to databases safely and securely. It is an MCP Server that gives you full control over the tools available to the MCP Client, with intelligent ontology creation optimized _for LLMs by LLMs_. Deploy on localhost for personal database access during application development or data engineering, or into your infrastructure for access by business users or AI agents.
 
