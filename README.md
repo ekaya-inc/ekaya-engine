@@ -36,10 +36,10 @@ curl -sSfL https://raw.githubusercontent.com/ekaya-inc/ekaya-engine/main/install
 
 The script detects your OS and architecture, downloads the correct binary, verifies its checksum, and walks you through an interactive configuration. It installs to `/usr/local/bin` and writes a config file to `~/.ekaya/config.yaml`.
 
-To customize the install location:
+To customize the install and config locations:
 
 ```bash
-INSTALL_DIR=~/.local/bin curl -sSfL https://raw.githubusercontent.com/ekaya-inc/ekaya-engine/main/install.sh | sh
+curl -sSfL https://raw.githubusercontent.com/ekaya-inc/ekaya-engine/main/install.sh | INSTALL_DIR=~/.local/bin CONFIG_DIR=~/.ekaya sh
 ```
 
 ### Windows
