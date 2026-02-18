@@ -317,7 +317,7 @@ const MCPServerPage = () => {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-text-secondary">
-              Follow the setup instructions to connect your MCP client to this project's MCP Server.
+              Follow the setup instructions to connect your MCP client to this project&apos;s MCP Server.
             </p>
             <a
               href={mcpSetupUrl}
