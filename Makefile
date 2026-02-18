@@ -1,5 +1,5 @@
 # ekaya-engine Makefile
-.PHONY: help install install-hooks install-air clean test fmt lint check run debug build dev-ui dev-server dev-build-docker ping dev-up dev-down dev-build-container connect-postgres DANGER-recreate-database build-test-image push-test-image pull-test-image build-quickstart run-quickstart push-quickstart
+.PHONY: help install install-hooks install-air clean test fmt lint check run debug build build-ui build-release dev-ui dev-server dev-build-docker ping dev-up dev-down dev-build-container connect-postgres DANGER-recreate-database build-test-image push-test-image pull-test-image build-quickstart run-quickstart push-quickstart
 
 # Variables
 # Note: All images are published to GitHub Container Registry
@@ -238,27 +238,6 @@ dev-server: ## Start development mode with auto-reload (using air)
 	@echo "$(YELLOW)Starting Go server...$(NC)"
 	@air -c .air.toml
 
-setup-auth-local: ## Setup localhost auth (local ekaya-central emulator)
-	@echo "$(YELLOW)Configuring for localhost authentication...$(NC)"
-	@cp config/config.local.yaml config.yaml
-	@echo "$(GREEN)✓ Configuration: localhost:5002 (hosting emulator)$(NC)"
-	@echo "$(GREEN)✓ Frontend will fetch config from backend at runtime$(NC)"
-	@echo "$(YELLOW)⚠️  Restart servers to apply changes$(NC)"
-
-setup-auth-dev: ## Setup dev auth (auth.dev.ekaya.ai)
-	@echo "$(YELLOW)Configuring for dev authentication...$(NC)"
-	@cp config/config.dev.yaml config.yaml
-	@echo "$(GREEN)✓ Configuration: auth.dev.ekaya.ai$(NC)"
-	@echo "$(GREEN)✓ Frontend will fetch config from backend at runtime$(NC)"
-	@echo "$(YELLOW)⚠️  Restart servers to apply changes$(NC)"
-
-setup-auth-prod: ## Setup prod auth (auth.ekaya.ai)
-	@echo "$(YELLOW)Configuring for production authentication...$(NC)"
-	@cp config/config.prod.yaml config.yaml
-	@echo "$(GREEN)✓ Configuration: auth.ekaya.ai$(NC)"
-	@echo "$(GREEN)✓ Frontend will fetch config from backend at runtime$(NC)"
-	@echo "$(YELLOW)⚠️  Restart servers to apply changes$(NC)"
-
 dev-build-docker: ## Build Docker image locally for testing (no push)
 	@echo "$(YELLOW)Building Docker image locally...$(NC)"
 	@echo "This will build using the same multi-stage process as CI/CD"
@@ -402,5 +381,45 @@ push-quickstart: build-quickstart ## Build and push quickstart image to ghcr.io 
 	@echo "$(GREEN)✓ Quickstart image pushed to: $(QUICKSTART_IMAGE_PATH):$(VERSION)$(NC)"
 	@echo "$(GREEN)✓ Quickstart image pushed to: $(QUICKSTART_IMAGE_PATH):latest$(NC)"
 
+
+# Release binary targets (cross-compilation)
+PLATFORMS := darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64
+RELEASE_DIR := dist
+
+build-ui: ## Build the frontend UI (prerequisite for binary builds)
+	@echo "$(YELLOW)Building UI...$(NC)"
+	@cd ui && if [ ! -f node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then echo "$(YELLOW)Installing UI dependencies...$(NC)" && npm install; fi
+	@cd ui && npm run build
+	@echo "$(GREEN)✓ UI built$(NC)"
+
+build-release: build-ui ## Build release binaries for all platforms
+	@echo "$(YELLOW)Building release binaries for all platforms...$(NC)"
+	@mkdir -p $(RELEASE_DIR)
+	@for platform in $(PLATFORMS); do \
+		GOOS=$${platform%/*}; \
+		GOARCH=$${platform#*/}; \
+		OUTPUT_NAME=ekaya-engine; \
+		ARCHIVE_NAME=ekaya-engine_$(VERSION_NO_V)_$${GOOS}_$${GOARCH}; \
+		if [ "$$GOOS" = "windows" ]; then OUTPUT_NAME=ekaya-engine.exe; fi; \
+		echo "  Building $$GOOS/$$GOARCH..."; \
+		CGO_ENABLED=0 GOOS=$$GOOS GOARCH=$$GOARCH go build \
+			-tags="$(BUILD_TAGS)" \
+			-trimpath \
+			-ldflags="-s -w -X main.Version=$(VERSION)" \
+			-o $(RELEASE_DIR)/$$ARCHIVE_NAME/$$OUTPUT_NAME . || exit 1; \
+		cp config.yaml.example $(RELEASE_DIR)/$$ARCHIVE_NAME/config.yaml.example; \
+		cp LICENSE $(RELEASE_DIR)/$$ARCHIVE_NAME/ 2>/dev/null || true; \
+		if [ "$$GOOS" = "windows" ]; then \
+			(cd $(RELEASE_DIR) && zip -q $$ARCHIVE_NAME.zip -r $$ARCHIVE_NAME/); \
+		else \
+			tar -czf $(RELEASE_DIR)/$$ARCHIVE_NAME.tar.gz -C $(RELEASE_DIR) $$ARCHIVE_NAME; \
+		fi; \
+		rm -rf $(RELEASE_DIR)/$$ARCHIVE_NAME; \
+	done
+	@echo ""
+	@echo "$(YELLOW)Generating checksums...$(NC)"
+	@cd $(RELEASE_DIR) && shasum -a 256 *.tar.gz *.zip 2>/dev/null > checksums.txt
+	@echo "$(GREEN)✓ Release binaries built in $(RELEASE_DIR)/$(NC)"
+	@ls -lh $(RELEASE_DIR)/
 
 .DEFAULT_GOAL := help
