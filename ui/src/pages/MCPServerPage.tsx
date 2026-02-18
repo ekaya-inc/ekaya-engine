@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
 import { TOOL_GROUP_IDS } from '../constants/mcpToolMetadata';
 import { useConfig } from '../contexts/ConfigContext';
 import { useToast } from '../hooks/useToast';
+import { getUserRoles } from '../lib/auth-token';
 import engineApi from '../services/engineApi';
 import type { AIConfigResponse, DAGStatusResponse, Datasource, MCPConfigResponse } from '../types';
 
@@ -277,10 +278,58 @@ const MCPServerPage = () => {
     }
   };
 
+  const roles = getUserRoles();
+  const hasConfigAccess = roles.includes('admin') || roles.includes('data');
+
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-text-secondary" />
+      </div>
+    );
+  }
+
+  if (!hasConfigAccess) {
+    const mcpSetupUrl = config?.serverUrl
+      ? `${appConfig?.authServerUrl}/mcp-setup?mcp_url=${encodeURIComponent(config.serverUrl)}`
+      : `${appConfig?.authServerUrl}/mcp-setup`;
+
+    return (
+      <div className="mx-auto max-w-4xl">
+        <div className="mb-6">
+          <Button
+            variant="ghost"
+            onClick={() => navigate(`/projects/${pid}`)}
+            className="mb-4"
+          >
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Dashboard
+          </Button>
+          <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
+            <MCPLogo size={32} className="text-brand-purple" />
+            MCP Server
+          </h1>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Connect to the MCP Server</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-text-secondary">
+              Follow the setup instructions to connect your MCP client to this project's MCP Server.
+            </p>
+            <a
+              href={mcpSetupUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 text-sm text-brand-purple hover:underline"
+            >
+              <ExternalLink className="h-4 w-4" />
+              MCP Setup Instructions
+            </a>
+          </CardContent>
+        </Card>
       </div>
     );
   }

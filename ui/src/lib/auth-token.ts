@@ -30,6 +30,26 @@ export function getCurrentProjectId(): string | null {
   return sessionStorage.getItem(STORAGE_KEYS.PROJECT_ID);
 }
 
+export function getUserRoles(): string[] {
+  const jwt = getProjectToken();
+  if (!jwt) return [];
+
+  try {
+    const parts = jwt.split('.');
+    if (parts.length !== 3) return [];
+
+    const payloadPart = parts[1];
+    if (!payloadPart) return [];
+
+    const payload = JSON.parse(atob(payloadPart));
+    if (!Array.isArray(payload.roles)) return [];
+
+    return payload.roles;
+  } catch {
+    return [];
+  }
+}
+
 export function isTokenExpired(jwt: string): boolean {
   try {
     const parts = jwt.split('.');
