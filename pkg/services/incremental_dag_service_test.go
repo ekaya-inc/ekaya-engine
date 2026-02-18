@@ -11,29 +11,6 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
 
-func TestToTitleCase(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"users", "Users"},
-		{"billing_activities", "Billing Activities"},
-		{"order_items", "Order Items"},
-		{"a_b_c", "A B C"},
-		{"single", "Single"},
-		{"", ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := toTitleCase(tt.input)
-			if got != tt.expected {
-				t.Errorf("toTitleCase(%q) = %q, want %q", tt.input, got, tt.expected)
-			}
-		})
-	}
-}
-
 func TestProcessChange_SkipsWithoutAIConfig(t *testing.T) {
 	logger := zap.NewNop()
 

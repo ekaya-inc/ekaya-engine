@@ -155,6 +155,9 @@ func (s *aiConfigService) GetEffective(ctx context.Context, projectID uuid.UUID)
 		if !projectConfig.HasLLMConfig() {
 			return nil, fmt.Errorf("BYOK config incomplete")
 		}
+		// Resolve localhost URLs for Docker environments (e.g., local proxies)
+		projectConfig.LLMBaseURL = config.ResolveURLForDocker(projectConfig.LLMBaseURL)
+		projectConfig.EmbeddingBaseURL = config.ResolveURLForDocker(projectConfig.EmbeddingBaseURL)
 		return projectConfig, nil
 
 	default:

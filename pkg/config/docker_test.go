@@ -27,6 +27,58 @@ func TestResolveHostForDocker_NotInDocker(t *testing.T) {
 	}
 }
 
+func TestResolveURLForDocker(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"empty string", "", ""},
+		{"non-localhost URL", "http://api.openai.com/v1", "http://api.openai.com/v1"},
+		{"localhost with port", "http://localhost:11434/v1", "http://localhost:11434/v1"},
+		{"127.0.0.1 with port", "http://127.0.0.1:8080/v1", "http://127.0.0.1:8080/v1"},
+		{"localhost no port", "http://localhost/v1", "http://localhost/v1"},
+		{"https localhost", "https://localhost:11434/v1", "https://localhost:11434/v1"},
+		{"invalid URL", "://bad", "://bad"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ResolveURLForDocker(tt.input)
+			if IsRunningInDocker() {
+				// In Docker, localhost URLs should be rewritten
+				switch tt.name {
+				case "localhost with port":
+					if result != "http://host.docker.internal:11434/v1" {
+						t.Errorf("ResolveURLForDocker(%q) in Docker = %q, want %q", tt.input, result, "http://host.docker.internal:11434/v1")
+					}
+				case "127.0.0.1 with port":
+					if result != "http://host.docker.internal:8080/v1" {
+						t.Errorf("ResolveURLForDocker(%q) in Docker = %q, want %q", tt.input, result, "http://host.docker.internal:8080/v1")
+					}
+				case "localhost no port":
+					if result != "http://host.docker.internal/v1" {
+						t.Errorf("ResolveURLForDocker(%q) in Docker = %q, want %q", tt.input, result, "http://host.docker.internal/v1")
+					}
+				case "https localhost":
+					if result != "https://host.docker.internal:11434/v1" {
+						t.Errorf("ResolveURLForDocker(%q) in Docker = %q, want %q", tt.input, result, "https://host.docker.internal:11434/v1")
+					}
+				default:
+					if result != tt.expected {
+						t.Errorf("ResolveURLForDocker(%q) in Docker = %q, want %q", tt.input, result, tt.expected)
+					}
+				}
+			} else {
+				// Not in Docker, all URLs should be unchanged
+				if result != tt.input {
+					t.Errorf("ResolveURLForDocker(%q) not in Docker = %q, want unchanged", tt.input, result)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveHostForDocker_LocalhostVariants(t *testing.T) {
 	// Test that localhost variants are recognized
 	// The actual replacement only happens when IsRunningInDocker() returns true

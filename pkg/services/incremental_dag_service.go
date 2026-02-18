@@ -2,8 +2,6 @@ package services
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -266,16 +264,6 @@ func (s *incrementalDAGService) processNewColumn(_ context.Context, change *mode
 	return nil
 }
 
-// processNewColumn_DISABLED is the old implementation preserved for reference.
-// nolint:unused
-func (s *incrementalDAGService) processNewColumn_DISABLED(ctx context.Context, change *models.PendingChange) error {
-	_ = ctx
-	_ = change
-	// Old implementation used GetByTableColumn which no longer exists.
-	// New implementation should use GetBySchemaColumnID.
-	return fmt.Errorf("not implemented: column metadata schema changed")
-}
-
 // processNewRelationship handles new relationship changes.
 // Note: Entity relationship functionality has been removed for v1.0 simplification.
 // Relationships are now stored at the schema level (SchemaRelationship), not entity level.
@@ -294,43 +282,4 @@ func (s *incrementalDAGService) processEnumUpdate(_ context.Context, change *mod
 		zap.String("table_name", change.TableName),
 		zap.String("column_name", change.ColumnName))
 	return nil
-}
-
-// Helper methods
-
-func (s *incrementalDAGService) getTableColumns(ctx context.Context, projectID uuid.UUID, tableName string) ([]*models.SchemaColumn, error) {
-	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, []string{tableName})
-	if err != nil {
-		return nil, err
-	}
-	return columnsByTable[tableName], nil
-}
-
-func (s *incrementalDAGService) getColumnInfo(ctx context.Context, projectID uuid.UUID, tableName, columnName string) (*models.SchemaColumn, error) {
-	columns, err := s.getTableColumns(ctx, projectID, tableName)
-	if err != nil {
-		return nil, err
-	}
-	for _, c := range columns {
-		if c.ColumnName == columnName {
-			return c, nil
-		}
-	}
-	return nil, fmt.Errorf("column not found: %s.%s", tableName, columnName)
-}
-
-// ptrStr returns a pointer to the given string.
-func ptrStr(s string) *string {
-	return &s
-}
-
-// toTitleCase converts a snake_case string to Title Case.
-func toTitleCase(s string) string {
-	words := strings.Split(s, "_")
-	for i, w := range words {
-		if len(w) > 0 {
-			words[i] = strings.ToUpper(string(w[0])) + strings.ToLower(w[1:])
-		}
-	}
-	return strings.Join(words, " ")
 }
