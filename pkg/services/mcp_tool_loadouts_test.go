@@ -8,61 +8,52 @@ import (
 )
 
 func TestComputeUserTools(t *testing.T) {
-	t.Run("returns Query loadout tools by default", func(t *testing.T) {
+	t.Run("returns only Default + LimitedQuery tools", func(t *testing.T) {
 		state := map[string]*models.ToolGroupConfig{}
 
 		tools := ComputeUserTools(state)
 		toolNames := toolNamesToMap(tools)
 
-		// Default + Query loadout
+		// Default + LimitedQuery only
 		assert.True(t, toolNames["health"], "health should be included")
-		assert.True(t, toolNames["query"], "query should be included")
-		assert.True(t, toolNames["sample"], "sample should be included")
-		assert.True(t, toolNames["validate"], "validate should be included")
-		assert.True(t, toolNames["get_ontology"], "get_ontology should be included")
-		assert.True(t, toolNames["get_schema"], "get_schema should be included")
 		assert.True(t, toolNames["list_approved_queries"], "list_approved_queries should be included")
 		assert.True(t, toolNames["execute_approved_query"], "execute_approved_query should be included")
 
-		// Developer-only tools NOT included
+		// Should NOT get query or developer tools
+		assert.False(t, toolNames["query"], "query should NOT be included")
+		assert.False(t, toolNames["sample"], "sample should NOT be included")
+		assert.False(t, toolNames["validate"], "validate should NOT be included")
 		assert.False(t, toolNames["echo"], "echo should NOT be included")
 		assert.False(t, toolNames["execute"], "execute should NOT be included")
-
-		// Ontology Maintenance NOT included without option
 		assert.False(t, toolNames["update_table"], "update_table should NOT be included")
 		assert.False(t, toolNames["update_column"], "update_column should NOT be included")
 	})
 
-	t.Run("includes Ontology Maintenance tools when AllowOntologyMaintenance is true", func(t *testing.T) {
+	t.Run("ignores config state — always returns limited tools", func(t *testing.T) {
 		state := map[string]*models.ToolGroupConfig{
-			ToolGroupUser: {AllowOntologyMaintenance: true},
+			ToolGroupUser:      {AllowOntologyMaintenance: true},
+			ToolGroupDeveloper: {AddQueryTools: true, AddOntologyMaintenance: true},
 		}
 
 		tools := ComputeUserTools(state)
+
+		// Should only have 3 tools (health, list_approved_queries, execute_approved_query)
+		assert.Len(t, tools, 3, "user should get exactly 3 tools")
+
 		toolNames := toolNamesToMap(tools)
-
-		// Query loadout tools
-		assert.True(t, toolNames["query"], "query should be included")
-		assert.True(t, toolNames["get_schema"], "get_schema should be included")
-
-		// Ontology Maintenance tools
-		assert.True(t, toolNames["update_table"], "update_table should be included")
-		assert.True(t, toolNames["update_column"], "update_column should be included")
-		assert.True(t, toolNames["update_glossary_term"], "update_glossary_term should be included")
-		assert.True(t, toolNames["refresh_schema"], "refresh_schema should be included")
-
-		// Developer-only tools still NOT included
-		assert.False(t, toolNames["echo"], "echo should NOT be included")
-		assert.False(t, toolNames["execute"], "execute should NOT be included")
+		assert.True(t, toolNames["health"])
+		assert.True(t, toolNames["list_approved_queries"])
+		assert.True(t, toolNames["execute_approved_query"])
 	})
 
-	t.Run("nil state returns Query loadout", func(t *testing.T) {
+	t.Run("nil state returns same limited tools", func(t *testing.T) {
 		tools := ComputeUserTools(nil)
 		toolNames := toolNamesToMap(tools)
 
 		assert.True(t, toolNames["health"], "health should be included")
-		assert.True(t, toolNames["query"], "query should be included")
-		assert.False(t, toolNames["update_table"], "update_table should NOT be included")
+		assert.True(t, toolNames["list_approved_queries"], "list_approved_queries should be included")
+		assert.True(t, toolNames["execute_approved_query"], "execute_approved_query should be included")
+		assert.False(t, toolNames["query"], "query should NOT be included")
 	})
 }
 

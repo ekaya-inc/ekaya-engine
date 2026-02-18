@@ -53,14 +53,19 @@ func (h *ProjectsHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *aut
 	// API routes
 	mux.HandleFunc("GET /api/projects/{pid}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Get)))
+	// Destructive/config operations - admin only
 	mux.HandleFunc("DELETE /api/projects/{pid}",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Delete)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.Delete))))
 	mux.HandleFunc("POST /api/projects/{pid}/delete-callback",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.DeleteCallback)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.DeleteCallback))))
 	mux.HandleFunc("PATCH /api/projects/{pid}/auth-server-url",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.UpdateAuthServerURL)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.UpdateAuthServerURL))))
 	mux.HandleFunc("POST /api/projects/{pid}/sync-server-url",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.SyncServerURL)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.SyncServerURL))))
 }
 
 // GetCurrent handles GET /projects

@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as authToken from '../../lib/auth-token';
 import engineApi from '../../services/engineApi';
 import type { Datasource, MCPConfigResponse } from '../../types';
 import MCPServerPage from '../MCPServerPage';
@@ -31,6 +32,10 @@ vi.mock('react-router-dom', async () => {
     useNavigate: () => mockNavigate,
   };
 });
+
+vi.mock('../../lib/auth-token', () => ({
+  getUserRoles: vi.fn(() => ['admin']),
+}));
 
 vi.mock('../../contexts/ConfigContext', () => ({
   useConfig: () => ({
@@ -387,5 +392,82 @@ describe('MCPServerPage - Questions checklist item', () => {
     await waitFor(() => {
       expect(screen.getByText('MCP Server')).toBeInTheDocument();
     });
+  });
+});
+
+describe('MCPServerPage - Role-based access', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('shows full config UI for admin role', async () => {
+    vi.mocked(authToken.getUserRoles).mockReturnValue(['admin']);
+    setupMocks();
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Setup Checklist')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Your MCP Server URL')).toBeInTheDocument();
+  });
+
+  it('shows full config UI for data role', async () => {
+    vi.mocked(authToken.getUserRoles).mockReturnValue(['data']);
+    setupMocks();
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Setup Checklist')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Your MCP Server URL')).toBeInTheDocument();
+  });
+
+  it('shows instructions page for user role instead of config UI', async () => {
+    vi.mocked(authToken.getUserRoles).mockReturnValue(['user']);
+    setupMocks();
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('MCP Server')).toBeInTheDocument();
+    });
+
+    // Should NOT show the admin config UI
+    expect(screen.queryByText('Setup Checklist')).not.toBeInTheDocument();
+    expect(screen.queryByText('Your MCP Server URL')).not.toBeInTheDocument();
+
+    // Should show instructions with a link to MCP setup
+    expect(screen.getByText(/MCP Setup Instructions/)).toBeInTheDocument();
+    const setupLink = screen.getByRole('link', { name: /MCP Setup Instructions/ });
+    expect(setupLink).toHaveAttribute('href', expect.stringContaining('/mcp-setup'));
+  });
+
+  it('includes project MCP URL in setup link for user role', async () => {
+    vi.mocked(authToken.getUserRoles).mockReturnValue(['user']);
+    setupMocks();
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('MCP Server')).toBeInTheDocument();
+    });
+
+    const setupLink = screen.getByRole('link', { name: /MCP Setup Instructions/ });
+    expect(setupLink).toHaveAttribute(
+      'href',
+      expect.stringContaining(encodeURIComponent('https://example.com/mcp/proj-1')),
+    );
+  });
+
+  it('shows instructions page for empty roles (defaults to user)', async () => {
+    vi.mocked(authToken.getUserRoles).mockReturnValue([]);
+    setupMocks();
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('MCP Server')).toBeInTheDocument();
+    });
+
+    // Should NOT show admin config UI
+    expect(screen.queryByText('Setup Checklist')).not.toBeInTheDocument();
+    expect(screen.queryByText('Your MCP Server URL')).not.toBeInTheDocument();
   });
 });

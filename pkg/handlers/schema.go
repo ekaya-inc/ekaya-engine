@@ -142,7 +142,8 @@ func (h *SchemaHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.
 	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsid}/schema/prompt",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetSchemaPrompt)))
 	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/schema/refresh",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.RefreshSchema)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.RefreshSchema))))
 
 	// Table operations
 	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsid}/schema/tables/{tableName}",
@@ -154,15 +155,18 @@ func (h *SchemaHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.
 
 	// Selection operations
 	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/schema/selections",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.SaveSelections)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.SaveSelections))))
 
 	// Relationship operations (datasource-level)
 	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsid}/schema/relationships",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetRelationships)))
 	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/schema/relationships",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.AddRelationship)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.AddRelationship))))
 	mux.HandleFunc("DELETE /api/projects/{pid}/datasources/{dsid}/schema/relationships/{relId}",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.RemoveRelationship)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.RemoveRelationship))))
 
 	// Project-level relationship operations (aggregates across all datasources)
 	mux.HandleFunc("GET /api/projects/{pid}/relationships",

@@ -10,6 +10,7 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
@@ -161,15 +162,19 @@ func (h *DatasourcesHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *
 	mux.HandleFunc("GET /api/projects/{pid}/datasources",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.List)))
 	mux.HandleFunc("POST /api/projects/{pid}/datasources",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Create)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.Create))))
 	mux.HandleFunc("GET /api/projects/{pid}/datasources/{id}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Get)))
 	mux.HandleFunc("PUT /api/projects/{pid}/datasources/{id}",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Update)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.Update))))
 	mux.HandleFunc("PATCH /api/projects/{pid}/datasources/{id}/name",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Rename)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.Rename))))
 	mux.HandleFunc("DELETE /api/projects/{pid}/datasources/{id}",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Delete)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.Delete))))
 	mux.HandleFunc("POST /api/projects/{pid}/datasources/test",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.TestConnection)))
 }

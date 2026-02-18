@@ -266,9 +266,10 @@ func (tc *ontologyPerformanceTestContext) createAuthContext() (context.Context, 
 
 	ctx := context.Background()
 
-	// Add auth claims
+	// Add auth claims (admin role for full tool access)
 	claims := &auth.Claims{
 		ProjectID: tc.projectID.String(),
+		Roles:     []string{models.RoleAdmin},
 	}
 	ctx = context.WithValue(ctx, auth.ClaimsKey, claims)
 

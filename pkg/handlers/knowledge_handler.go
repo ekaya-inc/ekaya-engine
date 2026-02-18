@@ -88,15 +88,20 @@ func (h *KnowledgeHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *au
 
 	// Write endpoints - require provenance for audit tracking
 	mux.HandleFunc("POST "+base,
-		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Create)))
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.Create))))
 	mux.HandleFunc("POST "+base+"/parse",
-		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Parse)))
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.Parse))))
 	mux.HandleFunc("PUT "+base+"/{kid}",
-		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Update)))
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.Update))))
 	mux.HandleFunc("DELETE "+base+"/{kid}",
-		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Delete)))
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.Delete))))
 	mux.HandleFunc("DELETE "+base,
-		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.DeleteAll)))
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.DeleteAll))))
 }
 
 // List handles GET /api/projects/{pid}/project-knowledge

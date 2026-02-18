@@ -87,13 +87,16 @@ func (h *OntologyQuestionsHandler) RegisterRoutes(mux *http.ServeMux, authMiddle
 	mux.HandleFunc("GET "+base+"/next",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetNext)))
 	mux.HandleFunc("POST "+base+"/{qid}/answer",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Answer)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.Answer))))
 	mux.HandleFunc("POST "+base+"/{qid}/skip",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Skip)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.Skip))))
 	mux.HandleFunc("GET "+base+"/counts",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Counts)))
 	mux.HandleFunc("DELETE "+base+"/{qid}",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Delete)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.Delete))))
 }
 
 // List handles GET /api/projects/{pid}/ontology/questions

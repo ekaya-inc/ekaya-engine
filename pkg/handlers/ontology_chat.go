@@ -95,11 +95,14 @@ func (h *OntologyChatHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware 
 
 	// Write endpoints - require provenance for audit tracking
 	mux.HandleFunc("POST "+chatBase+"/initialize",
-		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Initialize)))
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.Initialize))))
 	mux.HandleFunc("POST "+chatBase+"/message",
-		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.SendMessage)))
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.SendMessage))))
 	mux.HandleFunc("DELETE "+chatBase+"/history",
-		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.ClearHistory)))
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.ClearHistory))))
 
 	// Knowledge endpoints - read-only
 	knowledgeBase := "/api/projects/{pid}/ontology/knowledge"

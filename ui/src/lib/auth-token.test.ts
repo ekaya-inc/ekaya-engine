@@ -6,6 +6,7 @@ import {
   clearProjectToken,
   getCurrentProjectId,
   isTokenExpired,
+  getUserRoles,
 } from './auth-token';
 
 describe('Tab-Scoped JWT Storage', () => {
@@ -87,6 +88,42 @@ describe('Tab-Scoped JWT Storage', () => {
       const jwt = `header.${btoa(JSON.stringify(payload))}.signature`;
 
       expect(isTokenExpired(jwt)).toBe(true);
+    });
+  });
+
+  describe('getUserRoles', () => {
+    it('should return roles from stored JWT', () => {
+      const payload = { roles: ['admin', 'user'], exp: Math.floor(Date.now() / 1000) + 3600 };
+      const jwt = `header.${btoa(JSON.stringify(payload))}.signature`;
+      storeProjectToken(jwt, 'project-123');
+
+      expect(getUserRoles()).toEqual(['admin', 'user']);
+    });
+
+    it('should return empty array when no token stored', () => {
+      expect(getUserRoles()).toEqual([]);
+    });
+
+    it('should return empty array for JWT without roles claim', () => {
+      const payload = { sub: 'user-123', exp: Math.floor(Date.now() / 1000) + 3600 };
+      const jwt = `header.${btoa(JSON.stringify(payload))}.signature`;
+      storeProjectToken(jwt, 'project-123');
+
+      expect(getUserRoles()).toEqual([]);
+    });
+
+    it('should return empty array for malformed JWT', () => {
+      storeProjectToken('not-a-jwt', 'project-123');
+
+      expect(getUserRoles()).toEqual([]);
+    });
+
+    it('should return single role', () => {
+      const payload = { roles: ['user'], exp: Math.floor(Date.now() / 1000) + 3600 };
+      const jwt = `header.${btoa(JSON.stringify(payload))}.signature`;
+      storeProjectToken(jwt, 'project-123');
+
+      expect(getUserRoles()).toEqual(['user']);
     });
   });
 });

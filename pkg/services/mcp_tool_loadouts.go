@@ -247,16 +247,8 @@ func GetAllTools() []ToolSpec {
 }
 
 // ComputeEnabledToolsFromConfig computes the list of enabled tools based on config state.
-// This is the main entry point for determining which tools to expose.
-// The isAgent parameter indicates if the caller is using agent authentication.
-//
-// For user authentication (isAgent=false), tools are determined by role-based sub-options:
-// - Developer tools: Default + DeveloperCore + optional Query + optional OntologyMaintenance
-// - The Enabled flag is NOT checked for user auth (deprecated).
-//
-// For agent authentication (isAgent=true), tools are gated by agent_tools.Enabled:
-// - When enabled: Default + LimitedQuery
-// - When disabled: Default only
+// For admin/data roles (isAgent=false): Developer tools with config-driven loadouts.
+// For agent authentication (isAgent=true): Limited query tools only.
 func ComputeEnabledToolsFromConfig(state map[string]*models.ToolGroupConfig, isAgent bool) []ToolSpec {
 	if state == nil {
 		// Only default loadout (health) when no state
@@ -338,20 +330,10 @@ func IsToolInLoadout(toolName, loadoutName string) bool {
 	return false
 }
 
-// ComputeUserTools computes tools for business users (role: user).
-// Returns tools based on the User Tools configuration:
-// - Default loadout (health) always included
-// - Query loadout (read-only ad-hoc queries, approved queries, ontology access)
-// - Ontology Maintenance loadout if AllowOntologyMaintenance is true
+// ComputeUserTools returns the tool set for users with the "user" role.
+// Users get health check and limited query tools (execute approved queries only).
 func ComputeUserTools(state map[string]*models.ToolGroupConfig) []ToolSpec {
-	loadouts := []string{LoadoutDefault, LoadoutQuery}
-
-	// Check for allowOntologyMaintenance option in user config
-	if userConfig := state[ToolGroupUser]; userConfig != nil && userConfig.AllowOntologyMaintenance {
-		loadouts = append(loadouts, LoadoutOntologyMaintenance)
-	}
-
-	return MergeLoadouts(loadouts...)
+	return MergeLoadouts(LoadoutDefault, LoadoutLimitedQuery)
 }
 
 // ComputeDeveloperTools computes tools for admin/data/developer roles.

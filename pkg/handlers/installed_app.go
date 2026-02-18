@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
@@ -28,23 +29,33 @@ func NewInstalledAppHandler(installedAppService services.InstalledAppService, lo
 func (h *InstalledAppHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.Middleware, tenantMiddleware TenantMiddleware) {
 	base := "/api/projects/{pid}/apps"
 
+	// Read-only endpoints - all authenticated users
 	mux.HandleFunc("GET "+base,
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.List)))
 	mux.HandleFunc("GET "+base+"/{appId}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Get)))
+
+	// Install/Activate/Uninstall - admin only
 	mux.HandleFunc("POST "+base+"/{appId}",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Install)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.Install))))
 	mux.HandleFunc("POST "+base+"/{appId}/activate",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Activate)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.Activate))))
 	mux.HandleFunc("DELETE "+base+"/{appId}",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Uninstall)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.Uninstall))))
+
+	// Settings update - admin+data
 	mux.HandleFunc("PATCH "+base+"/{appId}",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.UpdateSettings)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.UpdateSettings))))
 
 	// Callback is authenticated — central redirects to a UI route, the SPA re-establishes
-	// auth context, then calls this endpoint. Security: JWT auth + single-use nonce.
+	// auth context, then calls this endpoint. Security: JWT auth + single-use nonce + admin only.
 	mux.HandleFunc("POST "+base+"/{appId}/callback",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Callback)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.Callback))))
 }
 
 // List handles GET /api/projects/{pid}/apps

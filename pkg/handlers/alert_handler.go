@@ -36,13 +36,15 @@ func (h *AlertHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.M
 	mux.HandleFunc("GET "+base,
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.ListAlerts)))
 	mux.HandleFunc("POST "+base+"/{alert_id}/resolve",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.ResolveAlert)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.ResolveAlert))))
 
 	configBase := "/api/projects/{pid}/audit/alert-config"
 	mux.HandleFunc("GET "+configBase,
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetAlertConfig)))
 	mux.HandleFunc("PUT "+configBase,
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.SetAlertConfig)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.SetAlertConfig))))
 }
 
 // ListAlerts handles GET /api/projects/{pid}/audit/alerts
