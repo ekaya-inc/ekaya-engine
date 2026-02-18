@@ -78,7 +78,8 @@ func (h *OntologyDAGHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *
 
 	// Start/Refresh extraction - triggers DAG execution
 	mux.HandleFunc("POST "+base+"/extract",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.StartExtraction)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.StartExtraction))))
 
 	// Get DAG status - for UI polling
 	mux.HandleFunc("GET "+base+"/dag",
@@ -86,11 +87,13 @@ func (h *OntologyDAGHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *
 
 	// Cancel running DAG
 	mux.HandleFunc("POST "+base+"/dag/cancel",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Cancel)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.Cancel))))
 
 	// Delete all ontology data for project
 	mux.HandleFunc("DELETE "+base,
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Delete)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.Delete))))
 }
 
 // StartExtraction handles POST /api/projects/{pid}/datasources/{dsid}/ontology/extract

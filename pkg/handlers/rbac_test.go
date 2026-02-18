@@ -14,6 +14,7 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
@@ -579,6 +580,147 @@ func (m *mockQuestionServiceForRBAC) CreateQuestions(ctx context.Context, questi
 	return nil
 }
 
+// =============================================================================
+// Additional mock services for remaining handler RBAC tests
+// =============================================================================
+
+// mockKnowledgeServiceForRBAC implements services.KnowledgeService.
+type mockKnowledgeServiceForRBAC struct{}
+
+func (m *mockKnowledgeServiceForRBAC) Store(ctx context.Context, projectID uuid.UUID, factType, value, contextInfo string) (*models.KnowledgeFact, error) {
+	return &models.KnowledgeFact{}, nil
+}
+func (m *mockKnowledgeServiceForRBAC) StoreWithSource(ctx context.Context, projectID uuid.UUID, factType, value, contextInfo, source string) (*models.KnowledgeFact, error) {
+	return &models.KnowledgeFact{}, nil
+}
+func (m *mockKnowledgeServiceForRBAC) Update(ctx context.Context, projectID, id uuid.UUID, factType, value, contextInfo string) (*models.KnowledgeFact, error) {
+	return &models.KnowledgeFact{}, nil
+}
+func (m *mockKnowledgeServiceForRBAC) GetAll(ctx context.Context, projectID uuid.UUID) ([]*models.KnowledgeFact, error) {
+	return nil, nil
+}
+func (m *mockKnowledgeServiceForRBAC) GetByType(ctx context.Context, projectID uuid.UUID, factType string) ([]*models.KnowledgeFact, error) {
+	return nil, nil
+}
+func (m *mockKnowledgeServiceForRBAC) Delete(ctx context.Context, id uuid.UUID) error { return nil }
+func (m *mockKnowledgeServiceForRBAC) DeleteAll(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
+// mockKnowledgeParsingServiceForRBAC implements services.KnowledgeParsingService.
+type mockKnowledgeParsingServiceForRBAC struct{}
+
+func (m *mockKnowledgeParsingServiceForRBAC) ParseAndStore(ctx context.Context, projectID uuid.UUID, freeFormText string) ([]*models.KnowledgeFact, error) {
+	return nil, nil
+}
+
+// mockOntologyDAGServiceForRBAC implements services.OntologyDAGService.
+type mockOntologyDAGServiceForRBAC struct{}
+
+func (m *mockOntologyDAGServiceForRBAC) Start(ctx context.Context, projectID, datasourceID uuid.UUID, projectOverview string) (*models.OntologyDAG, error) {
+	return &models.OntologyDAG{}, nil
+}
+func (m *mockOntologyDAGServiceForRBAC) GetStatus(ctx context.Context, datasourceID uuid.UUID) (*models.OntologyDAG, error) {
+	return nil, nil
+}
+func (m *mockOntologyDAGServiceForRBAC) Cancel(ctx context.Context, dagID uuid.UUID) error {
+	return nil
+}
+func (m *mockOntologyDAGServiceForRBAC) Delete(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+func (m *mockOntologyDAGServiceForRBAC) Shutdown(ctx context.Context) error { return nil }
+
+// mockOntologyChatServiceForRBAC implements services.OntologyChatService.
+type mockOntologyChatServiceForRBAC struct{}
+
+func (m *mockOntologyChatServiceForRBAC) Initialize(ctx context.Context, projectID uuid.UUID) (*models.ChatInitResponse, error) {
+	return &models.ChatInitResponse{}, nil
+}
+func (m *mockOntologyChatServiceForRBAC) SendMessage(ctx context.Context, projectID uuid.UUID, message string, eventChan chan<- models.ChatEvent) error {
+	return nil
+}
+func (m *mockOntologyChatServiceForRBAC) GetHistory(ctx context.Context, projectID uuid.UUID, limit int) ([]*models.ChatMessage, error) {
+	return nil, nil
+}
+func (m *mockOntologyChatServiceForRBAC) ClearHistory(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+func (m *mockOntologyChatServiceForRBAC) SaveMessage(ctx context.Context, message *models.ChatMessage) error {
+	return nil
+}
+
+// mockAIConfigServiceForRBAC implements services.AIConfigService.
+type mockAIConfigServiceForRBAC struct{}
+
+func (m *mockAIConfigServiceForRBAC) Get(ctx context.Context, projectID uuid.UUID) (*models.AIConfig, error) {
+	return nil, nil
+}
+func (m *mockAIConfigServiceForRBAC) Upsert(ctx context.Context, projectID uuid.UUID, config *models.AIConfig) error {
+	return nil
+}
+func (m *mockAIConfigServiceForRBAC) Delete(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+func (m *mockAIConfigServiceForRBAC) UpdateTestResult(ctx context.Context, projectID uuid.UUID, success bool) error {
+	return nil
+}
+func (m *mockAIConfigServiceForRBAC) GetEffective(ctx context.Context, projectID uuid.UUID) (*models.AIConfig, error) {
+	return nil, nil
+}
+
+// mockConnectionTesterForRBAC implements llm.ConnectionTester.
+type mockConnectionTesterForRBAC struct{}
+
+func (m *mockConnectionTesterForRBAC) Test(ctx context.Context, cfg *llm.TestConfig) *llm.TestResult {
+	return &llm.TestResult{Success: true}
+}
+
+// mockMCPConfigRepoForRBAC implements repositories.MCPConfigRepository.
+type mockMCPConfigRepoForRBAC struct{}
+
+func (m *mockMCPConfigRepoForRBAC) Get(ctx context.Context, projectID uuid.UUID) (*models.MCPConfig, error) {
+	return nil, nil
+}
+func (m *mockMCPConfigRepoForRBAC) Upsert(ctx context.Context, config *models.MCPConfig) error {
+	return nil
+}
+func (m *mockMCPConfigRepoForRBAC) GetAgentAPIKey(ctx context.Context, projectID uuid.UUID) (string, error) {
+	return "", nil
+}
+func (m *mockMCPConfigRepoForRBAC) SetAgentAPIKey(ctx context.Context, projectID uuid.UUID, encryptedKey string) error {
+	return nil
+}
+func (m *mockMCPConfigRepoForRBAC) GetAuditRetentionDays(ctx context.Context, projectID uuid.UUID) (*int, error) {
+	days := 90
+	return &days, nil
+}
+func (m *mockMCPConfigRepoForRBAC) SetAuditRetentionDays(ctx context.Context, projectID uuid.UUID, days *int) error {
+	return nil
+}
+func (m *mockMCPConfigRepoForRBAC) GetAlertConfig(ctx context.Context, projectID uuid.UUID) (*models.AlertConfig, error) {
+	return &models.AlertConfig{}, nil
+}
+func (m *mockMCPConfigRepoForRBAC) SetAlertConfig(ctx context.Context, projectID uuid.UUID, config *models.AlertConfig) error {
+	return nil
+}
+
+// mockAlertServiceForRBAC implements services.AlertService.
+type mockAlertServiceForRBAC struct{}
+
+func (m *mockAlertServiceForRBAC) ListAlerts(ctx context.Context, projectID uuid.UUID, filters models.AlertFilters) ([]*models.AuditAlert, int, error) {
+	return nil, 0, nil
+}
+func (m *mockAlertServiceForRBAC) GetAlertByID(ctx context.Context, projectID uuid.UUID, alertID uuid.UUID) (*models.AuditAlert, error) {
+	return nil, nil
+}
+func (m *mockAlertServiceForRBAC) CreateAlert(ctx context.Context, alert *models.AuditAlert) error {
+	return nil
+}
+func (m *mockAlertServiceForRBAC) ResolveAlert(ctx context.Context, projectID uuid.UUID, alertID uuid.UUID, resolvedBy string, resolution string, notes string) error {
+	return nil
+}
+
 func TestRBAC_GlossaryHandler(t *testing.T) {
 	projectID := uuid.New()
 	termID := uuid.New()
@@ -629,6 +771,352 @@ func TestRBAC_GlossaryHandler(t *testing.T) {
 		{name: "POST_autogen_admin_allowed", method: http.MethodPost, path: basePath + "/auto-generate", roles: []string{models.RoleAdmin}, expectedStatus: http.StatusAccepted},
 		{name: "POST_autogen_data_allowed", method: http.MethodPost, path: basePath + "/auto-generate", roles: []string{models.RoleData}, expectedStatus: http.StatusAccepted},
 		{name: "POST_autogen_user_denied", method: http.MethodPost, path: basePath + "/auto-generate", roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runRBACTest(t, projectID, handler.RegisterRoutes, tc)
+		})
+	}
+}
+
+// =============================================================================
+// Datasources Handler RBAC Tests
+// =============================================================================
+
+func TestRBAC_DatasourcesHandler(t *testing.T) {
+	projectID := uuid.New()
+	dsID := uuid.New()
+	handler := NewDatasourcesHandler(&mockDatasourceService{}, zap.NewNop())
+
+	basePath := "/api/projects/" + projectID.String() + "/datasources"
+	dsPath := basePath + "/" + dsID.String()
+
+	tests := []rbacTestCase{
+		// GET - any authenticated user
+		{name: "GET_list_user_allowed", method: http.MethodGet, path: basePath, roles: []string{models.RoleUser}, expectedStatus: http.StatusOK},
+		{name: "GET_detail_user_allowed", method: http.MethodGet, path: dsPath, roles: []string{models.RoleUser}, expectedStatus: http.StatusOK},
+
+		// POST create - admin only (400 = past RBAC, bad body)
+		{name: "POST_create_admin_allowed", method: http.MethodPost, path: basePath, roles: []string{models.RoleAdmin}, expectedStatus: http.StatusBadRequest},
+		{name: "POST_create_user_denied", method: http.MethodPost, path: basePath, roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+		{name: "POST_create_data_denied", method: http.MethodPost, path: basePath, roles: []string{models.RoleData}, expectedStatus: http.StatusForbidden},
+
+		// PUT update - admin only (400 = past RBAC, bad body)
+		{name: "PUT_update_admin_allowed", method: http.MethodPut, path: dsPath, roles: []string{models.RoleAdmin}, expectedStatus: http.StatusBadRequest},
+		{name: "PUT_update_user_denied", method: http.MethodPut, path: dsPath, roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+		{name: "PUT_update_data_denied", method: http.MethodPut, path: dsPath, roles: []string{models.RoleData}, expectedStatus: http.StatusForbidden},
+
+		// PATCH rename - admin only (400 = past RBAC, bad body)
+		{name: "PATCH_rename_admin_allowed", method: http.MethodPatch, path: dsPath + "/name", roles: []string{models.RoleAdmin}, expectedStatus: http.StatusBadRequest},
+		{name: "PATCH_rename_user_denied", method: http.MethodPatch, path: dsPath + "/name", roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+
+		// DELETE - admin only (200 = past RBAC, handler returns JSON)
+		{name: "DELETE_admin_allowed", method: http.MethodDelete, path: dsPath, roles: []string{models.RoleAdmin}, expectedStatus: http.StatusOK},
+		{name: "DELETE_user_denied", method: http.MethodDelete, path: dsPath, roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+		{name: "DELETE_data_denied", method: http.MethodDelete, path: dsPath, roles: []string{models.RoleData}, expectedStatus: http.StatusForbidden},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runRBACTest(t, projectID, handler.RegisterRoutes, tc)
+		})
+	}
+}
+
+// =============================================================================
+// Schema Handler RBAC Tests
+// =============================================================================
+
+func TestRBAC_SchemaHandler(t *testing.T) {
+	projectID := uuid.New()
+	dsID := uuid.New()
+	relID := uuid.New()
+	handler := NewSchemaHandler(&mockSchemaService{}, zap.NewNop())
+
+	schemaBase := "/api/projects/" + projectID.String() + "/datasources/" + dsID.String() + "/schema"
+
+	tests := []rbacTestCase{
+		// GET - any authenticated user
+		{name: "GET_schema_user_allowed", method: http.MethodGet, path: schemaBase, roles: []string{models.RoleUser}, expectedStatus: http.StatusOK},
+		{name: "GET_selected_user_allowed", method: http.MethodGet, path: schemaBase + "/selected", roles: []string{models.RoleUser}, expectedStatus: http.StatusOK},
+		{name: "GET_relationships_user_allowed", method: http.MethodGet, path: schemaBase + "/relationships", roles: []string{models.RoleUser}, expectedStatus: http.StatusOK},
+
+		// POST refresh - admin + data (200 = past RBAC, mock returns valid result)
+		{name: "POST_refresh_admin_allowed", method: http.MethodPost, path: schemaBase + "/refresh", roles: []string{models.RoleAdmin}, expectedStatus: http.StatusOK},
+		{name: "POST_refresh_data_allowed", method: http.MethodPost, path: schemaBase + "/refresh", roles: []string{models.RoleData}, expectedStatus: http.StatusOK},
+		{name: "POST_refresh_user_denied", method: http.MethodPost, path: schemaBase + "/refresh", roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+
+		// POST selections - admin + data (400 = past RBAC, bad body)
+		{name: "POST_selections_admin_allowed", method: http.MethodPost, path: schemaBase + "/selections", roles: []string{models.RoleAdmin}, expectedStatus: http.StatusBadRequest},
+		{name: "POST_selections_data_allowed", method: http.MethodPost, path: schemaBase + "/selections", roles: []string{models.RoleData}, expectedStatus: http.StatusBadRequest},
+		{name: "POST_selections_user_denied", method: http.MethodPost, path: schemaBase + "/selections", roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+
+		// POST add relationship - admin + data (400 = past RBAC, bad body)
+		{name: "POST_relationship_admin_allowed", method: http.MethodPost, path: schemaBase + "/relationships", roles: []string{models.RoleAdmin}, expectedStatus: http.StatusBadRequest},
+		{name: "POST_relationship_data_allowed", method: http.MethodPost, path: schemaBase + "/relationships", roles: []string{models.RoleData}, expectedStatus: http.StatusBadRequest},
+		{name: "POST_relationship_user_denied", method: http.MethodPost, path: schemaBase + "/relationships", roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+
+		// DELETE relationship - admin + data (200 = past RBAC, handler returns JSON)
+		{name: "DELETE_relationship_admin_allowed", method: http.MethodDelete, path: schemaBase + "/relationships/" + relID.String(), roles: []string{models.RoleAdmin}, expectedStatus: http.StatusOK},
+		{name: "DELETE_relationship_data_allowed", method: http.MethodDelete, path: schemaBase + "/relationships/" + relID.String(), roles: []string{models.RoleData}, expectedStatus: http.StatusOK},
+		{name: "DELETE_relationship_user_denied", method: http.MethodDelete, path: schemaBase + "/relationships/" + relID.String(), roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runRBACTest(t, projectID, handler.RegisterRoutes, tc)
+		})
+	}
+}
+
+// =============================================================================
+// Knowledge Handler RBAC Tests
+// =============================================================================
+
+func TestRBAC_KnowledgeHandler(t *testing.T) {
+	projectID := uuid.New()
+	kidID := uuid.New()
+	handler := NewKnowledgeHandler(&mockKnowledgeServiceForRBAC{}, &mockKnowledgeParsingServiceForRBAC{}, zap.NewNop())
+
+	basePath := "/api/projects/" + projectID.String() + "/project-knowledge"
+
+	tests := []rbacTestCase{
+		// GET - any authenticated user
+		{name: "GET_list_user_allowed", method: http.MethodGet, path: basePath, roles: []string{models.RoleUser}, expectedStatus: http.StatusOK},
+		{name: "GET_overview_user_allowed", method: http.MethodGet, path: basePath + "/overview", roles: []string{models.RoleUser}, expectedStatus: http.StatusOK},
+
+		// POST create - admin + data (400 = past RBAC, bad body)
+		{name: "POST_create_admin_allowed", method: http.MethodPost, path: basePath, roles: []string{models.RoleAdmin}, expectedStatus: http.StatusBadRequest},
+		{name: "POST_create_data_allowed", method: http.MethodPost, path: basePath, roles: []string{models.RoleData}, expectedStatus: http.StatusBadRequest},
+		{name: "POST_create_user_denied", method: http.MethodPost, path: basePath, roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+
+		// POST parse - admin + data (400 = past RBAC, bad body)
+		{name: "POST_parse_admin_allowed", method: http.MethodPost, path: basePath + "/parse", roles: []string{models.RoleAdmin}, expectedStatus: http.StatusBadRequest},
+		{name: "POST_parse_user_denied", method: http.MethodPost, path: basePath + "/parse", roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+
+		// PUT update - admin + data (400 = past RBAC, bad body)
+		{name: "PUT_update_admin_allowed", method: http.MethodPut, path: basePath + "/" + kidID.String(), roles: []string{models.RoleAdmin}, expectedStatus: http.StatusBadRequest},
+		{name: "PUT_update_data_allowed", method: http.MethodPut, path: basePath + "/" + kidID.String(), roles: []string{models.RoleData}, expectedStatus: http.StatusBadRequest},
+		{name: "PUT_update_user_denied", method: http.MethodPut, path: basePath + "/" + kidID.String(), roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+
+		// DELETE single - admin + data
+		{name: "DELETE_admin_allowed", method: http.MethodDelete, path: basePath + "/" + kidID.String(), roles: []string{models.RoleAdmin}, expectedStatus: http.StatusOK},
+		{name: "DELETE_data_allowed", method: http.MethodDelete, path: basePath + "/" + kidID.String(), roles: []string{models.RoleData}, expectedStatus: http.StatusOK},
+		{name: "DELETE_user_denied", method: http.MethodDelete, path: basePath + "/" + kidID.String(), roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+
+		// DELETE all - admin + data
+		{name: "DELETE_all_admin_allowed", method: http.MethodDelete, path: basePath, roles: []string{models.RoleAdmin}, expectedStatus: http.StatusOK},
+		{name: "DELETE_all_user_denied", method: http.MethodDelete, path: basePath, roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runRBACTest(t, projectID, handler.RegisterRoutes, tc)
+		})
+	}
+}
+
+// =============================================================================
+// Ontology DAG Handler RBAC Tests
+// =============================================================================
+
+func TestRBAC_OntologyDAGHandler(t *testing.T) {
+	projectID := uuid.New()
+	dsID := uuid.New()
+	handler := NewOntologyDAGHandler(&mockOntologyDAGServiceForRBAC{}, &mockProjectService{}, zap.NewNop())
+
+	base := "/api/projects/" + projectID.String() + "/datasources/" + dsID.String() + "/ontology"
+
+	tests := []rbacTestCase{
+		// GET dag status - any authenticated user
+		{name: "GET_status_user_allowed", method: http.MethodGet, path: base + "/dag", roles: []string{models.RoleUser}, expectedStatus: http.StatusOK},
+
+		// POST extract - admin + data (200 = past RBAC, mock returns empty DAG)
+		{name: "POST_extract_admin_allowed", method: http.MethodPost, path: base + "/extract", roles: []string{models.RoleAdmin}, expectedStatus: http.StatusOK},
+		{name: "POST_extract_data_allowed", method: http.MethodPost, path: base + "/extract", roles: []string{models.RoleData}, expectedStatus: http.StatusOK},
+		{name: "POST_extract_user_denied", method: http.MethodPost, path: base + "/extract", roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+
+		// POST cancel - admin + data (404 = past RBAC, mock returns nil DAG)
+		{name: "POST_cancel_admin_allowed", method: http.MethodPost, path: base + "/dag/cancel", roles: []string{models.RoleAdmin}, expectedStatus: http.StatusNotFound},
+		{name: "POST_cancel_data_allowed", method: http.MethodPost, path: base + "/dag/cancel", roles: []string{models.RoleData}, expectedStatus: http.StatusNotFound},
+		{name: "POST_cancel_user_denied", method: http.MethodPost, path: base + "/dag/cancel", roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+
+		// DELETE ontology - admin + data (200 = past RBAC, handler returns JSON)
+		{name: "DELETE_admin_allowed", method: http.MethodDelete, path: base, roles: []string{models.RoleAdmin}, expectedStatus: http.StatusOK},
+		{name: "DELETE_data_allowed", method: http.MethodDelete, path: base, roles: []string{models.RoleData}, expectedStatus: http.StatusOK},
+		{name: "DELETE_user_denied", method: http.MethodDelete, path: base, roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runRBACTest(t, projectID, handler.RegisterRoutes, tc)
+		})
+	}
+}
+
+// =============================================================================
+// Ontology Questions Handler RBAC Tests
+// =============================================================================
+
+func TestRBAC_OntologyQuestionsHandler(t *testing.T) {
+	projectID := uuid.New()
+	qID := uuid.New()
+	handler := NewOntologyQuestionsHandler(&mockQuestionServiceForRBAC{}, zap.NewNop())
+
+	basePath := "/api/projects/" + projectID.String() + "/ontology/questions"
+
+	tests := []rbacTestCase{
+		// GET - any authenticated user
+		{name: "GET_list_user_allowed", method: http.MethodGet, path: basePath, roles: []string{models.RoleUser}, expectedStatus: http.StatusOK},
+		{name: "GET_next_user_allowed", method: http.MethodGet, path: basePath + "/next", roles: []string{models.RoleUser}, expectedStatus: http.StatusOK},
+		{name: "GET_counts_user_allowed", method: http.MethodGet, path: basePath + "/counts", roles: []string{models.RoleUser}, expectedStatus: http.StatusOK},
+
+		// POST answer - admin + data (400 = past RBAC, bad body)
+		{name: "POST_answer_admin_allowed", method: http.MethodPost, path: basePath + "/" + qID.String() + "/answer", roles: []string{models.RoleAdmin}, expectedStatus: http.StatusBadRequest},
+		{name: "POST_answer_data_allowed", method: http.MethodPost, path: basePath + "/" + qID.String() + "/answer", roles: []string{models.RoleData}, expectedStatus: http.StatusBadRequest},
+		{name: "POST_answer_user_denied", method: http.MethodPost, path: basePath + "/" + qID.String() + "/answer", roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+
+		// POST skip - admin + data
+		{name: "POST_skip_admin_allowed", method: http.MethodPost, path: basePath + "/" + qID.String() + "/skip", roles: []string{models.RoleAdmin}, expectedStatus: http.StatusOK},
+		{name: "POST_skip_data_allowed", method: http.MethodPost, path: basePath + "/" + qID.String() + "/skip", roles: []string{models.RoleData}, expectedStatus: http.StatusOK},
+		{name: "POST_skip_user_denied", method: http.MethodPost, path: basePath + "/" + qID.String() + "/skip", roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+
+		// DELETE question - admin + data
+		{name: "DELETE_admin_allowed", method: http.MethodDelete, path: basePath + "/" + qID.String(), roles: []string{models.RoleAdmin}, expectedStatus: http.StatusOK},
+		{name: "DELETE_data_allowed", method: http.MethodDelete, path: basePath + "/" + qID.String(), roles: []string{models.RoleData}, expectedStatus: http.StatusOK},
+		{name: "DELETE_user_denied", method: http.MethodDelete, path: basePath + "/" + qID.String(), roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runRBACTest(t, projectID, handler.RegisterRoutes, tc)
+		})
+	}
+}
+
+// =============================================================================
+// Ontology Chat Handler RBAC Tests
+// =============================================================================
+
+func TestRBAC_OntologyChatHandler(t *testing.T) {
+	projectID := uuid.New()
+	handler := NewOntologyChatHandler(&mockOntologyChatServiceForRBAC{}, &mockKnowledgeServiceForRBAC{}, zap.NewNop())
+
+	chatBase := "/api/projects/" + projectID.String() + "/ontology/chat"
+
+	tests := []rbacTestCase{
+		// GET history - any authenticated user
+		{name: "GET_history_user_allowed", method: http.MethodGet, path: chatBase + "/history", roles: []string{models.RoleUser}, expectedStatus: http.StatusOK},
+
+		// POST initialize - admin + data
+		{name: "POST_init_admin_allowed", method: http.MethodPost, path: chatBase + "/initialize", roles: []string{models.RoleAdmin}, expectedStatus: http.StatusOK},
+		{name: "POST_init_data_allowed", method: http.MethodPost, path: chatBase + "/initialize", roles: []string{models.RoleData}, expectedStatus: http.StatusOK},
+		{name: "POST_init_user_denied", method: http.MethodPost, path: chatBase + "/initialize", roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+
+		// POST message - admin + data (400 = past RBAC, bad body)
+		{name: "POST_message_admin_allowed", method: http.MethodPost, path: chatBase + "/message", roles: []string{models.RoleAdmin}, expectedStatus: http.StatusBadRequest},
+		{name: "POST_message_user_denied", method: http.MethodPost, path: chatBase + "/message", roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+
+		// DELETE history - admin + data
+		{name: "DELETE_history_admin_allowed", method: http.MethodDelete, path: chatBase + "/history", roles: []string{models.RoleAdmin}, expectedStatus: http.StatusOK},
+		{name: "DELETE_history_data_allowed", method: http.MethodDelete, path: chatBase + "/history", roles: []string{models.RoleData}, expectedStatus: http.StatusOK},
+		{name: "DELETE_history_user_denied", method: http.MethodDelete, path: chatBase + "/history", roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runRBACTest(t, projectID, handler.RegisterRoutes, tc)
+		})
+	}
+}
+
+// =============================================================================
+// AI Config Handler RBAC Tests
+// =============================================================================
+
+func TestRBAC_AIConfigHandler(t *testing.T) {
+	projectID := uuid.New()
+	handler := NewAIConfigHandler(&mockAIConfigServiceForRBAC{}, &mockConnectionTesterForRBAC{}, testConfig(), zap.NewNop())
+
+	basePath := "/api/projects/" + projectID.String() + "/ai-config"
+
+	tests := []rbacTestCase{
+		// GET - any authenticated user
+		{name: "GET_user_allowed", method: http.MethodGet, path: basePath, roles: []string{models.RoleUser}, expectedStatus: http.StatusOK},
+
+		// PUT - admin only (400 = past RBAC, bad body)
+		{name: "PUT_admin_allowed", method: http.MethodPut, path: basePath, roles: []string{models.RoleAdmin}, expectedStatus: http.StatusBadRequest},
+		{name: "PUT_user_denied", method: http.MethodPut, path: basePath, roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+		{name: "PUT_data_denied", method: http.MethodPut, path: basePath, roles: []string{models.RoleData}, expectedStatus: http.StatusForbidden},
+
+		// DELETE - admin only
+		{name: "DELETE_admin_allowed", method: http.MethodDelete, path: basePath, roles: []string{models.RoleAdmin}, expectedStatus: http.StatusNoContent},
+		{name: "DELETE_user_denied", method: http.MethodDelete, path: basePath, roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+		{name: "DELETE_data_denied", method: http.MethodDelete, path: basePath, roles: []string{models.RoleData}, expectedStatus: http.StatusForbidden},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runRBACTest(t, projectID, handler.RegisterRoutes, tc)
+		})
+	}
+}
+
+// =============================================================================
+// Retention Handler RBAC Tests
+// =============================================================================
+
+func TestRBAC_RetentionHandler(t *testing.T) {
+	projectID := uuid.New()
+	handler := NewRetentionHandler(&mockMCPConfigRepoForRBAC{}, zap.NewNop())
+
+	basePath := "/api/projects/" + projectID.String() + "/audit/retention"
+
+	tests := []rbacTestCase{
+		// GET - any authenticated user
+		{name: "GET_user_allowed", method: http.MethodGet, path: basePath, roles: []string{models.RoleUser}, expectedStatus: http.StatusOK},
+
+		// PUT - admin only (400 = past RBAC, bad body)
+		{name: "PUT_admin_allowed", method: http.MethodPut, path: basePath, roles: []string{models.RoleAdmin}, expectedStatus: http.StatusBadRequest},
+		{name: "PUT_user_denied", method: http.MethodPut, path: basePath, roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+		{name: "PUT_data_denied", method: http.MethodPut, path: basePath, roles: []string{models.RoleData}, expectedStatus: http.StatusForbidden},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runRBACTest(t, projectID, handler.RegisterRoutes, tc)
+		})
+	}
+}
+
+// =============================================================================
+// Alert Handler RBAC Tests
+// =============================================================================
+
+func TestRBAC_AlertHandler(t *testing.T) {
+	projectID := uuid.New()
+	alertID := uuid.New()
+	handler := NewAlertHandler(&mockAlertServiceForRBAC{}, &mockMCPConfigRepoForRBAC{}, zap.NewNop())
+
+	alertBase := "/api/projects/" + projectID.String() + "/audit/alerts"
+	configBase := "/api/projects/" + projectID.String() + "/audit/alert-config"
+
+	tests := []rbacTestCase{
+		// GET alerts - any authenticated user
+		{name: "GET_alerts_user_allowed", method: http.MethodGet, path: alertBase, roles: []string{models.RoleUser}, expectedStatus: http.StatusOK},
+		// GET config - any authenticated user
+		{name: "GET_config_user_allowed", method: http.MethodGet, path: configBase, roles: []string{models.RoleUser}, expectedStatus: http.StatusOK},
+
+		// POST resolve - admin + data (400 = past RBAC, bad body)
+		{name: "POST_resolve_admin_allowed", method: http.MethodPost, path: alertBase + "/" + alertID.String() + "/resolve", roles: []string{models.RoleAdmin}, expectedStatus: http.StatusBadRequest},
+		{name: "POST_resolve_data_allowed", method: http.MethodPost, path: alertBase + "/" + alertID.String() + "/resolve", roles: []string{models.RoleData}, expectedStatus: http.StatusBadRequest},
+		{name: "POST_resolve_user_denied", method: http.MethodPost, path: alertBase + "/" + alertID.String() + "/resolve", roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+
+		// PUT config - admin only (400 = past RBAC, bad body)
+		{name: "PUT_config_admin_allowed", method: http.MethodPut, path: configBase, roles: []string{models.RoleAdmin}, expectedStatus: http.StatusBadRequest},
+		{name: "PUT_config_user_denied", method: http.MethodPut, path: configBase, roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+		{name: "PUT_config_data_denied", method: http.MethodPut, path: configBase, roles: []string{models.RoleData}, expectedStatus: http.StatusForbidden},
 	}
 
 	for _, tc := range tests {

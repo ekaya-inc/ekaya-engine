@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
@@ -32,7 +33,8 @@ func (h *RetentionHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *au
 	mux.HandleFunc("GET "+base,
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetRetention)))
 	mux.HandleFunc("PUT "+base,
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.SetRetention)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.SetRetention))))
 }
 
 type retentionResponse struct {
