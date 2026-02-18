@@ -1033,15 +1033,16 @@ func TestMCPConfigService_Update_AllowOntologyMaintenance(t *testing.T) {
 	require.NotNil(t, userConfig, "user config should exist")
 	assert.True(t, userConfig.AllowOntologyMaintenance, "AllowOntologyMaintenance should be true")
 
-	// User tools should now include ontology maintenance tools
+	// User tools are restricted to Default + LimitedQuery (health, list_approved_queries, execute_approved_query)
+	// regardless of AllowOntologyMaintenance — ontology tools are for admin/data roles only
 	toolNames := make([]string, len(resp.UserTools))
 	for i, tool := range resp.UserTools {
 		toolNames[i] = tool.Name
 	}
 
-	// Should have Query tools + Ontology Maintenance tools for users
-	assert.Contains(t, toolNames, "update_table", "should include update_table with AllowOntologyMaintenance")
-	assert.Contains(t, toolNames, "update_column", "should include update_column with AllowOntologyMaintenance")
+	assert.Contains(t, toolNames, "health", "should include health in user tools")
+	assert.NotContains(t, toolNames, "update_table", "user role should NOT include update_table")
+	assert.NotContains(t, toolNames, "update_column", "user role should NOT include update_column")
 }
 
 // mockInstalledAppServiceForMCP is a mock implementation of InstalledAppService for testing.
@@ -1317,15 +1318,14 @@ func TestMCPConfigService_Get_UserToolsContainsQueryTools(t *testing.T) {
 		userToolNames[i] = tool.Name
 	}
 
-	// UserTools should include query tools
+	// UserTools are restricted to Default + LimitedQuery (health + approved query execution)
 	assert.Contains(t, userToolNames, "health", "UserTools should include health")
-	assert.Contains(t, userToolNames, "query", "UserTools should include query")
 	assert.Contains(t, userToolNames, "list_approved_queries", "UserTools should include list_approved_queries")
+	assert.Contains(t, userToolNames, "execute_approved_query", "UserTools should include execute_approved_query")
 
-	// With AllowOntologyMaintenance, should include ontology tools
-	assert.Contains(t, userToolNames, "update_table", "UserTools should include update_table with AllowOntologyMaintenance")
-
-	// UserTools should NOT include developer-specific tools
+	// UserTools should NOT include developer or ontology tools (those require admin/data role)
+	assert.NotContains(t, userToolNames, "query", "UserTools should NOT include query (developer only)")
+	assert.NotContains(t, userToolNames, "update_table", "UserTools should NOT include update_table (developer only)")
 	assert.NotContains(t, userToolNames, "echo", "UserTools should NOT include echo (developer only)")
 	assert.NotContains(t, userToolNames, "execute", "UserTools should NOT include execute (developer only)")
 }
@@ -1365,11 +1365,13 @@ func TestMCPConfigService_Get_UserToolsWithoutOntologyMaintenance(t *testing.T) 
 		userToolNames[i] = tool.Name
 	}
 
-	// UserTools should include query tools
-	assert.Contains(t, userToolNames, "query", "UserTools should include query")
+	// UserTools are restricted to Default + LimitedQuery regardless of config
+	assert.Contains(t, userToolNames, "health", "UserTools should include health")
+	assert.Contains(t, userToolNames, "list_approved_queries", "UserTools should include list_approved_queries")
 
-	// Without AllowOntologyMaintenance, should NOT include ontology maintenance tools
-	assert.NotContains(t, userToolNames, "update_table", "UserTools should NOT include update_table without AllowOntologyMaintenance")
+	// UserTools should NOT include developer tools (those require admin/data role)
+	assert.NotContains(t, userToolNames, "query", "UserTools should NOT include query (developer only)")
+	assert.NotContains(t, userToolNames, "update_table", "UserTools should NOT include update_table (developer only)")
 }
 
 func TestMCPConfigService_Get_DeveloperToolsContainsDevCore(t *testing.T) {

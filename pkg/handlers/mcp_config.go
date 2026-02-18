@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
@@ -38,10 +39,14 @@ func NewMCPConfigHandler(mcpConfigService services.MCPConfigService, logger *zap
 func (h *MCPConfigHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.Middleware, tenantMiddleware TenantMiddleware) {
 	base := "/api/projects/{pid}/mcp/config"
 
+	// GET - any authenticated user can view config
 	mux.HandleFunc("GET "+base,
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Get)))
+
+	// PATCH - admin only
 	mux.HandleFunc("PATCH "+base,
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Update)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.Update))))
 }
 
 // Get handles GET /api/projects/{pid}/mcp/config

@@ -47,20 +47,20 @@ func NewUsersHandler(userService services.UserService, logger *zap.Logger) *User
 
 // RegisterRoutes registers the users handler's routes on the given mux.
 func (h *UsersHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.Middleware, tenantMiddleware TenantMiddleware) {
-	// POST /api/projects/{pid}/users - add user (auth + tenant context)
+	// POST /api/projects/{pid}/users - add user (admin only)
 	mux.HandleFunc("POST /api/projects/{pid}/users",
 		authMiddleware.RequireAuthWithPathValidation("pid")(
-			tenantMiddleware(h.Add)))
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.Add))))
 
-	// DELETE /api/projects/{pid}/users - remove user (auth + tenant context)
+	// DELETE /api/projects/{pid}/users - remove user (admin only)
 	mux.HandleFunc("DELETE /api/projects/{pid}/users",
 		authMiddleware.RequireAuthWithPathValidation("pid")(
-			tenantMiddleware(h.Remove)))
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.Remove))))
 
-	// PUT /api/projects/{pid}/users - update user role (auth + tenant context)
+	// PUT /api/projects/{pid}/users - update user role (admin only)
 	mux.HandleFunc("PUT /api/projects/{pid}/users",
 		authMiddleware.RequireAuthWithPathValidation("pid")(
-			tenantMiddleware(h.Update)))
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.Update))))
 }
 
 // Add handles POST /api/projects/{pid}/users

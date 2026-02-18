@@ -95,17 +95,22 @@ func (h *GlossaryHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *aut
 	mux.HandleFunc("POST "+base+"/test-sql",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.TestSQL)))
 
-	// Write endpoints - require provenance for audit tracking
+	// Write endpoints - require provenance for audit tracking, admin+data only
 	mux.HandleFunc("POST "+base,
-		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Create)))
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.Create))))
 	mux.HandleFunc("PUT "+base+"/{tid}",
-		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Update)))
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.Update))))
 	mux.HandleFunc("DELETE "+base+"/{tid}",
-		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Delete)))
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.Delete))))
 	mux.HandleFunc("POST "+base+"/suggest",
-		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Suggest)))
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.Suggest))))
 	mux.HandleFunc("POST "+base+"/auto-generate",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.AutoGenerate)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.AutoGenerate))))
 }
 
 // List handles GET /api/projects/{pid}/glossary

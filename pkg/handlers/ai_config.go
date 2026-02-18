@@ -68,9 +68,11 @@ func (h *AIConfigHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *aut
 	mux.HandleFunc("GET /api/projects/{pid}/ai-config",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Get)))
 	mux.HandleFunc("PUT /api/projects/{pid}/ai-config",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Upsert)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.Upsert))))
 	mux.HandleFunc("DELETE /api/projects/{pid}/ai-config",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Delete)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.Delete))))
 	mux.HandleFunc("POST /api/projects/{pid}/ai-config/test",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.TestConnection)))
 }

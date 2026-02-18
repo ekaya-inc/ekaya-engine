@@ -167,13 +167,52 @@ func CheckToolAccess(ctx context.Context, deps ToolAccessDeps, toolName string) 
 }
 
 // computeToolsForRole determines the tool set based on JWT claims.
-// Uses ComputeEnabledToolsFromConfig to ensure consistency with NewToolFilter's listing behavior.
+// Agent auth gets agent tools, user role gets limited tools, admin/data get full developer tools.
 func computeToolsForRole(claims *auth.Claims, state map[string]*models.ToolGroupConfig) []services.ToolSpec {
-	// Check if caller is an agent (API key authentication)
-	isAgent := claims.Subject == "agent"
+	// Agent authentication (API key)
+	if claims.Subject == "agent" {
+		return services.ComputeEnabledToolsFromConfig(state, true)
+	}
 
-	// Use the same function as the tool filter to ensure listing and calling are consistent
-	return services.ComputeEnabledToolsFromConfig(state, isAgent)
+	// Determine the user's effective role
+	role := effectiveRole(claims)
+
+	// User role: limited access — health + approved query execution only
+	if role == models.RoleUser {
+		return services.ComputeUserTools(state)
+	}
+
+	// Admin and Data roles: full developer tool access based on config
+	return services.ComputeEnabledToolsFromConfig(state, false)
+}
+
+// effectiveRole returns the highest-privilege role from the user's JWT claims.
+// Privilege order: admin > data > user.
+// Falls back to "user" (least privilege) if no roles are present.
+// This ensures that if a JWT contains multiple roles (e.g., ["user", "admin"]),
+// the user gets the access level of their most privileged role — consistent
+// with how RequireRole checks any matching role in the HTTP middleware.
+func effectiveRole(claims *auth.Claims) string {
+	if len(claims.Roles) == 0 {
+		return models.RoleUser
+	}
+
+	// Privilege ranking: admin > data > user
+	rolePriority := map[string]int{
+		models.RoleAdmin: 2,
+		models.RoleData:  1,
+		models.RoleUser:  0,
+	}
+
+	best := models.RoleUser
+	bestPriority := 0
+	for _, role := range claims.Roles {
+		if p, ok := rolePriority[role]; ok && p > bestPriority {
+			best = role
+			bestPriority = p
+		}
+	}
+	return best
 }
 
 // isToolInList checks if a tool name is in the enabled tools list.

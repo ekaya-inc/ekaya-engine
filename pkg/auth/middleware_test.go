@@ -409,6 +409,181 @@ func TestMiddleware_RequireAuthWithPathValidationAndProvenance_InvalidUserID(t *
 	}
 }
 
+// =============================================================================
+// RequireRole tests
+// =============================================================================
+
+func TestRequireRole_AdminAllowed(t *testing.T) {
+	claims := &Claims{
+		ProjectID: "project-123",
+		Roles:     []string{"admin"},
+	}
+	claims.Subject = "user-123"
+
+	ctx := context.WithValue(context.Background(), ClaimsKey, claims)
+
+	var handlerCalled bool
+	handler := RequireRole("admin")(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if !handlerCalled {
+		t.Error("expected handler to be called")
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+}
+
+func TestRequireRole_UserDenied(t *testing.T) {
+	claims := &Claims{
+		ProjectID: "project-123",
+		Roles:     []string{"user"},
+	}
+	claims.Subject = "user-123"
+
+	ctx := context.WithValue(context.Background(), ClaimsKey, claims)
+
+	handler := RequireRole("admin")(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected status 403, got %d", rec.Code)
+	}
+
+	var response map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if response["error"] != "forbidden" {
+		t.Errorf("expected error 'forbidden', got %q", response["error"])
+	}
+
+	if response["message"] != "Insufficient permissions" {
+		t.Errorf("expected message 'Insufficient permissions', got %q", response["message"])
+	}
+}
+
+func TestRequireRole_DataAllowed(t *testing.T) {
+	claims := &Claims{
+		ProjectID: "project-123",
+		Roles:     []string{"data"},
+	}
+	claims.Subject = "user-456"
+
+	ctx := context.WithValue(context.Background(), ClaimsKey, claims)
+
+	var handlerCalled bool
+	handler := RequireRole("admin", "data")(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if !handlerCalled {
+		t.Error("expected handler to be called")
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+}
+
+func TestRequireRole_NoClaims(t *testing.T) {
+	// No claims in context at all
+	handler := RequireRole("admin")(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected status 401, got %d", rec.Code)
+	}
+
+	var response map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if response["error"] != "unauthorized" {
+		t.Errorf("expected error 'unauthorized', got %q", response["error"])
+	}
+}
+
+func TestRequireRole_EmptyRoles(t *testing.T) {
+	claims := &Claims{
+		ProjectID: "project-123",
+		Roles:     []string{},
+	}
+	claims.Subject = "user-123"
+
+	ctx := context.WithValue(context.Background(), ClaimsKey, claims)
+
+	handler := RequireRole("admin")(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected status 403, got %d", rec.Code)
+	}
+}
+
+func TestRequireRole_MultipleRolesFirstMatch(t *testing.T) {
+	claims := &Claims{
+		ProjectID: "project-123",
+		Roles:     []string{"user", "data"},
+	}
+	claims.Subject = "user-123"
+
+	ctx := context.WithValue(context.Background(), ClaimsKey, claims)
+
+	var handlerCalled bool
+	handler := RequireRole("admin", "data")(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if !handlerCalled {
+		t.Error("expected handler to be called — second role 'data' should match")
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+}
+
 func TestMiddleware_RequireAuthWithPathValidationAndProvenance_ProjectMismatch(t *testing.T) {
 	userID := uuid.New()
 	claims := &Claims{ProjectID: "project-123"}
