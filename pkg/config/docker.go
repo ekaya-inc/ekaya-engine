@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net/url"
 	"os"
 	"sync"
 )
@@ -35,4 +36,33 @@ func ResolveHostForDocker(host string) string {
 	}
 
 	return host
+}
+
+// ResolveURLForDocker resolves localhost in a full URL for Docker environments.
+// If running in Docker and the URL's host is "localhost" or "127.0.0.1",
+// it replaces the host with "host.docker.internal".
+// Returns the original URL unchanged if not in Docker, not a localhost URL, or if parsing fails.
+func ResolveURLForDocker(rawURL string) string {
+	if rawURL == "" || !IsRunningInDocker() {
+		return rawURL
+	}
+
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+
+	hostname := parsed.Hostname()
+	if hostname != "localhost" && hostname != "127.0.0.1" {
+		return rawURL
+	}
+
+	port := parsed.Port()
+	if port != "" {
+		parsed.Host = "host.docker.internal:" + port
+	} else {
+		parsed.Host = "host.docker.internal"
+	}
+
+	return parsed.String()
 }
