@@ -26,6 +26,44 @@ func NewMiddleware(authService AuthService, logger *zap.Logger) *Middleware {
 	}
 }
 
+// RequireRole returns middleware that checks if the authenticated user has one of the allowed roles.
+// Must be used AFTER RequireAuth or RequireAuthWithPathValidation (claims must be in context).
+// Returns 403 Forbidden if the user's role is not in the allowed set.
+func RequireRole(allowedRoles ...string) func(http.HandlerFunc) http.HandlerFunc {
+	allowed := make(map[string]bool, len(allowedRoles))
+	for _, r := range allowedRoles {
+		allowed[r] = true
+	}
+	return func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := GetClaims(r.Context())
+			if !ok || claims == nil {
+				writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+				return
+			}
+
+			for _, role := range claims.Roles {
+				if allowed[role] {
+					next(w, r)
+					return
+				}
+			}
+
+			writeJSONError(w, http.StatusForbidden, "forbidden", "Insufficient permissions")
+		}
+	}
+}
+
+// writeJSONError writes a JSON error response with the given status code.
+func writeJSONError(w http.ResponseWriter, status int, errCode, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error":   errCode,
+		"message": message,
+	})
+}
+
 // RequireAuth validates JWT and requires a valid project ID.
 // Sets claims and token in context for downstream handlers.
 // Use this for endpoints that need authentication but don't have a project ID in the URL.

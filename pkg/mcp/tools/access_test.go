@@ -10,22 +10,20 @@ import (
 )
 
 func TestComputeToolsForRole_Agent(t *testing.T) {
-	// computeToolsForRole uses ComputeEnabledToolsFromConfig - for agents,
-	// only agent_tools.Enabled controls access to Limited Query tools.
 	claims := &auth.Claims{
 		ProjectID: "test-project",
 	}
 	claims.Subject = "agent"
 
 	state := map[string]*models.ToolGroupConfig{
-		services.ToolGroupAgentTools: {Enabled: true}, // Agent tools enabled
+		services.ToolGroupAgentTools: {Enabled: true},
 		services.ToolGroupDeveloper:  {Enabled: true, AddQueryTools: true, AddOntologyMaintenance: true},
 	}
 
 	tools := computeToolsForRole(claims, state)
 	toolNames := toolSpecNamesToMap(tools)
 
-	// Agent should only get Limited Query tools (health, list_approved_queries, execute_approved_query)
+	// Agent should only get Limited Query tools
 	assert.True(t, toolNames["health"], "agent should have health")
 	assert.True(t, toolNames["list_approved_queries"], "agent should have list_approved_queries")
 	assert.True(t, toolNames["execute_approved_query"], "agent should have execute_approved_query")
@@ -38,8 +36,7 @@ func TestComputeToolsForRole_Agent(t *testing.T) {
 }
 
 func TestComputeToolsForRole_AdminRole(t *testing.T) {
-	// computeToolsForRole uses ComputeEnabledToolsFromConfig - roles don't matter,
-	// only config state determines available tools for non-agent users.
+	// Admin role gets full developer tools based on config
 	claims := &auth.Claims{
 		ProjectID: "test-project",
 		Roles:     []string{models.RoleAdmin},
@@ -53,7 +50,6 @@ func TestComputeToolsForRole_AdminRole(t *testing.T) {
 	tools := computeToolsForRole(claims, state)
 	toolNames := toolSpecNamesToMap(tools)
 
-	// Non-agent users get Default + DeveloperCore + sub-options from config
 	assert.True(t, toolNames["health"], "admin should have health")
 	assert.True(t, toolNames["echo"], "admin should have echo")
 	assert.True(t, toolNames["execute"], "admin should have execute")
@@ -63,8 +59,7 @@ func TestComputeToolsForRole_AdminRole(t *testing.T) {
 }
 
 func TestComputeToolsForRole_DataRole(t *testing.T) {
-	// computeToolsForRole uses ComputeEnabledToolsFromConfig - roles don't matter,
-	// only config state determines available tools for non-agent users.
+	// Data role gets full developer tools based on config (same as admin for MCP)
 	claims := &auth.Claims{
 		ProjectID: "test-project",
 		Roles:     []string{models.RoleData},
@@ -78,7 +73,6 @@ func TestComputeToolsForRole_DataRole(t *testing.T) {
 	tools := computeToolsForRole(claims, state)
 	toolNames := toolSpecNamesToMap(tools)
 
-	// Non-agent users get Default + DeveloperCore + sub-options from config
 	assert.True(t, toolNames["health"], "data role should have health")
 	assert.True(t, toolNames["echo"], "data role should have echo")
 	assert.True(t, toolNames["execute"], "data role should have execute")
@@ -88,70 +82,14 @@ func TestComputeToolsForRole_DataRole(t *testing.T) {
 	assert.False(t, toolNames["refresh_schema"], "data role should NOT have refresh_schema without option")
 }
 
-func TestComputeToolsForRole_DeveloperRole(t *testing.T) {
-	// computeToolsForRole uses ComputeEnabledToolsFromConfig - roles don't matter,
-	// only config state determines available tools for non-agent users.
-	claims := &auth.Claims{
-		ProjectID: "test-project",
-		Roles:     []string{"developer"}, // developer role string
-	}
-	claims.Subject = "user-789"
-
-	state := map[string]*models.ToolGroupConfig{
-		services.ToolGroupDeveloper: {AddQueryTools: true, AddOntologyMaintenance: true},
-	}
-
-	tools := computeToolsForRole(claims, state)
-	toolNames := toolSpecNamesToMap(tools)
-
-	// Non-agent users get Default + DeveloperCore + sub-options from config
-	assert.True(t, toolNames["health"], "developer role should have health")
-	assert.True(t, toolNames["echo"], "developer role should have echo")
-	assert.True(t, toolNames["execute"], "developer role should have execute")
-	assert.True(t, toolNames["query"], "developer role should have query")
-	assert.True(t, toolNames["refresh_schema"], "developer role should have refresh_schema")
-}
-
 func TestComputeToolsForRole_UserRole(t *testing.T) {
-	// computeToolsForRole now uses ComputeEnabledToolsFromConfig for consistency with
-	// NewToolFilter's listing behavior. This means it ignores the role and uses config state.
+	// User role gets restricted access: only Default + LimitedQuery
 	claims := &auth.Claims{
 		ProjectID: "test-project",
 		Roles:     []string{models.RoleUser},
 	}
 	claims.Subject = "user-regular"
 
-	// No AddQueryTools, so no query tools
-	state := map[string]*models.ToolGroupConfig{
-		services.ToolGroupUser: {AllowOntologyMaintenance: false},
-	}
-
-	tools := computeToolsForRole(claims, state)
-	toolNames := toolSpecNamesToMap(tools)
-
-	// For non-agent users, computeToolsForRole now delegates to ComputeEnabledToolsFromConfig
-	// which provides Default + DeveloperCore loadouts, plus sub-options from developer config.
-	assert.True(t, toolNames["health"], "user should have health")
-	assert.True(t, toolNames["echo"], "user should have echo (DeveloperCore)")
-	assert.True(t, toolNames["execute"], "user should have execute (DeveloperCore)")
-
-	// Query tools are NOT included without AddQueryTools
-	assert.False(t, toolNames["query"], "user should NOT have query without AddQueryTools")
-	assert.False(t, toolNames["sample"], "user should NOT have sample without AddQueryTools")
-	assert.False(t, toolNames["list_approved_queries"], "user should NOT have list_approved_queries without AddQueryTools")
-}
-
-func TestComputeToolsForRole_UserWithOntologyMaintenance(t *testing.T) {
-	// computeToolsForRole uses ComputeEnabledToolsFromConfig which checks developer config,
-	// not user config. The ToolGroupUser.AllowOntologyMaintenance is for ComputeUserTools
-	// which is no longer used by computeToolsForRole.
-	claims := &auth.Claims{
-		ProjectID: "test-project",
-		Roles:     []string{models.RoleUser},
-	}
-	claims.Subject = "user-regular"
-
-	// To get ontology maintenance for non-agent users, we need developer config
 	state := map[string]*models.ToolGroupConfig{
 		services.ToolGroupDeveloper: {AddQueryTools: true, AddOntologyMaintenance: true},
 	}
@@ -159,44 +97,77 @@ func TestComputeToolsForRole_UserWithOntologyMaintenance(t *testing.T) {
 	tools := computeToolsForRole(claims, state)
 	toolNames := toolSpecNamesToMap(tools)
 
-	// Non-agent users get Default + DeveloperCore + sub-options from developer config
+	// User gets health + limited query tools only
 	assert.True(t, toolNames["health"], "user should have health")
-	assert.True(t, toolNames["echo"], "user should have echo (DeveloperCore)")
-	assert.True(t, toolNames["execute"], "user should have execute (DeveloperCore)")
-	assert.True(t, toolNames["query"], "user should have query with AddQueryTools")
-	assert.True(t, toolNames["refresh_schema"], "user should have refresh_schema with AddOntologyMaintenance")
-	assert.True(t, toolNames["update_column"], "user should have update_column with AddOntologyMaintenance")
+	assert.True(t, toolNames["list_approved_queries"], "user should have list_approved_queries")
+	assert.True(t, toolNames["execute_approved_query"], "user should have execute_approved_query")
+
+	// User should NOT get developer tools regardless of config
+	assert.False(t, toolNames["echo"], "user should NOT have echo")
+	assert.False(t, toolNames["execute"], "user should NOT have execute")
+	assert.False(t, toolNames["query"], "user should NOT have query")
+	assert.False(t, toolNames["sample"], "user should NOT have sample")
+	assert.False(t, toolNames["get_schema"], "user should NOT have get_schema")
+	assert.False(t, toolNames["refresh_schema"], "user should NOT have refresh_schema")
+	assert.False(t, toolNames["update_column"], "user should NOT have update_column")
+}
+
+func TestComputeToolsForRole_UserRole_IgnoresConfig(t *testing.T) {
+	// User role is restricted regardless of developer config settings
+	claims := &auth.Claims{
+		ProjectID: "test-project",
+		Roles:     []string{models.RoleUser},
+	}
+	claims.Subject = "user-regular"
+
+	state := map[string]*models.ToolGroupConfig{
+		services.ToolGroupDeveloper: {AddQueryTools: true, AddOntologyMaintenance: true},
+		services.ToolGroupUser:      {AllowOntologyMaintenance: true},
+	}
+
+	tools := computeToolsForRole(claims, state)
+	toolNames := toolSpecNamesToMap(tools)
+
+	// Still only gets limited tools
+	assert.True(t, toolNames["health"], "user should have health")
+	assert.True(t, toolNames["list_approved_queries"], "user should have list_approved_queries")
+	assert.True(t, toolNames["execute_approved_query"], "user should have execute_approved_query")
+	assert.False(t, toolNames["echo"], "user should NOT have echo")
+	assert.False(t, toolNames["query"], "user should NOT have query")
 }
 
 func TestComputeToolsForRole_NoRoles(t *testing.T) {
-	// computeToolsForRole uses ComputeEnabledToolsFromConfig which provides
-	// Default + DeveloperCore for all non-agent users regardless of roles.
+	// No roles defaults to user (least privilege)
 	claims := &auth.Claims{
 		ProjectID: "test-project",
-		Roles:     []string{}, // No roles
+		Roles:     []string{},
 	}
 	claims.Subject = "user-no-roles"
 
-	state := map[string]*models.ToolGroupConfig{}
+	state := map[string]*models.ToolGroupConfig{
+		services.ToolGroupDeveloper: {AddQueryTools: true},
+	}
 
 	tools := computeToolsForRole(claims, state)
 	toolNames := toolSpecNamesToMap(tools)
 
-	// Non-agent users get Default + DeveloperCore regardless of roles
+	// Defaults to user-level tools (least privilege)
 	assert.True(t, toolNames["health"], "should have health")
-	assert.True(t, toolNames["echo"], "should have echo (DeveloperCore)")
-	assert.True(t, toolNames["execute"], "should have execute (DeveloperCore)")
+	assert.True(t, toolNames["list_approved_queries"], "should have list_approved_queries")
+	assert.True(t, toolNames["execute_approved_query"], "should have execute_approved_query")
 
-	// No query tools without AddQueryTools
-	assert.False(t, toolNames["query"], "should NOT have query without AddQueryTools")
+	// Should NOT get developer tools
+	assert.False(t, toolNames["echo"], "should NOT have echo")
+	assert.False(t, toolNames["execute"], "should NOT have execute")
+	assert.False(t, toolNames["query"], "should NOT have query")
 }
 
-func TestComputeToolsForRole_MultipleRolesIncludingAdmin(t *testing.T) {
-	// computeToolsForRole uses ComputeEnabledToolsFromConfig which no longer
-	// checks roles - all non-agent users get the same tool set based on config.
+func TestComputeToolsForRole_MultipleRolesUserAndAdmin(t *testing.T) {
+	// effectiveRole uses highest privilege — admin > data > user
+	// Even though "user" is first, "admin" is highest privilege
 	claims := &auth.Claims{
 		ProjectID: "test-project",
-		Roles:     []string{models.RoleUser, models.RoleAdmin}, // Both user and admin
+		Roles:     []string{models.RoleUser, models.RoleAdmin},
 	}
 	claims.Subject = "user-multi-role"
 
@@ -207,10 +178,59 @@ func TestComputeToolsForRole_MultipleRolesIncludingAdmin(t *testing.T) {
 	tools := computeToolsForRole(claims, state)
 	toolNames := toolSpecNamesToMap(tools)
 
-	// All non-agent users get DeveloperCore (echo, execute)
-	assert.True(t, toolNames["echo"], "should have echo (DeveloperCore)")
-	assert.True(t, toolNames["execute"], "should have execute (DeveloperCore)")
-	assert.True(t, toolNames["query"], "should have query with AddQueryTools")
+	// Highest role is "admin", so full developer access
+	assert.True(t, toolNames["health"], "should have health")
+	assert.True(t, toolNames["echo"], "should have echo (admin is highest)")
+	assert.True(t, toolNames["execute"], "should have execute (admin is highest)")
+	assert.True(t, toolNames["query"], "should have query (admin is highest)")
+}
+
+func TestComputeToolsForRole_MultipleRolesDataAndUser(t *testing.T) {
+	// effectiveRole uses highest privilege — data > user
+	claims := &auth.Claims{
+		ProjectID: "test-project",
+		Roles:     []string{models.RoleUser, models.RoleData},
+	}
+	claims.Subject = "user-multi-role"
+
+	state := map[string]*models.ToolGroupConfig{
+		services.ToolGroupDeveloper: {AddQueryTools: true},
+	}
+
+	tools := computeToolsForRole(claims, state)
+	toolNames := toolSpecNamesToMap(tools)
+
+	// Highest role is "data", so full developer access
+	assert.True(t, toolNames["health"], "should have health")
+	assert.True(t, toolNames["echo"], "should have echo (data is highest)")
+	assert.True(t, toolNames["execute"], "should have execute (data is highest)")
+	assert.True(t, toolNames["query"], "should have query (data is highest)")
+}
+
+func TestEffectiveRole(t *testing.T) {
+	tests := []struct {
+		name     string
+		roles    []string
+		expected string
+	}{
+		{"admin role", []string{models.RoleAdmin}, models.RoleAdmin},
+		{"data role", []string{models.RoleData}, models.RoleData},
+		{"user role", []string{models.RoleUser}, models.RoleUser},
+		{"empty roles defaults to user", []string{}, models.RoleUser},
+		{"nil roles defaults to user", nil, models.RoleUser},
+		{"highest privilege wins: data+admin", []string{models.RoleData, models.RoleAdmin}, models.RoleAdmin},
+		{"highest privilege wins: user+admin", []string{models.RoleUser, models.RoleAdmin}, models.RoleAdmin},
+		{"highest privilege wins: user+data", []string{models.RoleUser, models.RoleData}, models.RoleData},
+		{"unknown role ignored, falls back to user", []string{"viewer"}, models.RoleUser},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			claims := &auth.Claims{Roles: tt.roles}
+			result := effectiveRole(claims)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }
 
 func TestIsToolInList(t *testing.T) {

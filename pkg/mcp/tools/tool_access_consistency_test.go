@@ -260,8 +260,8 @@ func TestNeitherEnabled_QueryToolsNotListed(t *testing.T) {
 	filter := NewToolFilter(filterDeps)
 	allTools := createTestTools()
 
-	// Regular user auth
-	claims := &auth.Claims{ProjectID: projectID.String()}
+	// Admin auth (use admin role to test config-based filtering, not role-based filtering)
+	claims := &auth.Claims{ProjectID: projectID.String(), Roles: []string{models.RoleAdmin}}
 	claims.Subject = "user-123"
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 
@@ -278,7 +278,7 @@ func TestNeitherEnabled_QueryToolsNotListed(t *testing.T) {
 		t.Error("LISTING: query should NOT be visible without AddQueryTools")
 	}
 
-	// Developer Core tools should still be present (for user auth)
+	// Developer Core tools should still be present (for admin auth)
 	if !containsTool(filteredTools, "health") {
 		t.Error("LISTING: health should be visible")
 	}
@@ -615,8 +615,8 @@ func TestDataLiaison_Installed_ExecutionAllowed(t *testing.T) {
 		QueryService:   &mockQueryService{},
 	}
 
-	// User auth context
-	claims := &auth.Claims{ProjectID: projectID.String()}
+	// Data role auth context (data liaison tools require at least data role with RBAC)
+	claims := &auth.Claims{ProjectID: projectID.String(), Roles: []string{models.RoleData}}
 	claims.Subject = "user-123"
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 

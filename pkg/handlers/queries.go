@@ -196,47 +196,60 @@ func NewQueriesHandler(queryService services.QueryService, logger *zap.Logger) *
 
 // RegisterRoutes registers the queries handler's routes on the given mux.
 func (h *QueriesHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.Middleware, tenantMiddleware TenantMiddleware) {
-	// All query routes are scoped to project and datasource
 	base := "/api/projects/{pid}/datasources/{dsid}/queries"
 
-	// CRUD endpoints
+	// Read endpoints - all authenticated users
 	mux.HandleFunc("GET "+base,
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.List)))
-	mux.HandleFunc("POST "+base,
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Create)))
 	mux.HandleFunc("GET "+base+"/{qid}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Get)))
-	mux.HandleFunc("PUT "+base+"/{qid}",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Update)))
-	mux.HandleFunc("DELETE "+base+"/{qid}",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Delete)))
-
-	// Execution endpoints
-	mux.HandleFunc("POST "+base+"/{qid}/execute",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Execute)))
-	mux.HandleFunc("POST "+base+"/test",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Test)))
-	mux.HandleFunc("POST "+base+"/validate",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Validate)))
-	mux.HandleFunc("POST "+base+"/validate-parameters",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.ValidateParameters)))
-
-	// Filtering endpoints
 	mux.HandleFunc("GET "+base+"/enabled",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.ListEnabled)))
 
-	// Project-level query endpoints (not scoped to datasource)
+	// Create/Update/Delete - admin and data only
+	mux.HandleFunc("POST "+base,
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.Create))))
+	mux.HandleFunc("PUT "+base+"/{qid}",
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.Update))))
+	mux.HandleFunc("DELETE "+base+"/{qid}",
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.Delete))))
+
+	// Execute - all authenticated users (this is the point of approved queries)
+	mux.HandleFunc("POST "+base+"/{qid}/execute",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Execute)))
+
+	// Test/Validate - admin and data only
+	mux.HandleFunc("POST "+base+"/test",
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.Test))))
+	mux.HandleFunc("POST "+base+"/validate",
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.Validate))))
+	mux.HandleFunc("POST "+base+"/validate-parameters",
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.ValidateParameters))))
+
+	// Project-level query endpoints
 	projectBase := "/api/projects/{pid}/queries"
 
-	// Admin review endpoints for pending query suggestions
+	// Pending list - admin and data can view
 	mux.HandleFunc("GET "+projectBase+"/pending",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.ListPending)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.ListPending))))
+
+	// Approve/Reject - admin only
 	mux.HandleFunc("POST "+projectBase+"/{qid}/approve",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Approve)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.Approve))))
 	mux.HandleFunc("POST "+projectBase+"/{qid}/reject",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Reject)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.Reject))))
 	mux.HandleFunc("POST "+projectBase+"/{qid}/move-to-pending",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.MoveToPending)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.MoveToPending))))
 }
 
 // List handles GET /api/projects/{pid}/datasources/{dsid}/queries

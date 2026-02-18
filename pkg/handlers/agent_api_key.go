@@ -6,6 +6,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
@@ -38,10 +39,14 @@ func NewAgentAPIKeyHandler(agentKeyService services.AgentAPIKeyService, logger *
 func (h *AgentAPIKeyHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.Middleware, tenantMiddleware TenantMiddleware) {
 	keyBase := "/api/projects/{pid}/mcp/agent-key"
 
+	// GET - admin only (viewing API keys is a sensitive operation)
 	mux.HandleFunc("GET "+keyBase,
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Get)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.Get))))
+	// POST regenerate - admin only
 	mux.HandleFunc("POST "+keyBase+"/regenerate",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Regenerate)))
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin)(tenantMiddleware(h.Regenerate))))
 }
 
 // Get handles GET /api/projects/{pid}/mcp/agent-key
