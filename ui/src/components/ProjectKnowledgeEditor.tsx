@@ -39,6 +39,7 @@ interface ProjectKnowledgeEditorProps {
   onClose: () => void;
   onSave: () => void;
   onProcessing?: () => void; // Called when async processing starts (for toast)
+  onError?: (message: string) => void; // Called when async processing fails (for toast)
 }
 
 export function ProjectKnowledgeEditor({
@@ -48,6 +49,7 @@ export function ProjectKnowledgeEditor({
   onClose,
   onSave,
   onProcessing,
+  onError,
 }: ProjectKnowledgeEditorProps) {
   const isEditing = !!fact;
 
@@ -113,15 +115,16 @@ export function ProjectKnowledgeEditor({
       const response = await engineApi.parseProjectKnowledge(projectId, text);
 
       if (!response.success) {
-        // Re-open dialog with error
-        setSaveError(response.error ?? 'Failed to parse fact');
+        const errorMsg = response.error ?? 'Failed to parse fact';
+        onError?.(errorMsg);
         return;
       }
 
       // Success - notify parent to refresh list
       onSave();
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Failed to parse fact');
+      const errorMsg = err instanceof Error ? err.message : 'Failed to parse fact';
+      onError?.(errorMsg);
     } finally {
       setIsSaving(false);
     }

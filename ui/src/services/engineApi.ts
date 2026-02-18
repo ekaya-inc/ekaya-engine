@@ -100,7 +100,10 @@ class EngineApiService {
 
     try {
       const response = await fetchWithAuth(url, config);
-      const data = (await response.json()) as ApiResponse<T>;
+
+      // Handle empty responses (e.g., 204 No Content from DELETE)
+      const text = await response.text();
+      const data = text ? (JSON.parse(text) as ApiResponse<T>) : ({} as ApiResponse<T>);
 
       if (!response.ok) {
         throw new Error(

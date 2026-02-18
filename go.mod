@@ -1,6 +1,6 @@
 module github.com/ekaya-inc/ekaya-engine
 
-go 1.25
+go 1.24.6
 
 require (
 	github.com/MicahParks/keyfunc/v3 v3.7.0
