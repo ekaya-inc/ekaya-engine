@@ -283,6 +283,85 @@ func TestToolAccessError(t *testing.T) {
 	})
 }
 
+// =============================================================================
+// Security Boundary: User Role Allow-List
+// =============================================================================
+
+// TestSecurityBoundary_UserToolsAllowList is a security gate that asserts the
+// exact set of tools available to role:user. If this test fails, a tool was
+// added to (or removed from) the user's toolset — review the change carefully
+// before updating the allow-list.
+//
+// This test exercises computeToolsForRole with every config permutation to
+// ensure role:user ALWAYS receives the same fixed toolset regardless of what
+// flags are enabled in the UI.
+func TestSecurityBoundary_UserToolsAllowList(t *testing.T) {
+	// The exhaustive allow-list. Update ONLY after security review.
+	allowList := map[string]bool{
+		"health":                 true,
+		"list_approved_queries":  true,
+		"execute_approved_query": true,
+	}
+
+	// Config permutations: every combination of flags that could affect tools.
+	// Role:user must get the same toolset in ALL cases.
+	configs := []struct {
+		name  string
+		state map[string]*models.ToolGroupConfig
+	}{
+		{"nil state", nil},
+		{"empty state", map[string]*models.ToolGroupConfig{}},
+		{"all developer flags on", map[string]*models.ToolGroupConfig{
+			services.ToolGroupDeveloper: {AddQueryTools: true, AddOntologyMaintenance: true},
+		}},
+		{"user ontology maintenance on", map[string]*models.ToolGroupConfig{
+			services.ToolGroupUser: {AllowOntologyMaintenance: true},
+		}},
+		{"agent tools on", map[string]*models.ToolGroupConfig{
+			services.ToolGroupAgentTools: {Enabled: true},
+		}},
+		{"custom tools on", map[string]*models.ToolGroupConfig{
+			services.ToolGroupCustom: {Enabled: true, CustomTools: []string{"query", "execute", "echo"}},
+		}},
+		{"everything on", map[string]*models.ToolGroupConfig{
+			services.ToolGroupDeveloper:  {AddQueryTools: true, AddOntologyMaintenance: true},
+			services.ToolGroupUser:       {AllowOntologyMaintenance: true},
+			services.ToolGroupAgentTools: {Enabled: true},
+			services.ToolGroupCustom:     {Enabled: true, CustomTools: []string{"query", "execute"}},
+		}},
+	}
+
+	// Role variants that should all resolve to user-level access
+	roleVariants := []struct {
+		name  string
+		roles []string
+	}{
+		{"explicit user role", []string{models.RoleUser}},
+		{"empty roles", []string{}},
+		{"nil roles", nil},
+		{"unknown role", []string{"viewer"}},
+	}
+
+	for _, cfg := range configs {
+		for _, rv := range roleVariants {
+			name := cfg.name + "/" + rv.name
+			t.Run(name, func(t *testing.T) {
+				claims := &auth.Claims{
+					ProjectID: "test-project",
+					Roles:     rv.roles,
+				}
+				claims.Subject = "user-boundary-test"
+
+				tools := computeToolsForRole(claims, cfg.state)
+				actual := toolSpecNamesToMap(tools)
+
+				assert.Equal(t, allowList, actual,
+					"SECURITY: role:user tools changed! If intentional, update the allow-list after security review.")
+			})
+		}
+	}
+}
+
 // toolSpecNamesToMap converts a slice of ToolSpec to a map for easy lookup.
 func toolSpecNamesToMap(tools []services.ToolSpec) map[string]bool {
 	result := make(map[string]bool)
