@@ -1,0 +1,107 @@
+name: Release Binaries
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v1.0.0)'
+        required: true
+
+env:
+  REGISTRY: ghcr.io
+  BUILD_TAGS: all_adapters
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Get version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            VERSION="${{ github.event.inputs.tag }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          VERSION_NO_V="${VERSION#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version_no_v=$VERSION_NO_V" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Build UI
+        run: |
+          cd ui && npm ci && npm run build
+
+      - name: Build release binaries
+        run: |
+          mkdir -p dist
+          PLATFORMS="darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64"
+
+          for platform in $PLATFORMS; do
+            GOOS="${platform%/*}"
+            GOARCH="${platform#*/}"
+            OUTPUT_NAME="ekaya-engine"
+            ARCHIVE_NAME="ekaya-engine_${{ steps.version.outputs.version_no_v }}_${GOOS}_${GOARCH}"
+
+            if [ "$GOOS" = "windows" ]; then
+              OUTPUT_NAME="ekaya-engine.exe"
+            fi
+
+            echo "Building ${GOOS}/${GOARCH}..."
+            CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build \
+              -tags="${BUILD_TAGS}" \
+              -trimpath \
+              -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }}" \
+              -o "dist/${ARCHIVE_NAME}/${OUTPUT_NAME}" .
+
+            cp config.yaml.example "dist/${ARCHIVE_NAME}/config.yaml.example"
+            cp LICENSE "dist/${ARCHIVE_NAME}/" 2>/dev/null || true
+
+            if [ "$GOOS" = "windows" ]; then
+              (cd dist && zip -q "${ARCHIVE_NAME}.zip" -r "${ARCHIVE_NAME}/")
+            else
+              tar -czf "dist/${ARCHIVE_NAME}.tar.gz" -C dist "${ARCHIVE_NAME}"
+            fi
+
+            rm -rf "dist/${ARCHIVE_NAME}"
+          done
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum *.tar.gz *.zip 2>/dev/null > checksums.txt
+          cat checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

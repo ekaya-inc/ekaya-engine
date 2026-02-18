@@ -198,9 +198,108 @@ func TestLoad_MissingConfigFile(t *testing.T) {
 	_ = os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(originalDir) })
 
+	// Override HOME so the fallback doesn't find a real ~/.ekaya/config.yaml
+	t.Setenv("HOME", tmpDir)
+
 	_, err := Load("test-version")
 	if err == nil {
 		t.Error("expected error when config.yaml is missing")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' in error, got: %v", err)
+	}
+}
+
+func TestLoad_FallbackToHomeDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create ~/.ekaya/config.yaml in a fake home directory
+	ekayaDir := filepath.Join(tmpDir, ".ekaya")
+	if err := os.MkdirAll(ekayaDir, 0755); err != nil {
+		t.Fatalf("failed to create .ekaya dir: %v", err)
+	}
+	configContent := `
+port: "9999"
+env: "test"
+engine_database:
+  pg_host: "home-host"
+`
+	if err := os.WriteFile(filepath.Join(ekayaDir, "config.yaml"), []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	// CWD has no config.yaml
+	cwdDir := t.TempDir()
+	originalDir, _ := os.Getwd()
+	_ = os.Chdir(cwdDir)
+	t.Cleanup(func() { os.Chdir(originalDir) })
+
+	// Point HOME to our fake home
+	t.Setenv("HOME", tmpDir)
+	os.Unsetenv("PORT")
+	os.Unsetenv("PGHOST")
+
+	cfg, err := Load("test-version")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	if cfg.Port != "9999" {
+		t.Errorf("expected Port=9999 (from ~/.ekaya/config.yaml), got %s", cfg.Port)
+	}
+	if cfg.EngineDatabase.Host != "home-host" {
+		t.Errorf("expected Host=home-host (from ~/.ekaya/config.yaml), got %s", cfg.EngineDatabase.Host)
+	}
+}
+
+func TestLoad_CWDTakesPrecedenceOverHomeDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create ~/.ekaya/config.yaml in a fake home directory
+	ekayaDir := filepath.Join(tmpDir, ".ekaya")
+	if err := os.MkdirAll(ekayaDir, 0755); err != nil {
+		t.Fatalf("failed to create .ekaya dir: %v", err)
+	}
+	homeConfig := `
+port: "1111"
+env: "test"
+engine_database:
+  pg_host: "home-host"
+`
+	if err := os.WriteFile(filepath.Join(ekayaDir, "config.yaml"), []byte(homeConfig), 0644); err != nil {
+		t.Fatalf("failed to write home config: %v", err)
+	}
+
+	// CWD config.yaml takes precedence
+	cwdConfig := `
+port: "2222"
+env: "test"
+engine_database:
+  pg_host: "cwd-host"
+`
+	cwdDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cwdDir, "config.yaml"), []byte(cwdConfig), 0644); err != nil {
+		t.Fatalf("failed to write cwd config: %v", err)
+	}
+
+	originalDir, _ := os.Getwd()
+	_ = os.Chdir(cwdDir)
+	t.Cleanup(func() { os.Chdir(originalDir) })
+
+	t.Setenv("HOME", tmpDir)
+	os.Unsetenv("PORT")
+	os.Unsetenv("PGHOST")
+
+	cfg, err := Load("test-version")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	if cfg.Port != "2222" {
+		t.Errorf("expected Port=2222 (from CWD config.yaml), got %s", cfg.Port)
+	}
+	if cfg.EngineDatabase.Host != "cwd-host" {
+		t.Errorf("expected Host=cwd-host (from CWD config.yaml), got %s", cfg.EngineDatabase.Host)
 	}
 }
 

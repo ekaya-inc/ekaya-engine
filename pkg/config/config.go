@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/ilyakaznacheev/cleanenv"
@@ -158,8 +159,30 @@ func (c *EmbeddedAIConfig) IsAvailable() bool {
 	return c.LLMBaseURL != "" && c.LLMModel != ""
 }
 
+// resolveConfigPath finds config.yaml by checking:
+// 1. Current working directory (./config.yaml)
+// 2. User home directory (~/.ekaya/config.yaml)
+func resolveConfigPath() (string, error) {
+	// Check CWD first
+	if _, err := os.Stat("config.yaml"); err == nil {
+		return "config.yaml", nil
+	}
+
+	// Fall back to ~/.ekaya/config.yaml
+	home, err := os.UserHomeDir()
+	if err == nil {
+		homePath := filepath.Join(home, ".ekaya", "config.yaml")
+		if _, err := os.Stat(homePath); err == nil {
+			return homePath, nil
+		}
+	}
+
+	return "", fmt.Errorf("config.yaml not found in current directory or ~/.ekaya/")
+}
+
 // Load reads configuration from config.yaml with environment variable overrides.
 // The version parameter is injected at build time and set on the returned Config.
+// It looks for config.yaml in the current directory first, then ~/.ekaya/config.yaml.
 // Environment variables override YAML values. Secrets (PGPASSWORD,
 // PROJECT_CREDENTIALS_KEY) must come from environment variables (yaml:"-" fields).
 func Load(version string) (*Config, error) {
@@ -167,9 +190,15 @@ func Load(version string) (*Config, error) {
 		Version: version,
 	}
 
+	// Resolve config file path (CWD first, then ~/.ekaya/)
+	configPath, err := resolveConfigPath()
+	if err != nil {
+		return nil, err
+	}
+
 	// Load config from YAML file with environment variable overrides
-	if err := cleanenv.ReadConfig("config.yaml", cfg); err != nil {
-		return nil, fmt.Errorf("failed to read config.yaml: %w", err)
+	if err := cleanenv.ReadConfig(configPath, cfg); err != nil {
+		return nil, fmt.Errorf("failed to read %s: %w", configPath, err)
 	}
 
 	// Parse complex fields

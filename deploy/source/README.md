@@ -1,6 +1,18 @@
 # Build from Source
 
-The UI is embedded in the binary. Build the frontend first, then the Go binary:
+## Using make
+
+Build release binaries for all platforms:
+
+```bash
+make build-release
+```
+
+This builds the frontend UI, cross-compiles for macOS (Intel + Apple Silicon), Linux (x86_64 + ARM64), and Windows (x86_64), and outputs archives with checksums to `dist/`.
+
+## Manual build
+
+Build the frontend first, then the Go binary:
 
 ```bash
 cd ui && npm install && npm run build && cd ..
@@ -10,28 +22,15 @@ go build -tags=all_adapters -ldflags="-X main.Version=$(git describe --tags --al
 Cross-compile for other platforms by setting `GOOS` and `GOARCH`:
 
 ```bash
-# Linux (amd64)
-GOOS=linux GOARCH=amd64 go build -tags=all_adapters -ldflags="-w -s -X main.Version=$(git describe --tags --always --dirty)" -o ekaya-engine .
-```
-
-```bash
-# Linux (arm64)
-GOOS=linux GOARCH=arm64 go build -tags=all_adapters -ldflags="-w -s -X main.Version=$(git describe --tags --always --dirty)" -o ekaya-engine .
-```
-
-```bash
-# macOS (Apple Silicon)
-GOOS=darwin GOARCH=arm64 go build -tags=all_adapters -ldflags="-w -s -X main.Version=$(git describe --tags --always --dirty)" -o ekaya-engine .
-```
-
-```bash
-# Windows
-GOOS=windows GOARCH=amd64 go build -tags=all_adapters -ldflags="-w -s -X main.Version=$(git describe --tags --always --dirty)" -o ekaya-engine.exe .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+  -tags=all_adapters -trimpath \
+  -ldflags="-w -s -X main.Version=$(git describe --tags --always --dirty)" \
+  -o ekaya-engine .
 ```
 
 ## Configure
 
-Ekaya Engine reads `config.yaml` from the **current working directory**. Copy the example and edit it:
+Ekaya Engine looks for `config.yaml` in the current working directory first, then falls back to `~/.ekaya/config.yaml`. Copy the example and edit it:
 
 ```bash
 cp config.yaml.example config.yaml
@@ -61,9 +60,9 @@ All settings can be overridden with environment variables.
 
 Ekaya Engine uses OAuth 2.1 with PKCE for authentication. PKCE requires the browser's Web Crypto API, which **only works in secure contexts** (HTTPS or `localhost`). This means:
 
-- `http://localhost:3443` — works (browsers treat localhost as secure)
-- `https://your.domain.com` — works with a valid TLS certificate
-- `http://your.domain.com` — **will not work** (browser blocks Web Crypto API)
+- `http://localhost:3443` -- works (browsers treat localhost as secure)
+- `https://your.domain.com` -- works with a valid TLS certificate
+- `http://your.domain.com` -- **will not work** (browser blocks Web Crypto API)
 
 For non-localhost deployments, provide TLS certificates in `config.yaml`:
 
@@ -76,8 +75,6 @@ base_url: "https://data.yourcompany.com:3443"
 Self-signed certificates work if users' browsers trust your root CA. If TLS is terminated by a reverse proxy or load balancer, leave `tls_cert_path`/`tls_key_path` unset and set `base_url` to your public HTTPS URL.
 
 ## Run
-
-Run the binary from the directory containing `config.yaml`:
 
 ```bash
 ./ekaya-engine

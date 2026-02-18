@@ -2,7 +2,7 @@
 
 All-in-one Docker image for running Ekaya Engine and PostgreSQL locally.
 
-To set your own base URL with HTTPS (required for OAuth) with multiple deployment options, see [READMD.md](../docker/README.md).
+To set your own base URL with HTTPS (required for OAuth) with multiple deployment options, see [deploy/docker](../docker/README.md).
 
 ## Quick Start
 
