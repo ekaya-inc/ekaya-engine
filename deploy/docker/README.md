@@ -1,6 +1,8 @@
 # Docker Deployment
 
-Build a self-contained Docker image with your config and TLS certs baked in for production deployment.
+Build a Docker image with your config and TLS certs baked in for production deployment.
+
+The image is based on the quickstart image (`ghcr.io/ekaya-inc/ekaya-engine-quickstart`), which bundles PostgreSQL 17 and Ekaya Engine. The bundled PostgreSQL is used by default, but you can point `config.yaml` at an external PostgreSQL instance instead.
 
 ## TLS and HTTPS
 
@@ -33,7 +35,7 @@ project_credentials_key: "..."   # encrypts datasource credentials; CANNOT be ch
 oauth_session_secret: "..."      # signs OAuth session cookies; all servers in a cluster must share this value
 ```
 
-**TLS** -- **REQUIRED**
+**TLS** -- **REQUIRED** for non-localhost deployments.
 
 This is the URL that everyone will use to access this server:
 
@@ -51,8 +53,8 @@ tls_key_path: "/app/certs/key.pem"      # path inside the container
 ### 2. Place TLS certificates
 
 ```bash
-cp ./certs/cert.pem certs/cert.pem
-cp ./certs/key.pem certs/key.pem
+cp /path/to/cert.pem certs/cert.pem
+cp /path/to/key.pem certs/key.pem
 ```
 
 ### 3. Build the image
@@ -61,17 +63,38 @@ cp ./certs/key.pem certs/key.pem
 docker build -t ekaya-engine-deploy .
 ```
 
-The Dockerfile layers your `config.yaml` and `certs/` onto `ghcr.io/ekaya-inc/ekaya-engine:latest`. The resulting image is portable -- push it to a private registry and deploy anywhere.
+The Dockerfile layers your `config.yaml` and `certs/` onto the quickstart image. The resulting image is portable -- push it to a private registry and deploy anywhere.
 
 ### 4. Run it
 
-Choose one of three PostgreSQL variants below. All use the same image built in step 3. Migrations run automatically on startup.
+```bash
+docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data ekaya-engine-deploy
+```
 
-## PostgreSQL Variants
+Migrations run automatically on startup. Data persists in the `ekaya-data` volume.
 
-### A. Docker Compose (recommended for most deployments)
+## Using an External PostgreSQL
 
-Runs Ekaya Engine + PostgreSQL 17 in separate containers. Data persists in a named Docker volume.
+To use your own PostgreSQL instance instead of the bundled one, set the `engine_database` fields in `config.yaml`:
+
+```yaml
+engine_database:
+  pg_host: "your-postgres-host"
+  pg_port: 5432
+  pg_user: "ekaya"
+  pg_password: "your-password"
+  pg_database: "ekaya_engine"
+  pg_sslmode: "require"
+```
+
+Requirements:
+
+- PostgreSQL >= 14
+- A database and role for Ekaya Engine (see [../../README.md](../../README.md) for details)
+
+## Docker Compose
+
+For deployments with a separate PostgreSQL container (instead of the bundled one), use docker-compose:
 
 Set `pg_user: "ekaya"` and `pg_database: "ekaya_engine"` in config.yaml to match the compose defaults, then:
 
@@ -80,26 +103,3 @@ PGPASSWORD=your-password docker-compose up -d
 ```
 
 The `PGPASSWORD` env var sets the PostgreSQL container's password and overrides `PGPASSWORD` in the Ekaya Engine container. `PGHOST` is overridden to `postgres` (the compose service name).
-
-### B. Standalone PostgreSQL
-
-Point config.yaml at your own PostgreSQL server (managed, on-prem, etc.) by setting `pg_host`, `pg_port`, `pg_user`, `pg_password`, `pg_database`, and `pg_sslmode` under `engine_database`.
-
-You only need to run the Ekaya Engine.
-
-```bash
-docker run -p 3443:3443 ekaya-engine-deploy
-```
-
-Requirements:
-
-- PostgreSQL >= 14
-- A database and role for Ekaya Engine see [../../README.md](../../README.md) for details.
-
-Note: migrations run automatically when the server runs.
-
-### C. Simple Single-Instance
-
-The `ekaya-engine-deploy` defaults to the Postgres instance running inside its container.
-
-This configuration does not require a separate PostgreSQL instance running but is not recommended for production use and does not support multiple Ekaya Engine instances for capacity or failover.

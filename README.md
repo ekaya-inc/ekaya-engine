@@ -6,128 +6,61 @@ Ekaya Engine connects AI to databases safely and securely. It is an MCP Server t
 
 Built with Go, React, and PostgreSQL with multi-tenant isolation via Row-Level Security.
 
-## Quickstart
+## Quickstart (Docker)
 
-The quickstart image bundles PostgreSQL and Ekaya Engine into a single container that runs on localhost port 3443:
+The quickstart image bundles PostgreSQL and Ekaya Engine into a single container.
+
+This is perfect to try out Ekaya or if you need to do a one-off ETL task and do not want to install the server.
 
 ```bash
-make run-quickstart
+docker run --pull always -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data ghcr.io/ekaya-inc/ekaya-engine-quickstart:latest
 ```
 
 Open your browser to [http://localhost:3443](http://localhost:3443) to sign in and provision a project.
 
 ## Deployment
 
-Since Ekaya Engine connects to your database, it needs to run in an environment:
+Since Ekaya Engine connects to your database as a datasource for AI analytics, it needs to run in an environment:
 
-1. That has network access to the database,
+1. That has network access to your datasource,
 1. Where business users can access it; and
-1. That has a Fully Qualified Domain Name (FQDN) with TLS certificates matching that domain.
+1. That the server has a Fully Qualified Domain Name (FQDN) with TLS certificates matching that domain.
 
-These are security requirements so that data never leaves your network boundary, users can authentication via OAuth, and you have full control over _who_ accesses _what data_.
+Ekaya requires a PostgreSQL 14+ instance for its own data. The installer will ask for your PostgreSQL connection details and generate a configuration file.
 
-### Docker image
-
-The easiest path to production. Assemble your config and TLS certs, build a self-contained image, and deploy it anywhere. See [deploy/docker/](deploy/docker/) for the full guide.
-
-### Build from source
-
-Build the Go binary with embedded UI and deploy anywhere. See [deploy/source/](deploy/source/) for the full guide.
-
-## Development
-
-### Option A — Dev Container (recommended)
-
-Open this repo in VS Code and select **Reopen in Container** when prompted (or run `Dev Containers: Reopen in Container` from the command palette). This starts a pre-configured environment with Go 1.25, Node 22, and PostgreSQL 17 — no local setup required.
-
-Once inside the container:
+### macOS and Linux
 
 ```bash
-make dev-server  # Terminal 1: Go API with auto-reload (port 3443)
-make dev-ui      # Terminal 2: UI with hot reload (port 5173)
+curl -sSfL https://raw.githubusercontent.com/ekaya-inc/ekaya-engine/main/install.sh | sh
 ```
 
-Ports 3443 and 5173 are forwarded automatically. Open [http://localhost:3443](http://localhost:3443) in your browser.
+The script detects your OS and architecture, downloads the correct binary, verifies its checksum, and walks you through an interactive configuration. It installs to `/usr/local/bin` and writes a config file to `~/.ekaya/config.yaml`.
 
-### Option B — Local Development
-
-#### Prerequisites
-
-- Go 1.25
-- Node.js >= 22.0.0
-- PostgreSQL >= 14
-
-#### Setup
-
-**1. Install dependencies**
+To customize the install location:
 
 ```bash
-cd ui && npm install && cd ..
+INSTALL_DIR=~/.local/bin curl -sSfL https://raw.githubusercontent.com/ekaya-inc/ekaya-engine/main/install.sh | sh
 ```
 
-**2. Configure**
+### Windows
+
+Download the latest `.zip` from [GitHub Releases](https://github.com/ekaya-inc/ekaya-engine/releases), extract it, and add the directory to your PATH. Then create a `config.yaml` file from the included `config.yaml.example`.
+
+### Manual download
+
+Pre-built binaries for all platforms are available on the [Releases page](https://github.com/ekaya-inc/ekaya-engine/releases). Each release includes binaries for macOS (Intel and Apple Silicon), Linux (x86_64 and ARM64), and Windows (x86_64).
+
+### After installing
+
+The Ekaya Engine will look in the CWD (first) then fallback to `~/.ekaya/` for the `config.yaml` file.
+
+If needed per installation above:
 
 ```bash
 cp config.yaml.example config.yaml
 ```
 
-The defaults work for local development. Optionally create `.env` from `.env.example` for environment overrides.
-
-**3. Set up PostgreSQL**
-
-Docker (easiest):
-
-```bash
-make dev-up
-```
-
-This starts PostgreSQL 17 in a container.
-
-Or use a local PostgreSQL — the `DANGER-recreate-database` target creates the database and an RLS-safe application role:
-
-```bash
-cp .env.example .env
-# Edit .env: set PGPASSWORD and PROJECT_CREDENTIALS_KEY
-source .env
-CONFIRM=YES make DANGER-recreate-database
-```
-
-This connects as your system superuser and creates:
-
-- Database `ekaya_engine`
-- Role `ekaya` with `NOSUPERUSER NOBYPASSRLS`
-- Grants on the database and public schema
-
-**4. Start development**
-
-```bash
-make dev-server  # Terminal 1: Go API with auto-reload (port 3443)
-make dev-ui      # Terminal 2: UI with hot reload (port 5173)
-```
-
-Migrations run automatically on server startup.
-
-### Testing
-
-```bash
-make test-short  # Unit tests only (no Docker)
-make check       # Full suite: format, lint, typecheck, unit + integration tests (requires Docker)
-```
-
-### Row-Level Security
-
-The `ekaya` database role is intentionally non-superuser with `NOBYPASSRLS`. All tenant-scoped tables enforce RLS using a `app.current_project_id` GUC. The application sets this GUC per-request so the database enforces tenant isolation even if application code has bugs.
-
-When querying directly via `psql`, set the tenant context first:
-
-```sql
-SELECT set_config('app.current_project_id', '<project-id>', false);
-SELECT * FROM engine_ontologies;
-```
-
-Tables without RLS (admin tables): `engine_projects`, `engine_users`.
-
-### Secrets
+Update/review the config.yaml.
 
 Two secrets are required in `config.yaml` (or as environment variables):
 
@@ -136,8 +69,26 @@ Two secrets are required in `config.yaml` (or as environment variables):
 | `project_credentials_key` | `PROJECT_CREDENTIALS_KEY` | Encrypts datasource credentials. **Cannot be changed after storing credentials.** |
 | `oauth_session_secret` | `OAUTH_SESSION_SECRET` | Signs OAuth session cookies. All servers in a cluster must share the same value. |
 
-For development, the defaults in `config.yaml.example` work. For production:
+You can create secure secrets using:
 
 ```bash
 openssl rand -base64 32
 ```
+
+### Running the Server
+
+Start the server:
+
+```bash
+ekaya-engine
+```
+
+Open [http://localhost:3443](http://localhost:3443) to sign in and provision a project. Migrations run automatically on first startup.
+
+## Docker image
+
+If you want to deploy via Docker, see [deploy/docker/](deploy/docker/) for the full guide.
+
+## Build from source
+
+Build the Go binary with embedded UI and deploy anywhere. See [deploy/source/](deploy/source/) for the full guide.
