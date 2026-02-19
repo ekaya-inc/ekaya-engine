@@ -2,7 +2,7 @@
 set -e
 
 # ekaya-engine installer
-# Usage: curl -sSfL https://raw.githubusercontent.com/ekaya-inc/ekaya-engine/main/install.sh | sh
+# Usage: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/ekaya-inc/ekaya-engine/releases/latest/download/install.sh | sh
 #
 # Environment variable overrides:
 #   INSTALL_DIR   - where to install the binary (default: /usr/local/bin)
@@ -353,7 +353,7 @@ main() {
 
     if [ -z "$VERSION" ]; then
       error "Could not determine latest version. Set VERSION explicitly:"
-      error "  VERSION=v1.0.0 curl -sSfL https://raw.githubusercontent.com/ekaya-inc/ekaya-engine/main/install.sh | sh"
+      error "  VERSION=v1.0.0 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/ekaya-inc/ekaya-engine/releases/latest/download/install.sh | sh"
       exit 1
     fi
   fi

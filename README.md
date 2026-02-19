@@ -31,7 +31,7 @@ Ekaya requires a PostgreSQL 14+ instance for its own data. The installer will as
 ### macOS and Linux
 
 ```bash
-curl -sSfL https://raw.githubusercontent.com/ekaya-inc/ekaya-engine/main/install.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/ekaya-inc/ekaya-engine/releases/latest/download/install.sh | sh
 ```
 
 The script detects your OS and architecture, downloads the correct binary, verifies its checksum, and walks you through an interactive configuration. It installs to `/usr/local/bin` and writes a config file to `~/.ekaya/config.yaml`.
@@ -39,7 +39,7 @@ The script detects your OS and architecture, downloads the correct binary, verif
 To customize the install and config locations:
 
 ```bash
-curl -sSfL https://raw.githubusercontent.com/ekaya-inc/ekaya-engine/main/install.sh | INSTALL_DIR=~/.local/bin CONFIG_DIR=~/.ekaya sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/ekaya-inc/ekaya-engine/releases/latest/download/install.sh | INSTALL_DIR=~/.local/bin CONFIG_DIR=~/.ekaya sh
 ```
 
 ### Windows

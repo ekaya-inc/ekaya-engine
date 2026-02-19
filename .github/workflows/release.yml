@@ -87,10 +87,13 @@ jobs:
             rm -rf "dist/${ARCHIVE_NAME}"
           done
 
+      - name: Copy installer script to dist
+        run: cp install.sh dist/install.sh
+
       - name: Generate checksums
         run: |
           cd dist
-          sha256sum *.tar.gz *.zip 2>/dev/null > checksums.txt
+          sha256sum *.tar.gz *.zip install.sh 2>/dev/null > checksums.txt
           cat checksums.txt
 
       - name: Create GitHub Release
@@ -103,5 +106,6 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/checksums.txt
+            dist/install.sh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
