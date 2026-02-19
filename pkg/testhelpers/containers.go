@@ -65,7 +65,8 @@ func setupTestDB() (*TestDB, error) {
 			"POSTGRES_USER":     "ekaya",
 			"POSTGRES_PASSWORD": "test_password",
 		},
-		WaitingFor: wait.ForLog("EKAYA_TEST_DB_READY").
+		WaitingFor: wait.ForLog("database system is ready to accept connections").
+			WithOccurrence(2).
 			WithStartupTimeout(60 * time.Second),
 	}
 

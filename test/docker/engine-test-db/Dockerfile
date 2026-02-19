@@ -22,32 +22,9 @@ RUN echo '#!/bin/sh' > /docker-entrypoint-initdb.d/00-restore.sh && \
     echo 'echo "ekaya_engine_test created successfully"' >> /docker-entrypoint-initdb.d/00-restore.sh && \
     chmod +x /docker-entrypoint-initdb.d/00-restore.sh
 
-# Create a startup wrapper that waits for PostgreSQL to fully restart after init
-# PostgreSQL starts twice: once for init (creating databases), then restarts for normal operation.
-# We need to wait for the second "ready" state, which we detect by:
-# 1. Waiting for pg_isready to succeed (database exists = init scripts ran)
-# 2. Waiting for pg_isready to fail (postgres is restarting)
-# 3. Waiting for pg_isready to succeed again (postgres restarted, truly ready)
-RUN echo '#!/bin/sh' > /usr/local/bin/startup-wrapper.sh && \
-    echo 'docker-entrypoint.sh postgres &' >> /usr/local/bin/startup-wrapper.sh && \
-    echo 'PG_PID=$!' >> /usr/local/bin/startup-wrapper.sh && \
-    echo '# Phase 1: Wait for init to complete (ekaya_engine_test exists)' >> /usr/local/bin/startup-wrapper.sh && \
-    echo 'while ! pg_isready -U ekaya -d ekaya_engine_test -q 2>/dev/null; do sleep 0.2; done' >> /usr/local/bin/startup-wrapper.sh && \
-    echo '# Phase 2: Wait for postgres restart (connection will fail during restart)' >> /usr/local/bin/startup-wrapper.sh && \
-    echo 'sleep 1' >> /usr/local/bin/startup-wrapper.sh && \
-    echo 'while pg_isready -U ekaya -d ekaya_engine_test -q 2>/dev/null; do sleep 0.2; done' >> /usr/local/bin/startup-wrapper.sh && \
-    echo '# Phase 3: Wait for postgres to come back up' >> /usr/local/bin/startup-wrapper.sh && \
-    echo 'while ! pg_isready -U ekaya -d ekaya_engine_test -q 2>/dev/null; do sleep 0.2; done' >> /usr/local/bin/startup-wrapper.sh && \
-    echo 'echo "EKAYA_TEST_DB_READY"' >> /usr/local/bin/startup-wrapper.sh && \
-    echo 'wait $PG_PID' >> /usr/local/bin/startup-wrapper.sh && \
-    chmod +x /usr/local/bin/startup-wrapper.sh
-
 # Expose PostgreSQL port
 EXPOSE 5432
 
 # Health check
 HEALTHCHECK --interval=5s --timeout=5s --retries=5 \
     CMD pg_isready -U ekaya -d test_data || exit 1
-
-# Use the wrapper script as the entrypoint
-ENTRYPOINT ["/usr/local/bin/startup-wrapper.sh"]
