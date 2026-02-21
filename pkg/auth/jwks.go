@@ -4,14 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
 )
-
-const debugLogPath = "/Users/kofimupati/Dev/Tikr/ekaya/ekaya-engine/.cursor/debug.log"
 
 // expectedAudience is the required audience claim for ekaya-engine tokens.
 const expectedAudience = "engine"
@@ -110,13 +107,6 @@ func (c *JWKSClient) ValidateToken(tokenString string) (*Claims, error) {
 		return nil, errors.New("invalid claims type")
 	}
 
-	// #region agent log
-	if logFile, err := os.OpenFile(debugLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-		logFile.WriteString(fmt.Sprintf(`{"location":"auth/jwks.go:105","message":"JWT claims parsed","data":{"hasAzureTokenRef":%t,"tokenRefID":"%s","tokenExpiry":%d,"projectID":"%s"},"timestamp":%d,"sessionId":"debug-session","runId":"jwks-debug","hypothesisId":"D"}`+"\n", claims.AzureTokenRefID != "", claims.AzureTokenRefID, claims.AzureTokenExpiry, claims.ProjectID, 0))
-		logFile.Close()
-	}
-	// #endregion
-
 	// Validate audience contains "engine"
 	if !slices.Contains(claims.Audience, expectedAudience) {
 		return nil, ErrInvalidAudience
@@ -139,13 +129,6 @@ func (c *JWKSClient) parseUnverifiedToken(tokenString string) (*Claims, error) {
 	if !ok {
 		return nil, errors.New("invalid claims type")
 	}
-
-	// #region agent log
-	if logFile, err := os.OpenFile(debugLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-		logFile.WriteString(fmt.Sprintf(`{"location":"auth/jwks.go:128","message":"JWT claims parsed (unverified)","data":{"hasAzureTokenRef":%t,"tokenRefID":"%s","tokenExpiry":%d,"projectID":"%s"},"timestamp":%d,"sessionId":"debug-session","runId":"jwks-debug","hypothesisId":"D"}`+"\n", claims.AzureTokenRefID != "", claims.AzureTokenRefID, claims.AzureTokenExpiry, claims.ProjectID, 0))
-		logFile.Close()
-	}
-	// #endregion
 
 	// Validate audience contains "engine" even in dev mode
 	if !slices.Contains(claims.Audience, expectedAudience) {
