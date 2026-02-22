@@ -244,7 +244,46 @@ These ideas were originally explored as separate repositories (Dec 2025) before 
 
 **25. Ontology Templates — Pre-built, one-click schema bootstrapping.** Library of curated ontology templates (3-5 tables each) for common business domains: digital marketing (campaigns, results, creatives), B2B sales pipeline, e-commerce analytics, mobile app analytics, subscription SaaS metrics, campaign optimization. Each template includes schema definitions, semantic ontology (descriptions, business rules, relationships), sample queries, and visual previews. Solves the cold-start problem for new projects — instead of connecting a database and waiting for AI discovery, start with a template and customize. Could be embedded in the engine binary or downloaded from the marketplace.
 
-**26. Product Kit — Embedded text-to-SQL for SaaS products.** A self-contained Go server that SaaS companies embed in their product to give their end-users AI-powered data querying. Exports a static config (schema + ontology + security rules) from ekaya-engine, then runs independently with JWT-based tenant isolation, automatic RLS injection, SQL injection prevention, and PII column flagging. The key insight: Ekaya's intelligence becomes an embeddable component that SaaS companies deploy alongside their product database. Target: five-nines availability, <50MB Docker image, <5s cold start. This is a distinct go-to-market: not "install Ekaya" but "embed Ekaya's intelligence in your product."
+**26. Product Kit — Embedded text-to-SQL for SaaS products.** A standalone, read-only inference server that SaaS companies deploy into their production backend to give end-users AI-powered data querying. The server has **no access to the product database** — it generates safe, validated SQL that the product's own backend executes against the schema it was designed for (e.g., a denormalized table used for end-user analytics in the product UI).
+
+**How it works:**
+- Ekaya Engine exports a static config bundle (SQLite file) containing schema metadata, ontology rules (business entities, relationships), and optionally vector embeddings for semantic search. This is a point-in-time snapshot of the Ekaya intelligence — the Product Kit server loads it into memory at startup and runs independently.
+- The product's backend sends a natural language query with a JWT containing tenant context (tenant_id, user_id, role, RLS fields). The Product Kit validates the JWT (HMAC), generates SQL using an LLM, validates the SQL for injection/leakage/RLS compliance, and returns the SQL + parameters. The product backend executes it.
+- The server is stateless — all instances load the same config bundle, scale independently, no database connection required at runtime. Hot reload via SIGHUP when a new config bundle is deployed.
+
+**View-based data access:** Customers expose data to AI through PostgreSQL views (not direct table access). Views define the AI-accessible schema — only columns explicitly included are queryable. Base table structure and sensitive columns remain hidden from the AI.
+
+**Tenant isolation (two approaches):**
+- **RLS on base tables (recommended):** Database RLS policies enforce isolation automatically. Product server sets session context (`SET app.tenant_id = $1`) before executing returned SQL. Even if the AI generates SQL without a tenant filter, RLS ensures isolation at execution time. Defense in depth.
+- **WHERE clause validation (fallback):** Product Kit validates that generated SQL contains `WHERE tenant_id = $1` before returning it. Fails closed — SQL not returned if RLS fields missing. Use when RLS cannot be enabled on base tables.
+
+**SQL validation pipeline:**
+- Injection detection: pattern matching for DROP, TRUNCATE, DELETE, UPDATE, stacked queries, UNION injection, pg_sleep
+- RLS enforcement: validates required WHERE clauses (Approach B) or skips (Approach A, database handles it)
+- Data leakage detection: flags SELECT * on wide tables, deep JOINs, missing LIMIT clauses
+- Automatic LIMIT injection: appends configurable max_rows (default 1000) if no LIMIT present
+- PII column flagging: warns when queries select sensitive columns
+
+**LLM integration:** The server requires LLM access for text-to-SQL generation. Two models:
+1. **Product Kit hosts its own LLM client:** Calls the customer's LLM endpoint (AWS Bedrock, GCP Vertex AI, Azure AI, or any OpenAI-compatible API). Multi-provider abstraction behind a common interface. The product team configures which provider/model to use.
+2. **Product's LLM intercepts the call:** The product already has an LLM (e.g., for a chat UI). The text-to-SQL request becomes a tool call that the product's LLM hosting code intercepts — it calls the Product Kit's generate-sql endpoint, executes the returned SQL, and incorporates the results into its response. This is the more likely integration pattern for products that already have AI features.
+
+**API surface:**
+- `POST /api/v1/generate-sql` — NL query in, validated SQL + parameters + security metadata out
+- `GET /api/v1/schema` — cached schema info (for debugging)
+- `GET /health` — health check with component status (config loaded, LLM available, vector index ready)
+
+**Config bundle contents (SQLite):**
+- `config_version` — version, timestamp, schema hash, isolation model, required RLS columns
+- `schema_tables` — view names and descriptions (views only, not base tables)
+- `schema_columns` — column names, types, nullability, PII flags, descriptions
+- `ontology_entities` — business rules as JSON arrays, entity relationships
+- `vector_embeddings` — optional, for semantic search (binary float32 vectors)
+- Schema safety validation on load: refuses to start if views are missing required tenant isolation columns
+
+**Deployment targets:** <50MB Docker image, <5s cold start, stateless horizontal scaling. Can run as Cloud Run service, Kubernetes deployment, ECS task, or sidecar container.
+
+**Key insight:** Ekaya's intelligence becomes an embeddable component. The go-to-market is not "install Ekaya" but "embed Ekaya's intelligence in your product." This is a B2B2C play — different buyer (SaaS CTOs), different pricing (embedded licensing), different distribution (developer docs, SDKs).
 
 **27. Smart Ingestion — OAuth-based third-party data connector.** Admin-facing data ingestion engine for pulling data from external sources (Google Analytics 4, Salesforce, HubSpot, Stripe, custom APIs) into Ekaya-managed ontology. OAuth-first authentication, encrypted credential storage, automatic token refresh, and incremental sync with CDC state management. Source data maps to semantic ontology rather than raw schema. This is the inbound counterpart to App #10 (Reverse ETL Sync) — together they form a complete data integration layer. The connector framework pattern (interface-based, pluggable) aligns well with WASM: each connector could be a separate WASM module.
 
