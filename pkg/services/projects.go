@@ -97,6 +97,7 @@ type projectService struct {
 	ontologyRepo         repositories.OntologyRepository
 	mcpConfigRepo        repositories.MCPConfigRepository
 	agentAPIKeyService   AgentAPIKeyService
+	installedAppService  InstalledAppService
 	centralClient        *central.Client
 	centralProjectClient CentralProjectClient
 	nonceStore           NonceStore
@@ -112,6 +113,7 @@ func NewProjectService(
 	ontologyRepo repositories.OntologyRepository,
 	mcpConfigRepo repositories.MCPConfigRepository,
 	agentAPIKeyService AgentAPIKeyService,
+	installedAppService InstalledAppService,
 	centralClient *central.Client,
 	nonceStore NonceStore,
 	baseURL string,
@@ -124,6 +126,7 @@ func NewProjectService(
 		ontologyRepo:         ontologyRepo,
 		mcpConfigRepo:        mcpConfigRepo,
 		agentAPIKeyService:   agentAPIKeyService,
+		installedAppService:  installedAppService,
 		centralClient:        centralClient,
 		centralProjectClient: centralClient,
 		nonceStore:           nonceStore,
@@ -763,6 +766,17 @@ func (s *projectService) ProvisionFromClaims(ctx context.Context, claims *auth.C
 		zap.String("project_id", projectID.String()),
 		zap.String("user_id", userID.String()),
 		zap.String("role", userRole))
+
+	// Install apps that central says should be in this project
+	for _, app := range projectInfo.Applications {
+		if err := s.installedAppService.EnsureInstalled(ctxWithScope, projectID, app.Name); err != nil {
+			s.logger.Error("Failed to install app from provision",
+				zap.String("project_id", projectID.String()),
+				zap.String("app_id", app.Name),
+				zap.Error(err))
+			// Don't return — app install failure shouldn't block provisioning
+		}
+	}
 
 	return result, nil
 }

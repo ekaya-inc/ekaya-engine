@@ -62,7 +62,7 @@ jobs:
       - name: Run linter
         uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.9.0
+          version: v2.10.1
 
       - name: Run unit tests (skip integration tests)
         run: go test -tags=all_adapters ./... -short -timeout 5m

@@ -1090,6 +1090,10 @@ func (m *mockInstalledAppServiceForMCP) GetApp(ctx context.Context, projectID uu
 	return nil, nil
 }
 
+func (m *mockInstalledAppServiceForMCP) EnsureInstalled(ctx context.Context, projectID uuid.UUID, appID string) error {
+	return nil
+}
+
 func TestMCPConfigService_Get_FiltersDataLiaisonTools_WhenNotInstalled(t *testing.T) {
 	// When AI Data Liaison app is not installed, data liaison tools should not appear in EnabledTools
 

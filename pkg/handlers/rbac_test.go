@@ -149,6 +149,9 @@ func (m *mockInstalledAppService) UpdateSettings(ctx context.Context, projectID 
 func (m *mockInstalledAppService) GetApp(ctx context.Context, projectID uuid.UUID, appID string) (*models.InstalledApp, error) {
 	return nil, nil
 }
+func (m *mockInstalledAppService) EnsureInstalled(ctx context.Context, projectID uuid.UUID, appID string) error {
+	return nil
+}
 
 // =============================================================================
 // Users Handler RBAC Tests
