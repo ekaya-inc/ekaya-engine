@@ -91,4 +91,10 @@ If you want to deploy via Docker, see [deploy/docker/](deploy/docker/) for the f
 
 ## Build from source
 
+Integration tests (`make check`) require Docker. If your Docker runtime uses a non-default socket path (e.g., OrbStack), set `DOCKER_HOST`:
+
+```bash
+export DOCKER_HOST=unix://$HOME/.orbstack/run/docker.sock
+```
+
 Build the Go binary with embedded UI and deploy anywhere. See [deploy/source/](deploy/source/) for the full guide.

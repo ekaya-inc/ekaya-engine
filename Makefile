@@ -124,7 +124,39 @@ check: ## Run strict quality checks (fails on any issue)
 		echo "$(GREEN)✓ Code properly formatted$(NC)"; \
 	fi
 	@echo ""
-	@echo "$(YELLOW)Step 3: Running strict linter...$(NC)"
+	@echo "$(YELLOW)Step 3: Running frontend linting...$(NC)"
+	@(cd ui && npm run lint) > /dev/null 2>&1; \
+	if [ $$? -ne 0 ]; then \
+		echo "$(RED)❌ Frontend linting failed:$(NC)"; \
+		(cd ui && npm run lint); \
+		exit 1; \
+	else \
+		echo "$(GREEN)✓ No frontend linting issues$(NC)"; \
+	fi
+	@echo ""
+	@echo "$(YELLOW)Step 4: Running TypeScript typecheck...$(NC)"
+	@(cd ui && npm run typecheck) > /dev/null 2>&1; \
+	if [ $$? -ne 0 ]; then \
+		echo "$(RED)❌ TypeScript typecheck failed:$(NC)"; \
+		(cd ui && npm run typecheck); \
+		exit 1; \
+	else \
+		echo "$(GREEN)✓ No TypeScript errors$(NC)"; \
+	fi
+	@echo ""
+	@echo "$(YELLOW)Step 5: Building UI...$(NC)"
+	@cd ui && if [ ! -f node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then echo "$(YELLOW)Installing UI dependencies...$(NC)" && npm install; fi
+	@BUILD_OUTPUT=$$(cd ui && npm run build 2>&1); \
+	BUILD_EXIT_CODE=$$?; \
+	if [ $$BUILD_EXIT_CODE -ne 0 ]; then \
+		echo "$(RED)❌ UI build failed:$(NC)"; \
+		echo "$$BUILD_OUTPUT"; \
+		exit 1; \
+	else \
+		echo "$(GREEN)✓ UI built$(NC)"; \
+	fi
+	@echo ""
+	@echo "$(YELLOW)Step 6: Running strict linter...$(NC)"
 	@if which golangci-lint > /dev/null 2>&1; then \
 		LINT_OUTPUT=$$(golangci-lint run --timeout=5m 2>&1); \
 		LINT_EXIT_CODE=$$?; \
@@ -140,8 +172,8 @@ check: ## Run strict quality checks (fails on any issue)
 		exit 1; \
 	fi
 	@echo ""
-	@echo "$(YELLOW)Step 4: Running all backend tests...$(NC)"
-	@TEST_OUTPUT=$$(go test -tags="$(BUILD_TAGS)" ./... -cover -timeout 5m 2>&1); \
+	@echo "$(YELLOW)Step 7: Running backend unit tests...$(NC)"
+	@TEST_OUTPUT=$$(go test -tags="$(BUILD_TAGS)" ./... -short -cover -timeout 5m 2>&1); \
 	TEST_EXIT_CODE=$$?; \
 	if [ $$TEST_EXIT_CODE -ne 0 ]; then \
 		echo "$(RED)❌ Backend tests failed:$(NC)"; \
@@ -151,27 +183,7 @@ check: ## Run strict quality checks (fails on any issue)
 		echo "$(GREEN)✓ All backend tests passed$(NC)"; \
 	fi
 	@echo ""
-	@echo "$(YELLOW)Step 5: Running frontend linting...$(NC)"
-	@(cd ui && npm run lint) > /dev/null 2>&1; \
-	if [ $$? -ne 0 ]; then \
-		echo "$(RED)❌ Frontend linting failed:$(NC)"; \
-		(cd ui && npm run lint); \
-		exit 1; \
-	else \
-		echo "$(GREEN)✓ No frontend linting issues$(NC)"; \
-	fi
-	@echo ""
-	@echo "$(YELLOW)Step 6: Running TypeScript typecheck...$(NC)"
-	@(cd ui && npm run typecheck) > /dev/null 2>&1; \
-	if [ $$? -ne 0 ]; then \
-		echo "$(RED)❌ TypeScript typecheck failed:$(NC)"; \
-		(cd ui && npm run typecheck); \
-		exit 1; \
-	else \
-		echo "$(GREEN)✓ No TypeScript errors$(NC)"; \
-	fi
-	@echo ""
-	@echo "$(YELLOW)Step 7: Running frontend tests...$(NC)"
+	@echo "$(YELLOW)Step 8: Running frontend tests...$(NC)"
 	@(cd ui && npm test -- --run) > /dev/null 2>&1; \
 	if [ $$? -ne 0 ]; then \
 		echo "$(RED)❌ Frontend tests failed:$(NC)"; \
@@ -181,7 +193,7 @@ check: ## Run strict quality checks (fails on any issue)
 		echo "$(GREEN)✓ All frontend tests passed$(NC)"; \
 	fi
 	@echo ""
-	@echo "$(YELLOW)Step 8: Running integration tests (requires Docker)...$(NC)"
+	@echo "$(YELLOW)Step 9: Running integration tests (requires Docker)...$(NC)"
 	@TEST_OUTPUT=$$(go test -tags="integration,$(BUILD_TAGS)" ./... -timeout 5m 2>&1); \
 	TEST_EXIT_CODE=$$?; \
 	if [ $$TEST_EXIT_CODE -ne 0 ]; then \
