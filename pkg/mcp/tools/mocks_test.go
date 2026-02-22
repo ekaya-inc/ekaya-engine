@@ -541,6 +541,10 @@ func (m *mockInstalledAppService) GetApp(ctx context.Context, projectID uuid.UUI
 	return nil, nil
 }
 
+func (m *mockInstalledAppService) EnsureInstalled(ctx context.Context, projectID uuid.UUID, appID string) error {
+	return nil
+}
+
 // mockColumnMetadataRepository implements repositories.ColumnMetadataRepository for testing.
 // Column metadata is now keyed by schema_column_id (FK to engine_schema_columns).
 type mockColumnMetadataRepository struct {

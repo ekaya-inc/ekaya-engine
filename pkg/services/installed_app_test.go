@@ -539,6 +539,84 @@ func TestInstalledAppService_CompleteCallback_CompletesUninstall(t *testing.T) {
 	assert.False(t, exists)
 }
 
+// --- EnsureInstalled tests ---
+
+func TestInstalledAppService_EnsureInstalled_InstallsNewApp(t *testing.T) {
+	projectID := uuid.New()
+	repo := newMockInstalledAppRepository()
+	svc := newTestInstalledAppService(repo)
+
+	err := svc.EnsureInstalled(context.Background(), projectID, models.AppIDAIDataLiaison)
+	require.NoError(t, err)
+
+	app, exists := repo.apps[repo.key(projectID, models.AppIDAIDataLiaison)]
+	require.True(t, exists, "app should be installed")
+	assert.Equal(t, models.AppIDAIDataLiaison, app.AppID)
+	assert.Equal(t, "central-provision", app.InstalledBy)
+	assert.False(t, app.InstalledAt.IsZero())
+}
+
+func TestInstalledAppService_EnsureInstalled_AlreadyInstalledIsNoop(t *testing.T) {
+	projectID := uuid.New()
+	repo := newMockInstalledAppRepository()
+
+	originalApp := &models.InstalledApp{
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		AppID:       models.AppIDAIDataLiaison,
+		InstalledAt: time.Now().Add(-24 * time.Hour),
+		InstalledBy: "original-user",
+		Settings:    map[string]any{"key": "value"},
+	}
+	repo.apps[repo.key(projectID, models.AppIDAIDataLiaison)] = originalApp
+
+	svc := newTestInstalledAppService(repo)
+
+	err := svc.EnsureInstalled(context.Background(), projectID, models.AppIDAIDataLiaison)
+	require.NoError(t, err)
+
+	// Verify original app unchanged
+	app := repo.apps[repo.key(projectID, models.AppIDAIDataLiaison)]
+	assert.Equal(t, originalApp.ID, app.ID)
+	assert.Equal(t, "original-user", app.InstalledBy)
+	assert.Equal(t, map[string]any{"key": "value"}, app.Settings)
+}
+
+func TestInstalledAppService_EnsureInstalled_UnknownAppSkipped(t *testing.T) {
+	projectID := uuid.New()
+	repo := newMockInstalledAppRepository()
+	svc := newTestInstalledAppService(repo)
+
+	err := svc.EnsureInstalled(context.Background(), projectID, "unknown-app")
+	require.NoError(t, err)
+
+	assert.Empty(t, repo.apps, "no app should be installed")
+}
+
+func TestInstalledAppService_EnsureInstalled_MCPServerSkipped(t *testing.T) {
+	projectID := uuid.New()
+	repo := newMockInstalledAppRepository()
+	svc := newTestInstalledAppService(repo)
+
+	err := svc.EnsureInstalled(context.Background(), projectID, models.AppIDMCPServer)
+	require.NoError(t, err)
+
+	assert.Empty(t, repo.apps, "mcp-server should not be persisted")
+}
+
+func TestInstalledAppService_EnsureInstalled_DoesNotCallCentral(t *testing.T) {
+	projectID := uuid.New()
+	repo := newMockInstalledAppRepository()
+	// Use nil central client — if EnsureInstalled tried to call central, it would panic
+	svc := newTestInstalledAppService(repo)
+
+	err := svc.EnsureInstalled(context.Background(), projectID, models.AppIDAIDataLiaison)
+	require.NoError(t, err)
+
+	_, exists := repo.apps[repo.key(projectID, models.AppIDAIDataLiaison)]
+	assert.True(t, exists, "app should be installed without central interaction")
+}
+
 func TestInstalledAppService_CompleteCallback_CancelledNoOps(t *testing.T) {
 	projectID := uuid.New()
 	repo := newMockInstalledAppRepository()

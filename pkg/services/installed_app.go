@@ -67,6 +67,12 @@ type InstalledAppService interface {
 
 	// GetApp returns a specific installed app details.
 	GetApp(ctx context.Context, projectID uuid.UUID, appID string) (*models.InstalledApp, error)
+
+	// EnsureInstalled installs an app locally if not already installed.
+	// Unlike Install, this does NOT notify central — it is used when central
+	// is the source of the installation (e.g., during provision).
+	// Idempotent: no-op if the app is already installed or the app ID is unknown.
+	EnsureInstalled(ctx context.Context, projectID uuid.UUID, appID string) error
 }
 
 type installedAppService struct {
@@ -388,6 +394,35 @@ func (s *installedAppService) GetApp(ctx context.Context, projectID uuid.UUID, a
 	}
 
 	return app, nil
+}
+
+// EnsureInstalled installs an app locally if not already installed.
+// This is the local-only path used during provision — central already knows about the app.
+func (s *installedAppService) EnsureInstalled(ctx context.Context, projectID uuid.UUID, appID string) error {
+	if !models.KnownAppIDs[appID] {
+		s.logger.Debug("Skipping unknown app from provision",
+			zap.String("project_id", projectID.String()),
+			zap.String("app_id", appID))
+		return nil
+	}
+
+	if appID == models.AppIDMCPServer {
+		return nil
+	}
+
+	installed, err := s.repo.IsInstalled(ctx, projectID, appID)
+	if err != nil {
+		return fmt.Errorf("failed to check installation status: %w", err)
+	}
+	if installed {
+		return nil
+	}
+
+	if _, err := s.saveInstall(ctx, projectID, appID, "central-provision"); err != nil {
+		return fmt.Errorf("failed to install app from provision: %w", err)
+	}
+
+	return nil
 }
 
 // saveInstall creates the installed app record in the database.
