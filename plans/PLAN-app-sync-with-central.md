@@ -1,4 +1,4 @@
-# PLAN: App Sync with Central + Dynamic Registry
+# PLAN: App Sync with Central — AI Data Liaison Sales Funnel
 
 **Status:** READY
 **Source:** `plans/DESIGN-engine-app-marketplace.md` (sections 1-3)
@@ -8,9 +8,19 @@
 
 ## Goal
 
-Enable the engine to discover and reconcile app installations that happen outside the engine (e.g., from ekaya-central's web UI marketplace). Today, apps installed from central are invisible to the engine until the next full provision call. This plan adds background sync so the engine picks up new installations, activation changes, and billing status updates automatically.
+Enable the sales funnel for AI Data Liaison: a CTO clicks an ad, lands on `try.ekaya.ai/ai-data-liaison`, views the feature, tries it with a mock UI, creates a new project with AI Data Liaison pre-configured, and the engine installs it automatically during provisioning.
 
-Also adds the three new WASM app IDs to the registry so the engine recognizes them, and validates AI configuration before installing AI-powered apps.
+The engine-side work is **sync infrastructure**: when ekaya-central tells the engine (via provision or project fetch) that an app is installed, the engine persists it to `engine_installed_apps` so the UI and services recognize it. Today this data is returned by central but ignored by the engine.
+
+AI Data Liaison (`ai-data-liaison`) already exists as a known app ID in the engine. No new app IDs are needed — only the plumbing to sync installation state from central.
+
+### Key Constraint: No Persistent JWT
+
+The engine does **not** persist the admin's JWT. Calling central's API requires a valid admin token, which is only available during a live authenticated request. This means:
+
+- **No true background sync is possible** — the engine cannot poll central on a timer
+- Sync happens opportunistically during two request-time flows that already have the JWT: `SyncFromCentralAsync` (GET /projects) and `ProvisionFromClaims` (POST /projects)
+- This is sufficient because both flows run on every admin session start, so app state is reconciled each time an admin opens the engine
 
 ---
 
@@ -26,6 +36,7 @@ Also adds the three new WASM app IDs to the registry so the engine recognizes th
 - Three constants: `AppIDMCPServer = "mcp-server"`, `AppIDAIDataLiaison = "ai-data-liaison"`, `AppIDAIAgents = "ai-agents"`
 - `KnownAppIDs` is a `map[string]bool` (not `map[string]string` as the DESIGN doc shows)
 - Used to validate app IDs on install — unknown IDs are rejected
+- **AI Data Liaison is already registered** — no model changes needed
 
 ### InstalledAppRepository (`pkg/repositories/installed_app_repository.go`)
 - Interface with 7 methods: List, Get, IsInstalled, Install, Activate, Uninstall, UpdateSettings
@@ -57,36 +68,7 @@ Also adds the three new WASM app IDs to the registry so the engine recognizes th
 
 ## Tasks
 
-### 1. Add new app ID constants to the model
-
-**File:** `pkg/models/installed_app.go`
-
-Add three new app ID constants and register them in KnownAppIDs:
-
-```go
-const (
-    AppIDMCPServer           = "mcp-server"
-    AppIDAIDataLiaison       = "ai-data-liaison"
-    AppIDAIAgents            = "ai-agents"
-    AppIDAIDriftMonitor      = "ai-drift-monitor"
-    AppIDAIDataGuardian      = "ai-data-guardian"
-    AppIDAIComplianceManager = "ai-compliance-manager"
-)
-```
-
-Add a set identifying which apps require AI configuration:
-
-```go
-var AIRequiredApps = map[string]bool{
-    AppIDAIDriftMonitor:      true,
-    AppIDAIDataGuardian:      true,
-    AppIDAIComplianceManager: true,
-}
-```
-
-Update `KnownAppIDs` to include all six app IDs.
-
-### 2. Add Upsert method to InstalledAppRepository
+### 1. Add Upsert method to InstalledAppRepository
 
 **File:** `pkg/repositories/installed_app_repository.go`
 
@@ -100,7 +82,7 @@ Implementation should use PostgreSQL `ON CONFLICT (project_id, app_id) DO UPDATE
 
 **Verified:** The `engine_installed_apps` table already has `CONSTRAINT unique_project_app UNIQUE (project_id, app_id)` (see `migrations/009_llm_and_config.up.sql:219`). No migration needed.
 
-### 3. Add SyncApps method to InstalledAppService
+### 2. Add SyncApps method to InstalledAppService
 
 **File:** `pkg/services/installed_app.go`
 
@@ -108,7 +90,8 @@ Add a new method to the interface and implementation:
 
 ```go
 // SyncApps reconciles local app state against central's source of truth.
-// Called in the background after user authentication when fresh data from central is available.
+// Called during request-time flows (provision and project fetch) when the admin's
+// JWT is available and fresh data from central has already been retrieved.
 //
 // Rules:
 //   - Central is source of truth for what's installed and billing status
@@ -139,11 +122,11 @@ For locally installed apps not in centralApps:
 
 **Dependencies:** This method needs access to the repository (already injected) but does NOT need the CentralAppClient (the caller provides the central data). No constructor changes needed.
 
-### 4. Wire sync into SyncFromCentralAsync
+### 3. Wire sync into SyncFromCentralAsync
 
 **File:** `pkg/services/projects.go`
 
-Extend `SyncFromCentralAsync` (line 770) to sync apps after syncing the project name. The `projectInfo` returned by `GetProject()` already contains `Applications []ApplicationInfo` — pass it to `InstalledAppService.SyncApps()`.
+Extend `SyncFromCentralAsync` (line 770) to sync apps after syncing the project name. The admin's JWT is available here because `SyncFromCentralAsync` is called from the GET /projects handler which has the live request token. The `projectInfo` returned by `GetProject()` already contains `Applications []ApplicationInfo` — pass it to `InstalledAppService.SyncApps()`.
 
 **Changes needed:**
 
@@ -167,83 +150,19 @@ if len(projectInfo.Applications) > 0 {
 
 **Also important:** SyncFromCentralAsync runs in a goroutine with a 30-second timeout. App sync adds DB operations, but these should be fast (small number of apps). The timeout should be sufficient.
 
-### 5. Also sync apps during initial provision
+**Note on "Async":** Despite the goroutine, this is not a background process — it is a fire-and-forget side-effect of a live admin request. The goroutine just avoids blocking the HTTP response. The central API call inside still uses the admin's JWT passed in from the request handler.
+
+### 4. Also sync apps during initial provision
 
 **File:** `pkg/services/projects.go`
 
 In `ProvisionFromClaims` (line 648), after the project is created/updated, call `SyncApps` with the applications from the provision response. Currently, applications from provision are stored in `project.Parameters["applications"]` and used only for MCP/AI setup. Add an explicit sync call so the apps are persisted to `engine_installed_apps`.
 
+This is the **primary path for the sales funnel**: CTO creates a project on central with AI Data Liaison pre-selected → CTO downloads and starts the engine → engine provisions from central → `ProvisionFromClaims` receives the applications list including `ai-data-liaison` → SyncApps persists it → the engine UI shows AI Data Liaison as installed.
+
 Find where `ProvisionFromClaims` returns the result (around line 760) and add the sync call before returning. The provision flow already has a database context available.
 
-### 6. Add AI config validation to Install
-
-**File:** `pkg/services/installed_app.go`
-
-In the `Install` method, before proceeding with installation, check if the app requires AI configuration:
-
-```go
-if models.AIRequiredApps[appID] {
-    // Check if project has working AI config
-    aiConfig, err := s.aiConfigService.GetEffective(ctx, projectID)
-    if err != nil || aiConfig == nil || aiConfig.ConfigType == models.AIConfigNone {
-        return nil, fmt.Errorf("app %q requires AI configuration; configure AI settings before installing", appID)
-    }
-}
-```
-
-**Dependencies:** This requires adding `AIConfigService` (or its `GetEffective` method via a smaller interface) to the InstalledAppService constructor. Check `pkg/services/ai_config.go` for the interface definition. The `AIConfigService` interface has a `GetEffective(ctx, projectID)` method that returns the resolved config.
-
-**Constructor change:**
-
-```go
-func NewInstalledAppService(
-    repo repositories.InstalledAppRepository,
-    centralClient CentralAppClient,
-    nonceStore NonceStore,
-    aiConfigProvider AIConfigProvider, // NEW — small interface with just GetEffective
-    baseURL string,
-    logger *zap.Logger,
-) InstalledAppService
-```
-
-Define a small interface to avoid coupling to the full AIConfigService:
-
-```go
-type AIConfigProvider interface {
-    GetEffective(ctx context.Context, projectID uuid.UUID) (*models.AIConfig, error)
-}
-```
-
-Update the call site in `main.go` where `NewInstalledAppService` is constructed to pass the AIConfigService.
-
-**Note:** The sync flow (task 3) should NOT enforce this validation — apps installed from central have already been validated there. Only the direct Install method (user-initiated from engine UI) should check.
-
-### 7. Add frontend app ID constants for new apps
-
-**File:** `ui/src/types/installedApp.ts`
-
-Add new constants:
-
-```typescript
-export const APP_ID_AI_DRIFT_MONITOR = 'ai-drift-monitor';
-export const APP_ID_AI_DATA_GUARDIAN = 'ai-data-guardian';
-export const APP_ID_AI_COMPLIANCE_MANAGER = 'ai-compliance-manager';
-```
-
-### 8. Add new app cards to ApplicationsPage
-
-**File:** `ui/src/pages/ApplicationsPage.tsx`
-
-Add cards for the three new apps in the available apps list. These should appear as "Coming Soon" or with install buttons depending on whether the WASM runtime is ready. For now, add them as informational cards (similar to the existing "Product Kit [BETA]" card pattern) with a "Coming Soon" badge.
-
-Each card should have:
-- App name and description
-- An icon (choose appropriate Lucide icons)
-- "Coming Soon" badge (since the WASM runtime isn't built yet)
-
-This ensures users can see what's coming and the UI is ready when the apps ship.
-
-### 9. Write tests
+### 5. Write tests
 
 **Tests for repository Upsert:**
 - Upsert inserts new app when not exists
@@ -259,28 +178,25 @@ This ensures users can see what's coming and the UI is ready when the apps ship.
 - Logs but doesn't delete orphaned local apps (app local but not in central → logged, not deleted)
 - Handles empty central apps list (no-op)
 
-**Tests for Install with AI config validation:**
-- Install AI-required app with valid AI config → succeeds
-- Install AI-required app without AI config → returns error
-- Install non-AI app without AI config → succeeds (no validation)
-
 ---
 
 ## Assumptions to Verify
 
-1. **Central's GetProject returns applications.** The `ProjectInfo` struct includes `Applications`, and `ProvisionProject` populates it. Both endpoints use the same `doProjectRequest` parser (lines 300-336) which deserializes the full `ProjectInfo`. However, whether central's GET endpoint actually includes `applications` in its JSON response depends on the central-side implementation. If central omits applications from GET responses, this sync won't work and we'd need to either (a) update central or (b) use `ProvisionProject` for sync instead of `GetProject`.
+1. **Central's GetProject returns applications.** The `ProjectInfo` struct includes `Applications`, and `ProvisionProject` populates it. Both endpoints use the same `doProjectRequest` parser (lines 300-336) which deserializes the full `ProjectInfo`. However, whether central's GET endpoint actually includes `applications` in its JSON response depends on the central-side implementation. If central omits applications from GET responses, this sync won't work and we'd need to either (a) update central or (b) use `ProvisionProject` for sync instead of `GetProject`. Both calls require the admin's JWT from the live request — the engine has no way to call central independently.
 
 2. ~~**Unique constraint exists on (project_id, app_id).**~~ **VERIFIED** — `CONSTRAINT unique_project_app UNIQUE (project_id, app_id)` exists in `migrations/009_llm_and_config.up.sql:219`.
 
 3. **BillingInfo.Status values.** The plan treats any non-nil Billing with non-empty Status as "active." Confirm with the companion DESIGN what status values central sends (e.g., "active", "trial", "expired", "cancelled").
 
+4. **Central pre-selects apps during project creation.** The sales funnel assumes central's project creation flow can include pre-selected applications (e.g., AI Data Liaison) so they appear in the provision response. This is central-side work covered in the companion DESIGN.
+
 ---
 
 ## Out of Scope
 
+- **Central-side funnel** — Landing pages, demo UI, install flow, project creation with pre-selected apps. Covered in `ekaya-central/plans/DESIGN-app-marketplace-funnel.md`.
+- **New app IDs** — Future apps (ai-drift-monitor, ai-data-guardian, ai-compliance-manager) depend on the WASM runtime. They will use this same sync infrastructure when they ship.
 - **WASM runtime** — Covered in `plans/DESIGN-wasm-application-platform.md`. Separate plan needed.
-- **First three AI apps** — Depend on WASM runtime. Separate plans needed.
-- **Phase 2 dynamic registry** — Loading app catalog from central at startup. Deferred until we have more apps than the hardcoded list can handle.
-- **Periodic background polling** — The DESIGN mentions optional periodic sync. Auth-time sync (via SyncFromCentralAsync) is sufficient for now.
-- **App-specific UI pages** — Each WASM app will need its own output page, settings panel, and activity log. These should be planned alongside each app's implementation.
+- **Periodic background polling** — The DESIGN mentions optional periodic sync. This is **architecturally impossible** today because the engine does not persist the admin JWT needed to call central's API. Would require either (a) persisting/refreshing admin tokens or (b) a service-to-service auth mechanism between engine and central.
+- **AI config validation on install** — Future AI apps may need to validate AI config before installation. Deferred until those apps exist. AI Data Liaison already handles its own config requirements.
 - **Notification delivery** — How apps send alerts (webhook, email, in-app). Deferred.
