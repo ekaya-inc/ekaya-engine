@@ -10,47 +10,56 @@ linters:
   enable:
     - govet
     - ineffassign
-    # - staticcheck  # Disabled temporarily - working on cleanup
-    # - errcheck  # Disabled temporarily - defer patterns cleanup needed
-    # - misspell  # Disabled temporarily - false positives on variable names
     - whitespace
   disable:
-    - unused  # Disabled temporarily - many helper functions pending usage
+    - unused       # Disabled temporarily - many helper functions pending usage
     - staticcheck  # Disabled temporarily - working on cleanup
-    - errcheck  # Disabled temporarily - defer patterns cleanup needed
-    - misspell  # Disabled temporarily - false positives on variable names
+    - errcheck     # Disabled temporarily - defer patterns cleanup needed
+    - misspell     # Disabled temporarily - false positives on variable names
 
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    check-blank: false
-    exclude-functions:
-      - (*database/sql.DB).Close
-      - (*database/sql.Rows).Close
-      - (*database/sql.Stmt).Close
-      - (*net/http.Response.Body).Close
-  misspell:
-    locale: US
-    ignore-words:
-      - ect
-      - EnhancedCloudTools
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: false
+      exclude-functions:
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+        - (*net/http.Response.Body).Close
+    misspell:
+      locale: US
+      ignore-rules:
+        - ect
+        - EnhancedCloudTools
 
-issues:
-  exclude:
-    - "`ect` is a misspelling of `etc`"
-    - "Error return value of.*Close.*is not checked"
-    - "Error return value of.*Delete.*is not checked"
-    - "Error return value of.*Set.*is not checked"
-    - "Error return value of.*AddMessage.*is not checked"
-    - "Error return value of.*StoreKnowledge.*is not checked"
-    - "Error return value of.*UpdateState.*is not checked"
-    - "Error return value of.*ArchiveSession.*is not checked"
-    - "Error return value of.*saveToCache.*is not checked"
-    - "SA9003: empty branch"
-    - "S1009:.*should omit nil check"
-    - "SA1019:.*Record.*deprecated"
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
-      text: "Error return value of `(os\\.Setenv|os\\.Unsetenv)` is not checked"
+  # Exclusion rules for when errcheck/staticcheck/misspell are re-enabled.
+  # Each rule requires at least 2 of: text, source, path, linters.
+  exclusions:
+    rules:
+      - linters: [misspell]
+        text: "`ect` is a misspelling of `etc`"
+      - linters: [errcheck]
+        text: "Error return value of.*Close.*is not checked"
+      - linters: [errcheck]
+        text: "Error return value of.*Delete.*is not checked"
+      - linters: [errcheck]
+        text: "Error return value of.*Set.*is not checked"
+      - linters: [errcheck]
+        text: "Error return value of.*AddMessage.*is not checked"
+      - linters: [errcheck]
+        text: "Error return value of.*StoreKnowledge.*is not checked"
+      - linters: [errcheck]
+        text: "Error return value of.*UpdateState.*is not checked"
+      - linters: [errcheck]
+        text: "Error return value of.*ArchiveSession.*is not checked"
+      - linters: [errcheck]
+        text: "Error return value of.*saveToCache.*is not checked"
+      - linters: [staticcheck]
+        text: "SA9003: empty branch"
+      - linters: [staticcheck]
+        text: "S1009:.*should omit nil check"
+      - linters: [staticcheck]
+        text: "SA1019:.*Record.*deprecated"
+      - path: _test\.go
+        linters: [errcheck]
+        text: "Error return value of `(os\\.Setenv|os\\.Unsetenv)` is not checked"
