@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
@@ -11,9 +13,17 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
+// AppLifecycleHook is called after app lifecycle events complete successfully.
+// Used by the tunnel manager to start/stop tunnels on activate/uninstall.
+type AppLifecycleHook interface {
+	OnAppActivated(ctx context.Context, projectID uuid.UUID, appID string)
+	OnAppUninstalled(ctx context.Context, projectID uuid.UUID, appID string)
+}
+
 // InstalledAppHandler handles installed apps HTTP requests.
 type InstalledAppHandler struct {
 	installedAppService services.InstalledAppService
+	lifecycleHook       AppLifecycleHook
 	logger              *zap.Logger
 }
 
@@ -23,6 +33,11 @@ func NewInstalledAppHandler(installedAppService services.InstalledAppService, lo
 		installedAppService: installedAppService,
 		logger:              logger,
 	}
+}
+
+// SetLifecycleHook sets an optional hook that is called after app lifecycle events.
+func (h *InstalledAppHandler) SetLifecycleHook(hook AppLifecycleHook) {
+	h.lifecycleHook = hook
 }
 
 // RegisterRoutes registers the installed app handler's routes on the given mux.
@@ -228,6 +243,11 @@ func (h *InstalledAppHandler) Activate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Notify lifecycle hook (e.g., start tunnel for mcp-tunnel app)
+	if h.lifecycleHook != nil {
+		h.lifecycleHook.OnAppActivated(r.Context(), projectID, appID)
+	}
+
 	response := ApiResponse{Success: true, Data: map[string]string{"status": result.Status}}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
@@ -285,6 +305,11 @@ func (h *InstalledAppHandler) Uninstall(w http.ResponseWriter, r *http.Request) 
 			h.logger.Error("Failed to write response", zap.Error(err))
 		}
 		return
+	}
+
+	// Notify lifecycle hook (e.g., stop tunnel for mcp-tunnel app)
+	if h.lifecycleHook != nil {
+		h.lifecycleHook.OnAppUninstalled(r.Context(), projectID, appID)
 	}
 
 	response := ApiResponse{Success: true, Data: map[string]string{"status": result.Status}}
@@ -354,6 +379,16 @@ func (h *InstalledAppHandler) Callback(w http.ResponseWriter, r *http.Request) {
 			h.logger.Error("Failed to write error response", zap.Error(err))
 		}
 		return
+	}
+
+	// Notify lifecycle hook after successful callback completion
+	if h.lifecycleHook != nil && req.Status == "success" {
+		switch req.Action {
+		case "activate":
+			h.lifecycleHook.OnAppActivated(r.Context(), projectID, appID)
+		case "uninstall":
+			h.lifecycleHook.OnAppUninstalled(r.Context(), projectID, appID)
+		}
 	}
 
 	response := ApiResponse{Success: true, Data: map[string]string{

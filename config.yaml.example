@@ -134,3 +134,19 @@ mcp:
 # auth:
 #   jwks_endpoints: "https://auth.yourauthservice=https://auth.yourauthservice/.well-known/jwks.json"
 #
+
+#
+# MCP Tunnel
+#
+# Outbound WebSocket connection to the ekaya-tunnel relay server.
+# When the mcp-tunnel app is activated for a project, the engine connects
+# to this server and registers, giving the project a public MCP URL.
+#
+# tunnel:
+#   server_url: "https://mcp.ekaya.ai"
+#   # Phase 3 mTLS (leave empty for Phase 1):
+#   # tls_cert_file: "/path/to/client-cert.pem"
+#   # tls_key_file: "/path/to/client-key.pem"
+#
+# Environment variable overrides:
+# TUNNEL_SERVER_URL, TUNNEL_TLS_CERT_FILE, TUNNEL_TLS_KEY_FILE
