@@ -13,6 +13,10 @@ PORT ?= 3443
 # Build tags for datasource adapters (postgres, all_adapters)
 BUILD_TAGS ?= all_adapters
 
+# Auto-detect DOCKER_HOST from Docker context (needed for OrbStack, colima, etc.)
+DOCKER_HOST ?= $(shell docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null)
+export DOCKER_HOST
+
 # Git commit and date for dev tags
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "no-git")
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
