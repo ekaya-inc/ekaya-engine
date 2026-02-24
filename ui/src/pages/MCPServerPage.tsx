@@ -32,6 +32,7 @@ const MCPServerPage = () => {
   const [aiConfig, setAiConfig] = useState<AIConfigResponse | null>(null);
   const [dagStatus, setDagStatus] = useState<DAGStatusResponse | null>(null);
   const [questionCounts, setQuestionCounts] = useState<{ required: number; optional: number } | null>(null);
+  const [hasApprovedQueries, setHasApprovedQueries] = useState(false);
 
   // Read tool group configs from backend
   const developerState = config?.toolGroups[TOOL_GROUP_IDS.DEVELOPER];
@@ -80,6 +81,14 @@ const MCPServerPage = () => {
           setQuestionCounts(countsRes.data ?? null);
         } catch {
           setQuestionCounts(null);
+        }
+
+        try {
+          const queriesRes = await engineApi.listQueries(pid, ds.datasource_id);
+          const approvedCount = queriesRes.data?.queries?.filter((q) => q.status === 'approved').length ?? 0;
+          setHasApprovedQueries(approvedCount > 0);
+        } catch {
+          setHasApprovedQueries(false);
         }
       }
     } catch (error) {
@@ -130,7 +139,25 @@ const MCPServerPage = () => {
     }
     items.push(schemaItem);
 
-    // 3. AI configured
+    // 3. Create Pre-Approved Queries (optional)
+    const queriesItem: ChecklistItem = {
+      id: 'queries',
+      title: 'Create Pre-Approved Queries',
+      description: hasApprovedQueries
+        ? 'Pre-approved queries are available for the MCP Server'
+        : datasource
+          ? 'Create pre-approved SQL queries for the MCP Server to use'
+          : 'Configure datasource first',
+      status: loading ? 'loading' : hasApprovedQueries ? 'complete' : 'pending',
+      linkText: hasApprovedQueries ? 'Manage' : 'Configure',
+      optional: true,
+    };
+    if (datasource) {
+      queriesItem.link = `/projects/${pid}/queries`;
+    }
+    items.push(queriesItem);
+
+    // 4. AI configured (renumbered from 3)
     const isAIConfigured = !!aiConfig?.config_type && aiConfig.config_type !== 'none';
     const aiConfigItem: ChecklistItem = {
       id: 'ai-config',
@@ -148,7 +175,7 @@ const MCPServerPage = () => {
     }
     items.push(aiConfigItem);
 
-    // 4. Ontology extracted
+    // 5. Ontology extracted
     const ontologyComplete = dagStatus?.status === 'completed';
     const ontologyRunning = dagStatus?.status === 'running';
     const ontologyFailed = dagStatus?.status === 'failed';
@@ -179,7 +206,7 @@ const MCPServerPage = () => {
     }
     items.push(ontologyItem);
 
-    // 5. Critical ontology questions answered
+    // 6. Critical ontology questions answered
     const questionsComplete = questionCounts !== null && questionCounts.required === 0;
     const hasQuestions = questionCounts !== null && (questionCounts.required > 0 || questionsComplete);
     const questionsItem: ChecklistItem = {
