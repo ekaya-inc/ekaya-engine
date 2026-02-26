@@ -97,15 +97,15 @@ const ServerSetupPage = () => {
         <Button
           variant="ghost"
           size="icon"
-          aria-label="Back to AI Data Liaison"
-          onClick={() => navigate(`/projects/${pid}/ai-data-liaison`)}
+          aria-label="Back to MCP Server"
+          onClick={() => navigate(`/projects/${pid}/mcp-server`)}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div>
           <h1 className="text-2xl font-bold">Server Setup</h1>
           <p className="text-text-secondary">
-            Configure your server for business user access over HTTPS
+            Configure HTTPS on a reachable domain for other users
           </p>
         </div>
       </div>
@@ -123,8 +123,8 @@ const ServerSetupPage = () => {
           </CardTitle>
           <CardDescription>
             {isAccessible
-              ? 'Your server is properly configured for business users'
-              : 'Your server needs configuration before business users can connect'}
+              ? 'Your server is properly configured for other users'
+              : 'Your server needs configuration before other users can connect'}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
