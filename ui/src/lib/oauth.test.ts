@@ -34,12 +34,13 @@ describe('initiateOAuthFlow', () => {
       port: '3443',
     };
 
-    // Mock sessionStorage
+    // Mock sessionStorage (spy on instance for Node.js v25+ compat where native
+    // Storage uses C++ dispatch that bypasses JS prototype spies)
     mockSessionStorage = {};
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation((key, value) => {
+    vi.spyOn(sessionStorage, 'setItem').mockImplementation((key, value) => {
       mockSessionStorage[key] = value;
     });
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation((key) => {
+    vi.spyOn(sessionStorage, 'getItem').mockImplementation((key) => {
       return mockSessionStorage[key] ?? null;
     });
 
@@ -168,16 +169,16 @@ describe('initiateOAuthFlow', () => {
   });
 
   it('should use different state value on each call', async () => {
-    // Clear previous mocks
+    // Clear previous mocks so we use real crypto for state generation
     vi.restoreAllMocks();
 
     // First call with real crypto
     await initiateOAuthFlow(mockConfig, 'project1');
-    const firstState = mockSessionStorage['oauth_state'];
+    const firstState = sessionStorage.getItem('oauth_state');
 
     // Second call
     await initiateOAuthFlow(mockConfig, 'project2');
-    const secondState = mockSessionStorage['oauth_state'];
+    const secondState = sessionStorage.getItem('oauth_state');
 
     // States should be different (CSRF protection)
     expect(firstState).toBeDefined();
