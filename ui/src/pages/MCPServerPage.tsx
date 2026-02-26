@@ -13,7 +13,7 @@ import { useConfig } from '../contexts/ConfigContext';
 import { useToast } from '../hooks/useToast';
 import { getUserRoles } from '../lib/auth-token';
 import engineApi from '../services/engineApi';
-import type { AIConfigResponse, DAGStatusResponse, Datasource, MCPConfigResponse } from '../types';
+import type { AIConfigResponse, DAGStatusResponse, Datasource, MCPConfigResponse, ServerStatusResponse } from '../types';
 
 const MCPServerPage = () => {
   const navigate = useNavigate();
@@ -33,6 +33,7 @@ const MCPServerPage = () => {
   const [dagStatus, setDagStatus] = useState<DAGStatusResponse | null>(null);
   const [questionCounts, setQuestionCounts] = useState<{ required: number; optional: number } | null>(null);
   const [hasApprovedQueries, setHasApprovedQueries] = useState(false);
+  const [serverStatus, setServerStatus] = useState<ServerStatusResponse | null>(null);
 
   // Read tool group configs from backend
   const developerState = config?.toolGroups[TOOL_GROUP_IDS.DEVELOPER];
@@ -44,10 +45,11 @@ const MCPServerPage = () => {
 
     try {
       setLoading(true);
-      const [mcpRes, datasourcesRes, aiConfigRes] = await Promise.all([
+      const [mcpRes, datasourcesRes, aiConfigRes, serverStatusRes] = await Promise.all([
         engineApi.getMCPConfig(pid),
         engineApi.listDataSources(pid),
         engineApi.getAIConfig(pid),
+        engineApi.getServerStatus(),
       ]);
 
       if (mcpRes.success && mcpRes.data) {
@@ -59,6 +61,7 @@ const MCPServerPage = () => {
       const ds = datasourcesRes.data?.datasources?.[0] ?? null;
       setDatasource(ds);
       setAiConfig(aiConfigRes.data ?? null);
+      setServerStatus(serverStatusRes);
 
       if (ds) {
         try {
@@ -363,6 +366,20 @@ const MCPServerPage = () => {
 
   const checklistItems = getChecklistItems();
 
+  const isAccessible = serverStatus?.accessible_for_business_users ?? false;
+  const deploymentItems: ChecklistItem[] = [
+    {
+      id: 'server-accessible',
+      title: 'MCP Server securely deployed',
+      description: isAccessible
+        ? 'Server is reachable by other users over HTTPS'
+        : 'Configure HTTPS on a reachable domain for other users',
+      status: loading ? 'loading' : isAccessible ? 'complete' : 'pending',
+      link: `/projects/${pid}/server-setup`,
+      linkText: isAccessible ? 'Review' : 'Configure',
+    },
+  ];
+
   return (
     <div className="mx-auto max-w-4xl">
       <div className="mb-6">
@@ -387,6 +404,14 @@ const MCPServerPage = () => {
           title="Setup Checklist"
           description="Complete these steps to enable the MCP Server"
           completeDescription="MCP Server is ready"
+        />
+
+        {/* Deployment Checklist */}
+        <SetupChecklist
+          items={deploymentItems}
+          title="Deployment"
+          description="Optional steps for sharing with other users"
+          completeDescription="MCP Server is accessible to other users"
         />
 
         {config && (

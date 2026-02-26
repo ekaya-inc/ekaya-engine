@@ -17,6 +17,7 @@ vi.mock('../../services/engineApi', () => ({
     getOntologyQuestionCounts: vi.fn(),
     updateMCPConfig: vi.fn(),
     listQueries: vi.fn(),
+    getServerStatus: vi.fn(),
   },
 }));
 
@@ -97,6 +98,8 @@ const setupMocks = (options: {
     success: true,
     data: mockMCPConfig,
   });
+
+  vi.mocked(engineApi.getServerStatus).mockResolvedValue(null);
 
   vi.mocked(engineApi.listDataSources).mockResolvedValue({
     success: true,
