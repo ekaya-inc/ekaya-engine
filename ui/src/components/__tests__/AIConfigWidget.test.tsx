@@ -149,6 +149,99 @@ describe('AIConfigWidget', () => {
     });
   });
 
+  describe('Provider Selection', () => {
+    it('selecting a provider updates the displayed provider and base URL', async () => {
+      render(
+        <AIConfigWidget
+          projectId={projectId}
+          onConfigChange={mockOnConfigChange}
+        />
+      );
+
+      await waitFor(() => {
+        expect(engineApi.getAIConfig).toHaveBeenCalledWith(projectId);
+      });
+
+      // Open BYOK panel
+      fireEvent.click(screen.getByText('Bring Your Own AI Keys'));
+      await waitFor(() => {
+        expect(screen.getByText('Provider')).toBeInTheDocument();
+      });
+
+      // Default provider should be OpenAI
+      expect(screen.getByText('OpenAI')).toBeInTheDocument();
+
+      // Open provider dropdown
+      fireEvent.click(screen.getByText('OpenAI'));
+
+      // Select Anthropic
+      fireEvent.click(screen.getByText('Anthropic'));
+
+      // Provider button should now show Anthropic
+      // The dropdown should be closed and the model should be auto-filled
+      await waitFor(() => {
+        const modelInput = screen.getByPlaceholderText('gpt-4o, claude-haiku-4-5, llama3.1');
+        expect(modelInput).toHaveValue('claude-haiku-4-5');
+      });
+    });
+
+    it('selecting Custom provider shows URL input field', async () => {
+      render(
+        <AIConfigWidget
+          projectId={projectId}
+          onConfigChange={mockOnConfigChange}
+        />
+      );
+
+      await waitFor(() => {
+        expect(engineApi.getAIConfig).toHaveBeenCalledWith(projectId);
+      });
+
+      // Open BYOK panel
+      fireEvent.click(screen.getByText('Bring Your Own AI Keys'));
+      await waitFor(() => {
+        expect(screen.getByText('Provider')).toBeInTheDocument();
+      });
+
+      // Open provider dropdown and select Custom
+      fireEvent.click(screen.getByText('OpenAI'));
+      fireEvent.click(screen.getByText('Custom'));
+
+      // Custom URL input should appear
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText('https://your-endpoint.com/v1')).toBeInTheDocument();
+      });
+    });
+
+    it('selecting Azure OpenAI provider shows URL input with Azure placeholder', async () => {
+      render(
+        <AIConfigWidget
+          projectId={projectId}
+          onConfigChange={mockOnConfigChange}
+        />
+      );
+
+      await waitFor(() => {
+        expect(engineApi.getAIConfig).toHaveBeenCalledWith(projectId);
+      });
+
+      // Open BYOK panel
+      fireEvent.click(screen.getByText('Bring Your Own AI Keys'));
+      await waitFor(() => {
+        expect(screen.getByText('Provider')).toBeInTheDocument();
+      });
+
+      // Open provider dropdown and select Azure OpenAI
+      fireEvent.click(screen.getByText('OpenAI'));
+      fireEvent.click(screen.getByText('Azure OpenAI'));
+
+      // Azure URL input should appear with Azure-specific placeholder
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText('https://your-resource.openai.azure.com')).toBeInTheDocument();
+      });
+    });
+  });
+
   describe('Error Handling', () => {
     it('displays error when save fails', async () => {
       // Set up test connection to succeed (required to enable save button)
