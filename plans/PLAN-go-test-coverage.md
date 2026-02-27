@@ -217,9 +217,9 @@ File to create: `pkg/services/knowledge_parsing_test.go`
 
 #### `pkg/services/mcp_audit_service.go` — (0 tests)
 
-- [ ] Read `pkg/services/mcp_audit_service.go`
-- [ ] If it contains validation or transformation beyond simple repo passthrough, add targeted tests
-- [ ] If it's a thin wrapper, skip
+- [x] Read `pkg/services/mcp_audit_service.go`
+- [x] If it contains validation or transformation beyond simple repo passthrough, add targeted tests
+- [x] If it's a thin wrapper, skip — confirmed thin wrapper, both Record and List are direct repo passthrough with error logging
 
 ### Phase 5 — Handler Error Paths
 
