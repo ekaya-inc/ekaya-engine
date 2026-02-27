@@ -198,10 +198,10 @@ File to create: `pkg/services/tenant_context_test.go`
 
 File to create: `pkg/services/knowledge_parsing_test.go`
 
-- [ ] Add test for `ParseAndStore` with empty/whitespace-only text — verify error without hitting LLM
-- [ ] Add test for `ParseAndStore` with LLM factory error — verify error propagates
-- [ ] Mock `LLMClientFactory` to return a `MockLLMClient` that returns a known JSON response, verify facts are created via mock `KnowledgeService`
-- [ ] Run `go test ./pkg/services/... -run TestKnowledgeParsing -count=1`
+- [x] Add test for `ParseAndStore` with empty/whitespace-only text — verify error without hitting LLM
+- [x] Add test for `ParseAndStore` with LLM factory error — verify error propagates
+- [x] Mock `LLMClientFactory` to return a `MockLLMClient` that returns a known JSON response, verify facts are created via mock `KnowledgeService`
+- [x] Run `go test ./pkg/services/... -run TestKnowledgeParsing -count=1`
 
 #### `pkg/services/ontology_question.go` — Orchestration edge cases (0 tests)
 
