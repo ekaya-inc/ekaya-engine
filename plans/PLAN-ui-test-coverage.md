@@ -61,7 +61,7 @@ Read `src/services/__tests__/engineApi.test.ts` first — existing tests cover `
 
 File to create: `src/services/__tests__/engineApi.methods.test.ts`
 
-- [ ] Add tests for datasource methods: `createDataSource`, `updateDataSource`, `deleteDataSource`, `listDataSources`, `getDataSource`, `renameDatasource` — verify correct URL, HTTP method, request body, and parsed response
+- [x] Add tests for datasource methods: `createDataSource`, `updateDataSource`, `deleteDataSource`, `listDataSources`, `getDataSource`, `renameDatasource` — verify correct URL, HTTP method, request body, and parsed response
 - [ ] Add tests for schema operation methods: `refreshSchema`, `getSchema`, `getOntology`, `getContext`, `searchSchema` — verify correct URL and response parsing
 - [ ] Add tests for query CRUD methods: `listQueries`, `getQuery`, `createQuery`, `updateQuery`, `deleteQuery` — verify correct URL, HTTP method, body
 - [ ] Add tests for query execution methods: `executeQuery`, `explainQuery`, `validateQuery` — verify correct URL, body, and response parsing
