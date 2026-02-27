@@ -242,6 +242,74 @@ describe('AIConfigWidget', () => {
     });
   });
 
+  describe('Delete Operation', () => {
+    it('calls engineApi.deleteAIConfig and updates UI state', async () => {
+      // Load with an existing BYOK config so remove button is available
+      vi.mocked(engineApi.getAIConfig).mockResolvedValue({
+        success: true,
+        data: {
+          project_id: projectId,
+          config_type: 'byok',
+          llm_base_url: 'https://api.openai.com/v1',
+          llm_api_key: 'sk-***...',
+          llm_model: 'gpt-4o',
+        },
+      });
+
+      vi.mocked(engineApi.deleteAIConfig).mockResolvedValue(undefined);
+
+      render(
+        <AIConfigWidget
+          projectId={projectId}
+          onConfigChange={mockOnConfigChange}
+        />
+      );
+
+      await waitFor(() => {
+        expect(engineApi.getAIConfig).toHaveBeenCalledWith(projectId);
+      });
+
+      // onConfigChange should have been called with 'byok' on load
+      expect(mockOnConfigChange).toHaveBeenCalledWith('byok');
+      mockOnConfigChange.mockClear();
+
+      // Open BYOK panel — should show "Remove Configuration" since config is active
+      fireEvent.click(screen.getByText('Bring Your Own AI Keys'));
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /remove configuration/i })).toBeInTheDocument();
+      });
+
+      // Click "Remove Configuration" — opens confirmation dialog
+      fireEvent.click(screen.getByRole('button', { name: /remove configuration/i }));
+
+      // Confirm removal in dialog
+      await waitFor(() => {
+        expect(screen.getByTestId('dialog-root')).toBeInTheDocument();
+      });
+      const dialogButtons = screen.getByTestId('dialog-root').querySelectorAll('button');
+      const confirmButton = Array.from(dialogButtons).find(
+        (btn) => btn.textContent === 'Remove Configuration'
+      )!;
+      fireEvent.click(confirmButton);
+
+      // Verify deleteAIConfig was called with the project ID
+      await waitFor(() => {
+        expect(engineApi.deleteAIConfig).toHaveBeenCalledWith(projectId);
+      });
+
+      // Verify onConfigChange was called with null (config removed)
+      await waitFor(() => {
+        expect(mockOnConfigChange).toHaveBeenCalledWith(null);
+      });
+
+      // The button should now show "Save Configuration" instead of "Remove Configuration"
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /save configuration/i })).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('button', { name: /remove configuration/i })).not.toBeInTheDocument();
+    });
+  });
+
   describe('Error Handling', () => {
     it('displays error when save fails', async () => {
       // Set up test connection to succeed (required to enable save button)
