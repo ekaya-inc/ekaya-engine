@@ -68,27 +68,27 @@ for _, tt := range tests {
 
 File to create: `pkg/jsonutil/flexible_test.go`
 
-- [ ] Add table-driven tests for `FlexibleStringValue`: string input `"hello"`, integer `42`, float `3.14`, boolean `true`/`false`, null, empty `json.RawMessage`, large integer (precision edge), nested object/array fallback to raw string
-- [ ] Run `go test ./pkg/jsonutil/... -count=1` and confirm all tests pass
+- [x] Add table-driven tests for `FlexibleStringValue`: string input `"hello"`, integer `42`, float `3.14`, boolean `true`/`false`, null, empty `json.RawMessage`, large integer (precision edge), nested object/array fallback to raw string
+- [x] Run `go test ./pkg/jsonutil/... -count=1` and confirm all tests pass
 
 #### `pkg/services/precedence_service.go` (65 lines, 0 tests)
 
 File to create: `pkg/services/precedence_service_test.go`
 
-- [ ] Read `pkg/services/precedence_service.go` and `pkg/models/provenance.go` to confirm provenance constants
-- [ ] Add tests for `GetPrecedenceLevel`: verify Manual=3, MCP=2, Inference=1, unknown=0
-- [ ] Add tests for `GetEffectiveSource`: updatedBy set vs nil, empty string updatedBy
-- [ ] Add tests for `CanModify`: Manual can modify all, MCP can modify MCP+Inference but not Manual, Inference can only modify Inference, unknown source behavior
-- [ ] Run `go test ./pkg/services/... -run TestPrecedence -count=1` and confirm all tests pass
+- [x] Read `pkg/services/precedence_service.go` and `pkg/models/provenance.go` to confirm provenance constants
+- [x] Add tests for `GetPrecedenceLevel`: verify Manual=3, MCP=2, Inference=1, unknown=0
+- [x] Add tests for `GetEffectiveSource`: updatedBy set vs nil, empty string updatedBy
+- [x] Add tests for `CanModify`: Manual can modify all, MCP can modify MCP+Inference but not Manual, Inference can only modify Inference, unknown source behavior
+- [x] Run `go test ./pkg/services/... -run TestPrecedence -count=1` and confirm all tests pass
 
 #### `pkg/handlers/response.go` (26 lines, 0 tests)
 
 File to create: `pkg/handlers/response_test.go`
 
-- [ ] Add test for `ErrorResponse`: verify Content-Type header, status code, JSON body shape (`error` and `message` keys)
-- [ ] Add test for `WriteJSON`: verify Content-Type, status 200 does not call WriteHeader explicitly, non-200 does, JSON body matches input struct
-- [ ] Add test for `WriteJSON` with unencodable data (e.g., `chan int`) — verify error is returned
-- [ ] Run `go test ./pkg/handlers/... -run TestResponse -count=1` and confirm all tests pass
+- [x] Add test for `ErrorResponse`: verify Content-Type header, status code, JSON body shape (`error` and `message` keys)
+- [x] Add test for `WriteJSON`: verify Content-Type, status 200 does not call WriteHeader explicitly, non-200 does, JSON body matches input struct
+- [x] Add test for `WriteJSON` with unencodable data (e.g., `chan int`) — verify error is returned
+- [x] Run `go test ./pkg/handlers/... -run TestResponse -count=1` and confirm all tests pass
 
 ### Phase 2 — LLM Package Edge Cases (streaming, tool execution, factory)
 
