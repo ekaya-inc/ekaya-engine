@@ -132,8 +132,7 @@ func (s *ontologyFinalizationService) Finalize(ctx context.Context, projectID uu
 	// Discover project conventions using pre-extracted insights
 	conventions, err := s.discoverConventionsWithInsights(ctx, projectID, tables, columnsByTable, insights)
 	if err != nil {
-		s.logger.Debug("Failed to discover conventions, continuing without", zap.Error(err))
-		// Non-fatal - continue without conventions
+		return fmt.Errorf("discover conventions: %w", err)
 	}
 
 	// Save to domain_summary JSONB

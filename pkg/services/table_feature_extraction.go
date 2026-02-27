@@ -220,6 +220,10 @@ func (s *tableFeatureExtractionService) ExtractTableFeatures(
 		zap.Int("tables_processed", successCount),
 		zap.Int("tables_failed", len(failedTables)))
 
+	// Fail fast: propagate LLM errors instead of silently continuing
+	if err := llm.CheckResults(results); err != nil {
+		return successCount, fmt.Errorf("table feature extraction: %w", err)
+	}
 	return successCount, nil
 }
 

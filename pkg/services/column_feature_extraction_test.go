@@ -1427,11 +1427,13 @@ func TestRunPhase2ColumnClassification_ContinuesOnFailure(t *testing.T) {
 	}
 
 	result, err := svc.runPhase2ColumnClassification(context.Background(), projectID, profiles, nil)
-	if err != nil {
-		t.Fatalf("runPhase2ColumnClassification() error = %v (should continue on individual failures)", err)
+
+	// Should return error when LLM calls fail (fail fast)
+	if err == nil {
+		t.Fatal("runPhase2ColumnClassification() should return error on LLM failures")
 	}
 
-	// Should have 2 successful results (1 failure)
+	// Should still have 2 successful results in partial output
 	if len(result.Features) != 2 {
 		t.Errorf("len(Features) = %d, want 2 (1 failure)", len(result.Features))
 	}
@@ -2065,9 +2067,9 @@ func TestRunPhase3EnumAnalysis_ContinuesOnFailure(t *testing.T) {
 		nil,
 	)
 
-	// Should not return error - continues on individual failures
-	if err != nil {
-		t.Errorf("runPhase3EnumAnalysis() should continue on individual failures, got error: %v", err)
+	// Should return error when LLM calls fail (fail fast)
+	if err == nil {
+		t.Fatal("runPhase3EnumAnalysis() should return error on LLM failures")
 	}
 
 	// All 3 LLM calls should have been attempted
@@ -2918,9 +2920,9 @@ func TestRunPhase5CrossColumnAnalysis_ContinuesOnFailure(t *testing.T) {
 		nil,
 	)
 
-	// Should not return error - continues on individual failures
-	if err != nil {
-		t.Errorf("runPhase5CrossColumnAnalysis() should continue on individual failures, got error: %v", err)
+	// Should return error when LLM calls fail (fail fast)
+	if err == nil {
+		t.Fatal("runPhase5CrossColumnAnalysis() should return error on LLM failures")
 	}
 
 	// All 3 LLM calls should have been attempted

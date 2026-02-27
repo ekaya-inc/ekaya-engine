@@ -110,16 +110,21 @@ func (c *Client) GenerateResponse(
 
 	start := time.Now()
 
-	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+	req := openai.ChatCompletionRequest{
 		Model:       c.model,
 		Messages:    messages,
 		Temperature: float32(temperature),
-		// Control thinking/reasoning mode via chat_template_kwargs
-		// Works with vLLM, Nemotron, Qwen3 and other models that support it
-		ChatTemplateKwargs: map[string]any{
+	}
+
+	// chat_template_kwargs is a vLLM extension for controlling thinking/reasoning mode.
+	// Only send it to vLLM-compatible endpoints; commercial APIs (OpenAI, etc.) reject it.
+	if c.supportsChatTemplateKwargs() {
+		req.ChatTemplateKwargs = map[string]any{
 			"enable_thinking": thinking,
-		},
-	})
+		}
+	}
+
+	resp, err := c.client.CreateChatCompletion(ctx, req)
 	if err != nil {
 		c.logger.Error("LLM request failed",
 			zap.Duration("elapsed", time.Since(start)),
@@ -198,6 +203,22 @@ func (c *Client) GetModel() string {
 // GetEndpoint returns the configured endpoint.
 func (c *Client) GetEndpoint() string {
 	return c.endpoint
+}
+
+// supportsChatTemplateKwargs returns true if the model supports the
+// chat_template_kwargs extension for controlling thinking/reasoning mode.
+// Only vLLM-served models (Ekaya's own, Qwen, and Nemotron) use this parameter.
+func (c *Client) supportsChatTemplateKwargs() bool {
+	switch {
+	case c.model == "ekaya-community", c.model == "ekaya-security":
+		return true
+	case strings.HasPrefix(strings.ToLower(c.model), "qwen"):
+		return true
+	case strings.HasPrefix(strings.ToLower(c.model), "nemotron"):
+		return true
+	default:
+		return false
+	}
 }
 
 // parseError categorizes OpenAI API errors using the structured Error type.

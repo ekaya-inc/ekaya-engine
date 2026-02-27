@@ -619,7 +619,8 @@ func TestColumnEnrichmentService_EnrichProject_NonRetryableError(t *testing.T) {
 	// Verify - should fail after retrying (retry.Do will still attempt retries)
 	// Note: retry.Do attempts all retries even for non-retryable errors,
 	// but logs them differently as "non-retryable"
-	require.NoError(t, err) // EnrichProject continues on table failures
+	require.Error(t, err) // EnrichProject now fails fast on table failures
+	assert.Contains(t, err.Error(), "1 of 1 tables failed enrichment")
 	assert.Equal(t, 0, len(result.TablesEnriched))
 	assert.Equal(t, 1, len(result.TablesFailed))
 
@@ -832,8 +833,9 @@ func TestColumnEnrichmentService_EnrichProject_PartialFailure(t *testing.T) {
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, []string{"table1", "table2", "table3"}, nil)
 
-	// Verify - should continue despite failure on table2
-	require.NoError(t, err, "EnrichProject should not return error for partial failures")
+	// Verify - should fail fast on partial failures
+	require.Error(t, err, "EnrichProject should return error for partial failures")
+	assert.Contains(t, err.Error(), "1 of 3 tables failed enrichment")
 	assert.Equal(t, 2, len(result.TablesEnriched), "Should enrich table1 and table3")
 	assert.Equal(t, 1, len(result.TablesFailed), "Should have 1 failed table")
 	assert.Contains(t, result.TablesFailed, "table2")
@@ -1181,8 +1183,9 @@ func TestColumnEnrichmentService_EnrichProject_ContinuesOnFailure(t *testing.T) 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, []string{"table1", "table2", "table3"}, nil)
 
-	// Verify - should not return error but track failures
-	require.NoError(t, err)
+	// Verify - should fail fast and track failures
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "1 of 3 tables failed enrichment")
 	assert.Equal(t, 2, len(result.TablesEnriched), "Should enrich table1 and table3")
 	assert.Equal(t, 1, len(result.TablesFailed), "Should track table2 failure")
 	assert.Contains(t, result.TablesFailed, "table2")
