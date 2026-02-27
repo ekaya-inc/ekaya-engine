@@ -205,22 +205,20 @@ func (c *Client) GetEndpoint() string {
 	return c.endpoint
 }
 
-// supportsChatTemplateKwargs returns true if the endpoint is a vLLM-compatible
-// server that supports the chat_template_kwargs extension. Commercial APIs
-// (OpenAI, Azure OpenAI) reject this parameter with HTTP 400.
+// supportsChatTemplateKwargs returns true if the model supports the
+// chat_template_kwargs extension for controlling thinking/reasoning mode.
+// Only vLLM-served models (Ekaya's own, Qwen, and Nemotron) use this parameter.
 func (c *Client) supportsChatTemplateKwargs() bool {
-	endpoint := strings.ToLower(c.endpoint)
-	// Known commercial APIs that don't support chat_template_kwargs
-	commercialHosts := []string{
-		"api.openai.com",
-		"openai.azure.com",
+	switch {
+	case c.model == "ekaya-community", c.model == "ekaya-security":
+		return true
+	case strings.HasPrefix(strings.ToLower(c.model), "qwen"):
+		return true
+	case strings.HasPrefix(strings.ToLower(c.model), "nemotron"):
+		return true
+	default:
+		return false
 	}
-	for _, host := range commercialHosts {
-		if strings.Contains(endpoint, host) {
-			return false
-		}
-	}
-	return true
 }
 
 // parseError categorizes OpenAI API errors using the structured Error type.
