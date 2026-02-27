@@ -169,7 +169,7 @@ func TestClientFactory_SetRecorder_NilDisablesWrapping(t *testing.T) {
 
 type mockConversationRecorder struct{}
 
-func (m *mockConversationRecorder) Record(conv *models.LLMConversation)                         {}
+func (m *mockConversationRecorder) Record(conv *models.LLMConversation) {}
 func (m *mockConversationRecorder) SavePending(ctx context.Context, conv *models.LLMConversation) error {
 	return nil
 }

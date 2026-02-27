@@ -17,14 +17,14 @@ import (
 // --- Mocks (only methods actually called by the service) ---
 
 type mockQuestionRepo struct {
-	getByIDFunc        func(ctx context.Context, id uuid.UUID) (*models.OntologyQuestion, error)
-	getNextPendingFunc func(ctx context.Context, projectID uuid.UUID) (*models.OntologyQuestion, error)
+	getByIDFunc          func(ctx context.Context, id uuid.UUID) (*models.OntologyQuestion, error)
+	getNextPendingFunc   func(ctx context.Context, projectID uuid.UUID) (*models.OntologyQuestion, error)
 	getPendingCountsFunc func(ctx context.Context, projectID uuid.UUID) (*repositories.QuestionCounts, error)
-	submitAnswerFunc   func(ctx context.Context, id uuid.UUID, answer string, answeredBy *uuid.UUID) error
-	createFunc         func(ctx context.Context, question *models.OntologyQuestion) error
-	updateStatusFunc   func(ctx context.Context, id uuid.UUID, status models.QuestionStatus) error
-	createBatchFunc    func(ctx context.Context, questions []*models.OntologyQuestion) error
-	listPendingFunc    func(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyQuestion, error)
+	submitAnswerFunc     func(ctx context.Context, id uuid.UUID, answer string, answeredBy *uuid.UUID) error
+	createFunc           func(ctx context.Context, question *models.OntologyQuestion) error
+	updateStatusFunc     func(ctx context.Context, id uuid.UUID, status models.QuestionStatus) error
+	createBatchFunc      func(ctx context.Context, questions []*models.OntologyQuestion) error
+	listPendingFunc      func(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyQuestion, error)
 }
 
 func (m *mockQuestionRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.OntologyQuestion, error) {
@@ -100,7 +100,7 @@ func (m *mockQuestionRepo) List(ctx context.Context, projectID uuid.UUID, filter
 }
 
 type mockOntologyRepo struct {
-	getActiveFunc          func(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error)
+	getActiveFunc           func(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error)
 	updateColumnDetailsFunc func(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error
 }
 

@@ -20,7 +20,7 @@ import (
 // ============================================================================
 
 type mockOntologyRepo struct {
-	getActiveFunc          func(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error)
+	getActiveFunc           func(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error)
 	updateColumnDetailsFunc func(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error
 }
 
@@ -77,8 +77,8 @@ func (m *mockKnowledgeRepo) DeleteBySource(ctx context.Context, projectID uuid.U
 }
 
 type mockSchemaRepo struct {
-	listTablesByDatasourceFunc  func(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error)
-	listAllColumnsByTableFunc   func(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error)
+	listTablesByDatasourceFunc func(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error)
+	listAllColumnsByTableFunc  func(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error)
 }
 
 // Implement only the methods actually called by tool_executor.go
