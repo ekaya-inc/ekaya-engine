@@ -240,11 +240,11 @@ Pick 2-3 handlers that have test files but may not test error paths:
 
 #### `pkg/central/client.go` — HTTP client error paths
 
-- [ ] Read `pkg/central/client.go` and existing `client_test.go` fully
-- [ ] Identify untested error paths: non-200 status codes, malformed JSON responses, timeout handling, URL construction edge cases
-- [ ] Add tests to existing `pkg/central/client_test.go` for: HTTP 500 error response handling, HTTP 404 handling, malformed JSON body, empty response body
-- [ ] Use `httptest.NewServer` to mock the central API (follow existing test patterns)
-- [ ] Run `go test ./pkg/central/... -count=1` and confirm all tests pass
+- [x] Read `pkg/central/client.go` and existing `client_test.go` fully
+- [x] Identify untested error paths: non-200 status codes, malformed JSON responses, timeout handling, URL construction edge cases
+- [x] Add tests to existing `pkg/central/client_test.go` for: HTTP 500 error response handling, HTTP 404 handling, malformed JSON body, empty response body
+- [x] Use `httptest.NewServer` to mock the central API (follow existing test patterns)
+- [x] Run `go test ./pkg/central/... -count=1` and confirm all tests pass
 
 ## Completion Criteria
 
