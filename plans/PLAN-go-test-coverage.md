@@ -98,12 +98,12 @@ File to create: `pkg/llm/streaming_test.go`
 
 The streaming client's `streamIteration` and `StreamWithTools` require a real OpenAI stream so skip those. Focus on the pure helper functions that are unit-testable:
 
-- [ ] Read `pkg/llm/streaming.go` fully to identify all pure functions
-- [ ] Add tests for `parseTextToolCalls`: valid XML tool call, multiple tool calls, malformed JSON inside XML, no matches, nested braces in arguments
-- [ ] Add tests for `cleanModelOutput`: remove `<think>` blocks, remove `<tool_call>` blocks, collapse triple+ newlines, content with no markup passes through unchanged
-- [ ] Add tests for `buildOpenAIMessages`: empty messages, system prompt + messages, messages with tool calls, messages with tool call IDs (tool role)
-- [ ] Add tests for `buildOpenAITools`: empty tools returns nil, single tool, tool with nested parameters JSON
-- [ ] Run `go test ./pkg/llm/... -run TestStreaming -count=1` and confirm all tests pass
+- [x] Read `pkg/llm/streaming.go` fully to identify all pure functions
+- [x] Add tests for `parseTextToolCalls`: valid XML tool call, multiple tool calls, malformed JSON inside XML, no matches, nested braces in arguments
+- [x] Add tests for `cleanModelOutput`: remove `<think>` blocks, remove `<tool_call>` blocks, collapse triple+ newlines, content with no markup passes through unchanged
+- [x] Add tests for `buildOpenAIMessages`: empty messages, system prompt + messages, messages with tool calls, messages with tool call IDs (tool role)
+- [x] Add tests for `buildOpenAITools`: empty tools returns nil, single tool, tool with nested parameters JSON
+- [x] Run `go test ./pkg/llm/... -run TestStreaming -count=1` and confirm all tests pass
 
 #### `pkg/llm/tool_executor.go` — Tool dispatch and validation (401 lines, 0 tests)
 
@@ -111,25 +111,25 @@ File to create: `pkg/llm/tool_executor_test.go`
 
 The tool executor calls repository interfaces — mock them to test dispatch logic and argument validation without a DB.
 
-- [ ] Read `pkg/llm/tool_executor.go` fully to identify all tool functions and their argument structs
-- [ ] Create mock implementations for `OntologyRepository`, `KnowledgeRepository`, `SchemaRepository`, and `datasource.QueryExecutor` (only the methods actually called)
-- [ ] Add test for `ExecuteTool` dispatch: known tool names route correctly, unknown tool returns error
-- [ ] Add tests for `queryColumnValues`: missing table_name, missing column_name, limit defaults to 10, limit capped at 100, nil queryExecutor returns error JSON, query execution error returns error JSON (not Go error)
-- [ ] Add tests for `querySchemaMetadata`: valid table filter, empty table name returns all tables, repo error propagates
-- [ ] Add tests for `storeKnowledge`: missing fact_type, missing value, invalid fact_type rejected, valid fact types accepted (all 5)
-- [ ] Add tests for `updateColumn`: missing table/column, invalid semantic_type rejected, valid semantic types, update existing column vs create new, businessName adds to synonyms
-- [ ] Run `go test ./pkg/llm/... -run TestOntologyToolExecutor -count=1` and confirm all tests pass
+- [x] Read `pkg/llm/tool_executor.go` fully to identify all tool functions and their argument structs
+- [x] Create mock implementations for `OntologyRepository`, `KnowledgeRepository`, `SchemaRepository`, and `datasource.QueryExecutor` (only the methods actually called)
+- [x] Add test for `ExecuteTool` dispatch: known tool names route correctly, unknown tool returns error
+- [x] Add tests for `queryColumnValues`: missing table_name, missing column_name, limit defaults to 10, limit capped at 100, nil queryExecutor returns error JSON, query execution error returns error JSON (not Go error)
+- [x] Add tests for `querySchemaMetadata`: valid table filter, empty table name returns all tables, repo error propagates
+- [x] Add tests for `storeKnowledge`: missing fact_type, missing value, invalid fact_type rejected, valid fact types accepted (all 5)
+- [x] Add tests for `updateColumn`: missing table/column, invalid semantic_type rejected, valid semantic types, update existing column vs create new, businessName adds to synonyms
+- [x] Run `go test ./pkg/llm/... -run TestOntologyToolExecutor -count=1` and confirm all tests pass
 
 #### `pkg/llm/factory.go` — Client factory (124 lines, 0 tests)
 
 File to create: `pkg/llm/factory_test.go`
 
-- [ ] Create a mock `AIConfigProvider` that returns configurable `*models.AIConfig`
-- [ ] Add test for `CreateForProject`: config provider error propagates, valid config creates client, recorder wraps client when set
-- [ ] Add test for `CreateEmbeddingClient`: uses effective embedding URL/key fallback
-- [ ] Add test for `CreateStreamingClient`: config provider error propagates, valid config creates streaming client
-- [ ] Add test for `SetRecorder`: nil recorder disables wrapping
-- [ ] Run `go test ./pkg/llm/... -run TestClientFactory -count=1` and confirm all tests pass
+- [x] Create a mock `AIConfigProvider` that returns configurable `*models.AIConfig`
+- [x] Add test for `CreateForProject`: config provider error propagates, valid config creates client, recorder wraps client when set
+- [x] Add test for `CreateEmbeddingClient`: uses effective embedding URL/key fallback
+- [x] Add test for `CreateStreamingClient`: config provider error propagates, valid config creates streaming client
+- [x] Add test for `SetRecorder`: nil recorder disables wrapping
+- [x] Run `go test ./pkg/llm/... -run TestClientFactory -count=1` and confirm all tests pass
 
 ### Phase 3 — DAG Nodes (complete the set)
 
