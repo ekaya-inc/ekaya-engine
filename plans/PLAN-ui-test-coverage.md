@@ -88,12 +88,12 @@ File to create: `src/services/__tests__/ontologyApi.test.ts`
 
 File to create: `src/lib/config.test.ts` (or `src/services/__tests__/config.test.ts` — match actual location of the file)
 
-- [ ] Read `src/services/config.ts` to identify actual export names and signatures
-- [ ] Add tests for `fetchConfig()`: mock `global.fetch` for both `/api/config` and `/.well-known/oauth-authorization-server`, verify parallel fetch and merged result
-- [ ] Add tests for `getCachedConfig()`: verify returns null before fetch, returns cached value after fetch
-- [ ] Add tests for `getAuthUrlFromQuery()`: verify URL parameter extraction for valid and missing query params
-- [ ] Add tests for `getProjectIdFromPath()`: verify path segment extraction for valid and missing paths
-- [ ] Run `cd ui && npx vitest run` and confirm all tests pass
+- [x] Read `src/services/config.ts` to identify actual export names and signatures
+- [x] Add tests for `fetchConfig()`: mock `global.fetch` for both `/api/config` and `/.well-known/oauth-authorization-server`, verify parallel fetch and merged result
+- [x] Add tests for `getCachedConfig()`: verify returns null before fetch, returns cached value after fetch
+- [x] Add tests for `getAuthUrlFromQuery()`: verify URL parameter extraction for valid and missing query params
+- [x] Add tests for `getProjectIdFromPath()`: verify path segment extraction for valid and missing paths
+- [x] Run `cd ui && npx vitest run` and confirm all tests pass
 
 ### Priority 2 — Business Logic
 
