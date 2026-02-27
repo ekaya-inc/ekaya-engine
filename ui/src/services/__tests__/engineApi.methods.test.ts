@@ -515,3 +515,92 @@ describe('engineApi query execution methods', () => {
     });
   });
 });
+
+describe('engineApi project knowledge methods', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('listProjectKnowledge', () => {
+    it('sends GET to /{projectId}/project-knowledge', async () => {
+      const responseData = {
+        data: {
+          facts: [{ id: 'pk-1', fact_type: 'business_rule', value: 'Revenue is calculated monthly' }],
+          total: 1,
+        },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.listProjectKnowledge('proj-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/project-knowledge',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        })
+      );
+      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      expect(callArgs.method).toBeUndefined();
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('createProjectKnowledge', () => {
+    it('sends POST to /{projectId}/project-knowledge with correct body', async () => {
+      const request = {
+        fact_type: 'business_rule',
+        value: 'All dates are in UTC',
+        context: 'Applies to all timestamp columns',
+      };
+      const responseData = { data: { id: 'pk-1', project_id: 'proj-1', ...request } };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.createProjectKnowledge('proj-1', request);
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/project-knowledge',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify(request),
+        })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('updateProjectKnowledge', () => {
+    it('sends PUT to /{projectId}/project-knowledge/{id} with correct body', async () => {
+      const request = {
+        fact_type: 'convention',
+        value: 'All monetary values are in cents',
+        context: 'Applies to price and amount columns',
+      };
+      const responseData = { data: { id: 'pk-1', project_id: 'proj-1', ...request } };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.updateProjectKnowledge('proj-1', 'pk-1', request);
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/project-knowledge/pk-1',
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify(request),
+        })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('deleteProjectKnowledge', () => {
+    it('sends DELETE to /{projectId}/project-knowledge/{id}', async () => {
+      mock204Response();
+
+      await engineApi.deleteProjectKnowledge('proj-1', 'pk-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/project-knowledge/pk-1',
+        expect.objectContaining({ method: 'DELETE' })
+      );
+    });
+  });
+});
