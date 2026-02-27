@@ -148,4 +148,158 @@ describe('AIConfigWidget', () => {
       });
     });
   });
+
+  describe('Error Handling', () => {
+    it('displays error when save fails', async () => {
+      // Set up test connection to succeed (required to enable save button)
+      vi.mocked(engineApi.testAIConnection).mockResolvedValue({
+        success: true,
+        data: { success: true, message: 'Connection successful' },
+      });
+
+      vi.mocked(engineApi.saveAIConfig).mockRejectedValue(
+        new Error('Network error: unable to save')
+      );
+
+      render(
+        <AIConfigWidget
+          projectId={projectId}
+          onConfigChange={mockOnConfigChange}
+        />
+      );
+
+      await waitFor(() => {
+        expect(engineApi.getAIConfig).toHaveBeenCalledWith(projectId);
+      });
+
+      // Open BYOK panel
+      fireEvent.click(screen.getByText('Bring Your Own AI Keys'));
+      await waitFor(() => {
+        expect(screen.getByText('Provider')).toBeInTheDocument();
+      });
+
+      // Select Custom provider to get URL input
+      fireEvent.click(screen.getByText('OpenAI'));
+      fireEvent.click(screen.getByText('Custom'));
+
+      // Fill in required fields
+      await userEvent.type(
+        screen.getByPlaceholderText('https://your-endpoint.com/v1'),
+        'https://api.example.com/v1'
+      );
+      await userEvent.type(screen.getByPlaceholderText('sk-...'), 'sk-key');
+      await userEvent.type(
+        screen.getByPlaceholderText('gpt-4o, claude-haiku-4-5, llama3.1'),
+        'gpt-4o'
+      );
+
+      // Test connection to enable save
+      fireEvent.click(screen.getByRole('button', { name: /test connection/i }));
+      await waitFor(() => {
+        expect(engineApi.testAIConnection).toHaveBeenCalled();
+      });
+
+      // Click save
+      const saveButton = screen.getByRole('button', { name: /save configuration/i });
+      await waitFor(() => expect(saveButton).toBeEnabled());
+      fireEvent.click(saveButton);
+
+      // Verify error message is displayed to the user
+      await waitFor(() => {
+        expect(screen.getByText('Network error: unable to save')).toBeInTheDocument();
+      });
+    });
+
+    it('displays error when test connection fails', async () => {
+      vi.mocked(engineApi.testAIConnection).mockRejectedValue(
+        new Error('Connection refused')
+      );
+
+      render(
+        <AIConfigWidget
+          projectId={projectId}
+          onConfigChange={mockOnConfigChange}
+        />
+      );
+
+      await waitFor(() => {
+        expect(engineApi.getAIConfig).toHaveBeenCalledWith(projectId);
+      });
+
+      // Open BYOK panel
+      fireEvent.click(screen.getByText('Bring Your Own AI Keys'));
+      await waitFor(() => {
+        expect(screen.getByText('Provider')).toBeInTheDocument();
+      });
+
+      // Select Custom provider and fill URL so test button is enabled
+      fireEvent.click(screen.getByText('OpenAI'));
+      fireEvent.click(screen.getByText('Custom'));
+      await userEvent.type(
+        screen.getByPlaceholderText('https://your-endpoint.com/v1'),
+        'https://api.example.com/v1'
+      );
+
+      // Click test connection
+      fireEvent.click(screen.getByRole('button', { name: /test connection/i }));
+
+      // Verify error is shown in the test result display
+      await waitFor(() => {
+        expect(screen.getByText('Connection refused')).toBeInTheDocument();
+      });
+    });
+
+    it('displays error when remove configuration fails', async () => {
+      // Load with an existing BYOK config so remove button is available
+      vi.mocked(engineApi.getAIConfig).mockResolvedValue({
+        success: true,
+        data: {
+          project_id: projectId,
+          config_type: 'byok',
+          llm_base_url: 'https://api.openai.com/v1',
+          llm_api_key: 'sk-***...',
+          llm_model: 'gpt-4o',
+        },
+      });
+
+      vi.mocked(engineApi.deleteAIConfig).mockRejectedValue(
+        new Error('Permission denied')
+      );
+
+      render(
+        <AIConfigWidget
+          projectId={projectId}
+          onConfigChange={mockOnConfigChange}
+        />
+      );
+
+      await waitFor(() => {
+        expect(engineApi.getAIConfig).toHaveBeenCalledWith(projectId);
+      });
+
+      // Open BYOK panel — should show "Remove Configuration" since config is active
+      fireEvent.click(screen.getByText('Bring Your Own AI Keys'));
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /remove configuration/i })).toBeInTheDocument();
+      });
+
+      // Click "Remove Configuration" — opens confirmation dialog
+      fireEvent.click(screen.getByRole('button', { name: /remove configuration/i }));
+
+      // Confirm removal in dialog
+      await waitFor(() => {
+        expect(screen.getByTestId('dialog-root')).toBeInTheDocument();
+      });
+      const dialogButtons = screen.getByTestId('dialog-root').querySelectorAll('button');
+      const confirmButton = Array.from(dialogButtons).find(
+        (btn) => btn.textContent === 'Remove Configuration'
+      )!;
+      fireEvent.click(confirmButton);
+
+      // Verify error message is displayed
+      await waitFor(() => {
+        expect(screen.getByText('Permission denied')).toBeInTheDocument();
+      });
+    });
+  });
 });

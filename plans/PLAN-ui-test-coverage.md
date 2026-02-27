@@ -122,7 +122,7 @@ File to create: `src/components/__tests__/AIConfigWidget.test.tsx`
 - [x] Add test: save operation calls `engineApi.updateAIConfig` with correct payload and shows success state
 - [ ] Add test: delete operation calls `engineApi.deleteAIConfig` and updates UI state
 - [ ] Add test: test-connection operation calls `engineApi.testAIConfig` and displays result
-- [ ] Add test: error from any API call is displayed to the user
+- [x] Add test: error from any API call is displayed to the user
 - [ ] Mock: `vi.mock('../../services/engineApi', () => ({ default: { getAIConfig: vi.fn(), updateAIConfig: vi.fn(), deleteAIConfig: vi.fn(), testAIConfig: vi.fn() } }))`
 - [ ] Run `cd ui && npx vitest run` and confirm all tests pass
 
