@@ -82,7 +82,7 @@ File to create: `src/services/__tests__/ontologyApi.test.ts`
 - [ ] Add tests for each async method verifying: correct URL passed to `fetchWithAuth`, correct HTTP method, correct request body, correct response parsing
 - [x] Add tests for `pollStatus` polling logic: verify polling starts, calls the correct endpoint at each interval, stops on terminal status, handles errors
 - [ ] Add tests for wrapped vs. unwrapped response handling (based on actual behavior found in the file)
-- [ ] Run `cd ui && npx vitest run` and confirm all tests pass
+- [x] Run `cd ui && npx vitest run` and confirm all tests pass
 
 #### `src/services/config.ts` (147 lines, 5 exports, 0 tests)
 
