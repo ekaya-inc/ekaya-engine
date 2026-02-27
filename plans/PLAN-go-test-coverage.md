@@ -139,49 +139,49 @@ All 4 existing node tests follow the same pattern from `glossary_discovery_node_
 
 File to create: `pkg/services/dag/column_enrichment_node_test.go`
 
-- [ ] Mock `ColumnEnrichmentMethods` interface
-- [ ] Add test: Execute success — service returns enriched tables, progress reported
-- [ ] Add test: Execute with service error — error propagates
-- [ ] Add test: progress callback is invoked by the service mock
-- [ ] Run `go test ./pkg/services/dag/... -run TestColumnEnrichment -count=1`
+- [x] Mock `ColumnEnrichmentMethods` interface
+- [x] Add test: Execute success — service returns enriched tables, progress reported
+- [x] Add test: Execute with service error — error propagates
+- [x] Add test: progress callback is invoked by the service mock
+- [x] Run `go test ./pkg/services/dag/... -run TestColumnEnrichment -count=1`
 
 File to create: `pkg/services/dag/column_feature_extraction_node_test.go`
 
-- [ ] Read `pkg/services/dag/column_feature_extraction_node.go` to identify its service interface
-- [ ] Mock the interface and add success/error/progress tests following the same pattern
-- [ ] Run `go test ./pkg/services/dag/... -run TestColumnFeature -count=1`
+- [x] Read `pkg/services/dag/column_feature_extraction_node.go` to identify its service interface
+- [x] Mock the interface and add success/error/progress tests following the same pattern
+- [x] Run `go test ./pkg/services/dag/... -run TestColumnFeature -count=1`
 
 File to create: `pkg/services/dag/fk_discovery_node_test.go`
 
-- [ ] Read `pkg/services/dag/fk_discovery_node.go` to identify its service interface
-- [ ] Mock the interface and add success/error tests
-- [ ] Run `go test ./pkg/services/dag/... -run TestFKDiscovery -count=1`
+- [x] Read `pkg/services/dag/fk_discovery_node.go` to identify its service interface
+- [x] Mock the interface and add success/error tests
+- [x] Run `go test ./pkg/services/dag/... -run TestFKDiscovery -count=1`
 
 File to create: `pkg/services/dag/pk_match_discovery_node_test.go`
 
-- [ ] Read `pkg/services/dag/pk_match_discovery_node.go` to identify its service interface
-- [ ] Mock the interface and add success/error tests
-- [ ] Run `go test ./pkg/services/dag/... -run TestPKMatch -count=1`
+- [x] Read `pkg/services/dag/pk_match_discovery_node.go` to identify its service interface
+- [x] Mock the interface and add success/error tests
+- [x] Run `go test ./pkg/services/dag/... -run TestPKMatch -count=1`
 
 File to create: `pkg/services/dag/relationship_discovery_node_test.go`
 
-- [ ] Read `pkg/services/dag/relationship_discovery_node.go` to identify its service interface
-- [ ] Mock the interface and add success/error tests
-- [ ] Run `go test ./pkg/services/dag/... -run TestRelationshipDiscovery -count=1`
+- [x] Read `pkg/services/dag/relationship_discovery_node.go` to identify its service interface
+- [x] Mock the interface and add success/error tests
+- [x] Run `go test ./pkg/services/dag/... -run TestRelationshipDiscovery -count=1`
 
 File to create: `pkg/services/dag/ontology_finalization_node_test.go`
 
-- [ ] Read `pkg/services/dag/ontology_finalization_node.go` to identify its service interface
-- [ ] Mock the interface and add success/error tests
-- [ ] Run `go test ./pkg/services/dag/... -run TestOntologyFinalization -count=1`
+- [x] Read `pkg/services/dag/ontology_finalization_node.go` to identify its service interface
+- [x] Mock the interface and add success/error tests
+- [x] Run `go test ./pkg/services/dag/... -run TestOntologyFinalization -count=1`
 
 File to create: `pkg/services/dag/node_executor_test.go`
 
-- [ ] Add tests for `BaseNode.ReportProgress`: with nil nodeID (uuid.Nil) returns nil, with valid nodeID calls dagRepo
-- [ ] Add tests for `NewExecutionContext`: with nil OntologyID, with valid OntologyID
-- [ ] Run `go test ./pkg/services/dag/... -run TestBaseNode -count=1`
+- [x] Add tests for `BaseNode.ReportProgress`: with nil nodeID (uuid.Nil) returns nil, with valid nodeID calls dagRepo
+- [x] Add tests for `NewExecutionContext`: with nil OntologyID, with valid OntologyID
+- [x] Run `go test ./pkg/services/dag/... -run TestBaseNode -count=1`
 
-- [ ] Run `go test ./pkg/services/dag/... -count=1` and confirm ALL dag tests pass
+- [x] Run `go test ./pkg/services/dag/... -count=1` and confirm ALL dag tests pass
 
 ### Phase 4 — Service Spot Checks (targeted edge cases in large packages)
 
