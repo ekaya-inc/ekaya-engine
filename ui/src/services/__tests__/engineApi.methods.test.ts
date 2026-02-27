@@ -928,3 +928,133 @@ describe('engineApi approved query methods', () => {
     });
   });
 });
+
+describe('engineApi glossary methods', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('listGlossaryTerms', () => {
+    it('sends GET to /{projectId}/glossary', async () => {
+      const responseData = {
+        data: {
+          terms: [{ id: 'term-1', name: 'Revenue', definition: 'Total income' }],
+          total: 1,
+        },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.listGlossaryTerms('proj-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/glossary',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        })
+      );
+      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      expect(callArgs.method).toBeUndefined();
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('createGlossaryTerm', () => {
+    it('sends POST to /{projectId}/glossary with correct body', async () => {
+      const request = {
+        name: 'Revenue',
+        definition: 'Total income from sales',
+        sql_expression: 'SUM(orders.amount)',
+      };
+      const responseData = { data: { id: 'term-1', ...request } };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.createGlossaryTerm('proj-1', request as any);
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/glossary',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify(request),
+        })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('updateGlossaryTerm', () => {
+    it('sends PUT to /{projectId}/glossary/{termId} with correct body', async () => {
+      const request = {
+        name: 'Net Revenue',
+        definition: 'Total income minus refunds',
+        sql_expression: 'SUM(orders.amount) - SUM(refunds.amount)',
+      };
+      const responseData = { data: { id: 'term-1', ...request } };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.updateGlossaryTerm('proj-1', 'term-1', request as any);
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/glossary/term-1',
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify(request),
+        })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('deleteGlossaryTerm', () => {
+    it('sends DELETE to /{projectId}/glossary/{termId}', async () => {
+      mock204Response();
+
+      await engineApi.deleteGlossaryTerm('proj-1', 'term-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/glossary/term-1',
+        expect.objectContaining({ method: 'DELETE' })
+      );
+    });
+  });
+
+  describe('testGlossarySQL', () => {
+    it('sends POST to /{projectId}/glossary/test-sql with sql body', async () => {
+      const responseData = {
+        data: {
+          columns: [{ name: 'total', type: 'numeric' }],
+          rows: [{ total: 12345.67 }],
+          row_count: 1,
+        },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.testGlossarySQL('proj-1', 'SUM(orders.amount)');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/glossary/test-sql',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ sql: 'SUM(orders.amount)' }),
+        })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('autoGenerateGlossary', () => {
+    it('sends POST to /{projectId}/glossary/auto-generate', async () => {
+      const responseData = {
+        data: { status: 'started', message: 'Glossary generation initiated' },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.autoGenerateGlossary('proj-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/glossary/auto-generate',
+        expect.objectContaining({ method: 'POST' })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+});
