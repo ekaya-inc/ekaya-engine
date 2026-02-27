@@ -968,9 +968,10 @@ func TestValidateCandidates_PartialFailure(t *testing.T) {
 
 	results, err := validator.ValidateCandidates(context.Background(), uuid.New(), candidates, nil)
 
-	// Should NOT return error when some candidates fail
-	require.NoError(t, err)
-	// Should have 2 successful results (not 3)
+	// Should return error when any candidates fail (fail fast)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "1 of 3 relationship validations failed")
+	// Should still have 2 successful results in partial output
 	require.Len(t, results, 2)
 }
 
@@ -1003,7 +1004,7 @@ func TestValidateCandidates_AllFailures(t *testing.T) {
 
 	// Should return error when ALL candidates fail
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "all 2 relationship validations failed")
+	assert.Contains(t, err.Error(), "2 of 2 relationship validations failed")
 	assert.Nil(t, results)
 }
 

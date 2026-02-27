@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestContextAwareTransport_InjectsRequestID(t *testing.T) {
@@ -76,5 +77,32 @@ func TestContextAwareTransport_NoHeaderWhenNoConversationID(t *testing.T) {
 	// Verify header was NOT set
 	if headerPresent {
 		t.Errorf("expected X-Request-Id header to be absent, got %s", receivedHeader)
+	}
+}
+
+func TestSupportsChatTemplateKwargs(t *testing.T) {
+	tests := []struct {
+		model string
+		want  bool
+	}{
+		{"ekaya-community", true},
+		{"ekaya-security", true},
+		{"qwen3-32b", true},
+		{"Qwen3-14B", true},
+		{"qwen2.5-coder-7b", true},
+		{"nemotron-3-nano-30b", true},
+		{"Nemotron-3-Nano-30B-A3B", true},
+		{"gpt-4o", false},
+		{"gpt-4o-mini", false},
+		{"o3-mini", false},
+		{"claude-sonnet-4-20250514", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			c := &Client{model: tt.model}
+			assert.Equal(t, tt.want, c.supportsChatTemplateKwargs())
+		})
 	}
 }

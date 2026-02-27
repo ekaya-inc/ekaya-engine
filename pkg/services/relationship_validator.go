@@ -341,11 +341,10 @@ func (v *relationshipValidator) ValidateCandidates(ctx context.Context, projectI
 		zap.Int("valid_relationships", validCount),
 	)
 
-	// Return error only if ALL candidates failed
-	if failedCount == total {
-		return nil, fmt.Errorf("all %d relationship validations failed, last error: %w", total, lastErr)
+	// Fail fast: propagate LLM errors instead of silently continuing
+	if failedCount > 0 {
+		return validResults, fmt.Errorf("%d of %d relationship validations failed: %w", failedCount, total, lastErr)
 	}
 
-	// Return partial results with no error - some failures are acceptable
 	return validResults, nil
 }

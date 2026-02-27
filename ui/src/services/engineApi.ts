@@ -100,6 +100,12 @@ class EngineApiService {
 
     try {
       const response = await fetchWithAuth(url, config);
+
+      // 204 No Content has no body to parse
+      if (response.status === 204) {
+        return {} as ApiResponse<T>;
+      }
+
       const data = (await response.json()) as ApiResponse<T>;
 
       if (!response.ok) {
