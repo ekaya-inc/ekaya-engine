@@ -191,8 +191,8 @@ These are services that have integration tests or partial coverage. Add unit tes
 
 File to create: `pkg/services/tenant_context_test.go`
 
-- [ ] Add test for `WithInferredProvenanceWrapper`: wraps getTenantCtx, adds provenance, cleanup function is passed through, error from inner function propagates
-- [ ] Run `go test ./pkg/services/... -run TestTenantContext -count=1`
+- [x] Add test for `WithInferredProvenanceWrapper`: wraps getTenantCtx, adds provenance, cleanup function is passed through, error from inner function propagates
+- [x] Run `go test ./pkg/services/... -run TestTenantContext -count=1`
 
 #### `pkg/services/knowledge_parsing.go` — Input validation (0 tests)
 
