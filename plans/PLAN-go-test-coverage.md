@@ -211,9 +211,9 @@ File to create: `pkg/services/knowledge_parsing_test.go`
 
 #### `pkg/services/audit_page_service.go` — Pagination edge cases (0 tests)
 
-- [ ] Read `pkg/services/audit_page_service.go` to understand its interface
-- [ ] If it contains pagination logic (offset/limit calculation, boundary checks), add unit tests for those pure functions
-- [ ] If it's a thin wrapper over the repository, skip
+- [x] Read `pkg/services/audit_page_service.go` to understand its interface
+- [x] If it contains pagination logic (offset/limit calculation, boundary checks), add unit tests for those pure functions
+- [x] If it's a thin wrapper over the repository, skip — confirmed thin wrapper, all methods are direct repo passthrough with error logging
 
 #### `pkg/services/mcp_audit_service.go` — (0 tests)
 
