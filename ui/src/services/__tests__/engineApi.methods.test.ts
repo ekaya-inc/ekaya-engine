@@ -159,3 +159,135 @@ describe('engineApi datasource methods', () => {
     });
   });
 });
+
+describe('engineApi schema operation methods', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('getSchema', () => {
+    it('sends GET to /{projectId}/datasources/{datasourceId}/schema', async () => {
+      const responseData = {
+        data: {
+          tables: [{ id: 't-1', name: 'users', columns: [] }],
+        },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.getSchema('proj-1', 'ds-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/schema',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        })
+      );
+      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      expect(callArgs.method).toBeUndefined();
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('refreshSchema', () => {
+    it('sends POST to /{projectId}/datasources/{datasourceId}/schema/refresh', async () => {
+      const responseData = { data: { status: 'refreshed', tables_count: 5 } };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.refreshSchema('proj-1', 'ds-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/schema/refresh',
+        expect.objectContaining({ method: 'POST' })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('getRelationships', () => {
+    it('sends GET to /{projectId}/relationships', async () => {
+      const responseData = {
+        data: {
+          relationships: [{ id: 'r-1', type: 'one_to_many' }],
+        },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.getRelationships('proj-1', 'ds-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/relationships',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        })
+      );
+      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      expect(callArgs.method).toBeUndefined();
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('createRelationship', () => {
+    it('sends POST to /{projectId}/datasources/{datasourceId}/schema/relationships with body', async () => {
+      const request = {
+        source_column_id: 'col-1',
+        target_column_id: 'col-2',
+      };
+      const responseData = { data: { id: 'r-1', ...request } };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.createRelationship('proj-1', 'ds-1', request as any);
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/schema/relationships',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify(request),
+        })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('removeRelationship', () => {
+    it('sends DELETE to /{projectId}/datasources/{datasourceId}/schema/relationships/{relationshipId}', async () => {
+      const responseData = { data: { message: 'Relationship removed' } };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.removeRelationship('proj-1', 'ds-1', 'r-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/schema/relationships/r-1',
+        expect.objectContaining({ method: 'DELETE' })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('saveSchemaSelections', () => {
+    it('sends POST to /{projectId}/datasources/{datasourceId}/schema/selections with table and column selections', async () => {
+      const tableSelections = { 'table-uuid-1': true, 'table-uuid-2': false };
+      const columnSelections = { 'table-uuid-1': ['col-uuid-1', 'col-uuid-2'] };
+      const responseData = { data: { updated: true } };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.saveSchemaSelections(
+        'proj-1',
+        'ds-1',
+        tableSelections,
+        columnSelections
+      );
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/schema/selections',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            table_selections: tableSelections,
+            column_selections: columnSelections,
+          }),
+        })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+});
