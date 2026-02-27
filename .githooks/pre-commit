@@ -4,6 +4,16 @@
 
 set -e
 
+# Source shell profile to get proper PATH (needed for VSCode git integration)
+if [ -f "$HOME/.zshrc" ]; then
+    . "$HOME/.zshrc" 2>/dev/null || true
+elif [ -f "$HOME/.bashrc" ]; then
+    . "$HOME/.bashrc" 2>/dev/null || true
+fi
+
+# Add common Go paths
+export PATH="$PATH:$HOME/go/bin:/usr/local/go/bin"
+
 echo "🔍 Running pre-commit checks..."
 
 # Check if we're in the right directory

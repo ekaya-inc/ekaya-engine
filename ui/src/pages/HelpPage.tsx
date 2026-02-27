@@ -26,6 +26,7 @@ interface QuickStartItem {
   icon: LucideIcon;
   title: string;
   description: string;
+  link: string;
 }
 
 interface Resource {
@@ -46,23 +47,27 @@ const HelpPage = () => {
   const quickStartItems: QuickStartItem[] = [
     {
       icon: Database,
-      title: "Connect to Datasource",
-      description: "Learn how to establish a connection to your datasource",
+      title: "Connect Your Datasource",
+      description: "Connect Ekaya to your PostgreSQL or SQL Server database",
+      link: "datasource",
     },
     {
       icon: ListTree,
-      title: "Managing Schemas",
-      description: "Understand how to view and modify database schemas",
+      title: "Extract Your Ontology",
+      description: "Let AI analyze your schema and discover semantic meaning",
+      link: "ontology",
     },
     {
       icon: Zap,
-      title: "Running Queries",
-      description: "Execute SQL queries and analyze results",
+      title: "Configure MCP Server",
+      description: "Enable AI tools to access your data through the MCP protocol",
+      link: "mcp-server",
     },
     {
       icon: Shield,
-      title: "Security Best Practices",
-      description: "Keep your data secure with these guidelines",
+      title: "Create Pre-Approved Queries",
+      description: "Define safe, parameterized queries for AI and users",
+      link: "queries",
     },
   ];
 
@@ -151,9 +156,10 @@ const HelpPage = () => {
               return (
                 <div
                   key={i}
-                  className="flex gap-3 rounded-lg border border-border-light p-4 hover:bg-surface-secondary"
+                  onClick={() => navigate(`/projects/${pid}/${item.link}`)}
+                  className="cursor-pointer rounded-lg border border-border-light p-4 hover:bg-surface-secondary hover:border-indigo-500/50 transition-colors flex gap-3"
                 >
-                  <Icon className="h-5 w-5 text-text-secondary mt-0.5" />
+                  <Icon className="h-5 w-5 text-indigo-500 mt-0.5 shrink-0" />
                   <div>
                     <h3 className="font-medium text-text-primary">
                       {item.title}
@@ -228,10 +234,12 @@ const HelpPage = () => {
                 <p className="mt-1 text-sm text-text-secondary">
                   Our support team is available Monday-Friday, 9AM-5PM EST
                 </p>
-                <Button className="mt-3" variant="outline">
-                  <MessageCircle className="mr-2 h-4 w-4" />
-                  Open Support Ticket
-                </Button>
+                <a href="mailto:support@ekaya.com?subject=Support%20Request">
+                  <Button className="mt-3" variant="outline">
+                    <MessageCircle className="mr-2 h-4 w-4" />
+                    Open Support Ticket
+                  </Button>
+                </a>
               </div>
               <div className="border-t border-border-light pt-4">
                 <h3 className="font-medium text-text-primary">System Status</h3>

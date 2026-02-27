@@ -362,6 +362,7 @@ const ProjectKnowledgePage = () => {
             onClose={() => setEditorOpen(false)}
             onSave={handleEditorSave}
             onProcessing={() => toast({ title: 'Processing fact...', description: 'The fact is being analyzed and will appear shortly.' })}
+            onError={(message) => toast({ title: 'Failed to add fact', description: message, variant: 'destructive' })}
           />
         )}
       </div>
@@ -513,6 +514,8 @@ const ProjectKnowledgePage = () => {
           isOpen={editorOpen}
           onClose={() => setEditorOpen(false)}
           onSave={handleEditorSave}
+          onProcessing={() => toast({ title: 'Processing fact...', description: 'The fact is being analyzed and will appear shortly.' })}
+          onError={(message) => toast({ title: 'Failed to add fact', description: message, variant: 'destructive' })}
         />
       )}
 
