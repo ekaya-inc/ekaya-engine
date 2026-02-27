@@ -101,7 +101,7 @@ File to create: `src/lib/config.test.ts` (or `src/services/__tests__/config.test
 
 File to create: `src/services/__tests__/ontologyService.test.ts`
 
-- [ ] Read `src/services/ontologyService.ts` to identify all exported functions
+- [x] Read `src/services/ontologyService.ts` to identify all exported functions
 - [x] Add tests for `transformEntityQueue`: provide representative input, assert correct output shape
 - [ ] Add tests for `transformTaskQueue`: provide representative input, assert correct output shape
 - [ ] Add tests for `transformQuestions`: provide representative input, assert correct output shape
