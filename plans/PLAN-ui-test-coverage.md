@@ -119,7 +119,7 @@ File to create: `src/components/__tests__/AIConfigWidget.test.tsx`
 - [ ] Add test: loads AI config on mount and displays provider/model values
 - [ ] Add test: provider selection updates the form state
 - [ ] Add test: form validation prevents save when required fields are empty
-- [ ] Add test: save operation calls `engineApi.updateAIConfig` with correct payload and shows success state
+- [x] Add test: save operation calls `engineApi.updateAIConfig` with correct payload and shows success state
 - [ ] Add test: delete operation calls `engineApi.deleteAIConfig` and updates UI state
 - [ ] Add test: test-connection operation calls `engineApi.testAIConfig` and displays result
 - [ ] Add test: error from any API call is displayed to the user
