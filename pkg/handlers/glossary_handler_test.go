@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -276,4 +278,121 @@ func TestGlossaryHandler_AutoGenerate_NilCounts(t *testing.T) {
 	handler.AutoGenerate(rec, req)
 
 	assert.Equal(t, http.StatusAccepted, rec.Code)
+}
+
+// ============================================================================
+// Error Path Tests — Malformed JSON, invalid IDs, service errors
+// ============================================================================
+
+func TestGlossaryHandler_Create_MalformedJSON(t *testing.T) {
+	projectID := uuid.New()
+
+	handler := NewGlossaryHandler(
+		&mockGlossaryServiceForHandler{},
+		&mockQuestionServiceForHandler{},
+		zap.NewNop(),
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/glossary",
+		bytes.NewReader([]byte(`{not valid json`)))
+	req.SetPathValue("pid", projectID.String())
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.Create(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+	var resp map[string]string
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "invalid_request", resp["error"])
+}
+
+func TestGlossaryHandler_Update_MalformedJSON(t *testing.T) {
+	projectID := uuid.New()
+	termID := uuid.New()
+
+	handler := NewGlossaryHandler(
+		&mockGlossaryServiceForHandler{},
+		&mockQuestionServiceForHandler{},
+		zap.NewNop(),
+	)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/projects/"+projectID.String()+"/glossary/"+termID.String(),
+		bytes.NewReader([]byte(`{not valid json`)))
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("tid", termID.String())
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.Update(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+	var resp map[string]string
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "invalid_request", resp["error"])
+}
+
+func TestGlossaryHandler_List_ServiceError(t *testing.T) {
+	projectID := uuid.New()
+
+	mockGlossary := &mockGlossaryServiceForHandler{
+		getTermsErr: errors.New("database connection lost"),
+	}
+	handler := NewGlossaryHandler(mockGlossary, &mockQuestionServiceForHandler{}, zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/glossary", nil)
+	req.SetPathValue("pid", projectID.String())
+	rec := httptest.NewRecorder()
+
+	handler.List(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+
+	var resp map[string]string
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "list_glossary_terms_failed", resp["error"])
+}
+
+func TestGlossaryHandler_AutoGenerate_PendingCountsError(t *testing.T) {
+	projectID := uuid.New()
+
+	mockGlossary := &mockGlossaryServiceForHandler{}
+	mockQuestions := &mockQuestionServiceForHandler{
+		pendingCountsErr: errors.New("database error"),
+	}
+	handler := NewGlossaryHandler(mockGlossary, mockQuestions, zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/glossary/auto-generate", nil)
+	req.SetPathValue("pid", projectID.String())
+	rec := httptest.NewRecorder()
+
+	handler.AutoGenerate(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+
+	var resp map[string]string
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "check_questions_failed", resp["error"])
+}
+
+func TestGlossaryHandler_List_InvalidProjectID(t *testing.T) {
+	handler := NewGlossaryHandler(
+		&mockGlossaryServiceForHandler{},
+		&mockQuestionServiceForHandler{},
+		zap.NewNop(),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/not-a-uuid/glossary", nil)
+	req.SetPathValue("pid", "not-a-uuid")
+	rec := httptest.NewRecorder()
+
+	handler.List(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+	var resp map[string]string
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "invalid_project_id", resp["error"])
 }

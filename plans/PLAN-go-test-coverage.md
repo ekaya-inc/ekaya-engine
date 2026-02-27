@@ -231,10 +231,10 @@ Handlers have 47.4% coverage. The untested handlers are mostly CRUD wrappers, bu
 
 Pick 2-3 handlers that have test files but may not test error paths:
 
-- [ ] Read `pkg/handlers/datasources_test.go` and identify if UUID parse errors (invalid `:id` path param) are tested
-- [ ] Read `pkg/handlers/glossary_test.go` (if exists) and identify if malformed JSON body errors are tested
-- [ ] For any untested error paths found, add targeted tests to the existing test files (do not create new files)
-- [ ] Run `go test ./pkg/handlers/... -count=1` and confirm all tests pass
+- [x] Read `pkg/handlers/datasources_test.go` and identify if UUID parse errors (invalid `:id` path param) are tested
+- [x] Read `pkg/handlers/glossary_test.go` (if exists) and identify if malformed JSON body errors are tested
+- [x] For any untested error paths found, add targeted tests to the existing test files (do not create new files)
+- [x] Run `go test ./pkg/handlers/... -count=1` and confirm all tests pass
 
 ### Phase 6 — Central Client Error Handling
 
