@@ -849,3 +849,82 @@ describe('engineApi alerts methods', () => {
     });
   });
 });
+
+describe('engineApi approved query methods', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('listPendingQueries', () => {
+    it('sends GET to /{projectId}/queries/pending', async () => {
+      const responseData = {
+        data: {
+          queries: [
+            { query_id: 'q-1', natural_language_prompt: 'get users', status: 'pending' },
+          ],
+        },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.listPendingQueries('proj-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/queries/pending',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        })
+      );
+      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      expect(callArgs.method).toBeUndefined();
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('approveQuery', () => {
+    it('sends POST to /{projectId}/queries/{queryId}/approve', async () => {
+      const responseData = { data: { success: true, message: 'Query approved' } };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.approveQuery('proj-1', 'q-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/queries/q-1/approve',
+        expect.objectContaining({ method: 'POST' })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('rejectQuery', () => {
+    it('sends POST to /{projectId}/queries/{queryId}/reject with reason body', async () => {
+      const responseData = { data: { success: true, message: 'Query rejected' } };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.rejectQuery('proj-1', 'q-1', 'SQL is too broad');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/queries/q-1/reject',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ reason: 'SQL is too broad' }),
+        })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('moveToPending', () => {
+    it('sends POST to /{projectId}/queries/{queryId}/move-to-pending', async () => {
+      const responseData = { data: { success: true, message: 'Query moved to pending' } };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.moveToPending('proj-1', 'q-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/queries/q-1/move-to-pending',
+        expect.objectContaining({ method: 'POST' })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+});
