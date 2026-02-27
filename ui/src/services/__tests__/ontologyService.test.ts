@@ -1,6 +1,39 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { transformEntityQueue } from '../ontologyService';
-import type { EntityProgressResponse } from '../../types';
+import type { EntityProgressResponse, WorkflowStatusResponse } from '../../types';
+
+// Mock ontologyApi before importing ontologyService (which imports it)
+vi.mock('../ontologyApi', () => ({
+  default: {
+    getStatus: vi.fn(),
+    getQuestions: vi.fn(),
+    extractOntology: vi.fn(),
+    cancelWorkflow: vi.fn(),
+    deleteOntology: vi.fn(),
+    submitProjectAnswers: vi.fn(),
+  },
+}));
+
+import ontologyApi from '../ontologyApi';
+import { ontologyService } from '../ontologyService';
+
+const mockOntologyApi = vi.mocked(ontologyApi);
+
+function makeStatusResponse(overrides: Partial<WorkflowStatusResponse> = {}): WorkflowStatusResponse {
+  return {
+    workflow_id: 'wf-1',
+    current_phase: 'tier1_generation',
+    completed_phases: [],
+    confidence_score: 0.5,
+    iteration_count: 1,
+    is_complete: false,
+    status_label: 'Processing',
+    status_type: 'processing',
+    can_start_new: false,
+    has_result: false,
+    ...overrides,
+  };
+}
 
 describe('transformEntityQueue', () => {
   it('returns empty array when input is undefined', () => {
@@ -118,5 +151,300 @@ describe('transformEntityQueue', () => {
         errorMessage: 'Rate limit exceeded',
       },
     ]);
+  });
+});
+
+describe('OntologyService polling (startPolling / stopPolling)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'debug').mockImplementation(() => {});
+    // Reset service state
+    ontologyService.stop();
+    ontologyService.setProjectId('proj-1');
+  });
+
+  afterEach(() => {
+    ontologyService.stop();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('startExtraction triggers immediate status fetch then polls at 2s intervals', async () => {
+    const inProgress = makeStatusResponse({ is_complete: false });
+    mockOntologyApi.extractOntology.mockResolvedValue({
+      workflow_id: 'wf-1',
+      status: 'started',
+    });
+    mockOntologyApi.getStatus.mockResolvedValue(inProgress);
+    mockOntologyApi.getQuestions.mockResolvedValue({
+      workflow_id: 'wf-1',
+      questions: { critical: [], high: [], medium: [], low: [] },
+    });
+
+    await ontologyService.startExtraction();
+
+    // startPolling calls fetchAndUpdateStatus immediately
+    // Flush the immediate fetch
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockOntologyApi.getStatus).toHaveBeenCalledTimes(1);
+
+    // Advance 2000ms — second poll
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(mockOntologyApi.getStatus).toHaveBeenCalledTimes(2);
+
+    // Advance another 2000ms — third poll
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(mockOntologyApi.getStatus).toHaveBeenCalledTimes(3);
+  });
+
+  it('emits status updates to subscribers during polling', async () => {
+    const inProgress = makeStatusResponse({ is_complete: false, current_entity: 2, total_entities: 5 });
+    mockOntologyApi.extractOntology.mockResolvedValue({
+      workflow_id: 'wf-1',
+      status: 'started',
+    });
+    mockOntologyApi.getStatus.mockResolvedValue(inProgress);
+    mockOntologyApi.getQuestions.mockResolvedValue({
+      workflow_id: 'wf-1',
+      questions: { critical: [], high: [], medium: [], low: [] },
+    });
+
+    const callback = vi.fn();
+    const unsubscribe = ontologyService.subscribe(callback);
+
+    // subscribe emits current status immediately
+    expect(callback).toHaveBeenCalledTimes(1);
+
+    await ontologyService.startExtraction();
+    // startExtraction emits 'initializing' status
+    expect(callback).toHaveBeenCalledTimes(2);
+
+    // Flush immediate fetch from startPolling
+    await vi.advanceTimersByTimeAsync(0);
+    // fetchAndUpdateStatus emits transformed status
+    expect(callback.mock.calls.length).toBeGreaterThanOrEqual(3);
+
+    const lastCall = callback.mock.calls[callback.mock.calls.length - 1][0];
+    expect(lastCall.progress.state).toBe('building');
+
+    unsubscribe();
+  });
+
+  it('auto-stops polling when workflow is_complete and not awaiting_input', async () => {
+    const inProgress = makeStatusResponse({ is_complete: false });
+    const complete = makeStatusResponse({ is_complete: true, current_phase: 'done' });
+
+    mockOntologyApi.extractOntology.mockResolvedValue({
+      workflow_id: 'wf-1',
+      status: 'started',
+    });
+    // First fetch returns in-progress, second returns complete
+    mockOntologyApi.getStatus
+      .mockResolvedValueOnce(inProgress)
+      .mockResolvedValueOnce(complete);
+    mockOntologyApi.getQuestions.mockResolvedValue({
+      workflow_id: 'wf-1',
+      questions: { critical: [], high: [], medium: [], low: [] },
+    });
+
+    await ontologyService.startExtraction();
+
+    // Flush immediate fetch (in-progress)
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockOntologyApi.getStatus).toHaveBeenCalledTimes(1);
+
+    // Advance to next poll interval — returns complete, which triggers stopPolling
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(mockOntologyApi.getStatus).toHaveBeenCalledTimes(2);
+
+    // No further polls should happen even after more time
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(mockOntologyApi.getStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it('auto-stops polling on fetch error and sets error state', async () => {
+    mockOntologyApi.extractOntology.mockResolvedValue({
+      workflow_id: 'wf-1',
+      status: 'started',
+    });
+    mockOntologyApi.getStatus.mockRejectedValue(new Error('Failed to fetch'));
+
+    await ontologyService.startExtraction();
+
+    // Flush immediate fetch — fails
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockOntologyApi.getStatus).toHaveBeenCalledTimes(1);
+
+    // Verify error state
+    const status = ontologyService.getStatus();
+    expect(status.progress.state).toBe('error');
+    expect(status.lastError).toBe('Service is currently down.');
+
+    // No more polls
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(mockOntologyApi.getStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('stop() clears the polling interval and resets to idle', async () => {
+    const inProgress = makeStatusResponse({ is_complete: false });
+    mockOntologyApi.extractOntology.mockResolvedValue({
+      workflow_id: 'wf-1',
+      status: 'started',
+    });
+    mockOntologyApi.getStatus.mockResolvedValue(inProgress);
+    mockOntologyApi.getQuestions.mockResolvedValue({
+      workflow_id: 'wf-1',
+      questions: { critical: [], high: [], medium: [], low: [] },
+    });
+
+    await ontologyService.startExtraction();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockOntologyApi.getStatus).toHaveBeenCalledTimes(1);
+
+    // Call stop — should clear interval
+    ontologyService.stop();
+
+    // No further polls
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(mockOntologyApi.getStatus).toHaveBeenCalledTimes(1);
+
+    // Status is idle after stop
+    const status = ontologyService.getStatus();
+    expect(status.progress.state).toBe('idle');
+  });
+
+  it('initialize starts polling when workflow is active and not complete', async () => {
+    const activeStatus = makeStatusResponse({
+      workflow_id: 'wf-existing',
+      is_complete: false,
+    });
+    mockOntologyApi.getStatus.mockResolvedValue(activeStatus);
+    mockOntologyApi.getQuestions.mockResolvedValue({
+      workflow_id: 'wf-existing',
+      questions: { critical: [], high: [], medium: [], low: [] },
+    });
+
+    await ontologyService.initialize('proj-1');
+
+    // initialize calls getStatus once to check, then startPolling fetches again immediately
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Should be polling — advance and check for additional calls
+    const callCountAfterInit = mockOntologyApi.getStatus.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(mockOntologyApi.getStatus.mock.calls.length).toBeGreaterThan(callCountAfterInit);
+  });
+
+  it('initialize does not start polling when workflow is complete', async () => {
+    const completeStatus = makeStatusResponse({
+      workflow_id: 'wf-done',
+      is_complete: true,
+    });
+    mockOntologyApi.getStatus.mockResolvedValue(completeStatus);
+    mockOntologyApi.getQuestions.mockResolvedValue({
+      workflow_id: 'wf-done',
+      questions: { critical: [], high: [], medium: [], low: [] },
+    });
+
+    await ontologyService.initialize('proj-1');
+
+    // Flush any microtasks
+    await vi.advanceTimersByTimeAsync(0);
+
+    const callCountAfterInit = mockOntologyApi.getStatus.mock.calls.length;
+
+    // Should NOT be polling — no further calls after waiting
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(mockOntologyApi.getStatus.mock.calls.length).toBe(callCountAfterInit);
+  });
+
+  it('cancel() stops polling and resets to idle', async () => {
+    const inProgress = makeStatusResponse({ is_complete: false });
+    mockOntologyApi.extractOntology.mockResolvedValue({
+      workflow_id: 'wf-1',
+      status: 'started',
+    });
+    mockOntologyApi.getStatus.mockResolvedValue(inProgress);
+    mockOntologyApi.getQuestions.mockResolvedValue({
+      workflow_id: 'wf-1',
+      questions: { critical: [], high: [], medium: [], low: [] },
+    });
+    mockOntologyApi.cancelWorkflow.mockResolvedValue({
+      workflow_id: 'wf-1',
+      status: 'cancelled',
+      message: 'Workflow cancelled',
+    });
+
+    await ontologyService.startExtraction();
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Cancel should stop polling
+    await ontologyService.cancel();
+
+    const callCountAfterCancel = mockOntologyApi.getStatus.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(mockOntologyApi.getStatus.mock.calls.length).toBe(callCountAfterCancel);
+
+    // Status is idle
+    expect(ontologyService.getStatus().progress.state).toBe('idle');
+  });
+
+  it('starting new polling clears the existing interval (no double-polling)', async () => {
+    const inProgress = makeStatusResponse({ is_complete: false });
+    mockOntologyApi.extractOntology.mockResolvedValue({
+      workflow_id: 'wf-1',
+      status: 'started',
+    });
+    mockOntologyApi.getStatus.mockResolvedValue(inProgress);
+    mockOntologyApi.getQuestions.mockResolvedValue({
+      workflow_id: 'wf-1',
+      questions: { critical: [], high: [], medium: [], low: [] },
+    });
+    mockOntologyApi.submitProjectAnswers.mockResolvedValue({
+      workflow_id: 'wf-1',
+      status: 'processing',
+    });
+
+    await ontologyService.startExtraction();
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Set up a question so submitAnswer can work
+    const withQuestions = makeStatusResponse({
+      is_complete: false,
+      current_phase: 'awaiting_input',
+      pending_questions_count: 1,
+    });
+    mockOntologyApi.getStatus.mockResolvedValue(withQuestions);
+    mockOntologyApi.getQuestions.mockResolvedValue({
+      workflow_id: 'wf-1',
+      questions: {
+        critical: [{ id: 'q1', text: 'What?', context: '', category: 'general', priority: 1 }],
+        high: [],
+        medium: [],
+        low: [],
+      },
+    });
+
+    // Fetch to pick up the question
+    await vi.advanceTimersByTimeAsync(2000);
+
+    // submitAnswer triggers startPolling again — should not double the interval
+    await ontologyService.submitAnswer('q1', 'test answer');
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Reset mock to count fresh
+    mockOntologyApi.getStatus.mockClear();
+    mockOntologyApi.getStatus.mockResolvedValue(inProgress);
+    mockOntologyApi.getQuestions.mockResolvedValue({
+      workflow_id: 'wf-1',
+      questions: { critical: [], high: [], medium: [], low: [] },
+    });
+
+    // Over 2000ms, should get exactly 1 poll (not 2 from double intervals)
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(mockOntologyApi.getStatus).toHaveBeenCalledTimes(1);
   });
 });
