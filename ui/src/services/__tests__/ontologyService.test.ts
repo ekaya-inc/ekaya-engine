@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { transformEntityQueue } from '../ontologyService';
-import type { EntityProgressResponse, WorkflowStatusResponse } from '../../types';
+import { transformEntityQueue, transformQuestions } from '../ontologyService';
+import type { EntityProgressResponse, WorkflowQuestion, WorkflowStatusResponse } from '../../types';
 
 // Mock ontologyApi before importing ontologyService (which imports it)
 vi.mock('../ontologyApi', () => ({
@@ -151,6 +151,145 @@ describe('transformEntityQueue', () => {
         errorMessage: 'Rate limit exceeded',
       },
     ]);
+  });
+});
+
+describe('transformQuestions', () => {
+  it('returns empty array when input is an empty array', () => {
+    expect(transformQuestions([])).toEqual([]);
+  });
+
+  it('maps id, text, and affects from WorkflowQuestion to ExtractionQuestion', () => {
+    const input: WorkflowQuestion[] = [
+      {
+        id: 'q-1',
+        text: 'What does the users table represent?',
+        context: 'Schema analysis',
+        category: 'general',
+        priority: 1,
+        affects: ['users', 'orders'],
+      },
+    ];
+
+    const result = transformQuestions(input);
+
+    expect(result).toEqual([
+      {
+        id: 'q-1',
+        text: 'What does the users table represent?',
+        affects: ['users', 'orders'],
+        isSubmitted: false,
+      },
+    ]);
+  });
+
+  it('defaults affects to empty array when not present in input', () => {
+    const input: WorkflowQuestion[] = [
+      {
+        id: 'q-2',
+        text: 'Describe the business domain',
+        context: '',
+        category: 'domain',
+        priority: 2,
+        // affects is undefined
+      },
+    ];
+
+    const result = transformQuestions(input);
+
+    expect(result[0]?.affects).toEqual([]);
+  });
+
+  it('sets isSubmitted to true when answered_at is a non-null string', () => {
+    const input: WorkflowQuestion[] = [
+      {
+        id: 'q-3',
+        text: 'Already answered question',
+        context: '',
+        category: 'general',
+        priority: 1,
+        answered_at: '2025-06-01T12:00:00Z',
+      },
+    ];
+
+    const result = transformQuestions(input);
+
+    expect(result[0]?.isSubmitted).toBe(true);
+  });
+
+  it('sets isSubmitted to false when answered_at is undefined', () => {
+    const input: WorkflowQuestion[] = [
+      {
+        id: 'q-4',
+        text: 'Unanswered question',
+        context: '',
+        category: 'general',
+        priority: 1,
+        // answered_at is undefined
+      },
+    ];
+
+    const result = transformQuestions(input);
+
+    expect(result[0]?.isSubmitted).toBe(false);
+  });
+
+  it('does not populate answer from backend data', () => {
+    const input: WorkflowQuestion[] = [
+      {
+        id: 'q-5',
+        text: 'Question with suggested answer',
+        context: '',
+        category: 'general',
+        priority: 1,
+        suggested_answer: 'This should not appear',
+        answered_at: '2025-06-01T12:00:00Z',
+      },
+    ];
+
+    const result = transformQuestions(input);
+
+    expect(result[0]).not.toHaveProperty('answer');
+  });
+
+  it('transforms multiple questions preserving order', () => {
+    const input: WorkflowQuestion[] = [
+      { id: 'q-a', text: 'First', context: '', category: 'general', priority: 1 },
+      { id: 'q-b', text: 'Second', context: '', category: 'domain', priority: 2, answered_at: '2025-01-01T00:00:00Z' },
+      { id: 'q-c', text: 'Third', context: '', category: 'schema', priority: 3, affects: ['products'] },
+    ];
+
+    const result = transformQuestions(input);
+
+    expect(result).toHaveLength(3);
+    expect(result[0]?.id).toBe('q-a');
+    expect(result[0]?.isSubmitted).toBe(false);
+    expect(result[1]?.id).toBe('q-b');
+    expect(result[1]?.isSubmitted).toBe(true);
+    expect(result[2]?.id).toBe('q-c');
+    expect(result[2]?.affects).toEqual(['products']);
+  });
+
+  it('only includes id, text, affects, and isSubmitted in output', () => {
+    const input: WorkflowQuestion[] = [
+      {
+        id: 'q-6',
+        text: 'Full question',
+        context: 'Lots of context',
+        category: 'schema',
+        priority: 5,
+        options: ['opt1', 'opt2'],
+        suggested_answer: 'suggestion',
+        reasoning: 'some reasoning',
+        affects: ['table1'],
+        created_at: '2025-01-01T00:00:00Z',
+      },
+    ];
+
+    const result = transformQuestions(input);
+
+    // Only these keys should be present
+    expect(Object.keys(result[0]!)).toEqual(['id', 'text', 'affects', 'isSubmitted']);
   });
 });
 
