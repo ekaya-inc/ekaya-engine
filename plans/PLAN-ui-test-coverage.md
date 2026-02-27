@@ -72,7 +72,7 @@ File to create: `src/services/__tests__/engineApi.methods.test.ts`
 - [x] Add tests for project knowledge methods: `listProjectKnowledge`, `createProjectKnowledge`, `updateProjectKnowledge`, `deleteProjectKnowledge` — verify URL, method, body
 - [x] Add tests for MCP config methods: `getMCPConfig`, `updateMCPConfig` — verify URL, method, response (no `deleteMcpConfig` exists in engineApi)
 - [x] Add tests for alerts methods: `listAlerts`, `getAlert`, `dismissAlert` — verify URL, method, response
-- [ ] Run `cd ui && npx vitest run` and confirm all tests pass
+- [x] Run `cd ui && npx vitest run` and confirm all tests pass
 
 #### `src/services/ontologyApi.ts` (482 lines, ~22 methods, 0 tests)
 
