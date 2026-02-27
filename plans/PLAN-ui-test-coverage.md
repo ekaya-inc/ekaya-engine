@@ -78,7 +78,7 @@ File to create: `src/services/__tests__/engineApi.methods.test.ts`
 
 File to create: `src/services/__tests__/ontologyApi.test.ts`
 
-- [ ] Read `src/services/ontologyApi.ts` to identify all exported async methods and response shapes
+- [x] Read `src/services/ontologyApi.ts` to identify all exported async methods and response shapes
 - [ ] Add tests for each async method verifying: correct URL passed to `fetchWithAuth`, correct HTTP method, correct request body, correct response parsing
 - [ ] Add tests for `pollStatus` polling logic: verify polling starts, calls the correct endpoint at each interval, stops on terminal status, handles errors
 - [ ] Add tests for wrapped vs. unwrapped response handling (based on actual behavior found in the file)
