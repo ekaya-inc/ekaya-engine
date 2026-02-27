@@ -115,7 +115,7 @@ File to create: `src/services/__tests__/ontologyService.test.ts`
 
 File to create: `src/components/__tests__/AIConfigWidget.test.tsx`
 
-- [ ] Read `src/components/AIConfigWidget.tsx` to identify props interface, mock dependencies
+- [x] Read `src/components/AIConfigWidget.tsx` to identify props interface, mock dependencies
 - [ ] Add test: loads AI config on mount and displays provider/model values
 - [ ] Add test: provider selection updates the form state
 - [ ] Add test: form validation prevents save when required fields are empty
