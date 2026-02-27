@@ -205,9 +205,9 @@ File to create: `pkg/services/knowledge_parsing_test.go`
 
 #### `pkg/services/ontology_question.go` — Orchestration edge cases (0 tests)
 
-- [ ] Read `pkg/services/ontology_question.go` to understand its interface and dependencies
-- [ ] If it contains pure validation or transformation logic, add targeted unit tests
-- [ ] If it's purely orchestration (calls other services), skip — integration tests cover this
+- [x] Read `pkg/services/ontology_question.go` to understand its interface and dependencies
+- [x] If it contains pure validation or transformation logic, add targeted unit tests
+- [x] If it's purely orchestration (calls other services), skip — integration tests cover this
 
 #### `pkg/services/audit_page_service.go` — Pagination edge cases (0 tests)
 
