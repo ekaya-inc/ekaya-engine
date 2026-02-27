@@ -67,7 +67,7 @@ File to create: `src/services/__tests__/engineApi.methods.test.ts`
 - [x] Add tests for query execution methods: `executeQuery`, `explainQuery`, `validateQuery` — verify correct URL, body, and response parsing
 - [ ] Add tests for approved query methods: `listApprovedQueries`, `executeApprovedQuery` — verify URL and body
 - [ ] Add tests for glossary CRUD methods: `listGlossaryTerms`, `getGlossaryTerm`, `createGlossaryTerm`, `updateGlossaryTerm`, `deleteGlossaryTerm`, `getGlossarySql` — verify correct URL, HTTP method, body
-- [ ] Add tests for AI config methods: `getAIConfig`, `updateAIConfig`, `deleteAIConfig`, `testAIConfig` — verify 204 handling for delete, request/response shapes
+- [x] Add tests for AI config methods: `getAIConfig`, `updateAIConfig`, `deleteAIConfig`, `testAIConfig` — verify 204 handling for delete, request/response shapes
 - [ ] Add tests for ontology change methods: `listPendingChanges`, `approveChange`, `rejectChange`, `approveAllChanges` — verify URL and method
 - [x] Add tests for project knowledge methods: `listProjectKnowledge`, `createProjectKnowledge`, `updateProjectKnowledge`, `deleteProjectKnowledge` — verify URL, method, body
 - [ ] Add tests for MCP config methods: `getMcpConfig`, `updateMcpConfig`, `deleteMcpConfig` — verify URL, method, response

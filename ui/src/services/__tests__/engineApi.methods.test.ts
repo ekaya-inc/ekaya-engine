@@ -605,6 +605,148 @@ describe('engineApi project knowledge methods', () => {
   });
 });
 
+describe('engineApi AI config methods', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('getAIConfig', () => {
+    it('sends GET to /{projectId}/ai-config', async () => {
+      const responseData = {
+        data: {
+          project_id: 'proj-1',
+          config_type: 'byok',
+          llm_base_url: 'https://api.openai.com/v1',
+          llm_model: 'gpt-4o',
+          embedding_base_url: 'https://api.openai.com/v1',
+          embedding_model: 'text-embedding-3-small',
+        },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.getAIConfig('proj-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/ai-config',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        })
+      );
+      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      expect(callArgs.method).toBeUndefined();
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('saveAIConfig', () => {
+    it('sends PUT to /{projectId}/ai-config with config body', async () => {
+      const config = {
+        config_type: 'byok',
+        llm_base_url: 'https://api.openai.com/v1',
+        llm_api_key: 'sk-test-key',
+        llm_model: 'gpt-4o',
+        embedding_base_url: 'https://api.openai.com/v1',
+        embedding_api_key: 'sk-test-key',
+        embedding_model: 'text-embedding-3-small',
+      };
+      const responseData = {
+        data: {
+          project_id: 'proj-1',
+          ...config,
+        },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.saveAIConfig('proj-1', config);
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/ai-config',
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify(config),
+        })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('deleteAIConfig', () => {
+    it('sends DELETE to /{projectId}/ai-config and handles 204 response', async () => {
+      mock204Response();
+
+      await engineApi.deleteAIConfig('proj-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/ai-config',
+        expect.objectContaining({ method: 'DELETE' })
+      );
+    });
+  });
+
+  describe('testAIConnection', () => {
+    it('sends POST to /{projectId}/ai-config/test with config body', async () => {
+      const testRequest = {
+        config_type: 'byok',
+        llm_base_url: 'https://api.openai.com/v1',
+        llm_api_key: 'sk-test-key',
+        llm_model: 'gpt-4o',
+        embedding_base_url: 'https://api.openai.com/v1',
+        embedding_api_key: 'sk-test-key',
+        embedding_model: 'text-embedding-3-small',
+      };
+      const responseData = {
+        data: {
+          success: true,
+          message: 'Connection successful',
+          llm_success: true,
+          llm_message: 'LLM responded correctly',
+          llm_response_time_ms: 342,
+          embedding_success: true,
+          embedding_message: 'Embedding model responded correctly',
+        },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.testAIConnection('proj-1', testRequest);
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/ai-config/test',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify(testRequest),
+        })
+      );
+      expect(result).toEqual(responseData);
+    });
+
+    it('returns failure details when connection test fails', async () => {
+      const testRequest = {
+        llm_base_url: 'https://invalid-url.example.com',
+        llm_model: 'gpt-4o',
+      };
+      const responseData = {
+        data: {
+          success: false,
+          message: 'Connection failed',
+          llm_success: false,
+          llm_message: 'Could not reach endpoint',
+          llm_error_type: 'endpoint',
+          embedding_success: false,
+          embedding_message: 'No embedding config provided',
+          embedding_error_type: 'unknown',
+        },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.testAIConnection('proj-1', testRequest);
+
+      expect(result).toEqual(responseData);
+      expect(result.data.success).toBe(false);
+      expect(result.data.llm_error_type).toBe('endpoint');
+    });
+  });
+});
+
 describe('engineApi alerts methods', () => {
   beforeEach(() => {
     vi.clearAllMocks();
