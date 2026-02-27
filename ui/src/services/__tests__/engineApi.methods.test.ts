@@ -291,3 +291,111 @@ describe('engineApi schema operation methods', () => {
     });
   });
 });
+
+describe('engineApi query CRUD methods', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('listQueries', () => {
+    it('sends GET to /{projectId}/datasources/{datasourceId}/queries', async () => {
+      const responseData = {
+        data: { queries: [{ query_id: 'q-1', natural_language_prompt: 'get users' }] },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.listQueries('proj-1', 'ds-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/queries',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        })
+      );
+      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      expect(callArgs.method).toBeUndefined();
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('getQuery', () => {
+    it('sends GET to /{projectId}/datasources/{datasourceId}/queries/{queryId}', async () => {
+      const responseData = {
+        data: { query_id: 'q-1', natural_language_prompt: 'get users', sql_query: 'SELECT * FROM users' },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.getQuery('proj-1', 'ds-1', 'q-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/queries/q-1',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        })
+      );
+      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      expect(callArgs.method).toBeUndefined();
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('createQuery', () => {
+    it('sends POST to /{projectId}/datasources/{datasourceId}/queries with correct body', async () => {
+      const request = {
+        natural_language_prompt: 'get all users',
+        sql_query: 'SELECT * FROM users',
+        is_enabled: true,
+      };
+      const responseData = { data: { query_id: 'q-1', ...request } };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.createQuery('proj-1', 'ds-1', request as any);
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/queries',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify(request),
+        })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('updateQuery', () => {
+    it('sends PUT to /{projectId}/datasources/{datasourceId}/queries/{queryId} with correct body', async () => {
+      const request = {
+        natural_language_prompt: 'get active users',
+        sql_query: 'SELECT * FROM users WHERE active = true',
+      };
+      const responseData = { data: { query_id: 'q-1', ...request } };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.updateQuery('proj-1', 'ds-1', 'q-1', request as any);
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/queries/q-1',
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify(request),
+        })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('deleteQuery', () => {
+    it('sends DELETE to /{projectId}/datasources/{datasourceId}/queries/{queryId}', async () => {
+      const responseData = { data: { success: true, message: 'Query deleted' } };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.deleteQuery('proj-1', 'ds-1', 'q-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/queries/q-1',
+        expect.objectContaining({ method: 'DELETE' })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+});
