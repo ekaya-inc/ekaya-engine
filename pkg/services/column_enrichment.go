@@ -178,6 +178,11 @@ func (s *columnEnrichmentService) EnrichProject(ctx context.Context, projectID u
 	}
 
 	result.DurationMs = time.Since(startTime).Milliseconds()
+
+	// Fail fast: propagate LLM errors instead of silently continuing
+	if len(result.TablesFailed) > 0 {
+		return result, fmt.Errorf("%d of %d tables failed enrichment", len(result.TablesFailed), len(result.TablesEnriched)+len(result.TablesFailed))
+	}
 	return result, nil
 }
 

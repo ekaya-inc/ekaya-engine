@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"go.uber.org/zap"
@@ -113,4 +114,24 @@ func Process[T any](
 	}
 
 	return results
+}
+
+// CheckResults returns an error if any work items failed.
+// Call this after Process() to fail fast when LLM calls fail.
+// The error includes the count and the first failure for diagnostics.
+func CheckResults[T any](results []WorkResult[T]) error {
+	var firstErr error
+	var failCount int
+	for _, r := range results {
+		if r.Err != nil {
+			failCount++
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: %w", r.ID, r.Err)
+			}
+		}
+	}
+	if failCount > 0 {
+		return fmt.Errorf("%d of %d failed: %w", failCount, len(results), firstErr)
+	}
+	return nil
 }

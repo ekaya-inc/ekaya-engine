@@ -716,6 +716,10 @@ func (s *columnFeatureExtractionService) runPhase2ColumnClassification(
 		progressCallback(len(profiles), len(profiles), summary)
 	}
 
+	// Fail fast: propagate LLM errors instead of silently continuing
+	if err := llm.CheckResults(results); err != nil {
+		return result, fmt.Errorf("column classification: %w", err)
+	}
 	return result, nil
 }
 
@@ -2090,6 +2094,10 @@ func (s *columnFeatureExtractionService) runPhase3EnumAnalysis(
 		progressCallback(len(enumQueue), len(enumQueue), summary)
 	}
 
+	// Fail fast: propagate LLM errors instead of silently continuing
+	if err := llm.CheckResults(results); err != nil {
+		return fmt.Errorf("enum analysis: %w", err)
+	}
 	return nil
 }
 
@@ -2439,6 +2447,10 @@ func (s *columnFeatureExtractionService) runPhase4FKResolution(
 		progressCallback(len(fkQueue), len(fkQueue), summary)
 	}
 
+	// Fail fast: propagate LLM errors instead of silently continuing
+	if err := llm.CheckResults(results); err != nil {
+		return fmt.Errorf("FK resolution: %w", err)
+	}
 	return nil
 }
 
@@ -2505,6 +2517,10 @@ func (s *columnFeatureExtractionService) runPhase4FKResolutionLLMOnly(
 		progressCallback(len(fkQueue), len(fkQueue), fmt.Sprintf("Resolved %d FK targets", successCount))
 	}
 
+	// Fail fast: propagate LLM errors instead of silently continuing
+	if err := llm.CheckResults(results); err != nil {
+		return fmt.Errorf("FK resolution (LLM-only): %w", err)
+	}
 	return nil
 }
 
@@ -3005,6 +3021,10 @@ func (s *columnFeatureExtractionService) runPhase5CrossColumnAnalysis(
 		progressCallback(len(tableQueue), len(tableQueue), summary)
 	}
 
+	// Fail fast: propagate LLM errors instead of silently continuing
+	if err := llm.CheckResults(results); err != nil {
+		return fmt.Errorf("cross-column analysis: %w", err)
+	}
 	return nil
 }
 
