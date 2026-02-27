@@ -39,6 +39,12 @@ vi.mock('../../lib/auth-token', () => ({
   getUserRoles: vi.fn(() => ['admin']),
 }));
 
+vi.mock('../../contexts/ProjectContext', () => ({
+  useProject: () => ({
+    urls: { projectsPageUrl: 'https://us.ekaya.ai/projects' },
+  }),
+}));
+
 vi.mock('../../contexts/ConfigContext', () => ({
   useConfig: () => ({
     config: {

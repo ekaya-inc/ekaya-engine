@@ -1,4 +1,4 @@
-import { ArrowLeft, ExternalLink, Loader2, Check, Copy } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Info, Loader2, Check, Copy } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
@@ -10,6 +10,7 @@ import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { TOOL_GROUP_IDS } from '../constants/mcpToolMetadata';
 import { useConfig } from '../contexts/ConfigContext';
+import { useProject } from '../contexts/ProjectContext';
 import { useToast } from '../hooks/useToast';
 import { getUserRoles } from '../lib/auth-token';
 import engineApi from '../services/engineApi';
@@ -19,6 +20,7 @@ const MCPServerPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
   const { config: appConfig } = useConfig();
+  const { urls } = useProject();
   const { toast } = useToast();
 
   const [config, setConfig] = useState<MCPConfigResponse | null>(null);
@@ -391,10 +393,20 @@ const MCPServerPage = () => {
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back to Dashboard
         </Button>
-        <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
-          <MCPLogo size={32} className="text-brand-purple" />
-          MCP Server
-        </h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
+            <MCPLogo size={32} className="text-brand-purple" />
+            MCP Server
+          </h1>
+          <a
+            href={`${urls.projectsPageUrl ? new URL(urls.projectsPageUrl).origin : 'https://us.ekaya.ai'}/apps/mcp-server`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="MCP Server documentation"
+          >
+            <Info className="h-7 w-7 text-text-secondary hover:text-brand-purple transition-colors" />
+          </a>
+        </div>
       </div>
 
       <div className="space-y-6">
