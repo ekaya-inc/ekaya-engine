@@ -107,7 +107,7 @@ File to create: `src/services/__tests__/ontologyService.test.ts`
 - [ ] Add tests for `transformQuestions`: provide representative input, assert correct output shape
 - [x] Add tests for `startPolling`: mock ontologyApi and timer functions (`vi.useFakeTimers()`), verify polling interval and stop behavior
 - [x] Add tests for `stopPolling`: verify timer is cleared and polling halts
-- [ ] Run `cd ui && npx vitest run` and confirm all tests pass
+- [x] Run `cd ui && npx vitest run` and confirm all tests pass
 
 ### Priority 3 — Critical Components
 
