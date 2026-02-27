@@ -34,7 +34,7 @@ import { TOOL_GROUP_IDS } from '../constants/mcpToolMetadata';
 import { useConfig } from '../contexts/ConfigContext';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
-import type { DAGStatusResponse, Datasource, InstalledApp, MCPConfigResponse, ServerStatusResponse } from '../types';
+import type { DAGStatusResponse, Datasource, InstalledApp, MCPConfigResponse } from '../types';
 
 // Developer tools added to the MCP Server by AI Data Liaison installation
 const DATA_LIAISON_DEVELOPER_TOOLS = [
@@ -61,7 +61,6 @@ const AIDataLiaisonPage = () => {
   // Checklist state
   const [loading, setLoading] = useState(true);
   const [mcpServerReady, setMcpServerReady] = useState(false);
-  const [serverStatus, setServerStatus] = useState<ServerStatusResponse | null>(null);
   const [mcpConfig, setMcpConfig] = useState<MCPConfigResponse | null>(null);
   const [installedApp, setInstalledApp] = useState<InstalledApp | null>(null);
   const [activating, setActivating] = useState(false);
@@ -77,16 +76,14 @@ const AIDataLiaisonPage = () => {
 
     setLoading(true);
     try {
-      // Fetch MCP config, datasources, server status, and installed app in parallel
-      const [mcpConfigRes, datasourcesRes, serverStatusRes, installedAppRes] = await Promise.all([
+      // Fetch MCP config, datasources, and installed app in parallel
+      const [mcpConfigRes, datasourcesRes, installedAppRes] = await Promise.all([
         engineApi.getMCPConfig(pid),
         engineApi.listDataSources(pid),
-        engineApi.getServerStatus(),
         engineApi.getInstalledApp(pid, 'ai-data-liaison').catch(() => null),
       ]);
 
       setMcpConfig(mcpConfigRes.data ?? null);
-      setServerStatus(serverStatusRes);
       setInstalledApp(installedAppRes?.data ?? null);
 
       // Check if MCP Server is ready: ontology DAG completed implies all prereqs are met
@@ -261,8 +258,6 @@ const AIDataLiaisonPage = () => {
   const getChecklistItems = (): ChecklistItem[] => {
     const items: ChecklistItem[] = [];
 
-    const isAccessible = serverStatus?.accessible_for_business_users ?? false;
-
     // 1. MCP Server set up
     items.push({
       id: 'mcp-server',
@@ -275,19 +270,7 @@ const AIDataLiaisonPage = () => {
       linkText: mcpServerReady ? 'Manage' : 'Configure',
     });
 
-    // 2. MCP Server accessible to business users (optional — not required for activation)
-    items.push({
-      id: 'server-accessible',
-      title: 'MCP Server accessible',
-      description: isAccessible
-        ? 'Server is reachable by business users over HTTPS'
-        : 'Optional \u2014 configure when ready to share with business users',
-      status: loading ? 'loading' : isAccessible ? 'complete' : 'pending',
-      link: `/projects/${pid}/server-setup`,
-      linkText: isAccessible ? 'Review' : 'Configure',
-    });
-
-    // 3. Activate (only requires step 1)
+    // 2. Activate (only requires step 1)
     const activated = installedApp?.activated_at != null;
     items.push({
       id: 'activate',

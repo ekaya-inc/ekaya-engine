@@ -46,6 +46,18 @@ function getMarketingOrigin(projectsPageUrl: string | null): string {
   return 'https://ekaya.ai';
 }
 
+/** Extract the ekaya-central origin from the projects page URL */
+function getCentralOrigin(projectsPageUrl: string | null): string {
+  if (projectsPageUrl) {
+    try {
+      return new URL(projectsPageUrl).origin;
+    } catch {
+      // invalid URL, fall through to default
+    }
+  }
+  return 'https://us.ekaya.ai';
+}
+
 type AppColor = 'blue' | 'purple' | 'green' | 'gray' | 'orange';
 
 interface ApplicationInfo {
@@ -57,8 +69,10 @@ interface ApplicationInfo {
   available: boolean;
   /** If true, this app can be installed (has install button) */
   installable?: boolean;
-  /** URL for Learn More link */
+  /** URL path for Learn More link */
   learnMoreUrl?: string;
+  /** Which origin to use for Learn More: 'marketing' (default) or 'central' */
+  learnMoreBase?: 'marketing' | 'central';
   /** If true, show a Contact Support button instead of install/sales actions */
   contactSupport?: boolean;
 }
@@ -72,7 +86,8 @@ const applications: ApplicationInfo[] = [
     color: 'blue',
     available: true,
     installable: true,
-    learnMoreUrl: '/enterprise/',
+    learnMoreUrl: '/apps/ai-data-liaison',
+    learnMoreBase: 'central',
   },
   {
     id: 'ai-agents',
@@ -130,6 +145,7 @@ const ApplicationsPage = () => {
   const { install, isLoading: isInstalling } = useInstallApp(pid);
   const [installingAppId, setInstallingAppId] = useState<string | null>(null);
   const marketingOrigin = getMarketingOrigin(urls.projectsPageUrl);
+  const centralOrigin = getCentralOrigin(urls.projectsPageUrl);
 
   const handleContactSales = (app: ApplicationInfo) => {
     const subject = encodeURIComponent(
@@ -151,8 +167,9 @@ const ApplicationsPage = () => {
     }
   };
 
-  const handleLearnMore = (path: string) => {
-    window.open(`${marketingOrigin}${path}`, '_blank', 'noopener,noreferrer');
+  const handleLearnMore = (path: string, base: 'marketing' | 'central' = 'marketing') => {
+    const origin = base === 'central' ? centralOrigin : marketingOrigin;
+    window.open(`${origin}${path}`, '_blank', 'noopener,noreferrer');
   };
 
   const handleContactSupport = () => {
@@ -218,7 +235,7 @@ const ApplicationsPage = () => {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => handleLearnMore(learnMoreUrl)}
+              onClick={() => handleLearnMore(learnMoreUrl, app.learnMoreBase)}
             >
               <ExternalLink className="h-3 w-3 mr-1" />
               Learn More

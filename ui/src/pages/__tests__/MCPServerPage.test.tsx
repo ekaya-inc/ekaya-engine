@@ -16,6 +16,8 @@ vi.mock('../../services/engineApi', () => ({
     getOntologyDAGStatus: vi.fn(),
     getOntologyQuestionCounts: vi.fn(),
     updateMCPConfig: vi.fn(),
+    listQueries: vi.fn(),
+    getServerStatus: vi.fn(),
   },
 }));
 
@@ -35,6 +37,12 @@ vi.mock('react-router-dom', async () => {
 
 vi.mock('../../lib/auth-token', () => ({
   getUserRoles: vi.fn(() => ['admin']),
+}));
+
+vi.mock('../../contexts/ProjectContext', () => ({
+  useProject: () => ({
+    urls: { projectsPageUrl: 'https://us.ekaya.ai/projects' },
+  }),
 }));
 
 vi.mock('../../contexts/ConfigContext', () => ({
@@ -81,6 +89,7 @@ const setupMocks = (options: {
   hasAIConfig?: boolean;
   hasOntology?: boolean;
   questionCounts?: { required: number; optional: number } | null;
+  hasApprovedQueries?: boolean;
 } = {}) => {
   const {
     hasDatasource = true,
@@ -88,12 +97,15 @@ const setupMocks = (options: {
     hasAIConfig = true,
     hasOntology = true,
     questionCounts = { required: 0, optional: 0 },
+    hasApprovedQueries = false,
   } = options;
 
   vi.mocked(engineApi.getMCPConfig).mockResolvedValue({
     success: true,
     data: mockMCPConfig,
   });
+
+  vi.mocked(engineApi.getServerStatus).mockResolvedValue(null);
 
   vi.mocked(engineApi.listDataSources).mockResolvedValue({
     success: true,
@@ -139,6 +151,31 @@ const setupMocks = (options: {
       new Error('No counts available'),
     );
   }
+
+  vi.mocked(engineApi.listQueries).mockResolvedValue({
+    success: true,
+    data: {
+      queries: hasApprovedQueries
+        ? [{
+            query_id: 'q-1',
+            project_id: 'proj-1',
+            datasource_id: 'ds-1',
+            natural_language_prompt: 'Test Query',
+            additional_context: null,
+            sql_query: 'SELECT 1',
+            dialect: 'postgres',
+            is_enabled: true,
+            allows_modification: false,
+            usage_count: 0,
+            last_used_at: null,
+            created_at: '2024-01-01',
+            updated_at: '2024-01-01',
+            parameters: [],
+            status: 'approved',
+          }]
+        : [],
+    },
+  });
 };
 
 const renderPage = async () => {
@@ -206,7 +243,39 @@ describe('MCPServerPage - Checklist step prerequisites match dashboard tiles', (
     expect(btn).toBeNull();
   });
 
-  // -- Step 3: AI configured -- requires datasource + schema (matches AI config prerequisite)
+  // -- Step 3: Pre-Approved Queries (optional) -- requires datasource
+  it('queries step shows Configure button when datasource exists but no queries', async () => {
+    setupMocks({ hasDatasource: true, hasApprovedQueries: false });
+    await renderPage();
+    await waitFor(() => {
+      const btn = getStepButton('Create Pre-Approved Queries');
+      expect(btn).toBeInTheDocument();
+      expect(btn).toHaveTextContent('Configure');
+    });
+  });
+
+  it('queries step shows Manage button when approved queries exist', async () => {
+    setupMocks({ hasDatasource: true, hasApprovedQueries: true });
+    await renderPage();
+    await waitFor(() => {
+      const btn = getStepButton('Create Pre-Approved Queries');
+      expect(btn).toBeInTheDocument();
+      expect(btn).toHaveTextContent('Manage');
+    });
+  });
+
+  it('queries step hides action button when no datasource', async () => {
+    setupMocks({ hasDatasource: false, hasApprovedQueries: false });
+    await renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/Create Pre-Approved Queries/)).toBeInTheDocument();
+    });
+    const stepEl = screen.getByText(/Create Pre-Approved Queries/).closest('[class*="rounded-lg"]');
+    const btn = stepEl?.querySelector('a button');
+    expect(btn).toBeNull();
+  });
+
+  // -- Step 4: AI configured -- requires datasource + schema (matches AI config prerequisite)
   it('AI step shows Configure button when datasource and schema exist', async () => {
     setupMocks({ hasDatasource: true, hasSelectedTables: true, hasAIConfig: false });
     await renderPage();
@@ -238,7 +307,7 @@ describe('MCPServerPage - Checklist step prerequisites match dashboard tiles', (
     expect(btn).toBeNull();
   });
 
-  // -- Step 4: Ontology -- requires datasource + schema + AI (matches Intelligence tile logic)
+  // -- Step 5: Ontology -- requires datasource + schema + AI (matches Intelligence tile logic)
   it('ontology step shows Configure button when datasource, schema, and AI are all configured', async () => {
     setupMocks({ hasDatasource: true, hasSelectedTables: true, hasAIConfig: true, hasOntology: false });
     await renderPage();
@@ -281,7 +350,7 @@ describe('MCPServerPage - Checklist step prerequisites match dashboard tiles', (
     expect(btn).toBeNull();
   });
 
-  // -- Step 5: Questions -- requires ontology complete
+  // -- Step 6: Questions -- requires ontology complete
   it('questions step shows Answer button when ontology is complete and questions exist', async () => {
     setupMocks({ hasOntology: true, questionCounts: { required: 2, optional: 0 } });
     await renderPage();
@@ -342,13 +411,14 @@ describe('MCPServerPage - Questions checklist item', () => {
     });
   });
 
-  it('shows "MCP Server is ready" when all 5 items are complete', async () => {
+  it('shows "MCP Server is ready" when all required items are complete (optional queries step ignored)', async () => {
     setupMocks({
       hasDatasource: true,
       hasSelectedTables: true,
       hasAIConfig: true,
       hasOntology: true,
       questionCounts: { required: 0, optional: 0 },
+      hasApprovedQueries: false,
     });
     await renderPage();
 

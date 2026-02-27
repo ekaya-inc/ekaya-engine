@@ -18,7 +18,6 @@ vi.mock('../../services/engineApi', () => ({
     getAIConfig: vi.fn(),
     getSchema: vi.fn(),
     getOntologyDAGStatus: vi.fn(),
-    getServerStatus: vi.fn(),
   },
 }));
 
@@ -89,8 +88,6 @@ const setupMocks = (options: {
 } = {}) => {
   const { hasDatasource = true, hasOntology = false, hasMCPConfig = true, hasSelectedTables = false, hasAIConfig = false, isActivated = false } = options;
 
-  vi.mocked(engineApi.getServerStatus).mockResolvedValue(null);
-
   vi.mocked(engineApi.getInstalledApp).mockResolvedValue({
     success: true,
     data: {
@@ -158,13 +155,6 @@ const setupAllCompleteMocks = (options: { isActivated?: boolean } = {}) => {
     hasOntology: true,
     hasMCPConfig: true,
     isActivated,
-  });
-  // Server must be accessible for all checklist items to be complete
-  vi.mocked(engineApi.getServerStatus).mockResolvedValue({
-    base_url: 'https://example.com',
-    is_localhost: false,
-    is_https: true,
-    accessible_for_business_users: true,
   });
 };
 
@@ -244,18 +234,13 @@ describe('AIDataLiaisonPage', () => {
       expect(screen.getByText('Datasource, schema, AI, and ontology configured')).toBeInTheDocument();
     });
 
-    it('shows MCP Server accessible as optional when server is on localhost', async () => {
-      await renderAIDataLiaisonPage();
-      expect(screen.getByText('2. MCP Server accessible')).toBeInTheDocument();
-      expect(screen.getByText(/Optional/)).toBeInTheDocument();
-    });
   });
 
   describe('Activate Step', () => {
     it('shows activate step when prerequisites are met but not activated', async () => {
       setupAllCompleteMocks({ isActivated: false });
       await renderAIDataLiaisonPage();
-      expect(screen.getByText('3. Activate AI Data Liaison')).toBeInTheDocument();
+      expect(screen.getByText('2. Activate AI Data Liaison')).toBeInTheDocument();
       expect(screen.getByText('Activate to start using the application')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /^activate$/i })).toBeInTheDocument();
     });
@@ -271,7 +256,7 @@ describe('AIDataLiaisonPage', () => {
     it('shows activated state when activated_at is set', async () => {
       setupAllCompleteMocks({ isActivated: true });
       await renderAIDataLiaisonPage();
-      expect(screen.getByText('3. Activate AI Data Liaison')).toBeInTheDocument();
+      expect(screen.getByText('2. Activate AI Data Liaison')).toBeInTheDocument();
       expect(screen.getByText('AI Data Liaison activated')).toBeInTheDocument();
       // No activate button when already activated
       expect(screen.queryByRole('button', { name: /^activate$/i })).not.toBeInTheDocument();
