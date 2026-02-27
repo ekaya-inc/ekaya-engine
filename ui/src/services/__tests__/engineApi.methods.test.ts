@@ -604,3 +604,106 @@ describe('engineApi project knowledge methods', () => {
     });
   });
 });
+
+describe('engineApi alerts methods', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('getAuditAlerts', () => {
+    it('sends GET to /{projectId}/audit/alerts', async () => {
+      const responseData = {
+        data: {
+          items: [{ id: 'alert-1', severity: 'high', message: 'Suspicious query' }],
+          total: 1,
+        },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.getAuditAlerts('proj-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/audit/alerts',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        })
+      );
+      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      expect(callArgs.method).toBeUndefined();
+      expect(result).toEqual(responseData);
+    });
+
+    it('appends query params when provided', async () => {
+      const responseData = { data: { items: [], total: 0 } };
+      mockJsonResponse(responseData);
+
+      await engineApi.getAuditAlerts('proj-1', { severity: 'high', status: 'open' });
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/audit/alerts?severity=high&status=open',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        })
+      );
+    });
+  });
+
+  describe('resolveAuditAlert', () => {
+    it('sends POST to /{projectId}/audit/alerts/{alertId}/resolve with body', async () => {
+      const responseData = { data: { message: 'Alert resolved' } };
+      mockJsonResponse(responseData);
+
+      const body = { resolution: 'false_positive', notes: 'Not a real threat' };
+      const result = await engineApi.resolveAuditAlert('proj-1', 'alert-1', body as any);
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/audit/alerts/alert-1/resolve',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify(body),
+        })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('getAlertConfig', () => {
+    it('sends GET to /{projectId}/audit/alert-config', async () => {
+      const responseData = {
+        data: { enabled: true, severity_threshold: 'medium', notify_email: true },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.getAlertConfig('proj-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/audit/alert-config',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        })
+      );
+      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      expect(callArgs.method).toBeUndefined();
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('updateAlertConfig', () => {
+    it('sends PUT to /{projectId}/audit/alert-config with config body', async () => {
+      const config = { enabled: false, severity_threshold: 'high', notify_email: false };
+      const responseData = { data: config };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.updateAlertConfig('proj-1', config as any);
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/audit/alert-config',
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify(config),
+        })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+});
