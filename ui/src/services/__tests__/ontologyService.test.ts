@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { transformEntityQueue, transformQuestions } from '../ontologyService';
-import type { EntityProgressResponse, WorkflowQuestion, WorkflowStatusResponse } from '../../types';
+import { transformEntityQueue, transformTaskQueue, transformQuestions } from '../ontologyService';
+import type { EntityProgressResponse, TaskProgressResponse, WorkflowQuestion, WorkflowStatusResponse } from '../../types';
 
 // Mock ontologyApi before importing ontologyService (which imports it)
 vi.mock('../ontologyApi', () => ({
@@ -149,6 +149,139 @@ describe('transformEntityQueue', () => {
         tokenCount: 3200,
         lastUpdated: '2025-06-01T12:00:00Z',
         errorMessage: 'Rate limit exceeded',
+      },
+    ]);
+  });
+});
+
+describe('transformTaskQueue', () => {
+  it('returns empty array when input is undefined', () => {
+    expect(transformTaskQueue(undefined)).toEqual([]);
+  });
+
+  it('returns empty array when input is an empty array', () => {
+    expect(transformTaskQueue([])).toEqual([]);
+  });
+
+  it('maps required fields to camelCase WorkQueueTaskItem fields', () => {
+    const input: TaskProgressResponse[] = [
+      { id: 'task-1', name: 'Analyze schema', status: 'processing', requires_llm: true },
+      { id: 'task-2', name: 'Profile data', status: 'queued', requires_llm: false },
+    ];
+
+    const result = transformTaskQueue(input);
+
+    expect(result).toEqual([
+      { id: 'task-1', name: 'Analyze schema', status: 'processing', requiresLlm: true },
+      { id: 'task-2', name: 'Profile data', status: 'queued', requiresLlm: false },
+    ]);
+  });
+
+  it('includes optional fields only when present in input', () => {
+    const input: TaskProgressResponse[] = [
+      {
+        id: 'task-3',
+        name: 'Generate ontology',
+        status: 'complete',
+        requires_llm: true,
+        started_at: '2025-06-01T10:00:00Z',
+        completed_at: '2025-06-01T10:05:00Z',
+      },
+    ];
+
+    const result = transformTaskQueue(input);
+
+    expect(result).toEqual([
+      {
+        id: 'task-3',
+        name: 'Generate ontology',
+        status: 'complete',
+        requiresLlm: true,
+        startedAt: '2025-06-01T10:00:00Z',
+        completedAt: '2025-06-01T10:05:00Z',
+      },
+    ]);
+  });
+
+  it('includes error_message as errorMessage when present', () => {
+    const input: TaskProgressResponse[] = [
+      {
+        id: 'task-4',
+        name: 'Failing task',
+        status: 'failed',
+        requires_llm: false,
+        error_message: 'Timeout exceeded',
+      },
+    ];
+
+    const result = transformTaskQueue(input);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      id: 'task-4',
+      name: 'Failing task',
+      status: 'failed',
+      requiresLlm: false,
+      errorMessage: 'Timeout exceeded',
+    });
+  });
+
+  it('omits optional fields when they are undefined in input', () => {
+    const input: TaskProgressResponse[] = [
+      { id: 'task-5', name: 'Basic task', status: 'queued', requires_llm: false },
+    ];
+
+    const result = transformTaskQueue(input);
+
+    expect(result[0]).not.toHaveProperty('startedAt');
+    expect(result[0]).not.toHaveProperty('completedAt');
+    expect(result[0]).not.toHaveProperty('errorMessage');
+  });
+
+  it('handles all possible task statuses', () => {
+    const statuses: TaskProgressResponse['status'][] = [
+      'queued', 'processing', 'complete', 'failed', 'paused',
+    ];
+
+    const input: TaskProgressResponse[] = statuses.map((status, i) => ({
+      id: `task-${i}`,
+      name: `Task ${i}`,
+      status,
+      requires_llm: i % 2 === 0,
+    }));
+
+    const result = transformTaskQueue(input);
+
+    expect(result).toHaveLength(statuses.length);
+    statuses.forEach((status, i) => {
+      expect(result[i]?.status).toBe(status);
+    });
+  });
+
+  it('transforms a full task with all optional fields', () => {
+    const input: TaskProgressResponse[] = [
+      {
+        id: 'task-full',
+        name: 'Complete task',
+        status: 'failed',
+        requires_llm: true,
+        started_at: '2025-06-01T12:00:00Z',
+        completed_at: '2025-06-01T12:30:00Z',
+        error_message: 'LLM rate limit',
+      },
+    ];
+
+    const result = transformTaskQueue(input);
+
+    expect(result).toEqual([
+      {
+        id: 'task-full',
+        name: 'Complete task',
+        status: 'failed',
+        requiresLlm: true,
+        startedAt: '2025-06-01T12:00:00Z',
+        completedAt: '2025-06-01T12:30:00Z',
+        errorMessage: 'LLM rate limit',
       },
     ]);
   });
