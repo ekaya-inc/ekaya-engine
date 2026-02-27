@@ -399,3 +399,119 @@ describe('engineApi query CRUD methods', () => {
     });
   });
 });
+
+describe('engineApi query execution methods', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('executeQuery', () => {
+    it('sends POST to /{projectId}/datasources/{datasourceId}/queries/{queryId}/execute with request body', async () => {
+      const responseData = {
+        data: {
+          columns: [{ name: 'id', type: 'integer' }, { name: 'name', type: 'text' }],
+          rows: [{ id: 1, name: 'Alice' }],
+          row_count: 1,
+        },
+      };
+      mockJsonResponse(responseData);
+
+      const request = { limit: 50, parameters: { status: 'active' } };
+      const result = await engineApi.executeQuery('proj-1', 'ds-1', 'q-1', request);
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/queries/q-1/execute',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify(request),
+        })
+      );
+      expect(result).toEqual(responseData);
+    });
+
+    it('sends POST without body when no request is provided', async () => {
+      const responseData = {
+        data: {
+          columns: [{ name: 'id', type: 'integer' }],
+          rows: [{ id: 1 }],
+          row_count: 1,
+        },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.executeQuery('proj-1', 'ds-1', 'q-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/queries/q-1/execute',
+        expect.objectContaining({ method: 'POST' })
+      );
+      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      expect(callArgs.body).toBeUndefined();
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('testQuery', () => {
+    it('sends POST to /{projectId}/datasources/{datasourceId}/queries/test with SQL body', async () => {
+      const responseData = {
+        data: {
+          columns: [{ name: 'count', type: 'bigint' }],
+          rows: [{ count: 42 }],
+          row_count: 1,
+        },
+      };
+      mockJsonResponse(responseData);
+
+      const request = { sql_query: 'SELECT COUNT(*) AS count FROM users', limit: 100 };
+      const result = await engineApi.testQuery('proj-1', 'ds-1', request as any);
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/queries/test',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify(request),
+        })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('validateQuery', () => {
+    it('sends POST to /{projectId}/datasources/{datasourceId}/queries/validate with SQL body', async () => {
+      const responseData = {
+        data: { valid: true, message: 'SQL is valid' },
+      };
+      mockJsonResponse(responseData);
+
+      const request = { sql_query: 'SELECT * FROM users' };
+      const result = await engineApi.validateQuery('proj-1', 'ds-1', request);
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/queries/validate',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify(request),
+        })
+      );
+      expect(result).toEqual(responseData);
+    });
+
+    it('returns validation errors for invalid SQL', async () => {
+      const responseData = {
+        data: {
+          valid: false,
+          message: 'Syntax error near "SELEC"',
+          warnings: ['Unknown keyword: SELEC'],
+        },
+      };
+      mockJsonResponse(responseData);
+
+      const request = { sql_query: 'SELEC * FROM users' };
+      const result = await engineApi.validateQuery('proj-1', 'ds-1', request);
+
+      expect(result).toEqual(responseData);
+      expect(result.data.valid).toBe(false);
+      expect(result.data.warnings).toHaveLength(1);
+    });
+  });
+});
