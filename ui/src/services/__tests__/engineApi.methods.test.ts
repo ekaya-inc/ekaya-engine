@@ -1058,3 +1058,171 @@ describe('engineApi glossary methods', () => {
     });
   });
 });
+
+describe('engineApi ontology change methods', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('startOntologyExtraction', () => {
+    it('sends POST to /{projectId}/datasources/{datasourceId}/ontology/extract with overview', async () => {
+      const responseData = {
+        data: { dag_id: 'dag-1', status: 'running', nodes: [] },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.startOntologyExtraction('proj-1', 'ds-1', 'A retail platform');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/ontology/extract',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ project_overview: 'A retail platform' }),
+        })
+      );
+      expect(result).toEqual(responseData);
+    });
+
+    it('sends POST with undefined overview when not provided', async () => {
+      const responseData = { data: { dag_id: 'dag-1', status: 'running', nodes: [] } };
+      mockJsonResponse(responseData);
+
+      await engineApi.startOntologyExtraction('proj-1', 'ds-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/ontology/extract',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ project_overview: undefined }),
+        })
+      );
+    });
+  });
+
+  describe('getOntologyDAGStatus', () => {
+    it('sends GET to /{projectId}/datasources/{datasourceId}/ontology/dag', async () => {
+      const responseData = {
+        data: { dag_id: 'dag-1', status: 'completed', nodes: [] },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.getOntologyDAGStatus('proj-1', 'ds-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/ontology/dag',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        })
+      );
+      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      expect(callArgs.method).toBeUndefined();
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('cancelOntologyDAG', () => {
+    it('sends POST to /{projectId}/datasources/{datasourceId}/ontology/dag/cancel', async () => {
+      const responseData = { data: { status: 'cancelled' } };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.cancelOntologyDAG('proj-1', 'ds-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/ontology/dag/cancel',
+        expect.objectContaining({ method: 'POST' })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('deleteOntology', () => {
+    it('sends DELETE to /{projectId}/datasources/{datasourceId}/ontology', async () => {
+      const responseData = { data: { message: 'Ontology deleted' } };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.deleteOntology('proj-1', 'ds-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/ontology',
+        expect.objectContaining({ method: 'DELETE' })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('getOntologyQuestionCounts', () => {
+    it('sends GET to /{projectId}/ontology/questions/counts', async () => {
+      const responseData = { data: { required: 3, optional: 7 } };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.getOntologyQuestionCounts('proj-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/ontology/questions/counts',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        })
+      );
+      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      expect(callArgs.method).toBeUndefined();
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('listAuditOntologyChanges', () => {
+    it('sends GET to /{projectId}/audit/ontology-changes', async () => {
+      const responseData = {
+        data: {
+          items: [{ id: 'oc-1', change_type: 'add', entity: 'users' }],
+          total: 1,
+        },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.listAuditOntologyChanges('proj-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/audit/ontology-changes',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        })
+      );
+      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      expect(callArgs.method).toBeUndefined();
+      expect(result).toEqual(responseData);
+    });
+
+    it('appends query params when provided', async () => {
+      const responseData = { data: { items: [], total: 0 } };
+      mockJsonResponse(responseData);
+
+      await engineApi.listAuditOntologyChanges('proj-1', { change_type: 'add' });
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/audit/ontology-changes?change_type=add',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        })
+      );
+    });
+  });
+
+  describe('getProjectOverview', () => {
+    it('sends GET to /{projectId}/project-knowledge/overview', async () => {
+      const responseData = { data: { overview: 'A SaaS platform for analytics' } };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.getProjectOverview('proj-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/project-knowledge/overview',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        })
+      );
+      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      expect(callArgs.method).toBeUndefined();
+      expect(result).toEqual(responseData);
+    });
+  });
+});
