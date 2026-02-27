@@ -1226,3 +1226,68 @@ describe('engineApi ontology change methods', () => {
     });
   });
 });
+
+describe('engineApi MCP config methods', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('getMCPConfig', () => {
+    it('sends GET to /{projectId}/mcp/config', async () => {
+      const responseData = {
+        data: {
+          serverUrl: 'https://mcp.example.com',
+          toolGroups: { approved_queries: { enabled: true } },
+          userTools: [{ name: 'query_tool', description: 'Run queries' }],
+          developerTools: [],
+          agentTools: [],
+          enabledTools: [{ name: 'query_tool', description: 'Run queries' }],
+        },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.getMCPConfig('proj-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/mcp/config',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        })
+      );
+      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      expect(callArgs.method).toBeUndefined();
+      expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('updateMCPConfig', () => {
+    it('sends PATCH to /{projectId}/mcp/config with request body', async () => {
+      const request = {
+        allowOntologyMaintenance: true,
+        addQueryTools: false,
+      };
+      const responseData = {
+        data: {
+          serverUrl: 'https://mcp.example.com',
+          toolGroups: { approved_queries: { enabled: true, allowOntologyMaintenance: true } },
+          userTools: [],
+          developerTools: [],
+          agentTools: [],
+          enabledTools: [],
+        },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.updateMCPConfig('proj-1', request);
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/mcp/config',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify(request),
+        })
+      );
+      expect(result).toEqual(responseData);
+    });
+  });
+});

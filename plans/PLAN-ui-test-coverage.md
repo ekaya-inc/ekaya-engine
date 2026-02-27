@@ -70,7 +70,7 @@ File to create: `src/services/__tests__/engineApi.methods.test.ts`
 - [x] Add tests for AI config methods: `getAIConfig`, `updateAIConfig`, `deleteAIConfig`, `testAIConfig` — verify 204 handling for delete, request/response shapes
 - [x] Add tests for ontology change methods: `listPendingChanges`, `approveChange`, `rejectChange`, `approveAllChanges` — verify URL and method
 - [x] Add tests for project knowledge methods: `listProjectKnowledge`, `createProjectKnowledge`, `updateProjectKnowledge`, `deleteProjectKnowledge` — verify URL, method, body
-- [ ] Add tests for MCP config methods: `getMcpConfig`, `updateMcpConfig`, `deleteMcpConfig` — verify URL, method, response
+- [x] Add tests for MCP config methods: `getMCPConfig`, `updateMCPConfig` — verify URL, method, response (no `deleteMcpConfig` exists in engineApi)
 - [x] Add tests for alerts methods: `listAlerts`, `getAlert`, `dismissAlert` — verify URL, method, response
 - [ ] Run `cd ui && npx vitest run` and confirm all tests pass
 
