@@ -765,3 +765,55 @@ func TestGetTablesContext_RowCountNil(t *testing.T) {
 	assert.NotNil(t, result)
 	assert.Equal(t, int64(0), result.Tables["users"].RowCount, "nil row_count should default to 0")
 }
+
+func TestGetTablesContext_HasDescriptionFlag(t *testing.T) {
+	// Test that ColumnOverview.HasDescription reflects whether the column has a description
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	tableID := uuid.New()
+
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"users": {
+				{Name: "id", IsPrimaryKey: true, Description: "Unique user identifier"},
+				{Name: "email", Description: "User email address"},
+				{Name: "status"}, // No description
+			},
+		},
+	}
+
+	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
+	schemaRepo := &mockSchemaRepository{
+		columnsByTable: map[string][]*models.SchemaColumn{
+			"users": {
+				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "email", DataType: "varchar"},
+				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "status", DataType: "varchar"},
+			},
+		},
+	}
+	projectService := &mockProjectServiceForOntology{}
+
+	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
+
+	result, err := svc.GetTablesContext(ctx, projectID, []string{"users"})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+
+	columnByName := make(map[string]models.ColumnOverview)
+	for _, col := range result.Tables["users"].Columns {
+		columnByName[col.Name] = col
+	}
+
+	// Columns with descriptions should have HasDescription = true
+	assert.True(t, columnByName["id"].HasDescription, "id should have HasDescription=true")
+	assert.True(t, columnByName["email"].HasDescription, "email should have HasDescription=true")
+
+	// Column without description should have HasDescription = false
+	assert.False(t, columnByName["status"].HasDescription, "status should have HasDescription=false")
+}
