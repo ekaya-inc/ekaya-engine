@@ -2,6 +2,35 @@ import { cleanup } from '@testing-library/react';
 import { afterEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 
+// Node.js v25+ defines native globalThis.localStorage and sessionStorage.
+// localStorage is non-functional when --localstorage-file is not set.
+// sessionStorage works but uses native C++ dispatch that vi.spyOn cannot
+// intercept (sessionStorage.setItem !== Storage.prototype.setItem).
+// Replace both with plain JS objects so happy-dom-style behavior and
+// vi.spyOn work correctly in tests.
+function createMemoryStorage(): Storage {
+  let store = new Map<string, string>();
+  return {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => { store.set(key, String(value)); },
+    removeItem: (key: string) => { store.delete(key); },
+    clear: () => { store = new Map(); },
+    get length() { return store.size; },
+    key: (index: number) => [...store.keys()][index] ?? null,
+  };
+}
+
+Object.defineProperty(globalThis, 'localStorage', {
+  value: createMemoryStorage(),
+  writable: true,
+  configurable: true,
+});
+Object.defineProperty(globalThis, 'sessionStorage', {
+  value: createMemoryStorage(),
+  writable: true,
+  configurable: true,
+});
+
 // Cleanup after each test
 afterEach(() => {
   cleanup();

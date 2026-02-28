@@ -21,6 +21,7 @@ export interface ChecklistItem {
   actionText?: string;
   actionDisabled?: boolean;
   disabled?: boolean;
+  optional?: boolean;
 }
 
 interface SetupChecklistProps {
@@ -36,7 +37,7 @@ const SetupChecklist = ({
   description = 'Complete these steps to get started',
   completeDescription,
 }: SetupChecklistProps) => {
-  const allComplete = items.every((item) => item.status === 'complete');
+  const allComplete = items.filter((item) => !item.optional).every((item) => item.status === 'complete');
 
   return (
     <Card>

@@ -233,7 +233,7 @@ describe('ApplicationsPage', () => {
     fireEvent.click(learnMoreButtons[0] as HTMLElement);
 
     expect(mockOpen).toHaveBeenCalledWith(
-      'https://ekaya.ai/enterprise/',
+      'https://us.ekaya.ai/apps/ai-data-liaison',
       '_blank',
       'noopener,noreferrer'
     );

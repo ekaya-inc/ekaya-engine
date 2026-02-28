@@ -1,4 +1,4 @@
-import { ArrowLeft, ExternalLink, Loader2, Check, Copy } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Info, Loader2, Check, Copy } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
@@ -10,15 +10,17 @@ import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { TOOL_GROUP_IDS } from '../constants/mcpToolMetadata';
 import { useConfig } from '../contexts/ConfigContext';
+import { useProject } from '../contexts/ProjectContext';
 import { useToast } from '../hooks/useToast';
 import { getUserRoles } from '../lib/auth-token';
 import engineApi from '../services/engineApi';
-import type { AIConfigResponse, DAGStatusResponse, Datasource, MCPConfigResponse } from '../types';
+import type { AIConfigResponse, DAGStatusResponse, Datasource, MCPConfigResponse, ServerStatusResponse } from '../types';
 
 const MCPServerPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
   const { config: appConfig } = useConfig();
+  const { urls } = useProject();
   const { toast } = useToast();
 
   const [config, setConfig] = useState<MCPConfigResponse | null>(null);
@@ -32,6 +34,8 @@ const MCPServerPage = () => {
   const [aiConfig, setAiConfig] = useState<AIConfigResponse | null>(null);
   const [dagStatus, setDagStatus] = useState<DAGStatusResponse | null>(null);
   const [questionCounts, setQuestionCounts] = useState<{ required: number; optional: number } | null>(null);
+  const [hasApprovedQueries, setHasApprovedQueries] = useState(false);
+  const [serverStatus, setServerStatus] = useState<ServerStatusResponse | null>(null);
 
   // Read tool group configs from backend
   const developerState = config?.toolGroups[TOOL_GROUP_IDS.DEVELOPER];
@@ -43,10 +47,11 @@ const MCPServerPage = () => {
 
     try {
       setLoading(true);
-      const [mcpRes, datasourcesRes, aiConfigRes] = await Promise.all([
+      const [mcpRes, datasourcesRes, aiConfigRes, serverStatusRes] = await Promise.all([
         engineApi.getMCPConfig(pid),
         engineApi.listDataSources(pid),
         engineApi.getAIConfig(pid),
+        engineApi.getServerStatus(),
       ]);
 
       if (mcpRes.success && mcpRes.data) {
@@ -58,6 +63,7 @@ const MCPServerPage = () => {
       const ds = datasourcesRes.data?.datasources?.[0] ?? null;
       setDatasource(ds);
       setAiConfig(aiConfigRes.data ?? null);
+      setServerStatus(serverStatusRes);
 
       if (ds) {
         try {
@@ -80,6 +86,14 @@ const MCPServerPage = () => {
           setQuestionCounts(countsRes.data ?? null);
         } catch {
           setQuestionCounts(null);
+        }
+
+        try {
+          const queriesRes = await engineApi.listQueries(pid, ds.datasource_id);
+          const approvedCount = queriesRes.data?.queries?.filter((q) => q.status === 'approved').length ?? 0;
+          setHasApprovedQueries(approvedCount > 0);
+        } catch {
+          setHasApprovedQueries(false);
         }
       }
     } catch (error) {
@@ -130,7 +144,25 @@ const MCPServerPage = () => {
     }
     items.push(schemaItem);
 
-    // 3. AI configured
+    // 3. Create Pre-Approved Queries (optional)
+    const queriesItem: ChecklistItem = {
+      id: 'queries',
+      title: 'Create Pre-Approved Queries',
+      description: hasApprovedQueries
+        ? 'Pre-approved queries are available for the MCP Server'
+        : datasource
+          ? 'Create pre-approved SQL queries for the MCP Server to use'
+          : 'Configure datasource first',
+      status: loading ? 'loading' : hasApprovedQueries ? 'complete' : 'pending',
+      linkText: hasApprovedQueries ? 'Manage' : 'Configure',
+      optional: true,
+    };
+    if (datasource) {
+      queriesItem.link = `/projects/${pid}/queries`;
+    }
+    items.push(queriesItem);
+
+    // 4. AI configured (renumbered from 3)
     const isAIConfigured = !!aiConfig?.config_type && aiConfig.config_type !== 'none';
     const aiConfigItem: ChecklistItem = {
       id: 'ai-config',
@@ -148,7 +180,7 @@ const MCPServerPage = () => {
     }
     items.push(aiConfigItem);
 
-    // 4. Ontology extracted
+    // 5. Ontology extracted
     const ontologyComplete = dagStatus?.status === 'completed';
     const ontologyRunning = dagStatus?.status === 'running';
     const ontologyFailed = dagStatus?.status === 'failed';
@@ -179,7 +211,7 @@ const MCPServerPage = () => {
     }
     items.push(ontologyItem);
 
-    // 5. Critical ontology questions answered
+    // 6. Critical ontology questions answered
     const questionsComplete = questionCounts !== null && questionCounts.required === 0;
     const hasQuestions = questionCounts !== null && (questionCounts.required > 0 || questionsComplete);
     const questionsItem: ChecklistItem = {
@@ -336,6 +368,20 @@ const MCPServerPage = () => {
 
   const checklistItems = getChecklistItems();
 
+  const isAccessible = serverStatus?.accessible_for_business_users ?? false;
+  const deploymentItems: ChecklistItem[] = [
+    {
+      id: 'server-accessible',
+      title: 'MCP Server securely deployed',
+      description: isAccessible
+        ? 'Server is reachable by other users over HTTPS'
+        : 'Configure HTTPS on a reachable domain for other users',
+      status: loading ? 'loading' : isAccessible ? 'complete' : 'pending',
+      link: `/projects/${pid}/server-setup`,
+      linkText: isAccessible ? 'Review' : 'Configure',
+    },
+  ];
+
   return (
     <div className="mx-auto max-w-4xl">
       <div className="mb-6">
@@ -347,10 +393,20 @@ const MCPServerPage = () => {
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back to Dashboard
         </Button>
-        <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
-          <MCPLogo size={32} className="text-brand-purple" />
-          MCP Server
-        </h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
+            <MCPLogo size={32} className="text-brand-purple" />
+            MCP Server
+          </h1>
+          <a
+            href={`${urls.projectsPageUrl ? new URL(urls.projectsPageUrl).origin : 'https://us.ekaya.ai'}/apps/mcp-server`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="MCP Server documentation"
+          >
+            <Info className="h-7 w-7 text-text-secondary hover:text-brand-purple transition-colors" />
+          </a>
+        </div>
       </div>
 
       <div className="space-y-6">
@@ -360,6 +416,14 @@ const MCPServerPage = () => {
           title="Setup Checklist"
           description="Complete these steps to enable the MCP Server"
           completeDescription="MCP Server is ready"
+        />
+
+        {/* Deployment Checklist */}
+        <SetupChecklist
+          items={deploymentItems}
+          title="Deployment"
+          description="Optional steps for sharing with other users"
+          completeDescription="MCP Server is accessible to other users"
         />
 
         {config && (
