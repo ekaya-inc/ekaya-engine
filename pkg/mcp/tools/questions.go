@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -375,6 +376,28 @@ func registerListOntologyQuestionsTool(s *server.MCPServer, deps *QuestionToolDe
 			}
 			if q.AnsweredAt != nil {
 				questionInfo["answered_at"] = q.AnsweredAt.Format("2006-01-02T15:04:05Z07:00")
+			}
+
+			// Suggest probe_column for categories where verifying actual data values is helpful
+			if q.Status == models.QuestionStatusPending && q.Affects != nil && len(q.Affects.Columns) > 0 &&
+				(q.Category == models.QuestionCategoryEnumeration || q.Category == models.QuestionCategoryBusinessRules || q.Category == models.QuestionCategoryDataQuality) {
+				var suggestions []map[string]interface{}
+				for _, col := range q.Affects.Columns {
+					parts := strings.SplitN(col, ".", 2)
+					if len(parts) == 2 {
+						suggestions = append(suggestions, map[string]interface{}{
+							"tool": "probe_column",
+							"args": map[string]string{
+								"table":  parts[0],
+								"column": parts[1],
+							},
+							"reason": "Inspect actual values before updating metadata",
+						})
+					}
+				}
+				if len(suggestions) > 0 {
+					questionInfo["suggested_tools"] = suggestions
+				}
 			}
 
 			questions = append(questions, questionInfo)
