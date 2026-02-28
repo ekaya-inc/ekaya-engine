@@ -1684,9 +1684,12 @@ func (c *numericClassifier) parseResponse(profile *models.ColumnDataProfile, con
 	// Determine role and purpose
 	role := models.RoleAttribute
 	purpose := models.PurposeMeasure
-	if profile.IsPrimaryKey || response.NumericType == "identifier" {
-		role = models.RolePrimaryKey
+	if response.NumericType == "identifier" {
 		purpose = models.PurposeIdentifier
+		if profile.IsPrimaryKey {
+			role = models.RolePrimaryKey
+		}
+		// Non-PK identifiers keep role: "attribute" and get flagged for FK resolution below
 	}
 	if response.NumericType == "measure" || response.NumericType == "monetary" || response.NumericType == "percentage" || response.NumericType == "count" {
 		role = models.RoleMeasure
@@ -1702,6 +1705,14 @@ func (c *numericClassifier) parseResponse(profile *models.ColumnDataProfile, con
 		Confidence:         response.Confidence,
 		AnalyzedAt:         time.Now(),
 		LLMModelUsed:       model,
+	}
+
+	// Flag non-PK identifier columns for FK resolution in Phase 4
+	if response.NumericType == "identifier" && !profile.IsPrimaryKey {
+		features.NeedsFKResolution = true
+		features.IdentifierFeatures = &models.IdentifierFeatures{
+			IdentifierType: models.IdentifierTypeForeignKey,
+		}
 	}
 
 	// Flag for cross-column analysis if potentially monetary
