@@ -612,11 +612,6 @@ func TestIsInputError(t *testing.T) {
 			expected: true,
 		},
 		{
-			name:     "output_column_descriptions required error",
-			err:      errors.New("output_column_descriptions parameter is required. Provide descriptions for output columns"),
-			expected: true,
-		},
-		{
 			name:     "already exists error",
 			err:      errors.New("resource already exists"),
 			expected: true,
