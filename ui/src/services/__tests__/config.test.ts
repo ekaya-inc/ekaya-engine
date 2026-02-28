@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Dynamic import so we get a fresh module (with fresh cachedConfig) per test
+/* eslint-disable @typescript-eslint/consistent-type-imports */
 let fetchConfig: typeof import('../config').fetchConfig;
 let getCachedConfig: typeof import('../config').getCachedConfig;
 let getAuthUrlFromQuery: typeof import('../config').getAuthUrlFromQuery;
 let clearConfigCache: typeof import('../config').clearConfigCache;
+/* eslint-enable @typescript-eslint/consistent-type-imports */
 
 // Helper to build mock responses
 function mockResponse(body: object, opts: { ok?: boolean; status?: number; statusText?: string } = {}) {
@@ -94,11 +96,11 @@ describe('config.ts', () => {
 
       const cached = getCachedConfig();
       expect(cached).not.toBeNull();
-      expect(cached!.oauthClientId).toBe('test-client');
-      expect(cached!.baseUrl).toBe('https://app.test');
-      expect(cached!.authorizationEndpoint).toBe('https://auth.test/authorize');
-      expect(cached!.tokenEndpoint).toBe('https://auth.test/token');
-      expect(cached!.authServerUrl).toBe('https://auth.test');
+      expect(cached?.oauthClientId).toBe('test-client');
+      expect(cached?.baseUrl).toBe('https://app.test');
+      expect(cached?.authorizationEndpoint).toBe('https://auth.test/authorize');
+      expect(cached?.tokenEndpoint).toBe('https://auth.test/token');
+      expect(cached?.authServerUrl).toBe('https://auth.test');
     });
   });
 

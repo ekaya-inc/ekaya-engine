@@ -116,7 +116,7 @@ describe('engineApi datasource methods', () => {
         })
       );
       // GET is the default — no explicit method should be set
-      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      const callArgs = mockFetchWithAuth.mock.calls[0]?.[1] as RequestInit;
       expect(callArgs.method).toBeUndefined();
       expect(result).toEqual(responseData);
     });
@@ -135,7 +135,7 @@ describe('engineApi datasource methods', () => {
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         })
       );
-      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      const callArgs = mockFetchWithAuth.mock.calls[0]?.[1] as RequestInit;
       expect(callArgs.method).toBeUndefined();
       expect(result).toEqual(responseData);
     });
@@ -182,7 +182,7 @@ describe('engineApi schema operation methods', () => {
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         })
       );
-      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      const callArgs = mockFetchWithAuth.mock.calls[0]?.[1] as RequestInit;
       expect(callArgs.method).toBeUndefined();
       expect(result).toEqual(responseData);
     });
@@ -220,7 +220,7 @@ describe('engineApi schema operation methods', () => {
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         })
       );
-      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      const callArgs = mockFetchWithAuth.mock.calls[0]?.[1] as RequestInit;
       expect(callArgs.method).toBeUndefined();
       expect(result).toEqual(responseData);
     });
@@ -312,7 +312,7 @@ describe('engineApi query CRUD methods', () => {
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         })
       );
-      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      const callArgs = mockFetchWithAuth.mock.calls[0]?.[1] as RequestInit;
       expect(callArgs.method).toBeUndefined();
       expect(result).toEqual(responseData);
     });
@@ -333,7 +333,7 @@ describe('engineApi query CRUD methods', () => {
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         })
       );
-      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      const callArgs = mockFetchWithAuth.mock.calls[0]?.[1] as RequestInit;
       expect(callArgs.method).toBeUndefined();
       expect(result).toEqual(responseData);
     });
@@ -445,7 +445,7 @@ describe('engineApi query execution methods', () => {
         '/api/projects/proj-1/datasources/ds-1/queries/q-1/execute',
         expect.objectContaining({ method: 'POST' })
       );
-      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      const callArgs = mockFetchWithAuth.mock.calls[0]?.[1] as RequestInit;
       expect(callArgs.body).toBeUndefined();
       expect(result).toEqual(responseData);
     });
@@ -510,8 +510,8 @@ describe('engineApi query execution methods', () => {
       const result = await engineApi.validateQuery('proj-1', 'ds-1', request);
 
       expect(result).toEqual(responseData);
-      expect(result.data.valid).toBe(false);
-      expect(result.data.warnings).toHaveLength(1);
+      expect(result.data?.valid).toBe(false);
+      expect(result.data?.warnings).toHaveLength(1);
     });
   });
 });
@@ -539,7 +539,7 @@ describe('engineApi project knowledge methods', () => {
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         })
       );
-      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      const callArgs = mockFetchWithAuth.mock.calls[0]?.[1] as RequestInit;
       expect(callArgs.method).toBeUndefined();
       expect(result).toEqual(responseData);
     });
@@ -632,7 +632,7 @@ describe('engineApi AI config methods', () => {
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         })
       );
-      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      const callArgs = mockFetchWithAuth.mock.calls[0]?.[1] as RequestInit;
       expect(callArgs.method).toBeUndefined();
       expect(result).toEqual(responseData);
     });
@@ -741,8 +741,8 @@ describe('engineApi AI config methods', () => {
       const result = await engineApi.testAIConnection('proj-1', testRequest);
 
       expect(result).toEqual(responseData);
-      expect(result.data.success).toBe(false);
-      expect(result.data.llm_error_type).toBe('endpoint');
+      expect(result.data?.success).toBe(false);
+      expect(result.data?.llm_error_type).toBe('endpoint');
     });
   });
 });
@@ -770,7 +770,7 @@ describe('engineApi alerts methods', () => {
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         })
       );
-      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      const callArgs = mockFetchWithAuth.mock.calls[0]?.[1] as RequestInit;
       expect(callArgs.method).toBeUndefined();
       expect(result).toEqual(responseData);
     });
@@ -824,7 +824,7 @@ describe('engineApi alerts methods', () => {
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         })
       );
-      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      const callArgs = mockFetchWithAuth.mock.calls[0]?.[1] as RequestInit;
       expect(callArgs.method).toBeUndefined();
       expect(result).toEqual(responseData);
     });
@@ -874,7 +874,7 @@ describe('engineApi approved query methods', () => {
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         })
       );
-      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      const callArgs = mockFetchWithAuth.mock.calls[0]?.[1] as RequestInit;
       expect(callArgs.method).toBeUndefined();
       expect(result).toEqual(responseData);
     });
@@ -952,7 +952,7 @@ describe('engineApi glossary methods', () => {
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         })
       );
-      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      const callArgs = mockFetchWithAuth.mock.calls[0]?.[1] as RequestInit;
       expect(callArgs.method).toBeUndefined();
       expect(result).toEqual(responseData);
     });
@@ -1114,7 +1114,7 @@ describe('engineApi ontology change methods', () => {
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         })
       );
-      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      const callArgs = mockFetchWithAuth.mock.calls[0]?.[1] as RequestInit;
       expect(callArgs.method).toBeUndefined();
       expect(result).toEqual(responseData);
     });
@@ -1163,7 +1163,7 @@ describe('engineApi ontology change methods', () => {
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         })
       );
-      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      const callArgs = mockFetchWithAuth.mock.calls[0]?.[1] as RequestInit;
       expect(callArgs.method).toBeUndefined();
       expect(result).toEqual(responseData);
     });
@@ -1187,7 +1187,7 @@ describe('engineApi ontology change methods', () => {
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         })
       );
-      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      const callArgs = mockFetchWithAuth.mock.calls[0]?.[1] as RequestInit;
       expect(callArgs.method).toBeUndefined();
       expect(result).toEqual(responseData);
     });
@@ -1220,7 +1220,7 @@ describe('engineApi ontology change methods', () => {
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         })
       );
-      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      const callArgs = mockFetchWithAuth.mock.calls[0]?.[1] as RequestInit;
       expect(callArgs.method).toBeUndefined();
       expect(result).toEqual(responseData);
     });
@@ -1254,7 +1254,7 @@ describe('engineApi MCP config methods', () => {
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         })
       );
-      const callArgs = mockFetchWithAuth.mock.calls[0][1] as RequestInit;
+      const callArgs = mockFetchWithAuth.mock.calls[0]?.[1] as RequestInit;
       expect(callArgs.method).toBeUndefined();
       expect(result).toEqual(responseData);
     });

@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { transformEntityQueue, transformTaskQueue, transformQuestions } from '../ontologyService';
+
 import type { EntityProgressResponse, TaskProgressResponse, WorkflowQuestion, WorkflowStatusResponse } from '../../types';
+import ontologyApi from '../ontologyApi';
+import { ontologyService, transformEntityQueue, transformTaskQueue, transformQuestions } from '../ontologyService';
 
 // Mock ontologyApi before importing ontologyService (which imports it)
 vi.mock('../ontologyApi', () => ({
@@ -13,9 +15,6 @@ vi.mock('../ontologyApi', () => ({
     submitProjectAnswers: vi.fn(),
   },
 }));
-
-import ontologyApi from '../ontologyApi';
-import { ontologyService } from '../ontologyService';
 
 const mockOntologyApi = vi.mocked(ontologyApi);
 
@@ -422,7 +421,7 @@ describe('transformQuestions', () => {
     const result = transformQuestions(input);
 
     // Only these keys should be present
-    expect(Object.keys(result[0]!)).toEqual(['id', 'text', 'affects', 'isSubmitted']);
+    expect(Object.keys(result[0] as object)).toEqual(['id', 'text', 'affects', 'isSubmitted']);
   });
 });
 
@@ -499,7 +498,7 @@ describe('OntologyService polling (startPolling / stopPolling)', () => {
     // fetchAndUpdateStatus emits transformed status
     expect(callback.mock.calls.length).toBeGreaterThanOrEqual(3);
 
-    const lastCall = callback.mock.calls[callback.mock.calls.length - 1][0];
+    const lastCall = callback.mock.calls[callback.mock.calls.length - 1]?.[0];
     expect(lastCall.progress.state).toBe('building');
 
     unsubscribe();

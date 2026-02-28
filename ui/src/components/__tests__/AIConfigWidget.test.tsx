@@ -256,7 +256,7 @@ describe('AIConfigWidget', () => {
         },
       });
 
-      vi.mocked(engineApi.deleteAIConfig).mockResolvedValue(undefined);
+      vi.mocked(engineApi.deleteAIConfig).mockResolvedValue({ success: true });
 
       render(
         <AIConfigWidget
@@ -289,8 +289,9 @@ describe('AIConfigWidget', () => {
       const dialogButtons = screen.getByTestId('dialog-root').querySelectorAll('button');
       const confirmButton = Array.from(dialogButtons).find(
         (btn) => btn.textContent === 'Remove Configuration'
-      )!;
-      fireEvent.click(confirmButton);
+      );
+      expect(confirmButton).toBeDefined();
+      fireEvent.click(confirmButton as HTMLElement);
 
       // Verify deleteAIConfig was called with the project ID
       await waitFor(() => {
@@ -454,8 +455,9 @@ describe('AIConfigWidget', () => {
       const dialogButtons = screen.getByTestId('dialog-root').querySelectorAll('button');
       const confirmButton = Array.from(dialogButtons).find(
         (btn) => btn.textContent === 'Remove Configuration'
-      )!;
-      fireEvent.click(confirmButton);
+      );
+      expect(confirmButton).toBeDefined();
+      fireEvent.click(confirmButton as HTMLElement);
 
       // Verify error message is displayed
       await waitFor(() => {
