@@ -661,3 +661,107 @@ func TestGetColumnsContext_WithTableMetadata(t *testing.T) {
 	assert.Equal(t, "Customer order records", ordersTable.Description)
 	assert.Equal(t, "Join with customers table for full details", ordersTable.UsageNotes)
 }
+
+func TestGetTablesContext_RowCountPopulated(t *testing.T) {
+	// Test that TableSummary.RowCount is populated from SchemaTable.RowCount
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"users":  {{Name: "id", IsPrimaryKey: true}},
+			"orders": {{Name: "id", IsPrimaryKey: true}},
+		},
+	}
+
+	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
+
+	usersRowCount := int64(95)
+	ordersRowCount := int64(250)
+	schemaRepo := &mockSchemaRepository{
+		columnsByTable: map[string][]*models.SchemaColumn{
+			"users": {
+				{ID: uuid.New(), SchemaTableID: usersTableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+			},
+			"orders": {
+				{ID: uuid.New(), SchemaTableID: ordersTableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+			},
+		},
+		tablesByName: map[string]*models.SchemaTable{
+			"users": {
+				ID:        usersTableID,
+				ProjectID: projectID,
+				TableName: "users",
+				RowCount:  &usersRowCount,
+			},
+			"orders": {
+				ID:        ordersTableID,
+				ProjectID: projectID,
+				TableName: "orders",
+				RowCount:  &ordersRowCount,
+			},
+		},
+	}
+	projectService := &mockProjectServiceForOntology{}
+
+	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
+
+	result, err := svc.GetTablesContext(ctx, projectID, nil)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result.Tables, 2)
+
+	// Row counts should be populated from SchemaTable data
+	assert.Equal(t, int64(95), result.Tables["users"].RowCount, "users table should have row_count 95")
+	assert.Equal(t, int64(250), result.Tables["orders"].RowCount, "orders table should have row_count 250")
+}
+
+func TestGetTablesContext_RowCountNil(t *testing.T) {
+	// Test that tables with nil RowCount default to 0
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	tableID := uuid.New()
+
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"users": {{Name: "id", IsPrimaryKey: true}},
+		},
+	}
+
+	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
+	schemaRepo := &mockSchemaRepository{
+		columnsByTable: map[string][]*models.SchemaColumn{
+			"users": {
+				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+			},
+		},
+		tablesByName: map[string]*models.SchemaTable{
+			"users": {
+				ID:        tableID,
+				ProjectID: projectID,
+				TableName: "users",
+				RowCount:  nil, // No row count available
+			},
+		},
+	}
+	projectService := &mockProjectServiceForOntology{}
+
+	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
+
+	result, err := svc.GetTablesContext(ctx, projectID, []string{"users"})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, int64(0), result.Tables["users"].RowCount, "nil row_count should default to 0")
+}

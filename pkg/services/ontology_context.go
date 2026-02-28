@@ -121,6 +121,12 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 		return nil, fmt.Errorf("failed to get columns: %w", err)
 	}
 
+	// Fetch schema tables keyed by table name (for row_count)
+	schemaTablesMap, err := s.schemaRepo.GetTablesByNames(ctx, projectID, tablesToInclude)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get schema tables: %w", err)
+	}
+
 	// Fetch table metadata keyed by table name (joins with engine_schema_tables)
 	var tableMetadataMap map[string]*models.TableMetadata
 	if s.tableMetadataRepo != nil {
@@ -158,6 +164,11 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 		summary := models.TableSummary{
 			ColumnCount: len(schemaColumns),
 			Columns:     columns,
+		}
+
+		// Populate row count from schema table
+		if st, ok := schemaTablesMap[tableName]; ok && st.RowCount != nil {
+			summary.RowCount = *st.RowCount
 		}
 
 		// Merge table metadata if available

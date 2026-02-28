@@ -124,6 +124,9 @@ func (m *mockSchemaRepo) ListColumnsByDatasource(context.Context, uuid.UUID, uui
 func (m *mockSchemaRepo) GetColumnsByTables(context.Context, uuid.UUID, []string) (map[string][]*models.SchemaColumn, error) {
 	return nil, nil
 }
+func (m *mockSchemaRepo) GetTablesByNames(context.Context, uuid.UUID, []string) (map[string]*models.SchemaTable, error) {
+	return nil, nil
+}
 func (m *mockSchemaRepo) GetColumnCountByProject(context.Context, uuid.UUID) (int, error) {
 	return 0, nil
 }

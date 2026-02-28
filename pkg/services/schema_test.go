@@ -36,6 +36,7 @@ type mockSchemaRepository struct {
 	// Tables
 	tables            []*models.SchemaTable
 	tableByName       *models.SchemaTable
+	tablesByName      map[string]*models.SchemaTable
 	upsertTableErr    error
 	softDeletedTables int64
 
@@ -373,6 +374,19 @@ func (m *mockSchemaRepository) GetColumnsByTables(ctx context.Context, projectID
 		return m.columnsByTable, nil
 	}
 	return make(map[string][]*models.SchemaColumn), nil
+}
+
+func (m *mockSchemaRepository) GetTablesByNames(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string]*models.SchemaTable, error) {
+	if m.tablesByName != nil {
+		result := make(map[string]*models.SchemaTable)
+		for _, name := range tableNames {
+			if t, ok := m.tablesByName[name]; ok {
+				result[name] = t
+			}
+		}
+		return result, nil
+	}
+	return make(map[string]*models.SchemaTable), nil
 }
 
 func (m *mockSchemaRepository) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {

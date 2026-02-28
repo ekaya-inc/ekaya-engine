@@ -68,6 +68,10 @@ func (r *testColEnrichmentSchemaRepo) GetColumnsByTables(ctx context.Context, pr
 	return result, nil
 }
 
+func (r *testColEnrichmentSchemaRepo) GetTablesByNames(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string]*models.SchemaTable, error) {
+	return nil, nil
+}
+
 func (r *testColEnrichmentSchemaRepo) FindTableByName(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.SchemaTable, error) {
 	// Return a SchemaTable for any table that has columns in the mock
 	if _, ok := r.columnsByTable[tableName]; ok {

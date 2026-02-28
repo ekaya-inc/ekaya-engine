@@ -405,6 +405,9 @@ func (m *mockSchemaRepository) ListColumnsByDatasource(ctx context.Context, proj
 func (m *mockSchemaRepository) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error) {
 	return nil, nil
 }
+func (m *mockSchemaRepository) GetTablesByNames(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string]*models.SchemaTable, error) {
+	return nil, nil
+}
 func (m *mockSchemaRepository) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 0, nil
 }

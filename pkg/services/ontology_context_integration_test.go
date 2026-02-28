@@ -287,6 +287,9 @@ func (tc *ontologyContextTestContext) createTestOntology(ctx context.Context) uu
 	usersTableID := uuid.New()
 	ordersTableID := uuid.New()
 
+	usersRowCount := int64(95)
+	ordersRowCount := int64(250)
+
 	err = tc.schemaRepo.UpsertTable(ctx, &models.SchemaTable{
 		ID:           usersTableID,
 		ProjectID:    tc.projectID,
@@ -294,6 +297,7 @@ func (tc *ontologyContextTestContext) createTestOntology(ctx context.Context) uu
 		SchemaName:   "public",
 		TableName:    "users",
 		IsSelected:   true,
+		RowCount:     &usersRowCount,
 	})
 	require.NoError(tc.t, err)
 
@@ -304,6 +308,7 @@ func (tc *ontologyContextTestContext) createTestOntology(ctx context.Context) uu
 		SchemaName:   "public",
 		TableName:    "orders",
 		IsSelected:   true,
+		RowCount:     &ordersRowCount,
 	})
 	require.NoError(tc.t, err)
 
@@ -482,6 +487,29 @@ func TestOntologyContextService_Integration_GetColumnsContext(t *testing.T) {
 	// FK info comes from enriched column_details
 	assert.True(t, userIDCol.IsForeignKey)
 	assert.Equal(t, "users", userIDCol.ForeignTable)
+}
+
+func TestOntologyContextService_Integration_GetTablesContext_RowCount(t *testing.T) {
+	tc := setupOntologyContextTest(t)
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create test ontology (sets users=95, orders=250 row counts)
+	tc.createTestOntology(ctx)
+
+	// Test GetTablesContext returns row counts
+	result, err := tc.service.GetTablesContext(ctx, tc.projectID, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	usersTable := result.Tables["users"]
+	assert.Equal(t, int64(95), usersTable.RowCount, "users table should have row_count from schema")
+
+	ordersTable := result.Tables["orders"]
+	assert.Equal(t, int64(250), ordersTable.RowCount, "orders table should have row_count from schema")
 }
 
 func TestOntologyContextService_Integration_NoOntology(t *testing.T) {
