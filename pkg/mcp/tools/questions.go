@@ -80,7 +80,11 @@ func registerListOntologyQuestionsTool(s *server.MCPServer, deps *QuestionToolDe
 				"entity (affected entity name), or priority (1-5, where 1=highest). "+
 				"Returns questions with id, text, category, priority, context, created_at, and counts_by_status for dashboard display. "+
 				"Use this to batch-process pending questions or review answered questions. "+
-				"Example: list_ontology_questions(status='pending', priority=1, limit=20) returns high-priority unanswered questions.",
+				"Example: list_ontology_questions(status='pending', priority=1, limit=20) returns high-priority unanswered questions. "+
+				"IMPORTANT: When answering questions, you MUST update the affected table/column metadata (via update_column, update_table, "+
+				"update_project_knowledge, or update_glossary_term) BEFORE calling resolve_ontology_question. "+
+				"Resolution notes alone are NOT persisted to the ontology — only metadata updates are. "+
+				"The MCP client answering questions is the only opportunity to enrich the ontology with this knowledge.",
 		),
 		mcp.WithString(
 			"status",
@@ -403,11 +407,16 @@ func registerResolveOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 		"resolve_ontology_question",
 		mcp.WithDescription(
 			"Mark an ontology question as resolved after researching and updating the ontology. "+
-				"Use this after you've used other update tools (update_entity, update_column, update_glossary_term, etc.) "+
-				"to capture the knowledge you learned while answering the question. "+
+				"PREREQUISITE: Before calling this tool, you MUST have already updated the affected metadata using the appropriate tool(s): "+
+				"update_column (for column descriptions, enum values, entity, role), "+
+				"update_table (for table descriptions, usage notes, table type), "+
+				"update_glossary_term (for business term definitions), or "+
+				"update_project_knowledge (for business rules, conventions, terminology). "+
+				"Resolution notes alone do NOT update the ontology — they are only recorded for audit purposes. "+
+				"If you skip the metadata update, the knowledge from your answer will be lost. "+
 				"This transitions the question status from 'pending' to 'answered' and sets the answered_at timestamp. "+
-				"Example workflow: 1) Research code/docs to answer question, 2) Update ontology with learned knowledge via update tools, "+
-				"3) Call resolve_ontology_question with optional resolution_notes explaining how you found the answer.",
+				"Workflow: 1) Research to find the answer, 2) Call update_column/update_table/update_project_knowledge with the answer, "+
+				"3) Call this tool with resolution_notes explaining how you found the answer.",
 		),
 		mcp.WithString(
 			"question_id",
