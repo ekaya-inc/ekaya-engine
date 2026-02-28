@@ -407,7 +407,7 @@ Use list_query_suggestions first to see pending suggestions.`),
 				zap.String("suggestion_id", suggestionID.String()),
 				zap.String("reviewer_id", reviewerID),
 				zap.Error(err))
-			return nil, fmt.Errorf("failed to approve query: %w", err)
+			return HandleServiceError(err, "approve_query_failed")
 		}
 
 		// Build response message based on type
@@ -551,7 +551,7 @@ Use list_query_suggestions first to see pending suggestions.`),
 				zap.String("suggestion_id", suggestionID.String()),
 				zap.String("reviewer_id", reviewerID),
 				zap.Error(err))
-			return nil, fmt.Errorf("failed to reject query: %w", err)
+			return HandleServiceError(err, "reject_query_failed")
 		}
 
 		deps.Logger.Info("Rejected query suggestion",
@@ -792,7 +792,7 @@ If datasource_id is not provided, the project's default datasource will be used.
 					zap.String("datasource_id", datasourceID.String()),
 					zap.Error(err))
 			}
-			return nil, fmt.Errorf("failed to create query: %w", err)
+			return HandleServiceError(err, "create_query_failed")
 		}
 
 		deps.Logger.Info("Created approved query",
@@ -1076,7 +1076,7 @@ Use this for admin-initiated updates that bypass the suggestion workflow.`),
 				zap.String("project_id", projectID.String()),
 				zap.String("query_id", queryID.String()),
 				zap.Error(err))
-			return nil, fmt.Errorf("failed to update query: %w", err)
+			return HandleServiceError(err, "update_query_failed")
 		}
 
 		deps.Logger.Info("Updated approved query",

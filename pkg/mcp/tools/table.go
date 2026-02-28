@@ -84,7 +84,7 @@ func registerUpdateTableTool(s *server.MCPServer, deps *TableToolDeps) {
 		// Get required table parameter
 		table, err := req.RequireString("table")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 		table = trimString(table)
 		if table == "" {
@@ -194,7 +194,7 @@ func registerUpdateTableTool(s *server.MCPServer, deps *TableToolDeps) {
 
 		// Upsert metadata
 		if err := deps.TableMetadataRepo.Upsert(tenantCtx, meta); err != nil {
-			return nil, fmt.Errorf("failed to update table metadata: %w", err)
+			return HandleServiceError(err, "update_table_metadata_failed")
 		}
 
 		// Build response
@@ -270,7 +270,7 @@ func registerDeleteTableMetadataTool(s *server.MCPServer, deps *TableToolDeps) {
 		// Get required table parameter
 		table, err := req.RequireString("table")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 		table = trimString(table)
 		if table == "" {
@@ -322,7 +322,7 @@ func registerDeleteTableMetadataTool(s *server.MCPServer, deps *TableToolDeps) {
 
 		// Delete the metadata
 		if err := deps.TableMetadataRepo.Delete(tenantCtx, schemaTable.ID); err != nil {
-			return nil, fmt.Errorf("failed to delete table metadata: %w", err)
+			return HandleServiceError(err, "delete_table_metadata_failed")
 		}
 
 		// Build response

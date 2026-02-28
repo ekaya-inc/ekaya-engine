@@ -105,7 +105,7 @@ func registerGetContextTool(s *server.MCPServer, deps *ContextToolDeps) {
 		// Parse required depth parameter
 		depth, err := req.RequireString("depth")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 
 		// Validate depth value

@@ -462,7 +462,7 @@ func registerResolveOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 			deps.Logger.Error("Failed to get question",
 				zap.String("question_id", questionID.String()),
 				zap.Error(err))
-			return nil, fmt.Errorf("failed to get question: %w", err)
+			return HandleServiceError(err, "get_question_failed")
 		}
 
 		if question == nil {
@@ -488,7 +488,7 @@ func registerResolveOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 			deps.Logger.Error("Failed to resolve question",
 				zap.String("question_id", questionID.String()),
 				zap.Error(err))
-			return nil, fmt.Errorf("failed to resolve question: %w", err)
+			return HandleServiceError(err, "resolve_question_failed")
 		}
 
 		// Build response
@@ -572,7 +572,7 @@ func registerSkipOntologyQuestionTool(s *server.MCPServer, deps *QuestionToolDep
 			deps.Logger.Error("Failed to get question",
 				zap.String("question_id", questionID.String()),
 				zap.Error(err))
-			return nil, fmt.Errorf("failed to get question: %w", err)
+			return HandleServiceError(err, "get_question_failed")
 		}
 
 		if question == nil {
@@ -591,7 +591,7 @@ func registerSkipOntologyQuestionTool(s *server.MCPServer, deps *QuestionToolDep
 			deps.Logger.Error("Failed to skip question",
 				zap.String("question_id", questionID.String()),
 				zap.Error(err))
-			return nil, fmt.Errorf("failed to skip question: %w", err)
+			return HandleServiceError(err, "skip_question_failed")
 		}
 
 		// Build response
@@ -672,7 +672,7 @@ func registerEscalateOntologyQuestionTool(s *server.MCPServer, deps *QuestionToo
 			deps.Logger.Error("Failed to get question",
 				zap.String("question_id", questionID.String()),
 				zap.Error(err))
-			return nil, fmt.Errorf("failed to get question: %w", err)
+			return HandleServiceError(err, "get_question_failed")
 		}
 
 		if question == nil {
@@ -691,7 +691,7 @@ func registerEscalateOntologyQuestionTool(s *server.MCPServer, deps *QuestionToo
 			deps.Logger.Error("Failed to escalate question",
 				zap.String("question_id", questionID.String()),
 				zap.Error(err))
-			return nil, fmt.Errorf("failed to escalate question: %w", err)
+			return HandleServiceError(err, "escalate_question_failed")
 		}
 
 		// Build response
@@ -772,7 +772,7 @@ func registerDismissOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 			deps.Logger.Error("Failed to get question",
 				zap.String("question_id", questionID.String()),
 				zap.Error(err))
-			return nil, fmt.Errorf("failed to get question: %w", err)
+			return HandleServiceError(err, "get_question_failed")
 		}
 
 		if question == nil {
@@ -791,7 +791,7 @@ func registerDismissOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 			deps.Logger.Error("Failed to dismiss question",
 				zap.String("question_id", questionID.String()),
 				zap.Error(err))
-			return nil, fmt.Errorf("failed to dismiss question: %w", err)
+			return HandleServiceError(err, "dismiss_question_failed")
 		}
 
 		// Build response

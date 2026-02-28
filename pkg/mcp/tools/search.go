@@ -66,7 +66,7 @@ func registerSearchSchemaTool(s *server.MCPServer, deps *SearchToolDeps) {
 		// Get required query parameter
 		query, err := req.RequireString("query")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 
 		// Trim and validate query

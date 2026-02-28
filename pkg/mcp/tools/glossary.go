@@ -119,7 +119,7 @@ func registerGetGlossarySQLTool(s *server.MCPServer, deps *GlossaryToolDeps) {
 		// Get term parameter
 		termName, err := req.RequireString("term")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 		// Validate term is not empty after trimming whitespace
 		termName = trimString(termName)
@@ -130,7 +130,7 @@ func registerGetGlossarySQLTool(s *server.MCPServer, deps *GlossaryToolDeps) {
 		// Look up term by name or alias
 		term, err := deps.GlossaryService.GetTermByName(tenantCtx, projectID, termName)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get glossary term: %w", err)
+			return HandleServiceError(err, "get_glossary_term_failed")
 		}
 
 		// Handle not found case with error result
@@ -346,7 +346,7 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 		// Get required term parameter
 		termName, err := req.RequireString("term")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 		// Validate term is not empty after trimming whitespace
 		termName = trimString(termName)
@@ -379,7 +379,7 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 		// Check if term already exists
 		existing, err := deps.GlossaryService.GetTermByName(tenantCtx, projectID, termName)
 		if err != nil {
-			return nil, fmt.Errorf("failed to check for existing term: %w", err)
+			return HandleServiceError(err, "check_term_failed")
 		}
 
 		var created bool
@@ -414,7 +414,7 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 						zap.String("term", termName),
 						zap.Error(err))
 				}
-				return nil, fmt.Errorf("failed to create term: %w", err)
+				return HandleServiceError(err, "create_term_failed")
 			}
 
 			created = true
@@ -462,7 +462,7 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 						zap.String("term", termName),
 						zap.Error(err))
 				}
-				return nil, fmt.Errorf("failed to update term: %w", err)
+				return HandleServiceError(err, "update_term_failed")
 			}
 
 			created = false
@@ -556,13 +556,13 @@ func registerDeleteGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 		// Get required term parameter
 		termName, err := req.RequireString("term")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 
 		// Check if term exists
 		term, err := deps.GlossaryService.GetTermByName(tenantCtx, projectID, termName)
 		if err != nil {
-			return nil, fmt.Errorf("failed to check for existing term: %w", err)
+			return HandleServiceError(err, "check_term_failed")
 		}
 
 		if term == nil {
@@ -589,7 +589,7 @@ func registerDeleteGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 				zap.String("project_id", projectID.String()),
 				zap.String("term", termName),
 				zap.Error(err))
-			return nil, fmt.Errorf("failed to delete term: %w", err)
+			return HandleServiceError(err, "delete_term_failed")
 		}
 
 		deps.Logger.Info("Deleted glossary term via MCP",

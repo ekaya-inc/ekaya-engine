@@ -77,7 +77,7 @@ func registerUpdateProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 		// Get required fact parameter
 		fact, err := req.RequireString("fact")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 
 		// Validate fact is not empty after trimming
@@ -138,21 +138,13 @@ func registerUpdateProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 			// Update existing fact
 			err = deps.KnowledgeRepository.Update(tenantCtx, knowledgeFact)
 			if err != nil {
-				// Check if this is a SQL user error (e.g., value too long for varchar(255))
-				if errResult := NewSQLErrorResult(err); errResult != nil {
-					return errResult, nil
-				}
-				return nil, fmt.Errorf("failed to update project knowledge: %w", err)
+				return HandleServiceError(err, "update_knowledge_failed")
 			}
 		} else {
 			// Create new fact
 			err = deps.KnowledgeRepository.Create(tenantCtx, knowledgeFact)
 			if err != nil {
-				// Check if this is a SQL user error (e.g., value too long for varchar(255))
-				if errResult := NewSQLErrorResult(err); errResult != nil {
-					return errResult, nil
-				}
-				return nil, fmt.Errorf("failed to create project knowledge: %w", err)
+				return HandleServiceError(err, "create_knowledge_failed")
 			}
 		}
 
@@ -208,7 +200,7 @@ func registerDeleteProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 		// Get required fact_id parameter
 		factIDStr, err := req.RequireString("fact_id")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 
 		// Validate fact_id is not empty after trimming
@@ -234,7 +226,7 @@ func registerDeleteProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 				return NewErrorResult("FACT_NOT_FOUND", fmt.Sprintf("fact %q not found", factIDStr)), nil
 			}
 			// Database/system errors remain as Go errors
-			return nil, fmt.Errorf("failed to delete project knowledge: %w", err)
+			return HandleServiceError(err, "delete_knowledge_failed")
 		}
 
 		// Build response
