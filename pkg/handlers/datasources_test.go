@@ -918,3 +918,285 @@ func TestDatasourcesHandler_List_AllDecryptionFailures(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================================
+// Error Path Tests — UUID parse errors and malformed request bodies
+// ============================================================================
+
+func TestDatasourcesHandler_Update_InvalidDatasourceID(t *testing.T) {
+	handler := NewDatasourcesHandler(&mockDatasourceService{}, zap.NewNop())
+
+	projectID := uuid.New()
+	body := UpdateDatasourceRequest{
+		Name:   "Updated Database",
+		Type:   "postgres",
+		Config: map[string]any{"host": "localhost"},
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/projects/"+projectID.String()+"/datasources/not-a-uuid", bytes.NewReader(bodyBytes))
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("id", "not-a-uuid")
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	handler.Update(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", rec.Code)
+	}
+
+	var resp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["error"] != "invalid_datasource_id" {
+		t.Errorf("expected error 'invalid_datasource_id', got %q", resp["error"])
+	}
+}
+
+func TestDatasourcesHandler_Delete_InvalidDatasourceID(t *testing.T) {
+	handler := NewDatasourcesHandler(&mockDatasourceService{}, zap.NewNop())
+
+	projectID := uuid.New()
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/projects/"+projectID.String()+"/datasources/not-a-uuid", nil)
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("id", "not-a-uuid")
+
+	rec := httptest.NewRecorder()
+	handler.Delete(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", rec.Code)
+	}
+
+	var resp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["error"] != "invalid_datasource_id" {
+		t.Errorf("expected error 'invalid_datasource_id', got %q", resp["error"])
+	}
+}
+
+func TestDatasourcesHandler_Create_MalformedJSON(t *testing.T) {
+	handler := NewDatasourcesHandler(&mockDatasourceService{}, zap.NewNop())
+
+	projectID := uuid.New()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources",
+		bytes.NewReader([]byte(`{invalid json`)))
+	req.SetPathValue("pid", projectID.String())
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	handler.Create(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", rec.Code)
+	}
+
+	var resp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["error"] != "invalid_request" {
+		t.Errorf("expected error 'invalid_request', got %q", resp["error"])
+	}
+}
+
+func TestDatasourcesHandler_Create_DatasourceLimitReached(t *testing.T) {
+	service := &mockDatasourceService{err: apperrors.ErrDatasourceLimitReached}
+	handler := NewDatasourcesHandler(service, zap.NewNop())
+
+	projectID := uuid.New()
+	body := CreateDatasourceRequest{
+		Name:   "Second DB",
+		Type:   "postgres",
+		Config: map[string]any{"host": "localhost"},
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources", bytes.NewReader(bodyBytes))
+	req.SetPathValue("pid", projectID.String())
+	req.Header.Set("Content-Type", "application/json")
+
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	ctx := context.WithValue(req.Context(), auth.ClaimsKey, claims)
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	handler.Create(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Errorf("expected status 409, got %d", rec.Code)
+	}
+
+	var resp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["error"] != "datasource_limit_reached" {
+		t.Errorf("expected error 'datasource_limit_reached', got %q", resp["error"])
+	}
+}
+
+func TestDatasourcesHandler_Create_DuplicateName(t *testing.T) {
+	service := &mockDatasourceService{err: apperrors.ErrConflict}
+	handler := NewDatasourcesHandler(service, zap.NewNop())
+
+	projectID := uuid.New()
+	body := CreateDatasourceRequest{
+		Name:   "My Database",
+		Type:   "postgres",
+		Config: map[string]any{"host": "localhost"},
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources", bytes.NewReader(bodyBytes))
+	req.SetPathValue("pid", projectID.String())
+	req.Header.Set("Content-Type", "application/json")
+
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	ctx := context.WithValue(req.Context(), auth.ClaimsKey, claims)
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	handler.Create(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Errorf("expected status 409, got %d", rec.Code)
+	}
+
+	var resp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["error"] != "duplicate_name" {
+		t.Errorf("expected error 'duplicate_name', got %q", resp["error"])
+	}
+}
+
+func TestDatasourcesHandler_Rename_InvalidDatasourceID(t *testing.T) {
+	handler := NewDatasourcesHandler(&mockDatasourceService{}, zap.NewNop())
+
+	projectID := uuid.New()
+	body := RenameDatasourceRequest{Name: "New Name"}
+	bodyBytes, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/projects/"+projectID.String()+"/datasources/not-a-uuid/name",
+		bytes.NewReader(bodyBytes))
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("id", "not-a-uuid")
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	handler.Rename(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", rec.Code)
+	}
+
+	var resp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["error"] != "invalid_datasource_id" {
+		t.Errorf("expected error 'invalid_datasource_id', got %q", resp["error"])
+	}
+}
+
+func TestDatasourcesHandler_Rename_MalformedJSON(t *testing.T) {
+	handler := NewDatasourcesHandler(&mockDatasourceService{}, zap.NewNop())
+
+	projectID := uuid.New()
+	dsID := uuid.New()
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/projects/"+projectID.String()+"/datasources/"+dsID.String()+"/name",
+		bytes.NewReader([]byte(`{not json`)))
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("id", dsID.String())
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	handler.Rename(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", rec.Code)
+	}
+
+	var resp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["error"] != "invalid_request" {
+		t.Errorf("expected error 'invalid_request', got %q", resp["error"])
+	}
+}
+
+func TestDatasourcesHandler_Rename_MissingName(t *testing.T) {
+	handler := NewDatasourcesHandler(&mockDatasourceService{}, zap.NewNop())
+
+	projectID := uuid.New()
+	dsID := uuid.New()
+
+	body := RenameDatasourceRequest{Name: ""}
+	bodyBytes, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/projects/"+projectID.String()+"/datasources/"+dsID.String()+"/name",
+		bytes.NewReader(bodyBytes))
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("id", dsID.String())
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	handler.Rename(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", rec.Code)
+	}
+
+	var resp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["error"] != "missing_name" {
+		t.Errorf("expected error 'missing_name', got %q", resp["error"])
+	}
+}
+
+func TestDatasourcesHandler_TestConnection_MalformedJSON(t *testing.T) {
+	handler := NewDatasourcesHandler(&mockDatasourceService{}, zap.NewNop())
+
+	projectID := uuid.New()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/test",
+		bytes.NewReader([]byte(`{bad json`)))
+	req.SetPathValue("pid", projectID.String())
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	handler.TestConnection(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", rec.Code)
+	}
+
+	var resp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["error"] != "invalid_request" {
+		t.Errorf("expected error 'invalid_request', got %q", resp["error"])
+	}
+}

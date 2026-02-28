@@ -507,6 +507,9 @@ class OntologyService {
   }
 }
 
+// Export pure transform functions for testing
+export { transformEntityQueue, transformTaskQueue, transformQuestions };
+
 // Export singleton instance
 export const ontologyService = new OntologyService();
 export default ontologyService;
