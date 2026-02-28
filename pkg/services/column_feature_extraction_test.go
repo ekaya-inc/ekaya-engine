@@ -1978,6 +1978,46 @@ func TestNumericClassifier_DimensionColumnGetsAttributeRole(t *testing.T) {
 	}
 }
 
+func TestNumericClassifier_PromptIncludesMeasureGuidance(t *testing.T) {
+	// The prompt should include guidance about aggregation prefixes and
+	// business abbreviations so the LLM correctly classifies measure columns
+	classifier := &numericClassifier{logger: zap.NewNop()}
+
+	profile := &models.ColumnDataProfile{
+		ColumnID:   uuid.New(),
+		ColumnName: "total_revenue",
+		TableName:  "weekly_metrics",
+		DataType:   "numeric",
+	}
+
+	prompt := classifier.buildPrompt(profile)
+
+	// The measure type description should mention aggregation prefixes as measure indicators
+	// (not just the column name appearing in the prompt, but actual guidance text)
+	if !strings.Contains(prompt, "avg_") || !strings.Contains(prompt, "total_") {
+		t.Error("prompt should include guidance about aggregation prefixes (avg_, total_) as measure indicators")
+	}
+}
+
+func TestNumericClassifier_PromptMeasureTypeIncludesRatesAndCosts(t *testing.T) {
+	// The measure type description should be broad enough to cover cost metrics and rates
+	classifier := &numericClassifier{logger: zap.NewNop()}
+
+	profile := &models.ColumnDataProfile{
+		ColumnID:   uuid.New(),
+		ColumnName: "cpa",
+		TableName:  "paid_placements",
+		DataType:   "numeric",
+	}
+
+	prompt := classifier.buildPrompt(profile)
+
+	// The measure description should include cost-related terms
+	if !strings.Contains(prompt, "cost") && !strings.Contains(prompt, "rate") {
+		t.Error("prompt measure type should mention cost and rate metrics")
+	}
+}
+
 // ============================================================================
 // Phase 3: Enum Value Analysis Tests
 // ============================================================================

@@ -1650,7 +1650,7 @@ func (c *numericClassifier) buildPrompt(profile *models.ColumnDataProfile) strin
 
 	sb.WriteString("**Numeric types:**\n")
 	sb.WriteString("- `identifier`: Numeric ID (auto-increment, serial)\n")
-	sb.WriteString("- `measure`: Quantitative value (amount, count, score)\n")
+	sb.WriteString("- `measure`: Quantitative value (amount, cost, rate, score, duration). Includes columns with aggregation prefixes (avg_, total_, sum_, min_, max_, mean_) and business KPI abbreviations (cpa, cpc, cpm, roi, roa, ltv, arpu, mrr, arr)\n")
 	sb.WriteString("- `monetary`: Money amount (may need currency pairing)\n")
 	sb.WriteString("- `percentage`: Percentage or ratio\n")
 	sb.WriteString("- `count`: Integer count of items\n")
