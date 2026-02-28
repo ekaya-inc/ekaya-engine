@@ -1064,7 +1064,7 @@ func TestParseDevQueryParameterDefinitions(t *testing.T) {
 					Type:        "uuid",
 					Description: "The user ID",
 					Required:    true,
-					Default:     "123e4567-e89b-12d3-a456-426614174000",
+					Example:     "123e4567-e89b-12d3-a456-426614174000",
 				},
 			},
 		},
@@ -1126,6 +1126,9 @@ func TestParseDevQueryParameterDefinitions(t *testing.T) {
 					assert.Equal(t, expected.Type, result[i].Type)
 					assert.Equal(t, expected.Description, result[i].Description)
 					assert.Equal(t, expected.Required, result[i].Required)
+					if expected.Example != nil {
+						assert.Equal(t, expected.Example, result[i].Example)
+					}
 					if expected.Default != nil {
 						assert.Equal(t, expected.Default, result[i].Default)
 					}

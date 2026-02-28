@@ -997,7 +997,11 @@ func parseParameterDefinitions(paramsArray []any) ([]models.QueryParameter, erro
 		}
 
 		if example, ok := paramMap["example"]; ok {
-			param.Default = example
+			param.Example = example
+		}
+
+		if def, ok := paramMap["default"]; ok {
+			param.Default = def
 		}
 
 		params = append(params, param)
@@ -1010,10 +1014,12 @@ func parseParameterDefinitions(paramsArray []any) ([]models.QueryParameter, erro
 // For modifying statements (INSERT/UPDATE/DELETE/CALL), uses EXPLAIN validation
 // instead of actually executing the query.
 func validateAndTestQuery(ctx context.Context, deps *QueryToolDeps, projectID, dsID uuid.UUID, sqlQuery string, paramDefs []models.QueryParameter) (*validationResult, error) {
-	// Build parameter values from examples
+	// Build parameter values from examples (for dry-run validation only)
 	paramValues := make(map[string]any)
 	for _, p := range paramDefs {
-		if p.Default != nil {
+		if p.Example != nil {
+			paramValues[p.Name] = p.Example
+		} else if p.Default != nil {
 			paramValues[p.Name] = p.Default
 		} else if p.Required {
 			return nil, fmt.Errorf("parameter %q is required but has no example value", p.Name)

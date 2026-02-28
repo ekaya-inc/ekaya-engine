@@ -856,7 +856,11 @@ func parseDevQueryParameterDefinitions(paramsArray []any) ([]models.QueryParamet
 		}
 
 		if example, ok := paramMap["example"]; ok {
-			param.Default = example
+			param.Example = example
+		}
+
+		if def, ok := paramMap["default"]; ok {
+			param.Default = def
 		}
 
 		params = append(params, param)
