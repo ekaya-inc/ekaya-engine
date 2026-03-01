@@ -416,7 +416,7 @@ func main() {
 	datasourcesHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register schema handler (protected)
-	schemaHandler := handlers.NewSchemaHandler(schemaService, logger)
+	schemaHandler := handlers.NewSchemaHandler(schemaService, schemaChangeDetectionService, logger)
 	schemaHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register queries handler (protected)

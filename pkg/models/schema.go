@@ -231,6 +231,12 @@ type RefreshColumnModification struct {
 	NewType    string `json:"new_type"`
 }
 
+// RefreshResultWithChanges wraps RefreshResult with change detection output.
+type RefreshResultWithChanges struct {
+	*RefreshResult
+	PendingChangesCreated int `json:"pending_changes_created"`
+}
+
 // DatasourceSchema represents the complete schema for a customer's datasource.
 type DatasourceSchema struct {
 	ProjectID     uuid.UUID

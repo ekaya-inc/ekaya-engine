@@ -48,7 +48,7 @@ func TestSchemaHandler_GetSchema_Success(t *testing.T) {
 			},
 		},
 	}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema", nil)
 	req.SetPathValue("pid", projectID.String())
@@ -97,7 +97,7 @@ func TestSchemaHandler_GetSchema_Success(t *testing.T) {
 }
 
 func TestSchemaHandler_GetSchema_InvalidProjectID(t *testing.T) {
-	handler := NewSchemaHandler(&mockSchemaService{}, zap.NewNop())
+	handler := NewSchemaHandler(&mockSchemaService{}, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/not-a-uuid/datasources/abc/schema", nil)
 	req.SetPathValue("pid", "not-a-uuid")
@@ -121,7 +121,7 @@ func TestSchemaHandler_GetSchema_InvalidProjectID(t *testing.T) {
 }
 
 func TestSchemaHandler_GetSchema_InvalidDatasourceID(t *testing.T) {
-	handler := NewSchemaHandler(&mockSchemaService{}, zap.NewNop())
+	handler := NewSchemaHandler(&mockSchemaService{}, nil, zap.NewNop())
 
 	projectID := uuid.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/not-a-uuid/schema", nil)
@@ -156,7 +156,7 @@ func TestSchemaHandler_GetSelectedSchema_Success(t *testing.T) {
 			Tables:       []*models.DatasourceTable{},
 		},
 	}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/selected", nil)
 	req.SetPathValue("pid", projectID.String())
@@ -186,7 +186,7 @@ func TestSchemaHandler_GetSchemaPrompt_Success(t *testing.T) {
 	service := &mockSchemaService{
 		prompt: "CREATE TABLE users (id uuid PRIMARY KEY);",
 	}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/prompt", nil)
 	req.SetPathValue("pid", projectID.String())
@@ -222,9 +222,18 @@ func TestSchemaHandler_RefreshSchema_Success(t *testing.T) {
 			ColumnsDeleted:       5,
 			RelationshipsCreated: 8,
 			RelationshipsDeleted: 1,
+			NewTableNames:        []string{"public.orders", "public.products"},
+			RemovedTableNames:    []string{"public.old_table"},
 		},
 	}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	changeDetectionSvc := &mockSchemaChangeDetectionService{
+		changes: []*models.PendingChange{
+			{ID: uuid.New()},
+			{ID: uuid.New()},
+			{ID: uuid.New()},
+		},
+	}
+	handler := NewSchemaHandler(service, changeDetectionSvc, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/refresh", nil)
 	req.SetPathValue("pid", projectID.String())
@@ -246,6 +255,28 @@ func TestSchemaHandler_RefreshSchema_Success(t *testing.T) {
 	if dataMap["tables_upserted"] != float64(10) {
 		t.Errorf("expected tables_upserted 10, got %v", dataMap["tables_upserted"])
 	}
+
+	// Verify pending changes are included in response
+	if dataMap["pending_changes_created"] != float64(3) {
+		t.Errorf("expected pending_changes_created 3, got %v", dataMap["pending_changes_created"])
+	}
+
+	// Verify new_table_names and removed_table_names are included
+	newTables, ok := dataMap["new_table_names"].([]any)
+	if !ok {
+		t.Fatalf("expected new_table_names to be an array, got %T", dataMap["new_table_names"])
+	}
+	if len(newTables) != 2 {
+		t.Errorf("expected 2 new tables, got %d", len(newTables))
+	}
+
+	removedTables, ok := dataMap["removed_table_names"].([]any)
+	if !ok {
+		t.Fatalf("expected removed_table_names to be an array, got %T", dataMap["removed_table_names"])
+	}
+	if len(removedTables) != 1 {
+		t.Errorf("expected 1 removed table, got %d", len(removedTables))
+	}
 }
 
 func TestSchemaHandler_GetTable_Success(t *testing.T) {
@@ -262,7 +293,7 @@ func TestSchemaHandler_GetTable_Success(t *testing.T) {
 			Columns:    []*models.DatasourceColumn{},
 		},
 	}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/tables/public.users", nil)
 	req.SetPathValue("pid", projectID.String())
@@ -289,7 +320,7 @@ func TestSchemaHandler_GetTable_Success(t *testing.T) {
 
 func TestSchemaHandler_GetTable_NotFound(t *testing.T) {
 	service := &mockSchemaService{err: apperrors.ErrNotFound}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -318,7 +349,7 @@ func TestSchemaHandler_GetTable_NotFound(t *testing.T) {
 
 func TestSchemaHandler_SaveSelections_Success(t *testing.T) {
 	service := &mockSchemaService{}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -342,7 +373,7 @@ func TestSchemaHandler_SaveSelections_Success(t *testing.T) {
 }
 
 func TestSchemaHandler_SaveSelections_InvalidBody(t *testing.T) {
-	handler := NewSchemaHandler(&mockSchemaService{}, zap.NewNop())
+	handler := NewSchemaHandler(&mockSchemaService{}, nil, zap.NewNop())
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -366,7 +397,7 @@ func TestSchemaHandler_GetRelationships_Success(t *testing.T) {
 
 	// The handler now calls GetRelationshipsResponse which returns enriched data
 	service := &mockSchemaService{}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/relationships", nil)
 	req.SetPathValue("pid", projectID.String())
@@ -423,7 +454,7 @@ func TestSchemaHandler_AddRelationship_Success(t *testing.T) {
 			Confidence:       1.0,
 		},
 	}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	body := `{"source_table": "public.orders", "source_column": "user_id", "target_table": "public.users", "target_column": "id"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/relationships", bytes.NewBufferString(body))
@@ -440,7 +471,7 @@ func TestSchemaHandler_AddRelationship_Success(t *testing.T) {
 
 func TestSchemaHandler_AddRelationship_Conflict(t *testing.T) {
 	service := &mockSchemaService{err: apperrors.ErrConflict}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -459,7 +490,7 @@ func TestSchemaHandler_AddRelationship_Conflict(t *testing.T) {
 }
 
 func TestSchemaHandler_AddRelationship_MissingFields(t *testing.T) {
-	handler := NewSchemaHandler(&mockSchemaService{}, zap.NewNop())
+	handler := NewSchemaHandler(&mockSchemaService{}, nil, zap.NewNop())
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -479,7 +510,7 @@ func TestSchemaHandler_AddRelationship_MissingFields(t *testing.T) {
 
 func TestSchemaHandler_RemoveRelationship_Success(t *testing.T) {
 	service := &mockSchemaService{}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -500,7 +531,7 @@ func TestSchemaHandler_RemoveRelationship_Success(t *testing.T) {
 
 func TestSchemaHandler_RemoveRelationship_NotFound(t *testing.T) {
 	service := &mockSchemaService{err: apperrors.ErrNotFound}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -520,7 +551,7 @@ func TestSchemaHandler_RemoveRelationship_NotFound(t *testing.T) {
 }
 
 func TestSchemaHandler_RemoveRelationship_InvalidID(t *testing.T) {
-	handler := NewSchemaHandler(&mockSchemaService{}, zap.NewNop())
+	handler := NewSchemaHandler(&mockSchemaService{}, nil, zap.NewNop())
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -540,7 +571,7 @@ func TestSchemaHandler_RemoveRelationship_InvalidID(t *testing.T) {
 
 func TestSchemaHandler_ServiceError(t *testing.T) {
 	service := &mockSchemaService{err: errors.New("database error")}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()

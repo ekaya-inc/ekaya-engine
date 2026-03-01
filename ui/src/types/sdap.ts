@@ -64,13 +64,13 @@ export interface SchemaRefreshResult {
   columns_upserted: number;
   columns_deleted: number;
   relationships_created: number;
+  relationships_deleted: number;
+  pending_changes_created: number;
+  new_table_names: string[];
+  removed_table_names: string[];
 }
 
 /**
- * Schema refresh response
+ * Schema refresh response - returned directly as RefreshSchemaResponse from the API
  */
-export interface SchemaRefreshResponse {
-  datasource_id: string;
-  project_id: string;
-  schema_refresh: SchemaRefreshResult;
-}
+export type SchemaRefreshResponse = SchemaRefreshResult;

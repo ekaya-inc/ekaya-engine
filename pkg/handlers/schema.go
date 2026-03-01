@@ -76,12 +76,15 @@ type RelationshipResponse struct {
 
 // RefreshSchemaResponse contains statistics from a schema refresh operation.
 type RefreshSchemaResponse struct {
-	TablesUpserted       int   `json:"tables_upserted"`
-	TablesDeleted        int64 `json:"tables_deleted"`
-	ColumnsUpserted      int   `json:"columns_upserted"`
-	ColumnsDeleted       int64 `json:"columns_deleted"`
-	RelationshipsCreated int   `json:"relationships_created"`
-	RelationshipsDeleted int64 `json:"relationships_deleted"`
+	TablesUpserted        int      `json:"tables_upserted"`
+	TablesDeleted         int64    `json:"tables_deleted"`
+	ColumnsUpserted       int      `json:"columns_upserted"`
+	ColumnsDeleted        int64    `json:"columns_deleted"`
+	RelationshipsCreated  int      `json:"relationships_created"`
+	RelationshipsDeleted  int64    `json:"relationships_deleted"`
+	PendingChangesCreated int      `json:"pending_changes_created"`
+	NewTableNames         []string `json:"new_table_names"`
+	RemovedTableNames     []string `json:"removed_table_names"`
 }
 
 // SchemaPromptResponse contains the schema formatted for LLM context.
@@ -120,15 +123,21 @@ type RelationshipDetailResponse struct {
 
 // SchemaHandler handles schema-related HTTP requests.
 type SchemaHandler struct {
-	schemaService services.SchemaService
-	logger        *zap.Logger
+	schemaService                services.SchemaService
+	schemaChangeDetectionService services.SchemaChangeDetectionService
+	logger                       *zap.Logger
 }
 
 // NewSchemaHandler creates a new schema handler.
-func NewSchemaHandler(schemaService services.SchemaService, logger *zap.Logger) *SchemaHandler {
+func NewSchemaHandler(
+	schemaService services.SchemaService,
+	schemaChangeDetectionService services.SchemaChangeDetectionService,
+	logger *zap.Logger,
+) *SchemaHandler {
 	return &SchemaHandler{
-		schemaService: schemaService,
-		logger:        logger,
+		schemaService:                schemaService,
+		schemaChangeDetectionService: schemaChangeDetectionService,
+		logger:                       logger,
 	}
 }
 
@@ -261,15 +270,23 @@ func (h *SchemaHandler) GetSchemaPrompt(w http.ResponseWriter, r *http.Request) 
 }
 
 // RefreshSchema handles POST /api/projects/{pid}/datasources/{dsid}/schema/refresh
-// Syncs tables, columns, and relationships from the datasource.
+// Syncs tables, columns, and relationships from the datasource, then runs change detection.
 func (h *SchemaHandler) RefreshSchema(w http.ResponseWriter, r *http.Request) {
 	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
 
-	// UI-initiated refresh does not auto-select new tables (users can manually select what they need)
-	result, err := h.schemaService.RefreshDatasourceSchema(r.Context(), projectID, datasourceID, false)
+	autoSelect := r.URL.Query().Get("auto_select") == "true"
+
+	result, err := services.RefreshSchemaWithChangeDetection(
+		r.Context(),
+		h.schemaService,
+		h.schemaChangeDetectionService,
+		h.logger,
+		projectID, datasourceID,
+		autoSelect,
+	)
 	if err != nil {
 		h.logger.Error("Failed to refresh schema",
 			zap.String("project_id", projectID.String()),
@@ -282,12 +299,15 @@ func (h *SchemaHandler) RefreshSchema(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := RefreshSchemaResponse{
-		TablesUpserted:       result.TablesUpserted,
-		TablesDeleted:        result.TablesDeleted,
-		ColumnsUpserted:      result.ColumnsUpserted,
-		ColumnsDeleted:       result.ColumnsDeleted,
-		RelationshipsCreated: result.RelationshipsCreated,
-		RelationshipsDeleted: result.RelationshipsDeleted,
+		TablesUpserted:        result.TablesUpserted,
+		TablesDeleted:         result.TablesDeleted,
+		ColumnsUpserted:       result.ColumnsUpserted,
+		ColumnsDeleted:        result.ColumnsDeleted,
+		RelationshipsCreated:  result.RelationshipsCreated,
+		RelationshipsDeleted:  result.RelationshipsDeleted,
+		PendingChangesCreated: result.PendingChangesCreated,
+		NewTableNames:         result.NewTableNames,
+		RemovedTableNames:     result.RemovedTableNames,
 	}
 	response := ApiResponse{Success: true, Data: data}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {

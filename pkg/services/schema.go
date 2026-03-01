@@ -999,3 +999,38 @@ func (s *schemaService) GetColumnMetadataByProject(ctx context.Context, projectI
 
 // Ensure schemaService implements SchemaService at compile time.
 var _ SchemaService = (*schemaService)(nil)
+
+// RefreshSchemaWithChangeDetection performs a schema refresh and then runs change detection.
+// If change detection fails, the refresh result is still returned (change detection is non-fatal).
+// changeDetectionSvc may be nil, in which case change detection is skipped.
+func RefreshSchemaWithChangeDetection(
+	ctx context.Context,
+	schemaSvc SchemaService,
+	changeDetectionSvc SchemaChangeDetectionService,
+	logger *zap.Logger,
+	projectID, datasourceID uuid.UUID,
+	autoSelect bool,
+) (*models.RefreshResultWithChanges, error) {
+	result, err := schemaSvc.RefreshDatasourceSchema(ctx, projectID, datasourceID, autoSelect)
+	if err != nil {
+		return nil, err
+	}
+
+	var pendingChangesCreated int
+	if changeDetectionSvc != nil {
+		changes, detectErr := changeDetectionSvc.DetectChanges(ctx, projectID, result)
+		if detectErr != nil {
+			logger.Warn("Change detection failed after schema refresh",
+				zap.String("project_id", projectID.String()),
+				zap.Error(detectErr),
+			)
+		} else {
+			pendingChangesCreated = len(changes)
+		}
+	}
+
+	return &models.RefreshResultWithChanges{
+		RefreshResult:         result,
+		PendingChangesCreated: pendingChangesCreated,
+	}, nil
+}

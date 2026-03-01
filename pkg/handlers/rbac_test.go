@@ -835,7 +835,7 @@ func TestRBAC_SchemaHandler(t *testing.T) {
 	projectID := uuid.New()
 	dsID := uuid.New()
 	relID := uuid.New()
-	handler := NewSchemaHandler(&mockSchemaService{}, zap.NewNop())
+	handler := NewSchemaHandler(&mockSchemaService{}, nil, zap.NewNop())
 
 	schemaBase := "/api/projects/" + projectID.String() + "/datasources/" + dsID.String() + "/schema"
 
