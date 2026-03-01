@@ -3,6 +3,7 @@ import {
   Bot,
   BrainCircuit,
   Database,
+  Globe,
   Layers,
   Lightbulb,
   ListTree,
@@ -29,7 +30,7 @@ import type {
   AIOption,
   OntologyWorkflowStatus,
 } from '../types';
-import { APP_ID_AI_DATA_LIAISON, APP_ID_AI_AGENTS } from '../types';
+import { APP_ID_AI_DATA_LIAISON, APP_ID_AI_AGENTS, APP_ID_MCP_TUNNEL } from '../types';
 
 type TileColor = 'blue' | 'green' | 'purple' | 'orange' | 'gray' | 'indigo' | 'cyan' | 'amber';
 
@@ -202,6 +203,19 @@ const ProjectDashboard = () => {
         disabled: !isConnected,
         disabledReason: 'Requires MCP Server to be enabled.',
         color: 'orange',
+      });
+    }
+
+    // Add MCP Tunnel tile if installed
+    if (installedApps.some((app) => app.app_id === APP_ID_MCP_TUNNEL)) {
+      tiles.push({
+        title: 'MCP Tunnel',
+        description: 'Your MCP Server has a public URL accessible from outside your firewall.',
+        icon: Globe,
+        path: `/projects/${pid}/mcp-tunnel`,
+        disabled: !isConnected,
+        disabledReason: 'Requires MCP Server to be enabled.',
+        color: 'green',
       });
     }
 

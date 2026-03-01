@@ -67,7 +67,7 @@ onClick={() => navigate(`/projects/${pid}/ai-data-liaison`)}
 onClick={() => navigate(`/projects/${pid}/${app.id}`)}
 ```
 
-### 3. [ ] `ui/src/pages/ProjectDashboard.tsx`
+### 3. [x] `ui/src/pages/ProjectDashboard.tsx`
 
 **a) Add imports** (lines 1-17):
 - Add `Globe` to the lucide-react import
