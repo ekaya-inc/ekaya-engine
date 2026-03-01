@@ -101,7 +101,7 @@ import MCPTunnelPage from './pages/MCPTunnelPage';
 <Route path="mcp-tunnel" element={<MCPTunnelPage />} />
 ```
 
-### 5. [ ] `ui/src/pages/MCPTunnelPage.tsx` (NEW FILE)
+### 5. [x] `ui/src/pages/MCPTunnelPage.tsx` (NEW FILE)
 
 Create a simple placeholder page following the AIAgentsPage pattern (`ui/src/pages/AIAgentsPage.tsx` is the template to follow).
 
