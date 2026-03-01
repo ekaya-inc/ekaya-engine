@@ -201,8 +201,8 @@ The core of the refactor — 3 methods that build all ontology context for MCP t
 
 ### Task 10: Remove TieredOntology and ColumnDetail
 
-- [ ] `pkg/models/ontology.go` — Remove `TieredOntology` struct, `ColumnDetail` struct, helper methods (`GetColumnDetails`, `TableCount`, `ColumnCount`, `TotalEntityCount`). **Keep:** `DomainSummary`, `ProjectConventions`, `RelationshipEdge`, `EnumValue`, `DomainContext`, `EntityHint`, constants.
-- [ ] Remove `pkg/models/ontology_test.go` tests for deleted structs
+- [x] `pkg/models/ontology.go` — Remove `TieredOntology` struct, `ColumnDetail` struct, helper methods (`GetColumnDetails`, `TableCount`, `ColumnCount`, `TotalEntityCount`). **Keep:** `DomainSummary`, `ProjectConventions`, `RelationshipEdge`, `EnumValue`, `DomainContext`, `EntityHint`, constants.
+- [x] Remove `pkg/models/ontology_test.go` tests for deleted structs
 
 ### Task 11: Remove OntologyRepository and All Remaining References
 
