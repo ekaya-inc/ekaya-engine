@@ -48,7 +48,6 @@ type TableContext struct {
 }
 
 type columnEnrichmentService struct {
-	ontologyRepo       repositories.OntologyRepository
 	schemaRepo         repositories.SchemaRepository
 	columnMetadataRepo repositories.ColumnMetadataRepository
 	conversationRepo   repositories.ConversationRepository
@@ -65,7 +64,6 @@ type columnEnrichmentService struct {
 
 // NewColumnEnrichmentService creates a new column enrichment service.
 func NewColumnEnrichmentService(
-	ontologyRepo repositories.OntologyRepository,
 	schemaRepo repositories.SchemaRepository,
 	columnMetadataRepo repositories.ColumnMetadataRepository,
 	conversationRepo repositories.ConversationRepository,
@@ -80,7 +78,6 @@ func NewColumnEnrichmentService(
 	logger *zap.Logger,
 ) ColumnEnrichmentService {
 	return &columnEnrichmentService{
-		ontologyRepo:       ontologyRepo,
 		schemaRepo:         schemaRepo,
 		columnMetadataRepo: columnMetadataRepo,
 		conversationRepo:   conversationRepo,
@@ -297,10 +294,10 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 	// Add synthetic enrichments for high-confidence columns
 	enrichments = append(enrichments, syntheticEnrichments...)
 
-	// Convert enrichments to ColumnDetail and save, merging enum definitions, distributions, and FK info
-	columnDetails := s.convertToColumnDetails(tableName, enrichments, columns, fkInfo, enumSamples, enumDefs, enumDistributions, metadataByColumnID)
-	if err := s.ontologyRepo.UpdateColumnDetails(ctx, projectID, tableName, columnDetails); err != nil {
-		return fmt.Errorf("save column details: %w", err)
+	// Save enrichment results to column metadata, merging enum definitions, distributions, and FK info
+	savedCount, err := s.saveEnrichments(ctx, projectID, tableName, enrichments, columns, fkInfo, enumSamples, enumDefs, enumDistributions, metadataByColumnID)
+	if err != nil {
+		return fmt.Errorf("save enrichments: %w", err)
 	}
 
 	// Persist sample values for columns with low cardinality (≤50 distinct values)
@@ -312,7 +309,7 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 
 	s.logger.Info("Enriched columns for table",
 		zap.String("table", tableName),
-		zap.Int("column_count", len(columnDetails)))
+		zap.Int("column_count", savedCount))
 
 	return nil
 }
@@ -976,41 +973,34 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 	}
 
 	// Store questions generated during enrichment
-	if len(response.Questions) > 0 {
+	if len(response.Questions) > 0 && s.questionService != nil {
 		s.logger.Info("LLM generated questions during column enrichment",
 			zap.String("table", tableCtx.TableName),
 			zap.Int("question_count", len(response.Questions)),
 			zap.String("project_id", projectID.String()))
 
-		// Get active ontology for question storage
-		ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-		if err != nil {
-			s.logger.Error("failed to get active ontology for question storage", zap.Error(err))
-			// Non-fatal: continue even if we can't store questions
-		} else if ontology != nil && s.questionService != nil {
-			questionInputs := make([]OntologyQuestionInput, len(response.Questions))
-			for i, q := range response.Questions {
-				questionInputs[i] = OntologyQuestionInput{
-					Category: q.Category,
-					Priority: q.Priority,
-					Question: q.Question,
-					Context:  q.Context,
-					Tables:   []string{tableCtx.TableName},
-				}
+		questionInputs := make([]OntologyQuestionInput, len(response.Questions))
+		for i, q := range response.Questions {
+			questionInputs[i] = OntologyQuestionInput{
+				Category: q.Category,
+				Priority: q.Priority,
+				Question: q.Question,
+				Context:  q.Context,
+				Tables:   []string{tableCtx.TableName},
 			}
-			questionModels := ConvertQuestionInputs(questionInputs, projectID, ontology.ID, nil)
-			if len(questionModels) > 0 {
-				if err := s.questionService.CreateQuestions(ctx, questionModels); err != nil {
-					s.logger.Error("failed to store ontology questions from column enrichment",
-						zap.String("table", tableCtx.TableName),
-						zap.Int("question_count", len(questionModels)),
-						zap.Error(err))
-					// Non-fatal: continue even if question storage fails
-				} else {
-					s.logger.Debug("Stored ontology questions from column enrichment",
-						zap.String("table", tableCtx.TableName),
-						zap.Int("question_count", len(questionModels)))
-				}
+		}
+		questionModels := ConvertQuestionInputs(questionInputs, projectID, uuid.Nil, nil)
+		if len(questionModels) > 0 {
+			if err := s.questionService.CreateQuestions(ctx, questionModels); err != nil {
+				s.logger.Error("failed to store ontology questions from column enrichment",
+					zap.String("table", tableCtx.TableName),
+					zap.Int("question_count", len(questionModels)),
+					zap.Error(err))
+				// Non-fatal: continue even if question storage fails
+			} else {
+				s.logger.Debug("Stored ontology questions from column enrichment",
+					zap.String("table", tableCtx.TableName),
+					zap.Int("question_count", len(questionModels)))
 			}
 		}
 	}
@@ -1166,11 +1156,12 @@ func (s *columnEnrichmentService) writeFKContext(sb *strings.Builder, fkInfo map
 	}
 }
 
-// convertToColumnDetails converts LLM enrichments to ColumnDetail structs.
-// It merges project-level enum definitions when available, using them to provide
-// accurate descriptions for enum values that the LLM cannot infer.
-// It also applies enum distribution metadata (count, percentage, state semantics).
-func (s *columnEnrichmentService) convertToColumnDetails(
+// saveEnrichments persists LLM enrichment results to column metadata, merging with
+// existing metadata from the feature extraction pipeline. Applies project-level enum
+// definitions and distribution metadata before saving.
+func (s *columnEnrichmentService) saveEnrichments(
+	ctx context.Context,
+	projectID uuid.UUID,
 	tableName string,
 	enrichments []columnEnrichment,
 	columns []*models.SchemaColumn,
@@ -1179,146 +1170,77 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 	enumDefs []models.EnumDefinition,
 	enumDistributions map[string]*datasource.EnumDistributionResult,
 	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata,
-) []models.ColumnDetail {
-	// Build a map for quick lookup
+) (int, error) {
+	// Build enrichment lookup
 	enrichmentByName := make(map[string]columnEnrichment)
 	for _, e := range enrichments {
 		enrichmentByName[e.Name] = e
 	}
 
-	// Build column details with schema overlay
-	details := make([]models.ColumnDetail, 0, len(columns))
+	savedCount := 0
 	for _, col := range columns {
-		detail := models.ColumnDetail{
-			Name:         col.ColumnName,
-			IsPrimaryKey: col.IsPrimaryKey,
+		// Get existing metadata or create new
+		meta := metadataByColumnID[col.ID]
+		if meta == nil {
+			meta = &models.ColumnMetadata{
+				ProjectID:      projectID,
+				SchemaColumnID: col.ID,
+				Source:         models.ProvenanceInferred,
+			}
 		}
 
-		// Check FK status from fkInfo
-		if targetTable, ok := fkInfo[col.ColumnName]; ok {
-			detail.IsForeignKey = true
-			detail.ForeignTable = targetTable
-		}
-
-		// Overlay enrichment data if available
+		// Apply LLM enrichment data
 		if enrichment, ok := enrichmentByName[col.ColumnName]; ok {
-			detail.Description = enrichment.Description
-			detail.SemanticType = enrichment.SemanticType
-			detail.Role = enrichment.Role
-			detail.Synonyms = enrichment.Synonyms
-			detail.EnumValues = enrichment.EnumValues
-			if enrichment.FKAssociation != nil {
-				detail.FKAssociation = *enrichment.FKAssociation
+			// Description: LLM-generated description is the primary enrichment contribution
+			if enrichment.Description != "" {
+				meta.Description = &enrichment.Description
 			}
-		}
-
-		// Apply stored column metadata from the feature extraction pipeline (Phase 2+)
-		// These features are populated by the column_feature_extraction service
-		// and stored in the ontology column metadata table. Metadata takes precedence
-		// over LLM-generated values as they are data-driven and more reliable.
-		if meta := metadataByColumnID[col.ID]; meta != nil {
-			// Use description from metadata if available and LLM didn't provide one
-			if meta.Description != nil && *meta.Description != "" && detail.Description == "" {
-				detail.Description = *meta.Description
+			// SemanticType: only set from LLM if not already populated by feature extraction
+			if enrichment.SemanticType != "" && (meta.SemanticType == nil || *meta.SemanticType == "") {
+				meta.SemanticType = &enrichment.SemanticType
 			}
-			// Semantic type from metadata takes precedence as it's data-driven
-			if meta.SemanticType != nil && *meta.SemanticType != "" {
-				detail.SemanticType = *meta.SemanticType
+			// Role: only set from LLM if not already populated
+			if enrichment.Role != "" && (meta.Role == nil || *meta.Role == "") {
+				meta.Role = &enrichment.Role
 			}
-			// Role from metadata takes precedence
-			if meta.Role != nil && *meta.Role != "" {
-				detail.Role = *meta.Role
+			// Synonyms: always apply from LLM
+			if len(enrichment.Synonyms) > 0 {
+				meta.Features.Synonyms = enrichment.Synonyms
 			}
-
-			// Copy EnumFeatures.Values to ColumnDetail.EnumValues if available
-			// EnumFeatures from Phase 3 include LLM-generated labels and state categories
-			if enumFeatures := meta.GetEnumFeatures(); enumFeatures != nil && len(enumFeatures.Values) > 0 {
-				enumValues := make([]models.EnumValue, 0, len(enumFeatures.Values))
-				for _, cev := range enumFeatures.Values {
-					ev := models.EnumValue{
-						Value: cev.Value,
-						Label: cev.Label,
-					}
-					// Map state categories to state flags
-					if cev.Count > 0 {
-						count := cev.Count
-						ev.Count = &count
-					}
-					if cev.Percentage > 0 {
-						pct := cev.Percentage
-						ev.Percentage = &pct
-					}
-					switch cev.Category {
-					case "initial":
-						isTrue := true
-						ev.IsLikelyInitialState = &isTrue
-					case "terminal", "terminal_success":
-						isTrue := true
-						ev.IsLikelyTerminalState = &isTrue
-					case "terminal_error":
-						isTrue := true
-						ev.IsLikelyTerminalState = &isTrue
-						ev.IsLikelyErrorState = &isTrue
-					}
-					enumValues = append(enumValues, ev)
+			// FKAssociation: set on IdentifierFeatures if not already set
+			if enrichment.FKAssociation != nil && *enrichment.FKAssociation != "" {
+				if meta.Features.IdentifierFeatures == nil {
+					meta.Features.IdentifierFeatures = &models.IdentifierFeatures{}
 				}
-				detail.EnumValues = enumValues
-			}
-
-			// Copy IdentifierFeatures.EntityReferenced to FKAssociation
-			// This provides semantic role information (e.g., "host", "visitor", "payer")
-			if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil && idFeatures.EntityReferenced != "" {
-				// Only set if not already set by LLM
-				if detail.FKAssociation == "" {
-					detail.FKAssociation = idFeatures.EntityReferenced
+				if meta.Features.IdentifierFeatures.FKAssociation == "" {
+					meta.Features.IdentifierFeatures.FKAssociation = *enrichment.FKAssociation
 				}
 			}
-
-			// Copy FK target info from IdentifierFeatures if available
-			if idFeatures := meta.GetIdentifierFeatures(); idFeatures != nil && idFeatures.FKTargetTable != "" {
-				detail.IsForeignKey = true
-				detail.ForeignTable = idFeatures.FKTargetTable
-			}
-
-			// Copy BooleanFeatures to description if not already set
-			// BooleanFeatures from Phase 2 include true/false meaning
-			if boolFeatures := meta.GetBooleanFeatures(); boolFeatures != nil && detail.Description == "" {
-				var descParts []string
-				if boolFeatures.TrueMeaning != "" {
-					descParts = append(descParts, fmt.Sprintf("True: %s", boolFeatures.TrueMeaning))
-				}
-				if boolFeatures.FalseMeaning != "" {
-					descParts = append(descParts, fmt.Sprintf("False: %s", boolFeatures.FalseMeaning))
-				}
-				if len(descParts) > 0 {
-					detail.Description = strings.Join(descParts, ". ")
-				}
-			}
-
-			// Copy TimestampFeatures to semantic type if applicable
-			if tsFeatures := meta.GetTimestampFeatures(); tsFeatures != nil {
-				if tsFeatures.IsSoftDelete {
-					detail.SemanticType = "soft_delete"
-				} else if tsFeatures.IsAuditField {
-					switch tsFeatures.TimestampPurpose {
-					case "audit_created":
-						detail.SemanticType = "audit_created"
-					case "audit_updated":
-						detail.SemanticType = "audit_updated"
+			// EnumValues: convert and apply if metadata doesn't already have Phase 3 values
+			if len(enrichment.EnumValues) > 0 {
+				if meta.Features.EnumFeatures == nil || len(meta.Features.EnumFeatures.Values) == 0 {
+					if meta.Features.EnumFeatures == nil {
+						meta.Features.EnumFeatures = &models.EnumFeatures{}
 					}
+					meta.Features.EnumFeatures.Values = convertEnumValuesToColumnEnumValues(enrichment.EnumValues)
 				}
 			}
 		}
 
-		// NOTE: detectBooleanNamingPattern and detectFKColumnPattern fallbacks have been removed.
-		// All columns now get their features from the column_feature_extraction service in Phase 2+.
-		// Boolean features come from BooleanFeatures, FK features from IdentifierFeatures.
+		// Apply FK info from schema
+		if targetTable, ok := fkInfo[col.ColumnName]; ok {
+			if meta.Features.IdentifierFeatures == nil {
+				meta.Features.IdentifierFeatures = &models.IdentifierFeatures{}
+			}
+			if meta.Features.IdentifierFeatures.FKTargetTable == "" {
+				meta.Features.IdentifierFeatures.FKTargetTable = targetTable
+			}
+		}
 
 		// Merge project-level enum definitions if available
 		// This overrides LLM-inferred enum values with explicit definitions
 		if sampledValues, hasSamples := enumSamples[col.ColumnName]; hasSamples && len(enumDefs) > 0 {
 			if mergedEnums := s.mergeEnumDefinitions(tableName, col.ColumnName, sampledValues, enumDefs); len(mergedEnums) > 0 {
-				// Only override if we have meaningful descriptions from definitions
 				hasDescriptions := false
 				for _, ev := range mergedEnums {
 					if ev.Description != "" || ev.Label != "" {
@@ -1327,20 +1249,82 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 					}
 				}
 				if hasDescriptions {
-					detail.EnumValues = mergedEnums
+					if meta.Features.EnumFeatures == nil {
+						meta.Features.EnumFeatures = &models.EnumFeatures{}
+					}
+					meta.Features.EnumFeatures.Values = convertEnumValuesToColumnEnumValues(mergedEnums)
 				}
 			}
 		}
 
 		// Apply enum distribution metadata (count, percentage, state semantics)
-		if dist, hasDist := enumDistributions[col.ColumnName]; hasDist && len(detail.EnumValues) > 0 {
-			detail.EnumValues = applyEnumDistributions(detail.EnumValues, dist)
+		if dist, hasDist := enumDistributions[col.ColumnName]; hasDist && meta.Features.EnumFeatures != nil && len(meta.Features.EnumFeatures.Values) > 0 {
+			applyEnumDistributionsToColumnEnumValues(meta.Features.EnumFeatures, dist)
 		}
 
-		details = append(details, detail)
+		if err := s.columnMetadataRepo.Upsert(ctx, meta); err != nil {
+			return savedCount, fmt.Errorf("upsert column metadata for %s.%s: %w", tableName, col.ColumnName, err)
+		}
+		savedCount++
 	}
 
-	return details
+	return savedCount, nil
+}
+
+// convertEnumValuesToColumnEnumValues converts EnumValue (LLM enrichment format) to
+// ColumnEnumValue (column metadata storage format).
+func convertEnumValuesToColumnEnumValues(enumValues []models.EnumValue) []models.ColumnEnumValue {
+	result := make([]models.ColumnEnumValue, 0, len(enumValues))
+	for _, ev := range enumValues {
+		cev := models.ColumnEnumValue{
+			Value: ev.Value,
+			Label: ev.Label,
+		}
+		if ev.Count != nil {
+			cev.Count = *ev.Count
+		}
+		if ev.Percentage != nil {
+			cev.Percentage = *ev.Percentage
+		}
+		// Map state flags to category
+		if ev.IsLikelyInitialState != nil && *ev.IsLikelyInitialState {
+			cev.Category = models.EnumCategoryInitial
+		} else if ev.IsLikelyErrorState != nil && *ev.IsLikelyErrorState {
+			cev.Category = models.EnumCategoryTerminalError
+		} else if ev.IsLikelyTerminalState != nil && *ev.IsLikelyTerminalState {
+			cev.Category = models.EnumCategoryTerminal
+		}
+		result = append(result, cev)
+	}
+	return result
+}
+
+// applyEnumDistributionsToColumnEnumValues applies distribution data (count, percentage,
+// state semantics) directly to ColumnEnumValue structs in EnumFeatures.
+func applyEnumDistributionsToColumnEnumValues(features *models.EnumFeatures, dist *datasource.EnumDistributionResult) {
+	if dist == nil || len(dist.Distributions) == 0 {
+		return
+	}
+
+	distMap := make(map[string]datasource.EnumValueDistribution)
+	for _, d := range dist.Distributions {
+		distMap[d.Value] = d
+	}
+
+	for i := range features.Values {
+		cev := &features.Values[i]
+		if d, ok := distMap[cev.Value]; ok {
+			cev.Count = d.Count
+			cev.Percentage = d.Percentage
+			if d.IsLikelyInitialState {
+				cev.Category = models.EnumCategoryInitial
+			} else if d.IsLikelyErrorState {
+				cev.Category = models.EnumCategoryTerminalError
+			} else if d.IsLikelyTerminalState {
+				cev.Category = models.EnumCategoryTerminal
+			}
+		}
+	}
 }
 
 // logTableFailure logs detailed information about a failed table enrichment.

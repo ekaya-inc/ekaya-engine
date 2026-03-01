@@ -114,11 +114,11 @@ The core of the refactor — 3 methods that build all ontology context for MCP t
 
 `pkg/services/column_enrichment.go`:
 
-- [ ] Remove `ontologyRepo` from constructor
-- [ ] Replace `convertToColumnDetails()` + `ontologyRepo.UpdateColumnDetails()` (line 302) with writing to `columnMetadataRepo.Upsert()` for each column
-- [ ] Map enrichment results (Description, Role, SemanticType, EnumValues, Synonyms, FKAssociation) to ColumnMetadata fields
-- [ ] Remove `convertToColumnDetails()` method entirely (line 1169+)
-- [ ] Update tests
+- [x] Remove `ontologyRepo` from constructor
+- [x] Replace `convertToColumnDetails()` + `ontologyRepo.UpdateColumnDetails()` (line 302) with writing to `columnMetadataRepo.Upsert()` for each column
+- [x] Map enrichment results (Description, Role, SemanticType, EnumValues, Synonyms, FKAssociation) to ColumnMetadata fields
+- [x] Remove `convertToColumnDetails()` method entirely (line 1169+)
+- [x] Update tests
 
 ### Task 6: Refactor Ontology Finalization Service
 
