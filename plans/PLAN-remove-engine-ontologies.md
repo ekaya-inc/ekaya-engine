@@ -209,25 +209,25 @@ The core of the refactor — 3 methods that build all ontology context for MCP t
 Remove `ontologyRepo` from all services that still accept/store it. Some have active calls that must be deleted, others are dead dependencies.
 
 **Active calls (must remove logic, not just the dependency):**
-- [ ] `pkg/services/projects.go` — Remove `createEmptyOntology()` method and its call from `CreateProject()`. Remove `ontologyRepo` from struct/constructor.
-- [ ] `pkg/services/datasource.go` — Remove `ontologyRepo.DeleteByProject()` call in datasource deletion. Remove `ontologyRepo` from struct/constructor.
+- [x] `pkg/services/projects.go` — Remove `createEmptyOntology()` method and its call from `CreateProject()`. Remove `ontologyRepo` from struct/constructor.
+- [x] `pkg/services/datasource.go` — Remove `ontologyRepo.DeleteByProject()` call in datasource deletion. Remove `ontologyRepo` from struct/constructor.
 
 **Dead dependencies (stored but never called — remove from struct/constructor):**
-- [ ] `pkg/services/schema.go` — Remove `ontologyRepo` from struct/constructor
-- [ ] `pkg/services/knowledge.go` — Remove `ontologyRepo` from struct/constructor
-- [ ] `pkg/services/deterministic_relationship_service.go` — Remove `ontologyRepo` from struct/constructor
-- [ ] `pkg/services/change_review_service.go` — Remove `ontologyRepo` from struct and `ChangeReviewServiceDeps`
-- [ ] `pkg/services/incremental_dag_service.go` — Remove `ontologyRepo` from struct/constructor
-- [ ] `pkg/mcp/tools/knowledge.go` — Remove `OntologyRepository` from `KnowledgeToolDeps`
+- [x] `pkg/services/schema.go` — Remove `ontologyRepo` from struct/constructor
+- [x] `pkg/services/knowledge.go` — Remove `ontologyRepo` from struct/constructor
+- [x] `pkg/services/deterministic_relationship_service.go` — Remove `ontologyRepo` from struct/constructor
+- [x] `pkg/services/change_review_service.go` — Remove `ontologyRepo` from struct and `ChangeReviewServiceDeps`
+- [x] `pkg/services/incremental_dag_service.go` — Remove `ontologyRepo` from struct/constructor
+- [x] `pkg/mcp/tools/knowledge.go` — Remove `OntologyRepository` from `KnowledgeToolDeps`
 
 **Delete repository and wiring:**
-- [ ] Delete `pkg/repositories/ontology_repository.go`
-- [ ] Delete `pkg/repositories/ontology_repository_test.go`
-- [ ] `main.go` — Remove `ontologyRepo` creation and all injection sites
-- [ ] Remove all mock implementations of `OntologyRepository` across test files
+- [x] Delete `pkg/repositories/ontology_repository.go`
+- [x] Delete `pkg/repositories/ontology_repository_test.go`
+- [x] `main.go` — Remove `ontologyRepo` creation and all injection sites
+- [x] Remove all mock implementations of `OntologyRepository` across test files
 
 **Stale comments:**
-- [ ] `pkg/services/ontology_chat.go:160` — Fix comment "Get DAG first to get ontologyID for all messages"
+- [x] `pkg/services/ontology_chat.go:160` — Fix comment "Get DAG first to get ontologyID for all messages"
 
 ### Task 12: Update Tests and Final Cleanup
 

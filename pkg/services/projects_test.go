@@ -275,7 +275,7 @@ func TestProjectService_UpdateAndGetAuthServerURL_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestProjectService_Provision_CreatesEmptyOntology(t *testing.T) {
+func TestProjectService_Provision_CreatesProject(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 
 	// Use a unique project ID for this test
@@ -287,67 +287,23 @@ func TestProjectService_Provision_CreatesEmptyOntology(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create scope: %v", err)
 	}
-	// Use tenant context for the ontology delete (RLS)
-	tenantScope, err := engineDB.DB.WithTenant(ctx, projectID)
-	if err == nil {
-		_, _ = tenantScope.Conn.Exec(ctx, `DELETE FROM engine_ontologies WHERE project_id = $1`, projectID)
-		tenantScope.Close()
-	}
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_projects WHERE id = $1`, projectID)
 	scope.Close()
 
 	// Create repositories
 	projectRepo := repositories.NewProjectRepository()
 	userRepo := repositories.NewUserRepository()
-	ontologyRepo := repositories.NewOntologyRepository()
 
-	service := NewProjectService(engineDB.DB, projectRepo, userRepo, ontologyRepo, nil, nil, nil, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, userRepo, nil, nil, nil, nil, nil, "", zap.NewNop())
 
 	// Provision new project
-	result, err := service.Provision(ctx, projectID, "Empty Ontology Test", nil)
+	result, err := service.Provision(ctx, projectID, "Provision Test", nil)
 	if err != nil {
 		t.Fatalf("Provision failed: %v", err)
 	}
 
 	if !result.Created {
 		t.Error("expected project to be created (new), got already exists")
-	}
-
-	// Verify ontology was created
-	tenantScope, err = engineDB.DB.WithTenant(ctx, projectID)
-	if err != nil {
-		t.Fatalf("Failed to create tenant scope: %v", err)
-	}
-	defer tenantScope.Close()
-
-	var ontologyExists bool
-	err = tenantScope.Conn.QueryRow(ctx, `
-		SELECT EXISTS(
-			SELECT 1 FROM engine_ontologies
-			WHERE project_id = $1 AND is_active = true
-		)
-	`, projectID).Scan(&ontologyExists)
-	if err != nil {
-		t.Fatalf("Failed to check for ontology: %v", err)
-	}
-
-	if !ontologyExists {
-		t.Error("expected an active ontology to be created with the project")
-	}
-
-	// Verify ontology is empty (version 1)
-	var version int
-	err = tenantScope.Conn.QueryRow(ctx, `
-		SELECT version
-		FROM engine_ontologies
-		WHERE project_id = $1 AND is_active = true
-	`, projectID).Scan(&version)
-	if err != nil {
-		t.Fatalf("Failed to query ontology details: %v", err)
-	}
-
-	if version != 1 {
-		t.Errorf("expected ontology version 1, got %d", version)
 	}
 }
 
@@ -549,8 +505,7 @@ func TestProjectService_Provision_WithMCPServerApp(t *testing.T) {
 	cleanupProject(t, engineDB, projectID)
 
 	projectRepo := repositories.NewProjectRepository()
-	ontologyRepo := repositories.NewOntologyRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, ontologyRepo, nil, nil, nil, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, nil, "", zap.NewNop())
 
 	// Provision with mcp-server application
 	params := map[string]interface{}{
@@ -564,24 +519,6 @@ func TestProjectService_Provision_WithMCPServerApp(t *testing.T) {
 	}
 	if !result.Created {
 		t.Error("expected project to be created")
-	}
-
-	// Verify ontology was created (MCP setup ran)
-	tenantScope, err := engineDB.DB.WithTenant(ctx, projectID)
-	if err != nil {
-		t.Fatalf("Failed to create tenant scope: %v", err)
-	}
-	defer tenantScope.Close()
-
-	var ontologyExists bool
-	err = tenantScope.Conn.QueryRow(ctx, `
-		SELECT EXISTS(SELECT 1 FROM engine_ontologies WHERE project_id = $1 AND is_active = true)
-	`, projectID).Scan(&ontologyExists)
-	if err != nil {
-		t.Fatalf("Failed to check ontology: %v", err)
-	}
-	if !ontologyExists {
-		t.Error("expected ontology to be created when mcp-server app is specified")
 	}
 
 	// Verify applications in result
@@ -602,8 +539,7 @@ func TestProjectService_Provision_WithNoApps_FallsBackToMCP(t *testing.T) {
 	cleanupProject(t, engineDB, projectID)
 
 	projectRepo := repositories.NewProjectRepository()
-	ontologyRepo := repositories.NewOntologyRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, ontologyRepo, nil, nil, nil, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, nil, "", zap.NewNop())
 
 	// Provision without applications (backward compat)
 	result, err := service.Provision(ctx, projectID, "No Apps Fallback Test", nil)
@@ -612,24 +548,6 @@ func TestProjectService_Provision_WithNoApps_FallsBackToMCP(t *testing.T) {
 	}
 	if !result.Created {
 		t.Error("expected project to be created")
-	}
-
-	// Verify ontology was created (MCP setup ran as fallback)
-	tenantScope, err := engineDB.DB.WithTenant(ctx, projectID)
-	if err != nil {
-		t.Fatalf("Failed to create tenant scope: %v", err)
-	}
-	defer tenantScope.Close()
-
-	var ontologyExists bool
-	err = tenantScope.Conn.QueryRow(ctx, `
-		SELECT EXISTS(SELECT 1 FROM engine_ontologies WHERE project_id = $1 AND is_active = true)
-	`, projectID).Scan(&ontologyExists)
-	if err != nil {
-		t.Fatalf("Failed to check ontology: %v", err)
-	}
-	if !ontologyExists {
-		t.Error("expected ontology to be created as fallback when no applications specified")
 	}
 }
 
@@ -642,8 +560,7 @@ func TestProjectService_Provision_WithNonMCPApp_SkipsMCPSetup(t *testing.T) {
 	cleanupProject(t, engineDB, projectID)
 
 	projectRepo := repositories.NewProjectRepository()
-	ontologyRepo := repositories.NewOntologyRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, ontologyRepo, nil, nil, nil, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nil, nil, "", zap.NewNop())
 
 	// Provision with only ai-data-liaison (no mcp-server)
 	params := map[string]interface{}{
@@ -658,35 +575,11 @@ func TestProjectService_Provision_WithNonMCPApp_SkipsMCPSetup(t *testing.T) {
 	if !result.Created {
 		t.Error("expected project to be created")
 	}
-
-	// Verify ontology was NOT created (MCP setup skipped)
-	tenantScope, err := engineDB.DB.WithTenant(ctx, projectID)
-	if err != nil {
-		t.Fatalf("Failed to create tenant scope: %v", err)
-	}
-	defer tenantScope.Close()
-
-	var ontologyExists bool
-	err = tenantScope.Conn.QueryRow(ctx, `
-		SELECT EXISTS(SELECT 1 FROM engine_ontologies WHERE project_id = $1 AND is_active = true)
-	`, projectID).Scan(&ontologyExists)
-	if err != nil {
-		t.Fatalf("Failed to check ontology: %v", err)
-	}
-	if ontologyExists {
-		t.Error("expected no ontology when mcp-server app is not specified")
-	}
 }
 
 func cleanupProject(t *testing.T, engineDB *testhelpers.EngineDB, projectID uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
-
-	tenantScope, err := engineDB.DB.WithTenant(ctx, projectID)
-	if err == nil {
-		_, _ = tenantScope.Conn.Exec(ctx, `DELETE FROM engine_ontologies WHERE project_id = $1`, projectID)
-		tenantScope.Close()
-	}
 
 	scope, err := engineDB.DB.WithoutTenant(ctx)
 	if err != nil {

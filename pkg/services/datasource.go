@@ -49,7 +49,6 @@ type DatasourceService interface {
 // datasourceService implements DatasourceService.
 type datasourceService struct {
 	repo           repositories.DatasourceRepository
-	ontologyRepo   repositories.OntologyRepository
 	encryptor      *crypto.CredentialEncryptor
 	adapterFactory datasource.DatasourceAdapterFactory
 	projectService ProjectService
@@ -59,7 +58,6 @@ type datasourceService struct {
 // NewDatasourceService creates a new datasource service with dependencies.
 func NewDatasourceService(
 	repo repositories.DatasourceRepository,
-	ontologyRepo repositories.OntologyRepository,
 	encryptor *crypto.CredentialEncryptor,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	projectService ProjectService,
@@ -67,7 +65,6 @@ func NewDatasourceService(
 ) DatasourceService {
 	return &datasourceService{
 		repo:           repo,
-		ontologyRepo:   ontologyRepo,
 		encryptor:      encryptor,
 		adapterFactory: adapterFactory,
 		projectService: projectService,
@@ -258,10 +255,8 @@ func (s *datasourceService) Update(ctx context.Context, id uuid.UUID, name, dsTy
 	return nil
 }
 
-// Delete removes a datasource and clears associated ontology data.
-// When a datasource is deleted, CASCADE deletes schema tables/columns,
-// but ontology entities would remain orphaned. This method explicitly
-// clears the ontology to prevent stale data.
+// Delete removes a datasource and cleans up associated data.
+// CASCADE deletes handle schema tables/columns automatically.
 // If the deleted datasource was the project's default, the default is cleared
 // so that a newly created datasource can become the default.
 func (s *datasourceService) Delete(ctx context.Context, id uuid.UUID) error {
@@ -274,15 +269,6 @@ func (s *datasourceService) Delete(ctx context.Context, id uuid.UUID) error {
 	// Delete the datasource (CASCADE deletes schema tables/columns)
 	if err := s.repo.Delete(ctx, id); err != nil {
 		return err
-	}
-
-	// Clear ontology data for the project (CASCADE deletes entities, relationships, etc.)
-	if err := s.ontologyRepo.DeleteByProject(ctx, projectID); err != nil {
-		s.logger.Error("Failed to delete ontology after datasource deletion",
-			zap.String("datasource_id", id.String()),
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		return fmt.Errorf("failed to clear ontology data: %w", err)
 	}
 
 	// Clear default_datasource_id if this was the default
@@ -307,7 +293,7 @@ func (s *datasourceService) Delete(ctx context.Context, id uuid.UUID) error {
 		}
 	}
 
-	s.logger.Info("Deleted datasource and cleared ontology",
+	s.logger.Info("Deleted datasource",
 		zap.String("id", id.String()),
 		zap.String("project_id", projectID.String()),
 	)

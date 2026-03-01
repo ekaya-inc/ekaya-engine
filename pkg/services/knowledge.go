@@ -38,24 +38,21 @@ type KnowledgeService interface {
 }
 
 type knowledgeService struct {
-	repo         repositories.KnowledgeRepository
-	projectRepo  repositories.ProjectRepository
-	ontologyRepo repositories.OntologyRepository
-	logger       *zap.Logger
+	repo        repositories.KnowledgeRepository
+	projectRepo repositories.ProjectRepository
+	logger      *zap.Logger
 }
 
 // NewKnowledgeService creates a new knowledge service.
 func NewKnowledgeService(
 	repo repositories.KnowledgeRepository,
 	projectRepo repositories.ProjectRepository,
-	ontologyRepo repositories.OntologyRepository,
 	logger *zap.Logger,
 ) KnowledgeService {
 	return &knowledgeService{
-		repo:         repo,
-		projectRepo:  projectRepo,
-		ontologyRepo: ontologyRepo,
-		logger:       logger.Named("knowledge"),
+		repo:        repo,
+		projectRepo: projectRepo,
+		logger:      logger.Named("knowledge"),
 	}
 }
 

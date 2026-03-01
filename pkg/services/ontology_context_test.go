@@ -17,39 +17,6 @@ import (
 // Mock Implementations
 // ============================================================================
 
-// mockOntologyRepository is a mock for OntologyRepository (shared across service tests).
-type mockOntologyRepository struct {
-	activeOntology *models.TieredOntology
-	getActiveErr   error
-}
-
-func (m *mockOntologyRepository) Create(ctx context.Context, ontology *models.TieredOntology) error {
-	return nil
-}
-
-func (m *mockOntologyRepository) GetActive(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error) {
-	if m.getActiveErr != nil {
-		return nil, m.getActiveErr
-	}
-	return m.activeOntology, nil
-}
-
-func (m *mockOntologyRepository) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
-	return nil
-}
-
-func (m *mockOntologyRepository) UpdateColumnDetails(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error {
-	return nil
-}
-
-func (m *mockOntologyRepository) GetNextVersion(ctx context.Context, projectID uuid.UUID) (int, error) {
-	return 1, nil
-}
-
-func (m *mockOntologyRepository) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
-	return nil
-}
-
 // mockColumnMetadataRepository is a mock for ColumnMetadataRepository.
 type mockColumnMetadataRepository struct {
 	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata

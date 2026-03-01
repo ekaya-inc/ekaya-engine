@@ -19,7 +19,6 @@ import (
 type KnowledgeToolDeps struct {
 	BaseMCPToolDeps
 	KnowledgeRepository repositories.KnowledgeRepository
-	OntologyRepository  repositories.OntologyRepository
 }
 
 // RegisterKnowledgeTools registers project knowledge MCP tools.

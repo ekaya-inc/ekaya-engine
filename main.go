@@ -129,7 +129,6 @@ func main() {
 	agentAPIKeyService := services.NewAgentAPIKeyService(mcpConfigRepo, credentialEncryptor, logger)
 
 	// Ontology repositories
-	ontologyRepo := repositories.NewOntologyRepository()
 	ontologyChatRepo := repositories.NewOntologyChatRepository()
 	knowledgeRepo := repositories.NewKnowledgeRepository()
 	ontologyQuestionRepo := repositories.NewOntologyQuestionRepository()
@@ -160,10 +159,10 @@ func main() {
 	// Create services
 	nonceStore := services.NewNonceStore()
 	installedAppService := services.NewInstalledAppService(installedAppRepo, centralClient, nonceStore, cfg.BaseURL, logger)
-	projectService := services.NewProjectService(db, projectRepo, userRepo, ontologyRepo, mcpConfigRepo, agentAPIKeyService, installedAppService, centralClient, nonceStore, cfg.BaseURL, logger)
+	projectService := services.NewProjectService(db, projectRepo, userRepo, mcpConfigRepo, agentAPIKeyService, installedAppService, centralClient, nonceStore, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
-	datasourceService := services.NewDatasourceService(datasourceRepo, ontologyRepo, credentialEncryptor, adapterFactory, projectService, logger)
-	schemaService := services.NewSchemaService(schemaRepo, ontologyRepo, columnMetadataRepo, datasourceService, adapterFactory, logger)
+	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, adapterFactory, projectService, logger)
+	schemaService := services.NewSchemaService(schemaRepo, columnMetadataRepo, datasourceService, adapterFactory, logger)
 	schemaChangeDetectionService := services.NewSchemaChangeDetectionService(pendingChangeRepo, logger)
 	dataChangeDetectionService := services.NewDataChangeDetectionService(schemaRepo, columnMetadataRepo, pendingChangeRepo, datasourceService, projectService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, securityAuditor, logger)
@@ -176,7 +175,7 @@ func main() {
 	llmFactory := llm.NewClientFactory(aiConfigService, logger)
 
 	// Ontology services
-	knowledgeService := services.NewKnowledgeService(knowledgeRepo, projectRepo, ontologyRepo, logger)
+	knowledgeService := services.NewKnowledgeService(knowledgeRepo, projectRepo, logger)
 	ontologyBuilderService := services.NewOntologyBuilderService(llmFactory, logger)
 	ontologyQuestionService := services.NewOntologyQuestionService(
 		ontologyQuestionRepo, columnMetadataRepo, schemaRepo, knowledgeRepo,
@@ -193,7 +192,7 @@ func main() {
 		schemaRepo, ontologyDAGRepo, projectService,
 		llmFactory, datasourceService, adapterFactory, logger)
 	deterministicRelationshipService := services.NewDeterministicRelationshipService(
-		datasourceService, projectService, adapterFactory, ontologyRepo, schemaRepo, columnMetadataRepo, logger)
+		datasourceService, projectService, adapterFactory, schemaRepo, columnMetadataRepo, logger)
 	ontologyFinalizationService := services.NewOntologyFinalizationService(
 		projectRepo, schemaRepo, columnMetadataRepo, convRepo, llmFactory, getTenantCtx, logger)
 	ontologyContextService := services.NewOntologyContextService(
@@ -248,7 +247,6 @@ func main() {
 	// Incremental DAG service for targeted LLM enrichment after changes
 	// Created first without ChangeReviewService due to circular dependency
 	incrementalDAGService := services.NewIncrementalDAGService(&services.IncrementalDAGServiceDeps{
-		OntologyRepo:       ontologyRepo,
 		ColumnMetadataRepo: columnMetadataRepo,
 		SchemaRepo:         schemaRepo,
 		ConversationRepo:   convRepo,
@@ -263,7 +261,6 @@ func main() {
 	changeReviewService := services.NewChangeReviewService(&services.ChangeReviewServiceDeps{
 		PendingChangeRepo:  pendingChangeRepo,
 		ColumnMetadataRepo: columnMetadataRepo,
-		OntologyRepo:       ontologyRepo,
 		IncrementalDAG:     incrementalDAGService,
 		Logger:             logger,
 	})
@@ -506,7 +503,6 @@ func main() {
 			InstalledAppService: installedAppService,
 		},
 		KnowledgeRepository: knowledgeRepo,
-		OntologyRepository:  ontologyRepo,
 	}
 	mcptools.RegisterKnowledgeTools(mcpServer.MCP(), knowledgeToolDeps)
 

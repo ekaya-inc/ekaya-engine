@@ -157,7 +157,7 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 		return fmt.Errorf("user ID not found in context: %w", err)
 	}
 
-	// Get DAG first to get ontologyID for all messages
+	// Get DAG to check extraction status and load chat history
 	dag, err := s.dagRepo.GetLatestByProject(ctx, projectID)
 	if err != nil {
 		s.logger.Error("Failed to get DAG",

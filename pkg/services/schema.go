@@ -78,7 +78,6 @@ type SchemaService interface {
 
 type schemaService struct {
 	schemaRepo         repositories.SchemaRepository
-	ontologyRepo       repositories.OntologyRepository
 	columnMetadataRepo repositories.ColumnMetadataRepository
 	datasourceSvc      DatasourceService
 	adapterFactory     datasource.DatasourceAdapterFactory
@@ -88,7 +87,6 @@ type schemaService struct {
 // NewSchemaService creates a new schema service with dependencies.
 func NewSchemaService(
 	schemaRepo repositories.SchemaRepository,
-	ontologyRepo repositories.OntologyRepository,
 	columnMetadataRepo repositories.ColumnMetadataRepository,
 	datasourceSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
@@ -96,7 +94,6 @@ func NewSchemaService(
 ) SchemaService {
 	return &schemaService{
 		schemaRepo:         schemaRepo,
-		ontologyRepo:       ontologyRepo,
 		columnMetadataRepo: columnMetadataRepo,
 		datasourceSvc:      datasourceSvc,
 		adapterFactory:     adapterFactory,

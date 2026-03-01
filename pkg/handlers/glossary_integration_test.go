@@ -54,7 +54,6 @@ type glossaryTestContext struct {
 	service        services.GlossaryService
 	datasourceSvc  services.DatasourceService
 	glossaryRepo   repositories.GlossaryRepository
-	ontologyRepo   repositories.OntologyRepository
 	projectID      uuid.UUID
 	ontologyID     uuid.UUID
 	datasourceID   uuid.UUID
@@ -80,16 +79,13 @@ func setupGlossaryTest(t *testing.T) *glossaryTestContext {
 
 	// Create repositories
 	glossaryRepo := repositories.NewGlossaryRepository()
-	ontologyRepo := repositories.NewOntologyRepository()
 	dsRepo := repositories.NewDatasourceRepository()
 	columnMetadataRepo := repositories.NewColumnMetadataRepository()
-
-	// Create repositories
 	schemaRepo := repositories.NewSchemaRepository()
 	knowledgeRepo := repositories.NewKnowledgeRepository()
 
 	// Create datasource service
-	datasourceSvc := services.NewDatasourceService(dsRepo, ontologyRepo, encryptor, adapterFactory, nil, zap.NewNop())
+	datasourceSvc := services.NewDatasourceService(dsRepo, encryptor, adapterFactory, nil, zap.NewNop())
 
 	// Create a mock LLM factory that returns nil (SuggestTerms needs ontology first)
 	mockLLMFactory := &mockLLMClientFactory{}
@@ -114,7 +110,6 @@ func setupGlossaryTest(t *testing.T) *glossaryTestContext {
 		service:        service,
 		datasourceSvc:  datasourceSvc,
 		glossaryRepo:   glossaryRepo,
-		ontologyRepo:   ontologyRepo,
 		projectID:      projectID,
 		adapterFactory: adapterFactory,
 	}
@@ -319,7 +314,7 @@ func (tc *glossaryTestContext) ensureTestDatasource() {
 	tc.datasourceID = ds.ID
 }
 
-// createTestOntology creates an active ontology for testing.
+// createTestOntology creates an active ontology for testing using raw SQL.
 func (tc *glossaryTestContext) createTestOntology() {
 	tc.t.Helper()
 
@@ -331,19 +326,15 @@ func (tc *glossaryTestContext) createTestOntology() {
 		tc.t.Fatalf("Failed to create tenant scope: %v", err)
 	}
 	defer scope.Close()
-	ctx = database.SetTenantScope(ctx, scope)
 
 	tc.ontologyID = uuid.New()
-	ontology := &models.TieredOntology{
-		ID:            tc.ontologyID,
-		ProjectID:     tc.projectID,
-		Version:       1,
-		IsActive:      true,
-		ColumnDetails: make(map[string][]models.ColumnDetail),
-		Metadata:      make(map[string]any),
-	}
-
-	if err := tc.ontologyRepo.Create(ctx, ontology); err != nil {
+	err = scope.Conn.QueryRow(ctx, `
+		INSERT INTO engine_ontologies (id, project_id, version, is_active, domain_summary, column_details, metadata, created_at, updated_at)
+		VALUES ($1, $2, 1, true, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, NOW(), NOW())
+		ON CONFLICT (project_id, version) DO UPDATE SET is_active = true
+		RETURNING id
+	`, tc.ontologyID, tc.projectID).Scan(&tc.ontologyID)
+	if err != nil {
 		tc.t.Fatalf("Failed to create ontology: %v", err)
 	}
 }

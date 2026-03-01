@@ -26,13 +26,12 @@ var (
 
 // ontologyContextTestContext holds all dependencies for ontology context integration tests.
 type ontologyContextTestContext struct {
-	t            *testing.T
-	engineDB     *testhelpers.EngineDB
-	service      OntologyContextService
-	ontologyRepo repositories.OntologyRepository
-	schemaRepo   repositories.SchemaRepository
-	projectID    uuid.UUID
-	dsID         uuid.UUID
+	t          *testing.T
+	engineDB   *testhelpers.EngineDB
+	service    OntologyContextService
+	schemaRepo repositories.SchemaRepository
+	projectID  uuid.UUID
+	dsID       uuid.UUID
 }
 
 // mockProjectServiceForIntegration implements ProjectService for integration tests.
@@ -109,7 +108,6 @@ func setupOntologyContextTest(t *testing.T) *ontologyContextTestContext {
 	t.Helper()
 
 	engineDB := testhelpers.GetEngineDB(t)
-	ontologyRepo := repositories.NewOntologyRepository()
 	schemaRepo := repositories.NewSchemaRepository()
 	columnMetadataRepo := repositories.NewColumnMetadataRepository()
 	projectService := &mockProjectServiceForIntegration{dsID: ontologyContextTestDSID}
@@ -118,13 +116,12 @@ func setupOntologyContextTest(t *testing.T) *ontologyContextTestContext {
 	service := NewOntologyContextService(schemaRepo, columnMetadataRepo, nil, projectService, logger)
 
 	tc := &ontologyContextTestContext{
-		t:            t,
-		engineDB:     engineDB,
-		service:      service,
-		ontologyRepo: ontologyRepo,
-		schemaRepo:   schemaRepo,
-		projectID:    ontologyContextTestProjectID,
-		dsID:         ontologyContextTestDSID,
+		t:          t,
+		engineDB:   engineDB,
+		service:    service,
+		schemaRepo: schemaRepo,
+		projectID:  ontologyContextTestProjectID,
+		dsID:       ontologyContextTestDSID,
 	}
 
 	// Ensure project exists
@@ -198,90 +195,36 @@ func (tc *ontologyContextTestContext) cleanup() {
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_schema_tables WHERE project_id = $1`, tc.projectID)
 }
 
-// createTestOntology creates a complete ontology with enriched column details.
+// createTestOntology creates a complete ontology with enriched column details using raw SQL,
+// and populates column metadata for semantic enrichment.
 func (tc *ontologyContextTestContext) createTestOntology(ctx context.Context) uuid.UUID {
 	tc.t.Helper()
 
 	ontologyID := uuid.New()
 
-	// Create ontology with domain summary and column details
-	ontology := &models.TieredOntology{
-		ID:        ontologyID,
-		ProjectID: tc.projectID,
-		Version:   1,
-		IsActive:  true,
-		DomainSummary: &models.DomainSummary{
-			Description: "E-commerce platform for online retail",
-			Domains:     []string{"sales", "customer", "product"},
-		},
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"users": {
-				{
-					Name:         "id",
-					Description:  "Unique user identifier",
-					SemanticType: "identifier",
-					Role:         "identifier",
-					IsPrimaryKey: true,
-					Synonyms:     []string{"user_id"},
-				},
-				{
-					Name:         "email",
-					Description:  "User email address",
-					SemanticType: "email",
-					Role:         "attribute",
-					Synonyms:     []string{"email_address"},
-				},
-				{
-					Name:         "status",
-					Description:  "Account status",
-					SemanticType: "category",
-					Role:         "dimension",
-					EnumValues: []models.EnumValue{
-						{Value: "active", Label: "Active", Description: "Account is active"},
-						{Value: "inactive", Label: "Inactive", Description: "Account is inactive"},
-					},
-				},
-			},
-			"orders": {
-				{
-					Name:         "id",
-					Description:  "Unique order identifier",
-					SemanticType: "identifier",
-					Role:         "identifier",
-					IsPrimaryKey: true,
-					Synonyms:     []string{"order_id"},
-				},
-				{
-					Name:         "user_id",
-					Description:  "Reference to customer",
-					SemanticType: "identifier",
-					Role:         "identifier",
-					IsForeignKey: true,
-					ForeignTable: "users",
-				},
-				{
-					Name:         "total_amount",
-					Description:  "Total order value",
-					SemanticType: "currency",
-					Role:         "measure",
-					Synonyms:     []string{"revenue", "order_total"},
-				},
-				{
-					Name:         "status",
-					Description:  "Order status",
-					SemanticType: "category",
-					Role:         "dimension",
-					EnumValues: []models.EnumValue{
-						{Value: "pending", Label: "Pending"},
-						{Value: "shipped", Label: "Shipped"},
-						{Value: "delivered", Label: "Delivered"},
-					},
-				},
-			},
-		},
-	}
+	scope, ok := database.GetTenantScope(ctx)
+	require.True(tc.t, ok, "Expected tenant scope in context")
 
-	err := tc.ontologyRepo.Create(ctx, ontology)
+	// Create ontology with domain summary and column details
+	domainSummary := `{"description": "E-commerce platform for online retail", "domains": ["sales", "customer", "product"]}`
+	columnDetails := `{
+		"users": [
+			{"name": "id", "description": "Unique user identifier", "semantic_type": "identifier", "role": "identifier", "is_primary_key": true, "synonyms": ["user_id"]},
+			{"name": "email", "description": "User email address", "semantic_type": "email", "role": "attribute", "synonyms": ["email_address"]},
+			{"name": "status", "description": "Account status", "semantic_type": "category", "role": "dimension", "enum_values": [{"value": "active", "label": "Active", "description": "Account is active"}, {"value": "inactive", "label": "Inactive", "description": "Account is inactive"}]}
+		],
+		"orders": [
+			{"name": "id", "description": "Unique order identifier", "semantic_type": "identifier", "role": "identifier", "is_primary_key": true, "synonyms": ["order_id"]},
+			{"name": "user_id", "description": "Reference to customer", "semantic_type": "identifier", "role": "identifier", "is_foreign_key": true, "foreign_table": "users"},
+			{"name": "total_amount", "description": "Total order value", "semantic_type": "currency", "role": "measure", "synonyms": ["revenue", "order_total"]},
+			{"name": "status", "description": "Order status", "semantic_type": "category", "role": "dimension", "enum_values": [{"value": "pending", "label": "Pending"}, {"value": "shipped", "label": "Shipped"}, {"value": "delivered", "label": "Delivered"}]}
+		]
+	}`
+
+	_, err := scope.Conn.Exec(ctx, `
+		INSERT INTO engine_ontologies (id, project_id, version, is_active, domain_summary, column_details, metadata, created_at, updated_at)
+		VALUES ($1, $2, 1, true, $3::jsonb, $4::jsonb, '{}'::jsonb, NOW(), NOW())
+	`, ontologyID, tc.projectID, domainSummary, columnDetails)
 	require.NoError(tc.t, err, "Failed to create test ontology")
 
 	// Create schema tables and columns for column count

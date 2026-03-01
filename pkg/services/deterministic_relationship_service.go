@@ -57,7 +57,6 @@ type deterministicRelationshipService struct {
 	datasourceService  DatasourceService
 	projectService     ProjectService
 	adapterFactory     datasource.DatasourceAdapterFactory
-	ontologyRepo       repositories.OntologyRepository
 	schemaRepo         repositories.SchemaRepository
 	columnMetadataRepo repositories.ColumnMetadataRepository
 	logger             *zap.Logger
@@ -68,7 +67,6 @@ func NewDeterministicRelationshipService(
 	datasourceService DatasourceService,
 	projectService ProjectService,
 	adapterFactory datasource.DatasourceAdapterFactory,
-	ontologyRepo repositories.OntologyRepository,
 	schemaRepo repositories.SchemaRepository,
 	columnMetadataRepo repositories.ColumnMetadataRepository,
 	logger *zap.Logger,
@@ -77,7 +75,6 @@ func NewDeterministicRelationshipService(
 		datasourceService:  datasourceService,
 		projectService:     projectService,
 		adapterFactory:     adapterFactory,
-		ontologyRepo:       ontologyRepo,
 		schemaRepo:         schemaRepo,
 		columnMetadataRepo: columnMetadataRepo,
 		logger:             logger.Named("relationship-discovery"),

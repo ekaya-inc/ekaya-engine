@@ -79,12 +79,10 @@ func setupIntegrationTest(t *testing.T) *integrationTestContext {
 
 	// Create real repositories
 	repo := repositories.NewDatasourceRepository()
-	ontologyRepo := repositories.NewOntologyRepository()
 
 	// Create service with mock adapter factory
 	service := services.NewDatasourceService(
 		repo,
-		ontologyRepo,
 		encryptor,
 		&integrationMockAdapterFactory{},
 		nil, // No project service for tests

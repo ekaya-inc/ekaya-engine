@@ -21,9 +21,7 @@ type knowledgeServiceTestContext struct {
 	engineDB      *testhelpers.EngineDB
 	service       KnowledgeService
 	knowledgeRepo repositories.KnowledgeRepository
-	ontologyRepo  repositories.OntologyRepository
 	projectID     uuid.UUID
-	ontologyID    uuid.UUID
 	testUserID    uuid.UUID
 }
 
@@ -32,21 +30,17 @@ func setupKnowledgeServiceTest(t *testing.T) *knowledgeServiceTestContext {
 	engineDB := testhelpers.GetEngineDB(t)
 
 	knowledgeRepo := repositories.NewKnowledgeRepository()
-	ontologyRepo := repositories.NewOntologyRepository()
 	projectRepo := repositories.NewProjectRepository()
 
 	tc := &knowledgeServiceTestContext{
 		t:             t,
 		engineDB:      engineDB,
 		knowledgeRepo: knowledgeRepo,
-		ontologyRepo:  ontologyRepo,
-		service:       NewKnowledgeService(knowledgeRepo, projectRepo, ontologyRepo, zap.NewNop()),
+		service:       NewKnowledgeService(knowledgeRepo, projectRepo, zap.NewNop()),
 		projectID:     uuid.MustParse("00000000-0000-0000-0000-000000000044"),
-		ontologyID:    uuid.MustParse("00000000-0000-0000-0000-000000000144"),
 		testUserID:    uuid.MustParse("00000000-0000-0000-0000-000000000047"),
 	}
 	tc.ensureTestProject()
-	tc.ensureTestOntology()
 	return tc
 }
 
@@ -77,24 +71,6 @@ func (tc *knowledgeServiceTestContext) ensureTestProject() {
 	`, tc.projectID, tc.testUserID)
 	if err != nil {
 		tc.t.Fatalf("failed to ensure test user: %v", err)
-	}
-}
-
-// ensureTestOntology creates the test ontology if it doesn't exist.
-func (tc *knowledgeServiceTestContext) ensureTestOntology() {
-	tc.t.Helper()
-	ctx, cleanup := tc.createTestContext()
-	defer cleanup()
-
-	scope, _ := database.GetTenantScope(ctx)
-	err := scope.Conn.QueryRow(ctx, `
-		INSERT INTO engine_ontologies (id, project_id, is_active, domain_summary, column_details)
-		VALUES ($1, $2, true, '{}', '{}')
-		ON CONFLICT (project_id, version) DO UPDATE SET is_active = true
-		RETURNING id
-	`, tc.ontologyID, tc.projectID).Scan(&tc.ontologyID)
-	if err != nil {
-		tc.t.Fatalf("failed to ensure test ontology: %v", err)
 	}
 }
 
