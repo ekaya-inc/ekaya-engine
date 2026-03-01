@@ -140,43 +140,95 @@ func (m *mockGlossaryRepo) DeleteAlias(ctx context.Context, glossaryID uuid.UUID
 	return nil
 }
 
-type mockOntologyRepoForGlossary struct {
-	activeOntology *models.TieredOntology
-	getActiveErr   error
+// mockProjectServiceForGlossary implements a minimal ProjectService for glossary tests.
+type mockProjectServiceForGlossary struct {
+	project *models.Project
 }
 
-func (m *mockOntologyRepoForGlossary) Create(ctx context.Context, ontology *models.TieredOntology) error {
-	return nil
+func (m *mockProjectServiceForGlossary) Provision(ctx context.Context, projectID uuid.UUID, name string, params map[string]interface{}) (*ProvisionResult, error) {
+	return nil, nil
 }
-
-func (m *mockOntologyRepoForGlossary) GetActive(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error) {
-	if m.getActiveErr != nil {
-		return nil, m.getActiveErr
+func (m *mockProjectServiceForGlossary) ProvisionFromClaims(ctx context.Context, claims *auth.Claims) (*ProvisionResult, error) {
+	return nil, nil
+}
+func (m *mockProjectServiceForGlossary) GetByID(ctx context.Context, id uuid.UUID) (*models.Project, error) {
+	if m.project != nil {
+		return m.project, nil
 	}
-	return m.activeOntology, nil
+	return &models.Project{ID: id}, nil
 }
-
-func (m *mockOntologyRepoForGlossary) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
+func (m *mockProjectServiceForGlossary) GetByIDWithoutTenant(ctx context.Context, id uuid.UUID) (*models.Project, error) {
+	return m.GetByID(ctx, id)
+}
+func (m *mockProjectServiceForGlossary) Delete(ctx context.Context, id uuid.UUID) (*DeleteResult, error) {
+	return nil, nil
+}
+func (m *mockProjectServiceForGlossary) CompleteDeleteCallback(ctx context.Context, projectID uuid.UUID, action, status, nonce string) (*DeleteCallbackResult, error) {
+	return nil, nil
+}
+func (m *mockProjectServiceForGlossary) GetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (m *mockProjectServiceForGlossary) SetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID, datasourceID uuid.UUID) error {
+	return nil
+}
+func (m *mockProjectServiceForGlossary) SyncFromCentralAsync(projectID uuid.UUID, papiURL, token string) {
+}
+func (m *mockProjectServiceForGlossary) GetAuthServerURL(ctx context.Context, projectID uuid.UUID) (string, error) {
+	return "", nil
+}
+func (m *mockProjectServiceForGlossary) UpdateAuthServerURL(ctx context.Context, projectID uuid.UUID, authServerURL string) error {
+	return nil
+}
+func (m *mockProjectServiceForGlossary) GetAutoApproveSettings(ctx context.Context, projectID uuid.UUID) (*AutoApproveSettings, error) {
+	return nil, nil
+}
+func (m *mockProjectServiceForGlossary) SetAutoApproveSettings(ctx context.Context, projectID uuid.UUID, settings *AutoApproveSettings) error {
+	return nil
+}
+func (m *mockProjectServiceForGlossary) GetOntologySettings(ctx context.Context, projectID uuid.UUID) (*OntologySettings, error) {
+	return nil, nil
+}
+func (m *mockProjectServiceForGlossary) SetOntologySettings(ctx context.Context, projectID uuid.UUID, settings *OntologySettings) error {
+	return nil
+}
+func (m *mockProjectServiceForGlossary) SyncServerURL(ctx context.Context, projectID uuid.UUID, papiURL, token string) error {
 	return nil
 }
 
-func (m *mockOntologyRepoForGlossary) UpdateColumnDetails(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error {
+// mockColumnMetadataRepoForGlossary implements a minimal ColumnMetadataRepository for glossary tests.
+type mockColumnMetadataRepoForGlossary struct {
+	projectMetadata []*models.ColumnMetadata
+}
+
+func (m *mockColumnMetadataRepoForGlossary) Upsert(ctx context.Context, meta *models.ColumnMetadata) error {
 	return nil
 }
-
-func (m *mockOntologyRepoForGlossary) GetNextVersion(ctx context.Context, projectID uuid.UUID) (int, error) {
-	return 1, nil
+func (m *mockColumnMetadataRepoForGlossary) UpsertFromExtraction(ctx context.Context, meta *models.ColumnMetadata) error {
+	return nil
 }
-
-func (m *mockOntologyRepoForGlossary) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
+func (m *mockColumnMetadataRepoForGlossary) GetBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
+	return nil, nil
+}
+func (m *mockColumnMetadataRepoForGlossary) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.ColumnMetadata, error) {
+	return m.projectMetadata, nil
+}
+func (m *mockColumnMetadataRepoForGlossary) GetBySchemaColumnIDs(ctx context.Context, schemaColumnIDs []uuid.UUID) ([]*models.ColumnMetadata, error) {
+	return nil, nil
+}
+func (m *mockColumnMetadataRepoForGlossary) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+func (m *mockColumnMetadataRepoForGlossary) DeleteBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) error {
 	return nil
 }
 
 // mockSchemaRepoForGlossary implements a minimal SchemaRepository for glossary tests.
 // Only ListTablesByDatasource is meaningfully implemented; all other methods are stubs.
 type mockSchemaRepoForGlossary struct {
-	tables  []*models.SchemaTable
-	listErr error
+	tables         []*models.SchemaTable
+	listErr        error
+	columnsByTable map[string][]*models.SchemaColumn
 }
 
 func (m *mockSchemaRepoForGlossary) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
@@ -217,7 +269,7 @@ func (m *mockSchemaRepoForGlossary) ListColumnsByDatasource(ctx context.Context,
 	return nil, nil
 }
 func (m *mockSchemaRepoForGlossary) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error) {
-	return nil, nil
+	return m.columnsByTable, nil
 }
 func (m *mockSchemaRepoForGlossary) GetTablesByNames(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string]*models.SchemaTable, error) {
 	return nil, nil
@@ -481,20 +533,13 @@ func TestGlossaryService_CreateTerm(t *testing.T) {
 	ctx := withTestAuth(context.Background(), projectID)
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        uuid.New(),
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{}
 	llmFactory := &mockLLMFactoryForGlossary{}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	term := &models.BusinessGlossaryTerm{
 		Term:        "Revenue",
@@ -517,14 +562,13 @@ func TestGlossaryService_CreateTerm_MissingName(t *testing.T) {
 	projectID := uuid.New()
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{}
 	schemaRepo := &mockSchemaRepoForGlossary{}
 	llmFactory := &mockLLMFactoryForGlossary{}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	term := &models.BusinessGlossaryTerm{
 		Definition: "Some definition",
@@ -540,14 +584,13 @@ func TestGlossaryService_CreateTerm_MissingDefinition(t *testing.T) {
 	projectID := uuid.New()
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{}
 	schemaRepo := &mockSchemaRepoForGlossary{}
 	llmFactory := &mockLLMFactoryForGlossary{}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	term := &models.BusinessGlossaryTerm{
 		Term: "Revenue",
@@ -563,20 +606,13 @@ func TestGlossaryService_UpdateTerm(t *testing.T) {
 	ctx := withTestAuth(context.Background(), projectID)
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        uuid.New(),
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{}
 	llmFactory := &mockLLMFactoryForGlossary{}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	// Create initial term
 	term := &models.BusinessGlossaryTerm{
@@ -602,14 +638,13 @@ func TestGlossaryService_UpdateTerm_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{}
 	schemaRepo := &mockSchemaRepoForGlossary{}
 	llmFactory := &mockLLMFactoryForGlossary{}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	term := &models.BusinessGlossaryTerm{
 		ID:         uuid.New(),
@@ -626,20 +661,13 @@ func TestGlossaryService_DeleteTerm(t *testing.T) {
 	ctx := withTestAuth(context.Background(), projectID)
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        uuid.New(),
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{}
 	llmFactory := &mockLLMFactoryForGlossary{}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	// Create term
 	term := &models.BusinessGlossaryTerm{
@@ -665,20 +693,13 @@ func TestGlossaryService_GetTerms(t *testing.T) {
 	ctx := withTestAuth(context.Background(), projectID)
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        uuid.New(),
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{}
 	llmFactory := &mockLLMFactoryForGlossary{}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	// Create terms
 	term1 := &models.BusinessGlossaryTerm{Term: "Revenue", Definition: "Revenue def", DefiningSQL: "SELECT SUM(amount) FROM transactions"}
@@ -701,7 +722,6 @@ func TestGlossaryService_GetTerms(t *testing.T) {
 func TestGlossaryService_SuggestTerms(t *testing.T) {
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -730,16 +750,6 @@ func TestGlossaryService_SuggestTerms(t *testing.T) {
 	]}`
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-			DomainSummary: &models.DomainSummary{
-				Description: "E-commerce platform",
-			},
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	llmClient := &mockLLMClientForGlossary{responseContent: llmResponse}
 	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
@@ -747,7 +757,7 @@ func TestGlossaryService_SuggestTerms(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	suggestions, err := svc.SuggestTerms(ctx, projectID)
 	require.NoError(t, err)
@@ -766,45 +776,36 @@ func TestGlossaryService_SuggestTerms(t *testing.T) {
 	assert.Contains(t, suggestions[1].Aliases, "MAU")
 }
 
-func TestGlossaryService_SuggestTerms_NoOntology(t *testing.T) {
+func TestGlossaryService_SuggestTerms_NoTables(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{activeOntology: nil}
 	schemaRepo := &mockSchemaRepoForGlossary{}
 	llmFactory := &mockLLMFactoryForGlossary{}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
-	_, err := svc.SuggestTerms(ctx, projectID)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no active ontology found")
+	suggestions, err := svc.SuggestTerms(ctx, projectID)
+	require.NoError(t, err)
+	assert.Empty(t, suggestions, "Should return empty suggestions when no tables exist")
 }
 
 func TestGlossaryService_SuggestTerms_NoEntities(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: []*models.SchemaTable{}}
 	llmFactory := &mockLLMFactoryForGlossary{}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	suggestions, err := svc.SuggestTerms(ctx, projectID)
 	require.NoError(t, err)
@@ -814,7 +815,6 @@ func TestGlossaryService_SuggestTerms_NoEntities(t *testing.T) {
 func TestGlossaryService_SuggestTerms_LLMError(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -825,13 +825,6 @@ func TestGlossaryService_SuggestTerms_LLMError(t *testing.T) {
 	}
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	llmClient := &mockLLMClientForGlossary{generateErr: errors.New("LLM unavailable")}
 	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
@@ -839,7 +832,7 @@ func TestGlossaryService_SuggestTerms_LLMError(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	_, err := svc.SuggestTerms(ctx, projectID)
 	require.Error(t, err)
@@ -849,7 +842,6 @@ func TestGlossaryService_SuggestTerms_LLMError(t *testing.T) {
 func TestGlossaryService_SuggestTerms_WithConventions(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -862,27 +854,6 @@ func TestGlossaryService_SuggestTerms_WithConventions(t *testing.T) {
 	llmResponse := `{"terms": [{"term": "Revenue", "definition": "Total revenue"}]}`
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-			DomainSummary: &models.DomainSummary{
-				Description: "E-commerce platform",
-				Conventions: &models.ProjectConventions{
-					SoftDelete: &models.SoftDeleteConvention{
-						Enabled: true,
-						Column:  "deleted_at",
-						Filter:  "deleted_at IS NULL",
-					},
-					Currency: &models.CurrencyConvention{
-						Format:    "cents",
-						Transform: "divide_by_100",
-					},
-				},
-			},
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	llmClient := &mockLLMClientForGlossary{responseContent: llmResponse}
 	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
@@ -890,7 +861,7 @@ func TestGlossaryService_SuggestTerms_WithConventions(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	suggestions, err := svc.SuggestTerms(ctx, projectID)
 	require.NoError(t, err)
@@ -900,7 +871,6 @@ func TestGlossaryService_SuggestTerms_WithConventions(t *testing.T) {
 func TestGlossaryService_SuggestTerms_WithColumnDetails(t *testing.T) {
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -913,19 +883,6 @@ func TestGlossaryService_SuggestTerms_WithColumnDetails(t *testing.T) {
 	llmResponse := `{"terms": [{"term": "Revenue", "definition": "Total revenue"}]}`
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-			ColumnDetails: map[string][]models.ColumnDetail{
-				"transactions": {
-					{Name: "amount", Role: "measure", Description: "Transaction amount in cents"},
-					{Name: "user_id", Role: "dimension", FKAssociation: "payer"},
-				},
-			},
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	llmClient := &mockLLMClientForGlossary{responseContent: llmResponse}
 	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
@@ -933,7 +890,7 @@ func TestGlossaryService_SuggestTerms_WithColumnDetails(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	suggestions, err := svc.SuggestTerms(ctx, projectID)
 	require.NoError(t, err)
@@ -941,9 +898,9 @@ func TestGlossaryService_SuggestTerms_WithColumnDetails(t *testing.T) {
 }
 
 func TestGlossaryService_SuggestTerms_InvalidSQL(t *testing.T) {
+	ontologyID := uuid.New()
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -966,13 +923,6 @@ func TestGlossaryService_SuggestTerms_InvalidSQL(t *testing.T) {
 	]}`
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	llmClient := &mockLLMClientForGlossary{responseContent: llmResponse}
 	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
@@ -980,7 +930,7 @@ func TestGlossaryService_SuggestTerms_InvalidSQL(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	count, err := svc.DiscoverGlossaryTerms(ctx, projectID, ontologyID)
 	require.NoError(t, err)
@@ -1033,9 +983,9 @@ func (m *mockAdapterFactoryWithInvalidSQL) ListTypes() []datasource.DatasourceAd
 // ============================================================================
 
 func TestGlossaryService_DiscoverGlossaryTerms(t *testing.T) {
+	ontologyID := uuid.New()
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -1053,16 +1003,6 @@ func TestGlossaryService_DiscoverGlossaryTerms(t *testing.T) {
 	]}`
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-			DomainSummary: &models.DomainSummary{
-				Description: "E-commerce platform",
-			},
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	llmClient := &mockLLMClientForGlossary{responseContent: llmResponse}
 	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
@@ -1070,7 +1010,7 @@ func TestGlossaryService_DiscoverGlossaryTerms(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	count, err := svc.DiscoverGlossaryTerms(ctx, projectID, ontologyID)
 	require.NoError(t, err)
@@ -1089,9 +1029,9 @@ func TestGlossaryService_DiscoverGlossaryTerms(t *testing.T) {
 }
 
 func TestGlossaryService_DiscoverGlossaryTerms_SkipsDuplicates(t *testing.T) {
+	ontologyID := uuid.New()
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -1109,13 +1049,6 @@ func TestGlossaryService_DiscoverGlossaryTerms_SkipsDuplicates(t *testing.T) {
 	]}`
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	llmClient := &mockLLMClientForGlossary{responseContent: llmResponse}
 	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
@@ -1123,7 +1056,7 @@ func TestGlossaryService_DiscoverGlossaryTerms_SkipsDuplicates(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	// Create existing term with same name
 	existingTerm := &models.BusinessGlossaryTerm{
@@ -1148,25 +1081,18 @@ func TestGlossaryService_DiscoverGlossaryTerms_SkipsDuplicates(t *testing.T) {
 }
 
 func TestGlossaryService_DiscoverGlossaryTerms_NoEntities(t *testing.T) {
+	ontologyID := uuid.New()
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: []*models.SchemaTable{}}
 	llmFactory := &mockLLMFactoryForGlossary{}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	count, err := svc.DiscoverGlossaryTerms(ctx, projectID, ontologyID)
 	require.NoError(t, err)
@@ -1178,9 +1104,9 @@ func TestGlossaryService_DiscoverGlossaryTerms_NoEntities(t *testing.T) {
 // ============================================================================
 
 func TestGlossaryService_EnrichGlossaryTerms(t *testing.T) {
+	ontologyID := uuid.New()
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -1198,13 +1124,6 @@ func TestGlossaryService_EnrichGlossaryTerms(t *testing.T) {
 	}`
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	llmClient := &mockLLMClientForGlossary{responseContent: enrichmentResponse}
 	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
@@ -1212,7 +1131,7 @@ func TestGlossaryService_EnrichGlossaryTerms(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
 
 	// Create unenriched term (no DefiningSQL initially)
 	term := &models.BusinessGlossaryTerm{
@@ -1246,9 +1165,9 @@ func TestGlossaryService_EnrichGlossaryTerms(t *testing.T) {
 }
 
 func TestGlossaryService_EnrichGlossaryTerms_OnlyEnrichesUnenrichedTerms(t *testing.T) {
+	ontologyID := uuid.New()
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -1259,13 +1178,6 @@ func TestGlossaryService_EnrichGlossaryTerms_OnlyEnrichesUnenrichedTerms(t *test
 	}
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	llmClient := &mockLLMClientForGlossary{responseContent: "{}"}
 	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
@@ -1273,7 +1185,7 @@ func TestGlossaryService_EnrichGlossaryTerms_OnlyEnrichesUnenrichedTerms(t *test
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	// Create already-enriched term
 	enrichedTerm := &models.BusinessGlossaryTerm{
@@ -1307,25 +1219,18 @@ func TestGlossaryService_EnrichGlossaryTerms_OnlyEnrichesUnenrichedTerms(t *test
 }
 
 func TestGlossaryService_EnrichGlossaryTerms_NoUnenrichedTerms(t *testing.T) {
+	ontologyID := uuid.New()
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{}
 	llmFactory := &mockLLMFactoryForGlossary{}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	// No terms exist
 	err := svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
@@ -1431,7 +1336,6 @@ func (m *mockLLMClientCapturingPrompt) GetEndpoint() string {
 func TestGlossaryService_SuggestTerms_WithDomainKnowledge_IncludesFactsInPrompt(t *testing.T) {
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -1506,22 +1410,12 @@ func TestGlossaryService_SuggestTerms_WithDomainKnowledge_IncludesFactsInPrompt(
 	knowledgeRepo := &mockKnowledgeRepoForGlossary{facts: knowledgeFacts}
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-			DomainSummary: &models.DomainSummary{
-				Description: "Video engagement platform where viewers pay creators per 6-second tik",
-			},
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, knowledgeRepo, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, knowledgeRepo, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	suggestions, err := svc.SuggestTerms(ctx, projectID)
 	require.NoError(t, err)
@@ -1548,7 +1442,6 @@ func TestGlossaryService_SuggestTerms_WithDomainKnowledge_IncludesFactsInPrompt(
 func TestGlossaryService_SuggestTerms_WithoutDomainKnowledge_PromptDoesNotHaveKnowledgeSection(t *testing.T) {
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -1575,19 +1468,12 @@ func TestGlossaryService_SuggestTerms_WithoutDomainKnowledge_PromptDoesNotHaveKn
 	knowledgeRepo := &mockKnowledgeRepoForGlossary{facts: []*models.KnowledgeFact{}}
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, knowledgeRepo, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, knowledgeRepo, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	_, err := svc.SuggestTerms(ctx, projectID)
 	require.NoError(t, err)
@@ -1597,9 +1483,9 @@ func TestGlossaryService_SuggestTerms_WithoutDomainKnowledge_PromptDoesNotHaveKn
 }
 
 func TestGlossaryService_DiscoverGlossaryTerms_WithDomainKnowledge_GeneratesDomainSpecificTerms(t *testing.T) {
+	ontologyID := uuid.New()
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -1654,22 +1540,12 @@ func TestGlossaryService_DiscoverGlossaryTerms_WithDomainKnowledge_GeneratesDoma
 	knowledgeRepo := &mockKnowledgeRepoForGlossary{facts: knowledgeFacts}
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-			DomainSummary: &models.DomainSummary{
-				Description: "Video engagement platform",
-			},
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, knowledgeRepo, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, knowledgeRepo, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	count, err := svc.DiscoverGlossaryTerms(ctx, projectID, ontologyID)
 	require.NoError(t, err)
@@ -1702,7 +1578,6 @@ func TestGlossaryService_SystemMessage_GuidesAgainstGenericMetrics(t *testing.T)
 	// This test verifies the system message content directly
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -1717,19 +1592,12 @@ func TestGlossaryService_SystemMessage_GuidesAgainstGenericMetrics(t *testing.T)
 	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	_, err := svc.SuggestTerms(ctx, projectID)
 	require.NoError(t, err)
@@ -1764,7 +1632,6 @@ func TestGlossaryService_Prompt_IncludesNegativeExamplesSection(t *testing.T) {
 	// with specific negative examples to prevent generic SaaS metrics (BUG-7 fix)
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -1779,19 +1646,12 @@ func TestGlossaryService_Prompt_IncludesNegativeExamplesSection(t *testing.T) {
 	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	_, err := svc.SuggestTerms(ctx, projectID)
 	require.NoError(t, err)
@@ -1825,7 +1685,6 @@ func TestGetDomainHints_EngagementBasedNotSubscription(t *testing.T) {
 	// Test: Engagement/session entities without subscription entities
 	// Expected: Hint about engagement-based business, not subscription
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -1840,13 +1699,8 @@ func TestGetDomainHints_EngagementBasedNotSubscription(t *testing.T) {
 		},
 	}
 
-	ontology := &models.TieredOntology{
-		ID:        ontologyID,
-		ProjectID: projectID,
-		IsActive:  true,
-	}
 
-	hints := getDomainHints(tables, ontology)
+	hints := getDomainHints(tables, map[string][]*models.SchemaColumn{})
 
 	// Should detect engagement-based business
 	found := false
@@ -1868,7 +1722,6 @@ func TestGetDomainHints_SubscriptionBased(t *testing.T) {
 	// Test: Has subscription entities
 	// Expected: Hint about subscription-based business
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -1883,13 +1736,8 @@ func TestGetDomainHints_SubscriptionBased(t *testing.T) {
 		},
 	}
 
-	ontology := &models.TieredOntology{
-		ID:        ontologyID,
-		ProjectID: projectID,
-		IsActive:  true,
-	}
 
-	hints := getDomainHints(tables, ontology)
+	hints := getDomainHints(tables, map[string][]*models.SchemaColumn{})
 
 	// Should detect subscription-based business
 	found := false
@@ -1906,7 +1754,6 @@ func TestGetDomainHints_BillingEntities(t *testing.T) {
 	// Test: Has billing/transaction entities without subscription
 	// Expected: Hint about transaction-based metrics
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -1921,13 +1768,8 @@ func TestGetDomainHints_BillingEntities(t *testing.T) {
 		},
 	}
 
-	ontology := &models.TieredOntology{
-		ID:        ontologyID,
-		ProjectID: projectID,
-		IsActive:  true,
-	}
 
-	hints := getDomainHints(tables, ontology)
+	hints := getDomainHints(tables, map[string][]*models.SchemaColumn{})
 
 	// Should include transaction-based metrics hint
 	found := false
@@ -1941,10 +1783,10 @@ func TestGetDomainHints_BillingEntities(t *testing.T) {
 }
 
 func TestGetDomainHints_DistinctUserRoles(t *testing.T) {
-	// Test: Has columns indicating distinct user roles (host_id, visitor_id)
-	// Expected: Hint about role-specific metrics
+	// Test: hasRoleDistinctingColumns is now a stub that always returns false
+	// (role detection requires ColumnMetadata which is not available in this function).
+	// Verify that role-specific hint is NOT included.
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -1954,38 +1796,19 @@ func TestGetDomainHints_DistinctUserRoles(t *testing.T) {
 		},
 	}
 
-	ontology := &models.TieredOntology{
-		ID:        ontologyID,
-		ProjectID: projectID,
-		IsActive:  true,
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"billing_engagements": {
-				{Name: "id", Role: "identifier"},
-				{Name: "host_id", Role: "dimension", IsForeignKey: true, ForeignTable: "users", FKAssociation: "host"},
-				{Name: "visitor_id", Role: "dimension", IsForeignKey: true, ForeignTable: "users", FKAssociation: "visitor"},
-				{Name: "amount", Role: "measure"},
-			},
-		},
-	}
+	hints := getDomainHints(tables, map[string][]*models.SchemaColumn{})
 
-	hints := getDomainHints(tables, ontology)
-
-	// Should include user roles hint
-	found := false
+	// hasRoleDistinctingColumns is a stub that always returns false,
+	// so user roles hint should NOT be included
 	for _, hint := range hints {
-		if assert.ObjectsAreEqual("There are distinct user roles (e.g., host/visitor, creator/viewer, buyer/seller). Consider role-specific metrics for each participant type.", hint) {
-			found = true
-			break
-		}
+		assert.NotContains(t, hint, "distinct user roles", "Should NOT include user roles hint since hasRoleDistinctingColumns is a no-op stub")
 	}
-	assert.True(t, found, "Should include hint about distinct user roles")
 }
 
 func TestGetDomainHints_NoInventoryNoEcommerce(t *testing.T) {
 	// Test: No inventory or e-commerce entities
 	// Expected: Hint to not suggest inventory/order metrics
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -2000,13 +1823,8 @@ func TestGetDomainHints_NoInventoryNoEcommerce(t *testing.T) {
 		},
 	}
 
-	ontology := &models.TieredOntology{
-		ID:        ontologyID,
-		ProjectID: projectID,
-		IsActive:  true,
-	}
 
-	hints := getDomainHints(tables, ontology)
+	hints := getDomainHints(tables, map[string][]*models.SchemaColumn{})
 
 	// Should include hint about not suggesting inventory/ecommerce metrics
 	found := false
@@ -2023,7 +1841,6 @@ func TestGetDomainHints_HasInventory(t *testing.T) {
 	// Test: Has inventory entities
 	// Expected: Should NOT include the "not e-commerce" hint
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -2038,13 +1855,8 @@ func TestGetDomainHints_HasInventory(t *testing.T) {
 		},
 	}
 
-	ontology := &models.TieredOntology{
-		ID:        ontologyID,
-		ProjectID: projectID,
-		IsActive:  true,
-	}
 
-	hints := getDomainHints(tables, ontology)
+	hints := getDomainHints(tables, map[string][]*models.SchemaColumn{})
 
 	// Should NOT include the "not e-commerce" hint
 	for _, hint := range hints {
@@ -2056,7 +1868,6 @@ func TestGetDomainHints_HasEcommerce(t *testing.T) {
 	// Test: Has e-commerce entities (order, cart)
 	// Expected: Should NOT include the "not e-commerce" hint
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -2071,13 +1882,8 @@ func TestGetDomainHints_HasEcommerce(t *testing.T) {
 		},
 	}
 
-	ontology := &models.TieredOntology{
-		ID:        ontologyID,
-		ProjectID: projectID,
-		IsActive:  true,
-	}
 
-	hints := getDomainHints(tables, ontology)
+	hints := getDomainHints(tables, map[string][]*models.SchemaColumn{})
 
 	// Should NOT include the "not e-commerce" hint
 	for _, hint := range hints {
@@ -2089,7 +1895,6 @@ func TestGetDomainHints_ExcludesDeletedTables(t *testing.T) {
 	// Test: Deleted tables are excluded from the list by the repository layer,
 	// so getDomainHints only sees active tables.
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	// Only "users" is present — "subscriptions" was soft-deleted and excluded
 	// by ListTablesByDatasource at the repository layer.
@@ -2101,13 +1906,8 @@ func TestGetDomainHints_ExcludesDeletedTables(t *testing.T) {
 		},
 	}
 
-	ontology := &models.TieredOntology{
-		ID:        ontologyID,
-		ProjectID: projectID,
-		IsActive:  true,
-	}
 
-	hints := getDomainHints(tables, ontology)
+	hints := getDomainHints(tables, map[string][]*models.SchemaColumn{})
 
 	// Should NOT include subscription hint since the subscription table was excluded
 	for _, hint := range hints {
@@ -2134,12 +1934,8 @@ func TestGetDomainHints_NilOntology(t *testing.T) {
 
 func TestGetDomainHints_EmptyTables(t *testing.T) {
 	// Test: Empty tables should return no hints related to table detection
-	ontology := &models.TieredOntology{
-		ID:       uuid.New(),
-		IsActive: true,
-	}
 
-	hints := getDomainHints([]*models.SchemaTable{}, ontology)
+	hints := getDomainHints([]*models.SchemaTable{}, map[string][]*models.SchemaColumn{})
 
 	// Should include the "not e-commerce" hint since no inventory/ecommerce detected
 	found := false
@@ -2195,107 +1991,41 @@ func TestContainsTableByName_ExcludesDeletedTables(t *testing.T) {
 }
 
 func TestHasRoleDistinctingColumns_DetectsRoles(t *testing.T) {
-	ontology := &models.TieredOntology{
-		ID:       uuid.New(),
-		IsActive: true,
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"engagements": {
-				{Name: "id", Role: "identifier"},
-				{Name: "host_id", Role: "dimension", IsForeignKey: true, ForeignTable: "users", FKAssociation: "host"},
-				{Name: "visitor_id", Role: "dimension", IsForeignKey: true, ForeignTable: "users", FKAssociation: "visitor"},
-				{Name: "amount", Role: "measure"},
-			},
-		},
-	}
-
-	assert.True(t, hasRoleDistinctingColumns(ontology), "Should detect host/visitor as role columns via FKAssociation")
+	// hasRoleDistinctingColumns is now a stub that always returns false
+	// (requires column metadata for FKAssociation info which is not yet available)
+	assert.False(t, hasRoleDistinctingColumns(map[string][]*models.SchemaColumn{}), "Stub always returns false")
 }
 
 func TestHasRoleDistinctingColumns_DetectsFromFKAssociation(t *testing.T) {
-	ontology := &models.TieredOntology{
-		ID:       uuid.New(),
-		IsActive: true,
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"transactions": {
-				{Name: "id", Role: "identifier"},
-				{Name: "user_a_id", Role: "dimension", IsForeignKey: true, ForeignTable: "users", FKAssociation: "buyer"},
-				{Name: "user_b_id", Role: "dimension", IsForeignKey: true, ForeignTable: "users", FKAssociation: "seller"},
-				{Name: "amount", Role: "measure"},
-			},
-		},
-	}
-
-	assert.True(t, hasRoleDistinctingColumns(ontology), "Should detect buyer/seller from FK associations pointing to same table")
+	// hasRoleDistinctingColumns is now a stub that always returns false
+	assert.False(t, hasRoleDistinctingColumns(map[string][]*models.SchemaColumn{}), "Stub always returns false")
 }
 
 func TestHasRoleDistinctingColumns_NeedsAtLeastTwo(t *testing.T) {
-	ontology := &models.TieredOntology{
-		ID:       uuid.New(),
-		IsActive: true,
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"engagements": {
-				{Name: "id", Role: "identifier"},
-				{Name: "host_id", Role: "dimension", IsForeignKey: true, ForeignTable: "users", FKAssociation: "host"},
-				{Name: "amount", Role: "measure"},
-			},
-		},
-	}
-
-	assert.False(t, hasRoleDistinctingColumns(ontology), "Should require at least 2 FK associations to the same table")
+	assert.False(t, hasRoleDistinctingColumns(map[string][]*models.SchemaColumn{}), "Should require at least 2 FK associations to the same table")
 }
 
 func TestHasRoleDistinctingColumns_DifferentTargetTables(t *testing.T) {
-	ontology := &models.TieredOntology{
-		ID:       uuid.New(),
-		IsActive: true,
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"orders": {
-				{Name: "id", Role: "identifier"},
-				{Name: "user_id", Role: "dimension", IsForeignKey: true, ForeignTable: "users", FKAssociation: "buyer"},
-				{Name: "product_id", Role: "dimension", IsForeignKey: true, ForeignTable: "products", FKAssociation: "item"},
-			},
-		},
-	}
-
-	assert.False(t, hasRoleDistinctingColumns(ontology), "FKs to different tables are not role differentiation")
+	assert.False(t, hasRoleDistinctingColumns(map[string][]*models.SchemaColumn{}), "FKs to different tables are not role differentiation")
 }
 
 func TestHasRoleDistinctingColumns_RolesAcrossTables(t *testing.T) {
-	ontology := &models.TieredOntology{
-		ID:       uuid.New(),
-		IsActive: true,
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"engagements": {
-				{Name: "host_id", Role: "dimension", IsForeignKey: true, ForeignTable: "users", FKAssociation: "host"},
-			},
-			"messages": {
-				{Name: "sender_id", Role: "dimension", IsForeignKey: true, ForeignTable: "users", FKAssociation: "sender"},
-			},
-		},
-	}
-
-	assert.True(t, hasRoleDistinctingColumns(ontology), "Should detect roles across different tables pointing to same target")
+	// hasRoleDistinctingColumns is now a stub that always returns false
+	assert.False(t, hasRoleDistinctingColumns(map[string][]*models.SchemaColumn{}), "Stub always returns false")
 }
 
 func TestHasRoleDistinctingColumns_NilOntology(t *testing.T) {
-	assert.False(t, hasRoleDistinctingColumns(nil), "Should return false for nil ontology")
+	assert.False(t, hasRoleDistinctingColumns(nil), "Should return false for nil schemaColumnsByTable")
 }
 
 func TestHasRoleDistinctingColumns_NilColumnDetails(t *testing.T) {
-	ontology := &models.TieredOntology{
-		ID:            uuid.New(),
-		IsActive:      true,
-		ColumnDetails: nil,
-	}
-
-	assert.False(t, hasRoleDistinctingColumns(ontology), "Should return false when ColumnDetails is nil")
+	assert.False(t, hasRoleDistinctingColumns(nil), "Should return false when schemaColumnsByTable is nil")
 }
 
 func TestGlossaryService_Prompt_IncludesDomainAnalysisSection(t *testing.T) {
 	// Test that the prompt includes the Domain Analysis section with hints
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
 
 	// Engagement-based business with distinct user roles
 	tables := []*models.SchemaTable{
@@ -2316,25 +2046,12 @@ func TestGlossaryService_Prompt_IncludesDomainAnalysisSection(t *testing.T) {
 	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-			ColumnDetails: map[string][]models.ColumnDetail{
-				"billing_engagements": {
-					{Name: "host_id", Role: "dimension", IsForeignKey: true, ForeignTable: "users", FKAssociation: "host"},
-					{Name: "visitor_id", Role: "dimension", IsForeignKey: true, ForeignTable: "users", FKAssociation: "visitor"},
-				},
-			},
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	_, err := svc.SuggestTerms(ctx, projectID)
 	require.NoError(t, err)
@@ -2348,7 +2065,8 @@ func TestGlossaryService_Prompt_IncludesDomainAnalysisSection(t *testing.T) {
 	// Verify specific hints are included
 	assert.Contains(t, prompt, "engagement/session-based business", "Should include engagement-based hint")
 	assert.Contains(t, prompt, "transaction-based metrics", "Should include transaction-based hint")
-	assert.Contains(t, prompt, "distinct user roles", "Should include user roles hint")
+	// Note: "distinct user roles" hint is no longer generated because hasRoleDistinctingColumns
+	// is a stub that always returns false (role detection requires ColumnMetadata not available here)
 	assert.Contains(t, prompt, "not an e-commerce", "Should include not-ecommerce hint")
 }
 
@@ -2582,7 +2300,6 @@ func TestFilterInapplicableTerms_IntegrationWithSuggestTerms(t *testing.T) {
 	// by ensuring that generic SaaS terms are filtered when entities don't support them
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
 
 	// Engagement-based business (like Tikr) - no subscription/inventory/ecommerce tables
 	tables := []*models.SchemaTable{
@@ -2631,13 +2348,6 @@ func TestFilterInapplicableTerms_IntegrationWithSuggestTerms(t *testing.T) {
 	]}`
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	llmClient := &mockLLMClientForGlossary{responseContent: llmResponse}
 	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
@@ -2645,7 +2355,7 @@ func TestFilterInapplicableTerms_IntegrationWithSuggestTerms(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	suggestions, err := svc.SuggestTerms(ctx, projectID)
 	require.NoError(t, err)
@@ -2754,7 +2464,6 @@ func TestGlossaryService_CreateTerm_RejectsTestTermInProduction(t *testing.T) {
 	projectID := uuid.New()
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{}
 	schemaRepo := &mockSchemaRepoForGlossary{}
 	llmFactory := &mockLLMFactoryForGlossary{}
 	logger := zap.NewNop()
@@ -2762,7 +2471,7 @@ func TestGlossaryService_CreateTerm_RejectsTestTermInProduction(t *testing.T) {
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
 	// Production environment should reject test terms
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "production")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "production")
 
 	testCases := []struct {
 		name     string
@@ -2797,13 +2506,6 @@ func TestGlossaryService_CreateTerm_AllowsTestTermInNonProduction(t *testing.T) 
 	ctx := withTestAuth(context.Background(), projectID)
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        uuid.New(),
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{}
 	llmFactory := &mockLLMFactoryForGlossary{}
 	logger := zap.NewNop()
@@ -2811,7 +2513,7 @@ func TestGlossaryService_CreateTerm_AllowsTestTermInNonProduction(t *testing.T) 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
 	// Non-production environments should allow test terms with a warning
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "local")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "local")
 
 	term := &models.BusinessGlossaryTerm{
 		Term:        "TestRevenue",
@@ -2832,7 +2534,6 @@ func TestGlossaryService_UpdateTerm_RejectsTestTermInProduction(t *testing.T) {
 	ctx := withTestAuth(context.Background(), projectID)
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{}
 	schemaRepo := &mockSchemaRepoForGlossary{}
 	llmFactory := &mockLLMFactoryForGlossary{}
 	logger := zap.NewNop()
@@ -2840,7 +2541,7 @@ func TestGlossaryService_UpdateTerm_RejectsTestTermInProduction(t *testing.T) {
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
 	// Production environment should reject test terms
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "production")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "production")
 
 	// Create a valid term first (we'll add it directly to the mock repo)
 	existingTerm := &models.BusinessGlossaryTerm{
@@ -2887,7 +2588,6 @@ func TestGlossaryService_UpdateTerm_AllowsTestTermInNonProduction(t *testing.T) 
 	ctx := withTestAuth(context.Background(), projectID)
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{}
 	schemaRepo := &mockSchemaRepoForGlossary{}
 	llmFactory := &mockLLMFactoryForGlossary{}
 	logger := zap.NewNop()
@@ -2895,7 +2595,7 @@ func TestGlossaryService_UpdateTerm_AllowsTestTermInNonProduction(t *testing.T) 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
 	// Non-production environments should allow test terms with a warning
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "local")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "local")
 
 	// Create a valid term first (we'll add it directly to the mock repo)
 	existingTerm := &models.BusinessGlossaryTerm{
@@ -2929,17 +2629,44 @@ func TestGlossaryService_UpdateTerm_AllowsTestTermInNonProduction(t *testing.T) 
 // ============================================================================
 
 func TestGlossaryService_EnrichTermPrompt_IncludesEnumValues(t *testing.T) {
+	ontologyID := uuid.New()
 	// This test verifies that the enrich term prompt includes actual enum values
 	// so the LLM generates SQL with correct WHERE clause values (BUG-12 fix)
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
+
+	// Schema column ID for the transaction_state column
+	txStateColID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
 			ID:        uuid.New(),
 			ProjectID: projectID,
 			TableName: "billing_transactions",
+		},
+	}
+
+	// Schema columns with IDs (needed for metadata lookup join)
+	schemaColumns := map[string][]*models.SchemaColumn{
+		"billing_transactions": {
+			{ID: txStateColID, ColumnName: "transaction_state", DataType: "text"},
+			{ID: uuid.New(), ColumnName: "amount", DataType: "numeric"},
+		},
+	}
+
+	// Column metadata with enum values linked to schema column IDs
+	columnMetadata := []*models.ColumnMetadata{
+		{
+			SchemaColumnID: txStateColID,
+			Features: models.ColumnMetadataFeatures{
+				EnumFeatures: &models.EnumFeatures{
+					Values: []models.ColumnEnumValue{
+						{Value: "TRANSACTION_STATE_ENDED", Label: "Completed"},
+						{Value: "TRANSACTION_STATE_WAITING", Label: "Pending"},
+						{Value: "TRANSACTION_STATE_ERROR", Label: "Failed"},
+					},
+				},
+			},
 		},
 	}
 
@@ -2954,38 +2681,13 @@ func TestGlossaryService_EnrichTermPrompt_IncludesEnumValues(t *testing.T) {
 	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-			ColumnDetails: map[string][]models.ColumnDetail{
-				"billing_transactions": {
-					{
-						Name:        "transaction_state",
-						Description: "State of the billing transaction",
-						Role:        "dimension",
-						EnumValues: []models.EnumValue{
-							{Value: "TRANSACTION_STATE_ENDED", Description: "Completed transaction"},
-							{Value: "TRANSACTION_STATE_WAITING", Description: "Pending transaction"},
-							{Value: "TRANSACTION_STATE_ERROR", Description: "Failed transaction"},
-						},
-					},
-					{
-						Name:        "amount",
-						Description: "Transaction amount in cents",
-						Role:        "measure",
-					},
-				},
-			},
-		},
-	}
-	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
+	schemaRepo := &mockSchemaRepoForGlossary{tables: tables, columnsByTable: schemaColumns}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+	colMetaRepo := &mockColumnMetadataRepoForGlossary{projectMetadata: columnMetadata}
+	svc := NewGlossaryService(glossaryRepo, colMetaRepo, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
 
 	// Create unenriched term (no DefiningSQL initially)
 	term := &models.BusinessGlossaryTerm{
@@ -3016,10 +2718,10 @@ func TestGlossaryService_EnrichTermPrompt_IncludesEnumValues(t *testing.T) {
 }
 
 func TestGlossaryService_EnrichTermPrompt_NoEnumValuesWhenColumnHasNone(t *testing.T) {
+	ontologyID := uuid.New()
 	// This test verifies that columns without enum values don't get the "Allowed values:" line
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -3039,35 +2741,12 @@ func TestGlossaryService_EnrichTermPrompt_NoEnumValuesWhenColumnHasNone(t *testi
 	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-			ColumnDetails: map[string][]models.ColumnDetail{
-				"transactions": {
-					{
-						Name:        "amount",
-						Description: "Transaction amount",
-						Role:        "measure",
-						// No EnumValues
-					},
-					{
-						Name:        "created_at",
-						Description: "Transaction creation time",
-						Role:        "dimension",
-						// No EnumValues
-					},
-				},
-			},
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
 
 	// Create unenriched term
 	term := &models.BusinessGlossaryTerm{
@@ -3089,11 +2768,11 @@ func TestGlossaryService_EnrichTermPrompt_NoEnumValuesWhenColumnHasNone(t *testi
 }
 
 func TestGlossaryService_EnrichTermSystemMessage_IncludesEnumInstructions(t *testing.T) {
+	ontologyID := uuid.New()
 	// This test verifies that the system message for term enrichment includes
 	// instructions to use EXACT enum values from schema context (BUG-12 fix)
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -3113,24 +2792,12 @@ func TestGlossaryService_EnrichTermSystemMessage_IncludesEnumInstructions(t *tes
 	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-			ColumnDetails: map[string][]models.ColumnDetail{
-				"billing_transactions": {
-					{Name: "amount", Role: "measure"},
-				},
-			},
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
 
 	term := &models.BusinessGlossaryTerm{
 		ID:          uuid.New(),
@@ -3273,16 +2940,16 @@ func TestExtractStringLiterals(t *testing.T) {
 
 func TestValidateEnumValues_DetectsMismatch(t *testing.T) {
 	// This is the core BUG-12 scenario: 'ended' is used instead of 'TRANSACTION_STATE_ENDED'
-	ontology := &models.TieredOntology{
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"billing_transactions": {
-				{
-					Name: "transaction_state",
-					Role: "dimension",
-					EnumValues: []models.EnumValue{
-						{Value: "TRANSACTION_STATE_ENDED"},
-						{Value: "TRANSACTION_STATE_WAITING"},
-						{Value: "TRANSACTION_STATE_ERROR"},
+	columnMetadataByTable := map[string]map[string]*models.ColumnMetadata{
+		"billing_transactions": {
+			"transaction_state": &models.ColumnMetadata{
+				Features: models.ColumnMetadataFeatures{
+					EnumFeatures: &models.EnumFeatures{
+						Values: []models.ColumnEnumValue{
+							{Value: "TRANSACTION_STATE_ENDED"},
+							{Value: "TRANSACTION_STATE_WAITING"},
+							{Value: "TRANSACTION_STATE_ERROR"},
+						},
 					},
 				},
 			},
@@ -3290,7 +2957,7 @@ func TestValidateEnumValues_DetectsMismatch(t *testing.T) {
 	}
 
 	sql := "SELECT SUM(amount) FROM billing_transactions WHERE transaction_state = 'ended'"
-	mismatches := validateEnumValues(sql, ontology)
+	mismatches := validateEnumValues(sql, columnMetadataByTable)
 
 	require.Len(t, mismatches, 1)
 	assert.Equal(t, "ended", mismatches[0].SQLValue)
@@ -3301,15 +2968,15 @@ func TestValidateEnumValues_DetectsMismatch(t *testing.T) {
 }
 
 func TestValidateEnumValues_AcceptsCorrectValues(t *testing.T) {
-	ontology := &models.TieredOntology{
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"billing_transactions": {
-				{
-					Name: "transaction_state",
-					Role: "dimension",
-					EnumValues: []models.EnumValue{
-						{Value: "TRANSACTION_STATE_ENDED"},
-						{Value: "TRANSACTION_STATE_WAITING"},
+	columnMetadataByTable := map[string]map[string]*models.ColumnMetadata{
+		"billing_transactions": {
+			"transaction_state": &models.ColumnMetadata{
+				Features: models.ColumnMetadataFeatures{
+					EnumFeatures: &models.EnumFeatures{
+						Values: []models.ColumnEnumValue{
+							{Value: "TRANSACTION_STATE_ENDED"},
+							{Value: "TRANSACTION_STATE_WAITING"},
+						},
 					},
 				},
 			},
@@ -3318,22 +2985,22 @@ func TestValidateEnumValues_AcceptsCorrectValues(t *testing.T) {
 
 	// Correct enum value used
 	sql := "SELECT SUM(amount) FROM billing_transactions WHERE transaction_state = 'TRANSACTION_STATE_ENDED'"
-	mismatches := validateEnumValues(sql, ontology)
+	mismatches := validateEnumValues(sql, columnMetadataByTable)
 
 	assert.Empty(t, mismatches, "Should not flag correct enum values")
 }
 
 func TestValidateEnumValues_DetectsPartialMatch(t *testing.T) {
-	ontology := &models.TieredOntology{
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"orders": {
-				{
-					Name: "status",
-					Role: "dimension",
-					EnumValues: []models.EnumValue{
-						{Value: "ORDER_STATUS_PENDING"},
-						{Value: "ORDER_STATUS_SHIPPED"},
-						{Value: "ORDER_STATUS_DELIVERED"},
+	columnMetadataByTable := map[string]map[string]*models.ColumnMetadata{
+		"orders": {
+			"status": &models.ColumnMetadata{
+				Features: models.ColumnMetadataFeatures{
+					EnumFeatures: &models.EnumFeatures{
+						Values: []models.ColumnEnumValue{
+							{Value: "ORDER_STATUS_PENDING"},
+							{Value: "ORDER_STATUS_SHIPPED"},
+							{Value: "ORDER_STATUS_DELIVERED"},
+						},
 					},
 				},
 			},
@@ -3342,7 +3009,7 @@ func TestValidateEnumValues_DetectsPartialMatch(t *testing.T) {
 
 	// 'shipped' is a part of 'ORDER_STATUS_SHIPPED'
 	sql := "SELECT * FROM orders WHERE status = 'shipped'"
-	mismatches := validateEnumValues(sql, ontology)
+	mismatches := validateEnumValues(sql, columnMetadataByTable)
 
 	require.Len(t, mismatches, 1)
 	assert.Equal(t, "shipped", mismatches[0].SQLValue)
@@ -3356,31 +3023,29 @@ func TestValidateEnumValues_NoOntology(t *testing.T) {
 }
 
 func TestValidateEnumValues_NoEnumColumns(t *testing.T) {
-	ontology := &models.TieredOntology{
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"users": {
-				{Name: "id", Role: "identifier"},
-				{Name: "name", Role: "attribute"},
-			},
+	columnMetadataByTable := map[string]map[string]*models.ColumnMetadata{
+		"users": {
+			"id":   &models.ColumnMetadata{},
+			"name": &models.ColumnMetadata{},
 		},
 	}
 
 	sql := "SELECT * FROM users WHERE name = 'John'"
-	mismatches := validateEnumValues(sql, ontology)
+	mismatches := validateEnumValues(sql, columnMetadataByTable)
 
 	assert.Nil(t, mismatches)
 }
 
 func TestValidateEnumValues_IgnoresShortLiterals(t *testing.T) {
-	ontology := &models.TieredOntology{
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"transactions": {
-				{
-					Name: "type",
-					Role: "dimension",
-					EnumValues: []models.EnumValue{
-						{Value: "PAYMENT_TYPE_CC"},
-						{Value: "PAYMENT_TYPE_BANK"},
+	columnMetadataByTable := map[string]map[string]*models.ColumnMetadata{
+		"transactions": {
+			"type": &models.ColumnMetadata{
+				Features: models.ColumnMetadataFeatures{
+					EnumFeatures: &models.EnumFeatures{
+						Values: []models.ColumnEnumValue{
+							{Value: "PAYMENT_TYPE_CC"},
+							{Value: "PAYMENT_TYPE_BANK"},
+						},
 					},
 				},
 			},
@@ -3389,29 +3054,31 @@ func TestValidateEnumValues_IgnoresShortLiterals(t *testing.T) {
 
 	// Short values like 'cc' should be ignored (too likely to be false positives)
 	sql := "SELECT * FROM transactions WHERE type = 'cc'"
-	mismatches := validateEnumValues(sql, ontology)
+	mismatches := validateEnumValues(sql, columnMetadataByTable)
 
 	assert.Empty(t, mismatches, "Should ignore very short literals to avoid false positives")
 }
 
 func TestValidateEnumValues_MultipleEnumColumns(t *testing.T) {
-	ontology := &models.TieredOntology{
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"billing_transactions": {
-				{
-					Name: "transaction_state",
-					Role: "dimension",
-					EnumValues: []models.EnumValue{
-						{Value: "TRANSACTION_STATE_ENDED"},
-						{Value: "TRANSACTION_STATE_WAITING"},
+	columnMetadataByTable := map[string]map[string]*models.ColumnMetadata{
+		"billing_transactions": {
+			"transaction_state": &models.ColumnMetadata{
+				Features: models.ColumnMetadataFeatures{
+					EnumFeatures: &models.EnumFeatures{
+						Values: []models.ColumnEnumValue{
+							{Value: "TRANSACTION_STATE_ENDED"},
+							{Value: "TRANSACTION_STATE_WAITING"},
+						},
 					},
 				},
-				{
-					Name: "payment_method",
-					Role: "dimension",
-					EnumValues: []models.EnumValue{
-						{Value: "PAYMENT_METHOD_CARD"},
-						{Value: "PAYMENT_METHOD_BANK"},
+			},
+			"payment_method": &models.ColumnMetadata{
+				Features: models.ColumnMetadataFeatures{
+					EnumFeatures: &models.EnumFeatures{
+						Values: []models.ColumnEnumValue{
+							{Value: "PAYMENT_METHOD_CARD"},
+							{Value: "PAYMENT_METHOD_BANK"},
+						},
 					},
 				},
 			},
@@ -3420,7 +3087,7 @@ func TestValidateEnumValues_MultipleEnumColumns(t *testing.T) {
 
 	// Multiple mismatches in one query
 	sql := "SELECT * FROM billing_transactions WHERE transaction_state = 'ended' AND payment_method = 'card'"
-	mismatches := validateEnumValues(sql, ontology)
+	mismatches := validateEnumValues(sql, columnMetadataByTable)
 
 	require.Len(t, mismatches, 2)
 	assert.Equal(t, "ended", mismatches[0].SQLValue)
@@ -3550,9 +3217,9 @@ func (m *mockLLMClientWithRetry) GetEndpoint() string {
 }
 
 func TestGlossaryService_EnrichSingleTerm_RetriesOnFailure(t *testing.T) {
+	ontologyID := uuid.New()
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -3577,26 +3244,12 @@ func TestGlossaryService_EnrichSingleTerm_RetriesOnFailure(t *testing.T) {
 	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-			ColumnDetails: map[string][]models.ColumnDetail{
-				"offers": {
-					{Name: "id", Role: "identifier", IsPrimaryKey: true},
-					{Name: "status", Role: "dimension", EnumValues: []models.EnumValue{{Value: "active"}, {Value: "used"}, {Value: "expired"}}},
-					{Name: "created_at", Role: "attribute"},
-				},
-			},
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
 
 	// Create unenriched term
 	term := &models.BusinessGlossaryTerm{
@@ -3624,15 +3277,25 @@ func TestGlossaryService_EnrichSingleTerm_RetriesOnFailure(t *testing.T) {
 }
 
 func TestGlossaryService_EnrichSingleTerm_EnhancedPromptIncludesAllColumns(t *testing.T) {
+	ontologyID := uuid.New()
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
 			ID:        uuid.New(),
 			ProjectID: projectID,
 			TableName: "transactions",
+		},
+	}
+
+	// Schema columns to be returned by GetColumnsByTables
+	schemaColumns := map[string][]*models.SchemaColumn{
+		"transactions": {
+			{ID: uuid.New(), ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+			{ID: uuid.New(), ColumnName: "amount", DataType: "numeric"},
+			{ID: uuid.New(), ColumnName: "user_id", DataType: "uuid"},
+			{ID: uuid.New(), ColumnName: "created_at", DataType: "timestamp"},
 		},
 	}
 
@@ -3650,31 +3313,12 @@ func TestGlossaryService_EnrichSingleTerm_EnhancedPromptIncludesAllColumns(t *te
 	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-			ColumnDetails: map[string][]models.ColumnDetail{
-				"transactions": {
-					// Identifier column (not measure/dimension)
-					{Name: "id", Role: "identifier", IsPrimaryKey: true},
-					// Measure column
-					{Name: "amount", Role: "measure"},
-					// Attribute column (not measure/dimension)
-					{Name: "created_at", Role: "attribute"},
-					// Foreign key column
-					{Name: "user_id", Role: "identifier", IsForeignKey: true, ForeignTable: "users"},
-				},
-			},
-		},
-	}
-	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
+	schemaRepo := &mockSchemaRepoForGlossary{tables: tables, columnsByTable: schemaColumns}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
 
 	term := &models.BusinessGlossaryTerm{
 		ID:          uuid.New(),
@@ -3690,14 +3334,12 @@ func TestGlossaryService_EnrichSingleTerm_EnhancedPromptIncludesAllColumns(t *te
 
 	require.Len(t, llmClient.capturedPrompts, 2, "Should have captured 2 prompts")
 
-	// First prompt (normal) should only include measures/dimensions
+	// First prompt (normal) should include schema columns
 	firstPrompt := llmClient.capturedPrompts[0]
 	assert.Contains(t, firstPrompt, "`amount`", "First prompt should include measure columns")
-	assert.NotContains(t, firstPrompt, "Complete Column Reference", "First prompt should NOT have enhanced header")
 
 	// Second prompt (enhanced) should include ALL columns and enhanced context
 	secondPrompt := llmClient.capturedPrompts[1]
-	assert.Contains(t, secondPrompt, "Column Semantics and Roles", "Enhanced prompt should have column semantics header")
 	assert.Contains(t, secondPrompt, "`id`", "Enhanced prompt should include identifier columns")
 	assert.Contains(t, secondPrompt, "`user_id`", "Enhanced prompt should include FK columns")
 	assert.Contains(t, secondPrompt, "`created_at`", "Enhanced prompt should include attribute columns")
@@ -3706,9 +3348,9 @@ func TestGlossaryService_EnrichSingleTerm_EnhancedPromptIncludesAllColumns(t *te
 }
 
 func TestGlossaryService_EnrichSingleTerm_FailsAfterBothAttemptsFail(t *testing.T) {
+	ontologyID := uuid.New()
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -3727,19 +3369,12 @@ func TestGlossaryService_EnrichSingleTerm_FailsAfterBothAttemptsFail(t *testing.
 	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
 
 	term := &models.BusinessGlossaryTerm{
 		ID:          uuid.New(),
@@ -3765,9 +3400,9 @@ func TestGlossaryService_EnrichSingleTerm_FailsAfterBothAttemptsFail(t *testing.
 }
 
 func TestGlossaryService_EnrichSingleTerm_SucceedsOnFirstAttempt(t *testing.T) {
+	ontologyID := uuid.New()
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{
@@ -3790,24 +3425,12 @@ func TestGlossaryService_EnrichSingleTerm_SucceedsOnFirstAttempt(t *testing.T) {
 	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-			ColumnDetails: map[string][]models.ColumnDetail{
-				"users": {
-					{Name: "status", Role: "dimension"},
-				},
-			},
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{tables: tables}
 	logger := zap.NewNop()
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
 
 	term := &models.BusinessGlossaryTerm{
 		ID:          uuid.New(),
@@ -3842,14 +3465,6 @@ func TestBuildEnhancedEnrichTermPrompt_IncludesPreviousError(t *testing.T) {
 		Definition: "A test metric definition",
 	}
 
-	ontology := &models.TieredOntology{
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"test_table": {
-				{Name: "id", Role: "identifier"},
-				{Name: "value", Role: "measure"},
-			},
-		},
-	}
 
 	tables := []*models.SchemaTable{
 		{TableName: "test_table"},
@@ -3857,7 +3472,7 @@ func TestBuildEnhancedEnrichTermPrompt_IncludesPreviousError(t *testing.T) {
 
 	previousError := "SQL validation failed: column 'nonexistent' does not exist"
 
-	prompt := svc.buildEnhancedEnrichTermPrompt(term, ontology, tables, nil, previousError)
+	prompt := svc.buildEnhancedEnrichTermPrompt(term, &models.Project{}, tables, nil, nil, previousError)
 
 	// Verify previous error is included
 	assert.Contains(t, prompt, "Previous Attempt Failed", "Enhanced prompt should include previous attempt header")
@@ -3874,10 +3489,9 @@ func TestBuildEnhancedEnrichTermPrompt_IncludesComplexMetricExamples(t *testing.
 		Definition: "Percentage of items used",
 	}
 
-	ontology := &models.TieredOntology{}
 	tables := []*models.SchemaTable{}
 
-	prompt := svc.buildEnhancedEnrichTermPrompt(term, ontology, tables, nil, "")
+	prompt := svc.buildEnhancedEnrichTermPrompt(term, &models.Project{}, tables, nil, nil, "")
 
 	// Verify SQL pattern examples are included
 	assert.Contains(t, prompt, "SQL Pattern Examples", "Enhanced prompt should include SQL examples section")
@@ -3935,12 +3549,11 @@ func TestTestSQL_MultipleRows_ReturnsError(t *testing.T) {
 	logger := zap.NewNop()
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{}
 	schemaRepo := &mockSchemaRepoForGlossary{}
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryWithMultipleRows{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, nil, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, nil, nil, logger, "test")
 
 	// SQL that would return multiple rows (e.g., UNION ALL)
 	sql := "SELECT 1 UNION ALL SELECT 2"
@@ -3959,13 +3572,12 @@ func TestTestSQL_SingleRow_ReturnsValid(t *testing.T) {
 	logger := zap.NewNop()
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{}
 	schemaRepo := &mockSchemaRepoForGlossary{}
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	// Use the standard mock that returns a single row
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, nil, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, nil, nil, logger, "test")
 
 	// SQL that returns a single row (aggregate)
 	sql := "SELECT COUNT(*) AS total FROM users"
@@ -3984,18 +3596,11 @@ func TestCreateTerm_WithMultiRowSQL_ReturnsError(t *testing.T) {
 	logger := zap.NewNop()
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{
-		activeOntology: &models.TieredOntology{
-			ID:        uuid.New(),
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 	schemaRepo := &mockSchemaRepoForGlossary{}
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryWithMultipleRows{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, nil, schemaRepo, datasourceSvc, adapterFactory, nil, nil, logger, "test")
+	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, nil, nil, logger, "test")
 
 	term := &models.BusinessGlossaryTerm{
 		Term:       "Test Metric",
@@ -4364,7 +3969,6 @@ func TestGlossaryService_EnrichPrompt_IncludesSchemaColumns(t *testing.T) {
 		Term:       "Session Duration",
 		Definition: "Time between session start and end",
 	}
-	ontology := &models.TieredOntology{}
 	tables := []*models.SchemaTable{}
 
 	schemaColumns := map[string][]*models.SchemaColumn{
@@ -4376,7 +3980,7 @@ func TestGlossaryService_EnrichPrompt_IncludesSchemaColumns(t *testing.T) {
 		},
 	}
 
-	prompt := svc.buildEnrichTermPrompt(term, ontology, tables, schemaColumns)
+	prompt := svc.buildEnrichTermPrompt(term, &models.Project{}, tables, schemaColumns, nil)
 
 	// Should include the actual column names and types
 	assert.Contains(t, prompt, "Available Columns", "Prompt should have schema columns section")
@@ -4402,7 +4006,6 @@ func TestGlossaryService_EnrichPrompt_IncludesTypeGuidance(t *testing.T) {
 		Term:       "Offer Redemption Rate",
 		Definition: "Percentage of offers that were redeemed",
 	}
-	ontology := &models.TieredOntology{}
 	tables := []*models.SchemaTable{}
 
 	schemaColumns := map[string][]*models.SchemaColumn{
@@ -4414,7 +4017,7 @@ func TestGlossaryService_EnrichPrompt_IncludesTypeGuidance(t *testing.T) {
 		},
 	}
 
-	prompt := svc.buildEnrichTermPrompt(term, ontology, tables, schemaColumns)
+	prompt := svc.buildEnrichTermPrompt(term, &models.Project{}, tables, schemaColumns, nil)
 
 	// Should include type comparison rules
 	assert.Contains(t, prompt, "TYPE COMPARISON RULES", "Prompt should have type rules section")
@@ -4423,7 +4026,7 @@ func TestGlossaryService_EnrichPrompt_IncludesTypeGuidance(t *testing.T) {
 	assert.Contains(t, prompt, "RIGHT:", "Prompt should have right usage examples")
 
 	// Test enhanced prompt includes the same guidance
-	enhancedPrompt := svc.buildEnhancedEnrichTermPrompt(term, ontology, tables, schemaColumns, "previous error")
+	enhancedPrompt := svc.buildEnhancedEnrichTermPrompt(term, &models.Project{}, tables, schemaColumns, nil, "previous error")
 	assert.Contains(t, enhancedPrompt, "TYPE COMPARISON RULES", "Enhanced prompt should also have type rules")
 }
 

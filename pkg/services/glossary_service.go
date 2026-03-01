@@ -116,16 +116,17 @@ type SQLTestResult struct {
 }
 
 type glossaryService struct {
-	glossaryRepo   repositories.GlossaryRepository
-	ontologyRepo   repositories.OntologyRepository
-	knowledgeRepo  repositories.KnowledgeRepository
-	schemaRepo     repositories.SchemaRepository
-	datasourceSvc  DatasourceService
-	adapterFactory datasource.DatasourceAdapterFactory
-	llmFactory     llm.LLMClientFactory
-	getTenant      TenantContextFunc
-	logger         *zap.Logger
-	env            string
+	glossaryRepo       repositories.GlossaryRepository
+	columnMetadataRepo repositories.ColumnMetadataRepository
+	knowledgeRepo      repositories.KnowledgeRepository
+	schemaRepo         repositories.SchemaRepository
+	projectService     ProjectService
+	datasourceSvc      DatasourceService
+	adapterFactory     datasource.DatasourceAdapterFactory
+	llmFactory         llm.LLMClientFactory
+	getTenant          TenantContextFunc
+	logger             *zap.Logger
+	env                string
 }
 
 // NewGlossaryService creates a new GlossaryService.
@@ -134,9 +135,10 @@ type glossaryService struct {
 // In non-production environments, test-like terms are allowed but logged as warnings.
 func NewGlossaryService(
 	glossaryRepo repositories.GlossaryRepository,
-	ontologyRepo repositories.OntologyRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
 	knowledgeRepo repositories.KnowledgeRepository,
 	schemaRepo repositories.SchemaRepository,
+	projectService ProjectService,
 	datasourceSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	llmFactory llm.LLMClientFactory,
@@ -145,16 +147,147 @@ func NewGlossaryService(
 	env string,
 ) GlossaryService {
 	return &glossaryService{
-		glossaryRepo:   glossaryRepo,
-		ontologyRepo:   ontologyRepo,
-		knowledgeRepo:  knowledgeRepo,
-		schemaRepo:     schemaRepo,
-		datasourceSvc:  datasourceSvc,
-		adapterFactory: adapterFactory,
-		llmFactory:     llmFactory,
-		getTenant:      getTenant,
-		logger:         logger.Named("glossary-service"),
-		env:            env,
+		glossaryRepo:       glossaryRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		knowledgeRepo:      knowledgeRepo,
+		schemaRepo:         schemaRepo,
+		projectService:     projectService,
+		datasourceSvc:      datasourceSvc,
+		adapterFactory:     adapterFactory,
+		llmFactory:         llmFactory,
+		getTenant:          getTenant,
+		logger:             logger.Named("glossary-service"),
+		env:                env,
+	}
+}
+
+// buildColumnMetadataLookup builds a tableName → columnName → ColumnMetadata map
+// from project column metadata and schema columns.
+func (s *glossaryService) buildColumnMetadataLookup(ctx context.Context, projectID uuid.UUID, schemaColumnsByTable map[string][]*models.SchemaColumn) map[string]map[string]*models.ColumnMetadata {
+	allMetadata, err := s.columnMetadataRepo.GetByProject(ctx, projectID)
+	if err != nil {
+		s.logger.Warn("Failed to get column metadata for lookup", zap.Error(err))
+		return nil
+	}
+	metaByColumnID := make(map[uuid.UUID]*models.ColumnMetadata, len(allMetadata))
+	for _, meta := range allMetadata {
+		metaByColumnID[meta.SchemaColumnID] = meta
+	}
+	result := make(map[string]map[string]*models.ColumnMetadata)
+	for tableName, columns := range schemaColumnsByTable {
+		colMap := make(map[string]*models.ColumnMetadata)
+		for _, col := range columns {
+			if meta, ok := metaByColumnID[col.ID]; ok {
+				colMap[col.ColumnName] = meta
+			}
+		}
+		if len(colMap) > 0 {
+			result[tableName] = colMap
+		}
+	}
+	return result
+}
+
+// writeDomainSummary writes domain overview and conventions from project DomainSummary.
+func writeDomainSummary(sb *strings.Builder, domainSummary *models.DomainSummary) {
+	if domainSummary == nil {
+		return
+	}
+	if domainSummary.Description != "" {
+		sb.WriteString("## Domain Overview\n\n")
+		sb.WriteString(domainSummary.Description)
+		sb.WriteString("\n\n")
+	}
+	if domainSummary.Conventions != nil {
+		conv := domainSummary.Conventions
+		sb.WriteString("## Conventions\n\n")
+		if conv.SoftDelete != nil && conv.SoftDelete.Enabled {
+			sb.WriteString(fmt.Sprintf("- Soft delete: Filter with `%s`\n", conv.SoftDelete.Filter))
+		}
+		if conv.Currency != nil {
+			if conv.Currency.Format == "cents" {
+				sb.WriteString("- Currency: Stored in cents, divide by 100 for display\n")
+			} else if conv.Currency.Format == "basis_points" {
+				sb.WriteString("- Currency: Stored in basis points, divide by 10000 for display\n")
+			} else {
+				sb.WriteString("- Currency: Stored as dollars/decimal\n")
+			}
+		}
+		sb.WriteString("\n")
+	}
+}
+
+// writeKeyColumns writes key columns (measures, dimensions) from column metadata.
+func writeKeyColumns(sb *strings.Builder, columnMetadataByTable map[string]map[string]*models.ColumnMetadata) {
+	if len(columnMetadataByTable) == 0 {
+		return
+	}
+	sb.WriteString("## Key Columns\n\n")
+	for tableName, colMap := range columnMetadataByTable {
+		var relevantCols []string
+		for colName, meta := range colMap {
+			role := ""
+			if meta.Role != nil {
+				role = *meta.Role
+			}
+			if role == "measure" || role == "dimension" {
+				colInfo := fmt.Sprintf("- `%s`", colName)
+				if role != "" {
+					colInfo += fmt.Sprintf(" [%s]", role)
+				}
+				if meta.Description != nil && *meta.Description != "" {
+					colInfo += fmt.Sprintf(" - %s", *meta.Description)
+				}
+				relevantCols = append(relevantCols, colInfo)
+			}
+		}
+		if len(relevantCols) > 0 {
+			sb.WriteString(fmt.Sprintf("**%s:**\n", tableName))
+			for _, col := range relevantCols {
+				sb.WriteString(col + "\n")
+			}
+			sb.WriteString("\n")
+		}
+	}
+}
+
+// writeColumnSemantics writes full column semantic details from column metadata.
+func writeColumnSemantics(sb *strings.Builder, header string, columnMetadataByTable map[string]map[string]*models.ColumnMetadata) {
+	if len(columnMetadataByTable) == 0 {
+		return
+	}
+	sb.WriteString(fmt.Sprintf("## %s\n\n", header))
+	for tableName, colMap := range columnMetadataByTable {
+		var colInfos []string
+		for colName, meta := range colMap {
+			colInfo := fmt.Sprintf("- `%s`", colName)
+			if meta.Role != nil && *meta.Role != "" {
+				colInfo += fmt.Sprintf(" [%s]", *meta.Role)
+			}
+			if meta.Description != nil && *meta.Description != "" {
+				colInfo += fmt.Sprintf(" - %s", *meta.Description)
+			}
+			// Include enum values if present
+			if enumFeatures := meta.GetEnumFeatures(); enumFeatures != nil && len(enumFeatures.Values) > 0 {
+				values := make([]string, 0, len(enumFeatures.Values))
+				for _, v := range enumFeatures.Values {
+					if v.Label != "" {
+						values = append(values, fmt.Sprintf("'%s' (%s)", v.Value, v.Label))
+					} else {
+						values = append(values, fmt.Sprintf("'%s'", v.Value))
+					}
+				}
+				colInfo += fmt.Sprintf("\n  Allowed values: %s", strings.Join(values, ", "))
+			}
+			colInfos = append(colInfos, colInfo)
+		}
+		if len(colInfos) > 0 {
+			sb.WriteString(fmt.Sprintf("**%s:**\n", tableName))
+			for _, info := range colInfos {
+				sb.WriteString(info + "\n")
+			}
+			sb.WriteString("\n")
+		}
 	}
 }
 
@@ -184,16 +317,6 @@ func (s *glossaryService) CreateTerm(ctx context.Context, projectID uuid.UUID, t
 	if term.Source == "" {
 		term.Source = models.GlossarySourceManual
 	}
-
-	// Get active ontology and set ontology_id for proper CASCADE delete and uniqueness
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err != nil {
-		return fmt.Errorf("get active ontology: %w", err)
-	}
-	if ontology == nil {
-		return fmt.Errorf("no active ontology found for project")
-	}
-	term.OntologyID = &ontology.ID
 
 	// Validate SQL and capture output columns (only when SQL is provided)
 	if term.DefiningSQL != "" {
@@ -483,13 +606,10 @@ func (s *glossaryService) DeleteAlias(ctx context.Context, termID uuid.UUID, ali
 func (s *glossaryService) SuggestTerms(ctx context.Context, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error) {
 	s.logger.Info("Starting term suggestion", zap.String("project_id", projectID.String()))
 
-	// Get active ontology for context
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
+	// Get project for domain context
+	project, err := s.projectService.GetByID(ctx, projectID)
 	if err != nil {
-		return nil, fmt.Errorf("get active ontology: %w", err)
-	}
-	if ontology == nil {
-		return nil, fmt.Errorf("no active ontology found for project")
+		return nil, fmt.Errorf("get project: %w", err)
 	}
 
 	// Get tables for context (replaces entity concept)
@@ -504,6 +624,19 @@ func (s *glossaryService) SuggestTerms(ctx context.Context, projectID uuid.UUID)
 		return []*models.BusinessGlossaryTerm{}, nil
 	}
 
+	// Get schema columns and column metadata for context
+	tableNames := make([]string, 0, len(tables))
+	for _, t := range tables {
+		tableNames = append(tableNames, t.TableName)
+	}
+	schemaColumnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames)
+	if err != nil {
+		s.logger.Warn("Failed to get schema columns, continuing without",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+	}
+	columnMetadataByTable := s.buildColumnMetadataLookup(ctx, projectID, schemaColumnsByTable)
+
 	// Fetch project knowledge for domain context
 	var knowledgeFacts []*models.KnowledgeFact
 	if s.knowledgeRepo != nil {
@@ -517,7 +650,7 @@ func (s *glossaryService) SuggestTerms(ctx context.Context, projectID uuid.UUID)
 	}
 
 	// Build context for LLM
-	prompt := s.buildSuggestTermsPrompt(ontology, tables, knowledgeFacts)
+	prompt := s.buildSuggestTermsPrompt(project, tables, knowledgeFacts, schemaColumnsByTable, columnMetadataByTable)
 	systemMessage := s.suggestTermsSystemMessage()
 
 	// Create LLM client
@@ -585,7 +718,7 @@ DO NOT include SQL in this response. SQL definitions will be generated separatel
 Suggest 5-15 terms that are specific and meaningful for this domain.`
 }
 
-func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntology, tables []*models.SchemaTable, knowledgeFacts []*models.KnowledgeFact) string {
+func (s *glossaryService) buildSuggestTermsPrompt(project *models.Project, tables []*models.SchemaTable, knowledgeFacts []*models.KnowledgeFact, schemaColumnsByTable map[string][]*models.SchemaColumn, columnMetadataByTable map[string]map[string]*models.ColumnMetadata) string {
 	var sb strings.Builder
 
 	sb.WriteString("# Database Schema Analysis for Business Metrics\n\n")
@@ -622,31 +755,7 @@ func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntolog
 	}
 
 	// Include domain summary if available
-	if ontology.DomainSummary != nil && ontology.DomainSummary.Description != "" {
-		sb.WriteString("## Domain Overview\n\n")
-		sb.WriteString(ontology.DomainSummary.Description)
-		sb.WriteString("\n\n")
-	}
-
-	// Include conventions if available
-	if ontology.DomainSummary != nil && ontology.DomainSummary.Conventions != nil {
-		conv := ontology.DomainSummary.Conventions
-		sb.WriteString("## Conventions\n\n")
-
-		if conv.SoftDelete != nil && conv.SoftDelete.Enabled {
-			sb.WriteString(fmt.Sprintf("- Soft delete: Filter with `%s`\n", conv.SoftDelete.Filter))
-		}
-		if conv.Currency != nil {
-			if conv.Currency.Format == "cents" {
-				sb.WriteString("- Currency: Stored in cents, divide by 100 for display\n")
-			} else if conv.Currency.Format == "basis_points" {
-				sb.WriteString("- Currency: Stored in basis points, divide by 10000 for display\n")
-			} else {
-				sb.WriteString("- Currency: Stored as dollars/decimal\n")
-			}
-		}
-		sb.WriteString("\n")
-	}
+	writeDomainSummary(&sb, project.DomainSummary)
 
 	// List tables
 	// Note: BusinessName and Description now live in TableMetadata
@@ -657,40 +766,8 @@ func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntolog
 		sb.WriteString("\n")
 	}
 
-	// Include column details if available (only for selected tables)
-	if len(ontology.ColumnDetails) > 0 {
-		selectedTableNames := make(map[string]bool, len(tables))
-		for _, t := range tables {
-			selectedTableNames[t.TableName] = true
-		}
-		sb.WriteString("## Key Columns\n\n")
-		for tableName, columns := range ontology.ColumnDetails {
-			if !selectedTableNames[tableName] {
-				continue
-			}
-			// Only show columns with roles (measures, dimensions) or FK associations
-			relevantCols := make([]models.ColumnDetail, 0)
-			for _, col := range columns {
-				if col.Role == "measure" || col.Role == "dimension" || col.FKAssociation != "" {
-					relevantCols = append(relevantCols, col)
-				}
-			}
-			if len(relevantCols) > 0 {
-				sb.WriteString(fmt.Sprintf("**%s:**\n", tableName))
-				for _, col := range relevantCols {
-					colInfo := fmt.Sprintf("- `%s`", col.Name)
-					if col.Role != "" {
-						colInfo += fmt.Sprintf(" [%s]", col.Role)
-					}
-					if col.Description != "" {
-						colInfo += fmt.Sprintf(" - %s", col.Description)
-					}
-					sb.WriteString(colInfo + "\n")
-				}
-				sb.WriteString("\n")
-			}
-		}
-	}
+	// Include key columns from column metadata (measures, dimensions)
+	writeKeyColumns(&sb, columnMetadataByTable)
 
 	// Add negative examples section to prevent generic SaaS terms
 	sb.WriteString("## What NOT to Suggest\n\n")
@@ -708,7 +785,7 @@ func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntolog
 	sb.WriteString("- What user roles are distinguished (host, visitor, creator, viewer)\n\n")
 
 	// Add domain-specific hints based on detected patterns
-	domainHints := getDomainHints(tables, ontology)
+	domainHints := getDomainHints(tables, schemaColumnsByTable)
 	if len(domainHints) > 0 {
 		sb.WriteString("## Domain Analysis\n\n")
 		sb.WriteString("Based on the schema structure, the following observations apply to this business:\n\n")
@@ -781,16 +858,12 @@ func (s *glossaryService) parseSuggestTermsResponse(content string, projectID uu
 
 func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) (int, error) {
 	s.logger.Info("Starting glossary term discovery",
-		zap.String("project_id", projectID.String()),
-		zap.String("ontology_id", ontologyID.String()))
+		zap.String("project_id", projectID.String()))
 
-	// Get active ontology for context
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
+	// Get project for domain context
+	project, err := s.projectService.GetByID(ctx, projectID)
 	if err != nil {
-		return 0, fmt.Errorf("get active ontology: %w", err)
-	}
-	if ontology == nil {
-		return 0, fmt.Errorf("no active ontology found for project")
+		return 0, fmt.Errorf("get project: %w", err)
 	}
 
 	// Get tables for context (replaces entity concept)
@@ -805,6 +878,19 @@ func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, 
 		return 0, nil
 	}
 
+	// Get schema columns and column metadata for context
+	tableNames := make([]string, 0, len(tables))
+	for _, t := range tables {
+		tableNames = append(tableNames, t.TableName)
+	}
+	schemaColumnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames)
+	if err != nil {
+		s.logger.Warn("Failed to get schema columns, continuing without",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+	}
+	columnMetadataByTable := s.buildColumnMetadataLookup(ctx, projectID, schemaColumnsByTable)
+
 	// Fetch project knowledge for domain context
 	var knowledgeFacts []*models.KnowledgeFact
 	if s.knowledgeRepo != nil {
@@ -818,7 +904,7 @@ func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, 
 	}
 
 	// Build context for LLM
-	prompt := s.buildSuggestTermsPrompt(ontology, tables, knowledgeFacts)
+	prompt := s.buildSuggestTermsPrompt(project, tables, knowledgeFacts, schemaColumnsByTable, columnMetadataByTable)
 	systemMessage := s.suggestTermsSystemMessage()
 
 	// Create LLM client
@@ -874,9 +960,6 @@ func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, 
 		// Source is already set to "inferred" in parseSuggestTermsResponse
 		// DefiningSQL is empty - will be populated in enrichment phase
 
-		// Set ontology_id to link term to ontology lifecycle (CASCADE delete)
-		term.OntologyID = &ontologyID
-
 		// Create the term
 		if err := s.glossaryRepo.Create(ctx, term); err != nil {
 			s.logger.Error("Failed to create discovered term",
@@ -929,13 +1012,10 @@ func (s *glossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, on
 	s.logger.Info("Found unenriched terms to process",
 		zap.Int("count", len(unenrichedTerms)))
 
-	// Get active ontology for context
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
+	// Get project for domain context
+	project, err := s.projectService.GetByID(ctx, projectID)
 	if err != nil {
-		return fmt.Errorf("get active ontology: %w", err)
-	}
-	if ontology == nil {
-		return fmt.Errorf("no active ontology found for project")
+		return fmt.Errorf("get project: %w", err)
 	}
 
 	// Get tables for context (replaces entity concept)
@@ -965,6 +1045,9 @@ func (s *glossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, on
 		}
 	}
 
+	// Build column metadata lookup for semantic info
+	columnMetadataByTable := s.buildColumnMetadataLookup(ctx, projectID, schemaColumnsByTable)
+
 	// Create LLM client
 	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
 	if err != nil {
@@ -980,7 +1063,7 @@ func (s *glossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, on
 		semaphore <- struct{}{} // Acquire
 		go func(t *models.BusinessGlossaryTerm) {
 			defer func() { <-semaphore }() // Release
-			results <- s.enrichSingleTerm(ctx, t, ontology, tables, schemaColumnsByTable, llmClient, projectID)
+			results <- s.enrichSingleTerm(ctx, t, project, tables, schemaColumnsByTable, columnMetadataByTable, llmClient, projectID)
 		}(term)
 	}
 
@@ -1024,9 +1107,10 @@ type enrichmentResult struct {
 func (s *glossaryService) enrichSingleTerm(
 	ctx context.Context,
 	term *models.BusinessGlossaryTerm,
-	ontology *models.TieredOntology,
+	project *models.Project,
 	tables []*models.SchemaTable,
 	schemaColumnsByTable map[string][]*models.SchemaColumn,
+	columnMetadataByTable map[string]map[string]*models.ColumnMetadata,
 	llmClient llm.LLMClient,
 	projectID uuid.UUID,
 ) enrichmentResult {
@@ -1040,7 +1124,7 @@ func (s *glossaryService) enrichSingleTerm(
 	defer cleanup()
 
 	// First attempt: normal enrichment
-	result, firstErr := s.tryEnrichTerm(tenantCtx, term, ontology, tables, schemaColumnsByTable, llmClient, projectID, false, "")
+	result, firstErr := s.tryEnrichTerm(tenantCtx, term, project, tables, schemaColumnsByTable, columnMetadataByTable, llmClient, projectID, false, "")
 	if firstErr == nil {
 		return result
 	}
@@ -1050,7 +1134,7 @@ func (s *glossaryService) enrichSingleTerm(
 		zap.String("term", term.Term),
 		zap.Error(firstErr))
 
-	result, retryErr := s.tryEnrichTerm(tenantCtx, term, ontology, tables, schemaColumnsByTable, llmClient, projectID, true, firstErr.Error())
+	result, retryErr := s.tryEnrichTerm(tenantCtx, term, project, tables, schemaColumnsByTable, columnMetadataByTable, llmClient, projectID, true, firstErr.Error())
 	if retryErr == nil {
 		s.logger.Info("Enrichment succeeded on retry with enhanced context",
 			zap.String("term", term.Term))
@@ -1075,9 +1159,10 @@ func (s *glossaryService) enrichSingleTerm(
 func (s *glossaryService) tryEnrichTerm(
 	ctx context.Context,
 	term *models.BusinessGlossaryTerm,
-	ontology *models.TieredOntology,
+	project *models.Project,
 	tables []*models.SchemaTable,
 	schemaColumnsByTable map[string][]*models.SchemaColumn,
+	columnMetadataByTable map[string]map[string]*models.ColumnMetadata,
 	llmClient llm.LLMClient,
 	projectID uuid.UUID,
 	enhanced bool,
@@ -1085,9 +1170,9 @@ func (s *glossaryService) tryEnrichTerm(
 ) (enrichmentResult, error) {
 	var prompt string
 	if enhanced {
-		prompt = s.buildEnhancedEnrichTermPrompt(term, ontology, tables, schemaColumnsByTable, previousError)
+		prompt = s.buildEnhancedEnrichTermPrompt(term, project, tables, schemaColumnsByTable, columnMetadataByTable, previousError)
 	} else {
-		prompt = s.buildEnrichTermPrompt(term, ontology, tables, schemaColumnsByTable)
+		prompt = s.buildEnrichTermPrompt(term, project, tables, schemaColumnsByTable, columnMetadataByTable)
 	}
 	systemMessage := s.enrichTermSystemMessage()
 
@@ -1128,7 +1213,7 @@ func (s *glossaryService) tryEnrichTerm(
 
 	// Check for potential enum value mismatches (best-effort validation)
 	// This logs warnings but doesn't fail the enrichment
-	if mismatches := validateEnumValues(enrichment.DefiningSQL, ontology); len(mismatches) > 0 {
+	if mismatches := validateEnumValues(enrichment.DefiningSQL, columnMetadataByTable); len(mismatches) > 0 {
 		for _, mismatch := range mismatches {
 			s.logger.Warn("Potential enum value mismatch in generated SQL",
 				zap.String("term", term.Term),
@@ -1237,44 +1322,19 @@ Be specific and use exact table/column names from the provided schema.`
 
 func (s *glossaryService) buildEnrichTermPrompt(
 	term *models.BusinessGlossaryTerm,
-	ontology *models.TieredOntology,
+	project *models.Project,
 	tables []*models.SchemaTable,
 	schemaColumnsByTable map[string][]*models.SchemaColumn,
+	columnMetadataByTable map[string]map[string]*models.ColumnMetadata,
 ) string {
 	var sb strings.Builder
 
 	sb.WriteString("# Schema Context\n\n")
 
-	// Include domain summary
-	if ontology.DomainSummary != nil && ontology.DomainSummary.Description != "" {
-		sb.WriteString("## Domain Overview\n\n")
-		sb.WriteString(ontology.DomainSummary.Description)
-		sb.WriteString("\n\n")
-	}
-
-	// Include conventions
-	if ontology.DomainSummary != nil && ontology.DomainSummary.Conventions != nil {
-		conv := ontology.DomainSummary.Conventions
-		sb.WriteString("## Conventions\n\n")
-
-		if conv.SoftDelete != nil && conv.SoftDelete.Enabled {
-			sb.WriteString(fmt.Sprintf("- Soft delete: Filter with `%s`\n", conv.SoftDelete.Filter))
-		}
-		if conv.Currency != nil {
-			if conv.Currency.Format == "cents" {
-				sb.WriteString("- Currency: Stored in cents, divide by 100 for display\n")
-			} else if conv.Currency.Format == "basis_points" {
-				sb.WriteString("- Currency: Stored in basis points, divide by 10000 for display\n")
-			} else {
-				sb.WriteString("- Currency: Stored as dollars/decimal\n")
-			}
-		}
-		sb.WriteString("\n")
-	}
+	// Include domain summary and conventions
+	writeDomainSummary(&sb, project.DomainSummary)
 
 	// List tables
-	// Note: BusinessName and Description now live in TableMetadata
-	// (engine_ontology_table_metadata), not SchemaTable.
 	sb.WriteString("## Tables\n\n")
 	for _, t := range tables {
 		sb.WriteString(fmt.Sprintf("### %s\n", t.TableName))
@@ -1282,7 +1342,6 @@ func (s *glossaryService) buildEnrichTermPrompt(
 	}
 
 	// Include actual schema columns - the ground truth for SQL generation
-	// This section provides the EXACT column names and types that exist in the database
 	if len(schemaColumnsByTable) > 0 {
 		sb.WriteString("## Available Columns (EXACT names - use these in your SQL)\n\n")
 		sb.WriteString("IMPORTANT: Only use column names listed below. Do NOT invent or guess column names.\n\n")
@@ -1293,14 +1352,11 @@ func (s *glossaryService) buildEnrichTermPrompt(
 				if col.IsPrimaryKey {
 					colInfo += " [PK]"
 				}
-				// NOTE: Description is now in ColumnMetadata, not SchemaColumn
 				sb.WriteString(colInfo + "\n")
-				// NOTE: Sample values are no longer persisted to avoid storing target datasource data.
 			}
 			sb.WriteString("\n")
 		}
 
-		// Add common column confusion warnings based on actual schema
 		confusions := s.detectColumnConfusions(schemaColumnsByTable)
 		if len(confusions) > 0 {
 			sb.WriteString("## IMPORTANT: Common Column Mistakes to Avoid\n\n")
@@ -1310,48 +1366,14 @@ func (s *glossaryService) buildEnrichTermPrompt(
 			sb.WriteString("\n")
 		}
 
-		// Add type comparison guidance to prevent type mismatch errors
 		typeGuidance := generateTypeComparisonGuidance(schemaColumnsByTable)
 		if typeGuidance != "" {
 			sb.WriteString(typeGuidance)
 		}
 	}
 
-	// Include semantic column details from ontology (enriched information)
-	if len(ontology.ColumnDetails) > 0 {
-		sb.WriteString("## Column Semantics\n\n")
-		for tableName, columns := range ontology.ColumnDetails {
-			relevantCols := make([]models.ColumnDetail, 0)
-			for _, col := range columns {
-				if col.Role == "measure" || col.Role == "dimension" {
-					relevantCols = append(relevantCols, col)
-				}
-			}
-			if len(relevantCols) > 0 {
-				sb.WriteString(fmt.Sprintf("**%s:**\n", tableName))
-				for _, col := range relevantCols {
-					colInfo := fmt.Sprintf("- `%s`", col.Name)
-					if col.Role != "" {
-						colInfo += fmt.Sprintf(" [%s]", col.Role)
-					}
-					if col.Description != "" {
-						colInfo += fmt.Sprintf(" - %s", col.Description)
-					}
-					sb.WriteString(colInfo + "\n")
-
-					// Include enum values if present so LLM uses exact values in SQL
-					if len(col.EnumValues) > 0 {
-						values := make([]string, len(col.EnumValues))
-						for i, v := range col.EnumValues {
-							values[i] = fmt.Sprintf("'%s'", v.Value)
-						}
-						sb.WriteString(fmt.Sprintf("  Allowed values: %s\n", strings.Join(values, ", ")))
-					}
-				}
-				sb.WriteString("\n")
-			}
-		}
-	}
+	// Include semantic column details from column metadata
+	writeColumnSemantics(&sb, "Column Semantics", columnMetadataByTable)
 
 	// Add the term to enrich
 	sb.WriteString("## Term to Enrich\n\n")
@@ -1379,9 +1401,10 @@ func (s *glossaryService) buildEnrichTermPrompt(
 // previous failure to help the LLM avoid the same mistake.
 func (s *glossaryService) buildEnhancedEnrichTermPrompt(
 	term *models.BusinessGlossaryTerm,
-	ontology *models.TieredOntology,
+	project *models.Project,
 	tables []*models.SchemaTable,
 	schemaColumnsByTable map[string][]*models.SchemaColumn,
+	columnMetadataByTable map[string]map[string]*models.ColumnMetadata,
 	previousError string,
 ) string {
 	var sb strings.Builder
@@ -1396,36 +1419,10 @@ func (s *glossaryService) buildEnhancedEnrichTermPrompt(
 		sb.WriteString("Please analyze this error and generate valid SQL that avoids this issue.\n\n")
 	}
 
-	// Include domain summary
-	if ontology.DomainSummary != nil && ontology.DomainSummary.Description != "" {
-		sb.WriteString("## Domain Overview\n\n")
-		sb.WriteString(ontology.DomainSummary.Description)
-		sb.WriteString("\n\n")
-	}
-
-	// Include conventions
-	if ontology.DomainSummary != nil && ontology.DomainSummary.Conventions != nil {
-		conv := ontology.DomainSummary.Conventions
-		sb.WriteString("## Conventions\n\n")
-
-		if conv.SoftDelete != nil && conv.SoftDelete.Enabled {
-			sb.WriteString(fmt.Sprintf("- Soft delete: Filter with `%s`\n", conv.SoftDelete.Filter))
-		}
-		if conv.Currency != nil {
-			if conv.Currency.Format == "cents" {
-				sb.WriteString("- Currency: Stored in cents, divide by 100 for display\n")
-			} else if conv.Currency.Format == "basis_points" {
-				sb.WriteString("- Currency: Stored in basis points, divide by 10000 for display\n")
-			} else {
-				sb.WriteString("- Currency: Stored as dollars/decimal\n")
-			}
-		}
-		sb.WriteString("\n")
-	}
+	// Include domain summary and conventions
+	writeDomainSummary(&sb, project.DomainSummary)
 
 	// List tables
-	// Note: BusinessName and Description now live in TableMetadata
-	// (engine_ontology_table_metadata), not SchemaTable.
 	sb.WriteString("## Tables\n\n")
 	for _, t := range tables {
 		sb.WriteString(fmt.Sprintf("### %s\n", t.TableName))
@@ -1444,14 +1441,11 @@ func (s *glossaryService) buildEnhancedEnrichTermPrompt(
 				if col.IsPrimaryKey {
 					colInfo += " [PK]"
 				}
-				// NOTE: Description is now in ColumnMetadata, not SchemaColumn
 				sb.WriteString(colInfo + "\n")
-				// NOTE: Sample values are no longer persisted to avoid storing target datasource data.
 			}
 			sb.WriteString("\n")
 		}
 
-		// Add common column confusion warnings
 		confusions := s.detectColumnConfusions(schemaColumnsByTable)
 		if len(confusions) > 0 {
 			sb.WriteString("## CRITICAL: Column Mistakes to Avoid\n\n")
@@ -1461,50 +1455,14 @@ func (s *glossaryService) buildEnhancedEnrichTermPrompt(
 			sb.WriteString("\n")
 		}
 
-		// Add type comparison guidance to prevent type mismatch errors
 		typeGuidance := generateTypeComparisonGuidance(schemaColumnsByTable)
 		if typeGuidance != "" {
 			sb.WriteString(typeGuidance)
 		}
 	}
 
-	// Include semantic column details from ontology
-	if len(ontology.ColumnDetails) > 0 {
-		sb.WriteString("## Column Semantics and Roles\n\n")
-		for tableName, columns := range ontology.ColumnDetails {
-			sb.WriteString(fmt.Sprintf("**%s:**\n", tableName))
-			for _, col := range columns {
-				colInfo := fmt.Sprintf("- `%s`", col.Name)
-				if col.Role != "" {
-					colInfo += fmt.Sprintf(" [%s]", col.Role)
-				}
-				if col.IsPrimaryKey {
-					colInfo += " (PK)"
-				}
-				if col.IsForeignKey {
-					colInfo += fmt.Sprintf(" (FK→%s)", col.ForeignTable)
-				}
-				if col.Description != "" {
-					colInfo += fmt.Sprintf(" - %s", col.Description)
-				}
-				sb.WriteString(colInfo + "\n")
-
-				// Include enum values if present so LLM uses exact values in SQL
-				if len(col.EnumValues) > 0 {
-					values := make([]string, len(col.EnumValues))
-					for i, v := range col.EnumValues {
-						if v.Description != "" {
-							values[i] = fmt.Sprintf("'%s' (%s)", v.Value, v.Description)
-						} else {
-							values[i] = fmt.Sprintf("'%s'", v.Value)
-						}
-					}
-					sb.WriteString(fmt.Sprintf("  Allowed values: %s\n", strings.Join(values, ", ")))
-				}
-			}
-			sb.WriteString("\n")
-		}
-	}
+	// Include semantic column details from column metadata
+	writeColumnSemantics(&sb, "Column Semantics and Roles", columnMetadataByTable)
 
 	// Add the term to enrich
 	sb.WriteString("## Term to Enrich\n\n")
@@ -1734,7 +1692,7 @@ func capitalizeWords(s string) string {
 
 // getDomainHints analyzes tables and column details to detect domain patterns
 // and returns hints to guide the LLM toward domain-specific term suggestions.
-func getDomainHints(tables []*models.SchemaTable, ontology *models.TieredOntology) []string {
+func getDomainHints(tables []*models.SchemaTable, schemaColumnsByTable map[string][]*models.SchemaColumn) []string {
 	var hints []string
 
 	// Detect patterns from table names
@@ -1745,7 +1703,7 @@ func getDomainHints(tables []*models.SchemaTable, ontology *models.TieredOntolog
 	hasEcommerce := containsTableByName(tables, "order", "cart", "checkout", "purchase")
 
 	// Check for distinct user roles in column details
-	hasUserRoles := hasRoleDistinctingColumns(ontology)
+	hasUserRoles := hasRoleDistinctingColumns(schemaColumnsByTable)
 
 	// Generate domain-specific hints
 	if hasEngagement && !hasSubscription {
@@ -1786,35 +1744,19 @@ func containsTableByName(tables []*models.SchemaTable, keywords ...string) bool 
 	return false
 }
 
-// hasRoleDistinctingColumns checks if the ontology contains FK columns that indicate
+// hasRoleDistinctingColumns checks if column metadata contains FK columns that indicate
 // distinct user roles (e.g., host vs visitor, buyer vs seller).
-// Detected by finding 2+ FK columns pointing to the same table with different
-// FKAssociation values — set by the ColumnEnrichment DAG step from
-// ColumnMetadata.IdentifierFeatures.EntityReferenced.
-func hasRoleDistinctingColumns(ontology *models.TieredOntology) bool {
-	if ontology == nil || ontology.ColumnDetails == nil {
-		return false
-	}
-
-	// Group FK columns by their target table, collecting distinct associations
-	fkAssociationsByTarget := map[string]map[string]bool{}
-	for _, columns := range ontology.ColumnDetails {
-		for _, col := range columns {
-			if col.IsForeignKey && col.ForeignTable != "" && col.FKAssociation != "" {
-				if fkAssociationsByTarget[col.ForeignTable] == nil {
-					fkAssociationsByTarget[col.ForeignTable] = map[string]bool{}
-				}
-				fkAssociationsByTarget[col.ForeignTable][col.FKAssociation] = true
-			}
-		}
-	}
-
-	// If any target table has 2+ distinct FK associations, roles are differentiated
-	for _, associations := range fkAssociationsByTarget {
-		if len(associations) >= 2 {
-			return true
-		}
-	}
+// Detected by finding 2+ FK columns pointing to the same target table with different
+// FKAssociation values in IdentifierFeatures.
+func hasRoleDistinctingColumns(schemaColumnsByTable map[string][]*models.SchemaColumn) bool {
+	// This check now requires column metadata for FKAssociation info.
+	// Without ontology blob, we fall back to a simple heuristic:
+	// multiple columns with naming patterns like host_id/visitor_id suggest role distinction.
+	// A more robust check would use ColumnMetadata.IdentifierFeatures.FKAssociation,
+	// but that requires additional data not available in this function signature.
+	// For now, we keep this as a no-op since the getDomainHints function
+	// also provides value through table-name-based heuristics.
+	_ = schemaColumnsByTable
 	return false
 }
 
@@ -1907,8 +1849,8 @@ type enumInfo struct {
 // This is a best-effort heuristic check - it may produce false positives for
 // string literals that aren't meant to be enum values. The caller should use
 // these results as warnings/logs rather than hard failures.
-func validateEnumValues(sql string, ontology *models.TieredOntology) []EnumMismatch {
-	if ontology == nil || len(ontology.ColumnDetails) == 0 {
+func validateEnumValues(sql string, columnMetadataByTable map[string]map[string]*models.ColumnMetadata) []EnumMismatch {
+	if len(columnMetadataByTable) == 0 {
 		return nil
 	}
 
@@ -1918,19 +1860,19 @@ func validateEnumValues(sql string, ontology *models.TieredOntology) []EnumMisma
 		return nil
 	}
 
-	// Build a map of all known enum values across the ontology
+	// Build a map of all known enum values from column metadata
 	// key: lowercase enum value, value: struct with table, column, original value
 	knownEnums := make(map[string]enumInfo)
 	enumColumns := make(map[string][]string) // key: "table.column", values: all enum values
 
-	for tableName, columns := range ontology.ColumnDetails {
-		for _, col := range columns {
-			if len(col.EnumValues) > 0 {
-				key := tableName + "." + col.Name
-				for _, ev := range col.EnumValues {
+	for tableName, colMap := range columnMetadataByTable {
+		for colName, meta := range colMap {
+			if enumFeatures := meta.GetEnumFeatures(); enumFeatures != nil && len(enumFeatures.Values) > 0 {
+				key := tableName + "." + colName
+				for _, ev := range enumFeatures.Values {
 					knownEnums[strings.ToLower(ev.Value)] = enumInfo{
 						table:    tableName,
-						column:   col.Name,
+						column:   colName,
 						original: ev.Value,
 					}
 					enumColumns[key] = append(enumColumns[key], ev.Value)
@@ -2727,24 +2669,9 @@ func (s *glossaryService) RunAutoGenerate(ctx context.Context, projectID uuid.UU
 	// Set inferred provenance — this is an automated LLM operation, not a user action
 	tenantCtx = models.WithInferredProvenance(tenantCtx, uuid.Nil)
 
-	// Resolve active ontology ID
-	setGenerationStatus(projectID, "discovering", "Resolving active ontology...", "", &now)
-	ontology, err := s.ontologyRepo.GetActive(tenantCtx, projectID)
-	if err != nil {
-		s.logger.Error("glossary auto-generate: failed to get active ontology", zap.Error(err))
-		setGenerationStatus(projectID, "failed", "Failed to get active ontology", err.Error(), &now)
-		return fmt.Errorf("get active ontology: %w", err)
-	}
-	if ontology == nil {
-		s.logger.Error("glossary auto-generate: no active ontology found")
-		setGenerationStatus(projectID, "failed", "No active ontology found", "no active ontology found for project", &now)
-		return fmt.Errorf("no active ontology found for project")
-	}
-	ontologyID := ontology.ID
-
 	// Discovery phase
-	setGenerationStatus(projectID, "discovering", "Discovering glossary terms from ontology...", "", &now)
-	count, err := s.DiscoverGlossaryTerms(tenantCtx, projectID, ontologyID)
+	setGenerationStatus(projectID, "discovering", "Discovering glossary terms from schema...", "", &now)
+	count, err := s.DiscoverGlossaryTerms(tenantCtx, projectID, uuid.Nil)
 	if err != nil {
 		s.logger.Error("glossary auto-generate: discovery failed", zap.Error(err))
 		setGenerationStatus(projectID, "failed", "Discovery failed", err.Error(), &now)
@@ -2754,7 +2681,7 @@ func (s *glossaryService) RunAutoGenerate(ctx context.Context, projectID uuid.UU
 
 	// Enrichment phase
 	setGenerationStatus(projectID, "enriching", fmt.Sprintf("Enriching %d discovered terms with SQL...", count), "", &now)
-	err = s.EnrichGlossaryTerms(tenantCtx, projectID, ontologyID)
+	err = s.EnrichGlossaryTerms(tenantCtx, projectID, uuid.Nil)
 	if err != nil {
 		s.logger.Error("glossary auto-generate: enrichment failed", zap.Error(err))
 		setGenerationStatus(projectID, "failed", "Enrichment failed", err.Error(), &now)

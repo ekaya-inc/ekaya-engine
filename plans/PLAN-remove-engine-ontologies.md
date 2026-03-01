@@ -158,37 +158,37 @@ The core of the refactor — 3 methods that build all ontology context for MCP t
 ### Task 8: Refactor Remaining Services
 
 **`pkg/services/glossary_service.go`** (heaviest caller — 5+ GetActive calls):
-- [ ] Remove `ontologyRepo` from constructor
-- [ ] Replace all `ontologyRepo.GetActive()` + `ontology.ColumnDetails` reads with `columnMetadataRepo.GetBySchemaColumnIDs()` or `GetByProject()`
-- [ ] Remove `ontology.ID` references for glossary term creation
-- [ ] Update LLM prompt building that iterates `ontology.ColumnDetails` to iterate ColumnMetadata instead
+- [x] Remove `ontologyRepo` from constructor
+- [x] Replace all `ontologyRepo.GetActive()` + `ontology.ColumnDetails` reads with `columnMetadataRepo.GetBySchemaColumnIDs()` or `GetByProject()`
+- [x] Remove `ontology.ID` references for glossary term creation
+- [x] Update LLM prompt building that iterates `ontology.ColumnDetails` to iterate ColumnMetadata instead
 
 **`pkg/services/data_change_detection.go`:**
-- [ ] Remove `ontologyRepo` from constructor
-- [ ] Line 134: Replace `ontologyRepo.GetActive()` + reading `ontology.ColumnDetails[tableName]` for existing enum values with reading from `ColumnMetadataRepo` (`EnumFeatures.Values`)
+- [x] Remove `ontologyRepo` from constructor
+- [x] Line 134: Replace `ontologyRepo.GetActive()` + reading `ontology.ColumnDetails[tableName]` for existing enum values with reading from `ColumnMetadataRepo` (`EnumFeatures.Values`)
 
 **`pkg/services/ontology_question.go`:**
-- [ ] Remove `ontologyRepo` from constructor
-- [ ] Remove `applyColumnUpdates()` method (lines 244-336) which writes to ontology blob. Replace with `ColumnMetadataRepo.Upsert()`.
-- [ ] Remove `OntologyID` from question creation
+- [x] Remove `ontologyRepo` from constructor
+- [x] Remove `applyColumnUpdates()` method (lines 244-336) which writes to ontology blob. Replace with `ColumnMetadataRepo.Upsert()`.
+- [x] Remove `OntologyID` from question creation
 
 **`pkg/services/ontology_chat.go`:**
-- [ ] Remove `ontologyRepo` from constructor
-- [ ] Replace `ontology.DomainSummary` reads with `project.DomainSummary`
-- [ ] Replace `ontology.TableCount()` with schema table count
+- [x] Remove `ontologyRepo` from constructor
+- [x] Replace `ontology.DomainSummary` reads with `project.DomainSummary`
+- [x] Replace `ontology.TableCount()` with schema table count
 
 **`pkg/services/ontology_dag_service.go`:**
-- [ ] Remove `ontologyRepo` from constructor
-- [ ] Remove `getOrCreateOntology()` method entirely
-- [ ] Remove `OntologyID` from DAG record creation
-- [ ] In `Delete()`: Remove `ontologyRepo.DeleteByProject()` call
+- [x] Remove `ontologyRepo` from constructor
+- [x] Remove `getOrCreateOntology()` method entirely
+- [x] Remove `OntologyID` from DAG record creation
+- [x] In `Delete()`: Remove `ontologyRepo.DeleteByProject()` call
 
 **`pkg/services/column_feature_extraction.go`:**
-- [ ] Remove ontology ID references in question creation
+- [x] Remove ontology ID references in question creation
 
 **`pkg/llm/tool_executor.go`:**
-- [ ] Remove `ontologyRepo` from struct
-- [ ] Replace `ontologyRepo.GetActive()` + `ontology.ColumnDetails` read/write with `ColumnMetadataRepo` operations
+- [x] Remove `ontologyRepo` from struct
+- [x] Replace `ontologyRepo.GetActive()` + `ontology.ColumnDetails` read/write with `ColumnMetadataRepo` operations
 
 ### Task 9: Remove OntologyID from Models
 

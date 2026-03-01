@@ -361,7 +361,6 @@ func createAuthenticatedContext(userID uuid.UUID) context.Context {
 func TestStart_StoresProjectOverview(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
-	ontologyID := uuid.New()
 	userID := uuid.New()
 	projectOverview := "This is a CRM application for managing customer relationships"
 
@@ -400,20 +399,12 @@ func TestStart_StoresProjectOverview(t *testing.T) {
 		},
 	}
 
-	// Create ontology repository mock that returns an existing ontology
-	mockOntologyRepo := &mockOntologyRepository{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-		},
-	}
 
 	// Create entity and relationship repository mocks (use existing mocks from same package)
 	logger := zap.NewNop()
 	service := &ontologyDAGService{
 		dagRepo:       mockDAGRepo,
 		knowledgeRepo: mockKnowledgeRepo,
-		ontologyRepo:  mockOntologyRepo,
 		logger:        logger,
 		// Provide getTenantCtx to prevent panic in background goroutine
 		getTenantCtx: func(ctx context.Context, _ uuid.UUID) (context.Context, func(), error) {
@@ -441,7 +432,6 @@ func TestStart_StoresProjectOverview(t *testing.T) {
 func TestStart_UpdatesExistingProjectOverview(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
-	ontologyID := uuid.New()
 	userID := uuid.New()
 	existingOverviewID := uuid.New()
 	originalOverview := "Original project overview"
@@ -499,18 +489,11 @@ func TestStart_UpdatesExistingProjectOverview(t *testing.T) {
 		},
 	}
 
-	mockOntologyRepo := &mockOntologyRepository{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-		},
-	}
 
 	logger := zap.NewNop()
 	service := &ontologyDAGService{
 		dagRepo:       mockDAGRepo,
 		knowledgeRepo: mockKnowledgeRepo,
-		ontologyRepo:  mockOntologyRepo,
 		logger:        logger,
 		getTenantCtx: func(ctx context.Context, _ uuid.UUID) (context.Context, func(), error) {
 			return ctx, func() {}, nil
@@ -535,7 +518,6 @@ func TestStart_UpdatesExistingProjectOverview(t *testing.T) {
 func TestStart_SkipsOverviewStorageWhenEmpty(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
-	ontologyID := uuid.New()
 	userID := uuid.New()
 	emptyOverview := ""
 
@@ -564,18 +546,11 @@ func TestStart_SkipsOverviewStorageWhenEmpty(t *testing.T) {
 		},
 	}
 
-	mockOntologyRepo := &mockOntologyRepository{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-		},
-	}
 
 	logger := zap.NewNop()
 	service := &ontologyDAGService{
 		dagRepo:       mockDAGRepo,
 		knowledgeRepo: mockKnowledgeRepo,
-		ontologyRepo:  mockOntologyRepo,
 		logger:        logger,
 		// Provide getTenantCtx to prevent panic in background goroutine
 		getTenantCtx: func(ctx context.Context, _ uuid.UUID) (context.Context, func(), error) {
@@ -598,7 +573,6 @@ func TestStart_SkipsOverviewStorageWhenEmpty(t *testing.T) {
 func TestStart_ContinuesOnOverviewStorageError(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
-	ontologyID := uuid.New()
 	userID := uuid.New()
 	projectOverview := "A valid project overview"
 
@@ -630,18 +604,11 @@ func TestStart_ContinuesOnOverviewStorageError(t *testing.T) {
 		},
 	}
 
-	mockOntologyRepo := &mockOntologyRepository{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-		},
-	}
 
 	logger := zap.NewNop()
 	service := &ontologyDAGService{
 		dagRepo:       mockDAGRepo,
 		knowledgeRepo: mockKnowledgeRepo,
-		ontologyRepo:  mockOntologyRepo,
 		logger:        logger,
 		// Provide getTenantCtx to prevent panic in background goroutine
 		getTenantCtx: func(ctx context.Context, _ uuid.UUID) (context.Context, func(), error) {

@@ -19,33 +19,36 @@ import (
 // Mock implementations
 // ============================================================================
 
-type mockOntologyRepo struct {
-	getActiveFunc           func(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error)
-	updateColumnDetailsFunc func(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error
+type mockColumnMetadataRepo struct {
+	getBySchemaColumnIDFunc func(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error)
+	upsertFunc              func(ctx context.Context, meta *models.ColumnMetadata) error
 }
 
-func (m *mockOntologyRepo) Create(ctx context.Context, ontology *models.TieredOntology) error {
+func (m *mockColumnMetadataRepo) Upsert(ctx context.Context, meta *models.ColumnMetadata) error {
+	if m.upsertFunc != nil {
+		return m.upsertFunc(ctx, meta)
+	}
 	return nil
 }
-func (m *mockOntologyRepo) GetActive(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error) {
-	if m.getActiveFunc != nil {
-		return m.getActiveFunc(ctx, projectID)
+func (m *mockColumnMetadataRepo) UpsertFromExtraction(ctx context.Context, meta *models.ColumnMetadata) error {
+	return nil
+}
+func (m *mockColumnMetadataRepo) GetBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
+	if m.getBySchemaColumnIDFunc != nil {
+		return m.getBySchemaColumnIDFunc(ctx, schemaColumnID)
 	}
 	return nil, nil
 }
-func (m *mockOntologyRepo) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
+func (m *mockColumnMetadataRepo) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.ColumnMetadata, error) {
+	return nil, nil
+}
+func (m *mockColumnMetadataRepo) GetBySchemaColumnIDs(ctx context.Context, schemaColumnIDs []uuid.UUID) ([]*models.ColumnMetadata, error) {
+	return nil, nil
+}
+func (m *mockColumnMetadataRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
-func (m *mockOntologyRepo) UpdateColumnDetails(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error {
-	if m.updateColumnDetailsFunc != nil {
-		return m.updateColumnDetailsFunc(ctx, projectID, tableName, columns)
-	}
-	return nil
-}
-func (m *mockOntologyRepo) GetNextVersion(ctx context.Context, projectID uuid.UUID) (int, error) {
-	return 0, nil
-}
-func (m *mockOntologyRepo) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
+func (m *mockColumnMetadataRepo) DeleteBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) error {
 	return nil
 }
 
@@ -79,6 +82,8 @@ func (m *mockKnowledgeRepo) DeleteBySource(ctx context.Context, projectID uuid.U
 type mockSchemaRepo struct {
 	listTablesByDatasourceFunc func(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error)
 	listAllColumnsByTableFunc  func(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error)
+	findTableByNameFunc        func(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.SchemaTable, error)
+	getColumnByNameFunc        func(ctx context.Context, tableID uuid.UUID, columnName string) (*models.SchemaColumn, error)
 }
 
 // Implement only the methods actually called by tool_executor.go
@@ -105,7 +110,10 @@ func (m *mockSchemaRepo) GetTableByID(context.Context, uuid.UUID, uuid.UUID) (*m
 func (m *mockSchemaRepo) GetTableByName(context.Context, uuid.UUID, uuid.UUID, string, string) (*models.SchemaTable, error) {
 	return nil, nil
 }
-func (m *mockSchemaRepo) FindTableByName(context.Context, uuid.UUID, uuid.UUID, string) (*models.SchemaTable, error) {
+func (m *mockSchemaRepo) FindTableByName(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+	if m.findTableByNameFunc != nil {
+		return m.findTableByNameFunc(ctx, projectID, datasourceID, tableName)
+	}
 	return nil, nil
 }
 func (m *mockSchemaRepo) UpsertTable(context.Context, *models.SchemaTable) error { return nil }
@@ -139,7 +147,10 @@ func (m *mockSchemaRepo) GetSelectedTableNamesByProject(context.Context, uuid.UU
 func (m *mockSchemaRepo) GetColumnByID(context.Context, uuid.UUID, uuid.UUID) (*models.SchemaColumn, error) {
 	return nil, nil
 }
-func (m *mockSchemaRepo) GetColumnByName(context.Context, uuid.UUID, string) (*models.SchemaColumn, error) {
+func (m *mockSchemaRepo) GetColumnByName(ctx context.Context, tableID uuid.UUID, columnName string) (*models.SchemaColumn, error) {
+	if m.getColumnByNameFunc != nil {
+		return m.getColumnByNameFunc(ctx, tableID, columnName)
+	}
 	return nil, nil
 }
 func (m *mockSchemaRepo) UpsertColumn(context.Context, *models.SchemaColumn) error { return nil }
@@ -245,14 +256,13 @@ func (m *mockQueryExecutor) Close() error { return nil }
 
 func newTestExecutor(opts ...func(*OntologyToolExecutorConfig)) *OntologyToolExecutor {
 	cfg := &OntologyToolExecutorConfig{
-		ProjectID:     uuid.New(),
-		OntologyID:    uuid.New(),
-		DatasourceID:  uuid.New(),
-		OntologyRepo:  &mockOntologyRepo{},
-		KnowledgeRepo: &mockKnowledgeRepo{},
-		SchemaRepo:    &mockSchemaRepo{},
-		QueryExecutor: &mockQueryExecutor{},
-		Logger:        zap.NewNop(),
+		ProjectID:          uuid.New(),
+		DatasourceID:       uuid.New(),
+		ColumnMetadataRepo: &mockColumnMetadataRepo{},
+		KnowledgeRepo:      &mockKnowledgeRepo{},
+		SchemaRepo:         &mockSchemaRepo{},
+		QueryExecutor:      &mockQueryExecutor{},
+		Logger:             zap.NewNop(),
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -555,19 +565,23 @@ func TestOntologyToolExecutor_UpdateColumn_ValidSemanticTypes(t *testing.T) {
 		"date", "timestamp", "status", "flag", "code", "reference", "other",
 	}
 
+	tableID := uuid.New()
+	colID := uuid.New()
+
 	for _, st := range validTypes {
 		t.Run(st, func(t *testing.T) {
 			projectID := uuid.New()
 			executor := newTestExecutor(func(cfg *OntologyToolExecutorConfig) {
 				cfg.ProjectID = projectID
-				cfg.OntologyRepo = &mockOntologyRepo{
-					getActiveFunc: func(ctx context.Context, pID uuid.UUID) (*models.TieredOntology, error) {
-						return &models.TieredOntology{
-							ProjectID:     pID,
-							ColumnDetails: map[string][]models.ColumnDetail{},
-						}, nil
+				cfg.SchemaRepo = &mockSchemaRepo{
+					findTableByNameFunc: func(ctx context.Context, pID, dsID uuid.UUID, name string) (*models.SchemaTable, error) {
+						return &models.SchemaTable{ID: tableID, TableName: "users"}, nil
+					},
+					getColumnByNameFunc: func(ctx context.Context, tID uuid.UUID, colName string) (*models.SchemaColumn, error) {
+						return &models.SchemaColumn{ID: colID, ColumnName: "email"}, nil
 					},
 				}
+				cfg.ColumnMetadataRepo = &mockColumnMetadataRepo{}
 			})
 
 			args, _ := json.Marshal(map[string]string{
@@ -587,21 +601,31 @@ func TestOntologyToolExecutor_UpdateColumn_ValidSemanticTypes(t *testing.T) {
 }
 
 func TestOntologyToolExecutor_UpdateColumn_UpdateExistingColumn(t *testing.T) {
-	var savedColumns []models.ColumnDetail
+	tableID := uuid.New()
+	colID := uuid.New()
+	existingSemanticType := "identifier"
+	existingDesc := "old desc"
+	var savedMeta *models.ColumnMetadata
+
 	executor := newTestExecutor(func(cfg *OntologyToolExecutorConfig) {
-		cfg.OntologyRepo = &mockOntologyRepo{
-			getActiveFunc: func(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error) {
-				return &models.TieredOntology{
-					ProjectID: projectID,
-					ColumnDetails: map[string][]models.ColumnDetail{
-						"users": {
-							{Name: "email", Description: "old desc", SemanticType: "identifier"},
-						},
-					},
+		cfg.SchemaRepo = &mockSchemaRepo{
+			findTableByNameFunc: func(ctx context.Context, pID, dsID uuid.UUID, name string) (*models.SchemaTable, error) {
+				return &models.SchemaTable{ID: tableID, TableName: "users"}, nil
+			},
+			getColumnByNameFunc: func(ctx context.Context, tID uuid.UUID, colName string) (*models.SchemaColumn, error) {
+				return &models.SchemaColumn{ID: colID, ColumnName: "email"}, nil
+			},
+		}
+		cfg.ColumnMetadataRepo = &mockColumnMetadataRepo{
+			getBySchemaColumnIDFunc: func(ctx context.Context, scID uuid.UUID) (*models.ColumnMetadata, error) {
+				return &models.ColumnMetadata{
+					SchemaColumnID: scID,
+					Description:    &existingDesc,
+					SemanticType:   &existingSemanticType,
 				}, nil
 			},
-			updateColumnDetailsFunc: func(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error {
-				savedColumns = columns
+			upsertFunc: func(ctx context.Context, meta *models.ColumnMetadata) error {
+				savedMeta = meta
 				return nil
 			},
 		}
@@ -611,23 +635,31 @@ func TestOntologyToolExecutor_UpdateColumn_UpdateExistingColumn(t *testing.T) {
 		`{"table_name": "users", "column_name": "email", "description": "new desc"}`)
 
 	require.NoError(t, err)
-	require.Len(t, savedColumns, 1)
-	assert.Equal(t, "new desc", savedColumns[0].Description)
-	assert.Equal(t, "identifier", savedColumns[0].SemanticType) // Preserved
+	require.NotNil(t, savedMeta)
+	assert.Equal(t, "new desc", *savedMeta.Description)
+	assert.Equal(t, "identifier", *savedMeta.SemanticType) // Preserved
 }
 
 func TestOntologyToolExecutor_UpdateColumn_CreateNewColumn(t *testing.T) {
-	var savedColumns []models.ColumnDetail
+	tableID := uuid.New()
+	colID := uuid.New()
+	var savedMeta *models.ColumnMetadata
+
 	executor := newTestExecutor(func(cfg *OntologyToolExecutorConfig) {
-		cfg.OntologyRepo = &mockOntologyRepo{
-			getActiveFunc: func(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error) {
-				return &models.TieredOntology{
-					ProjectID:     projectID,
-					ColumnDetails: map[string][]models.ColumnDetail{},
-				}, nil
+		cfg.SchemaRepo = &mockSchemaRepo{
+			findTableByNameFunc: func(ctx context.Context, pID, dsID uuid.UUID, name string) (*models.SchemaTable, error) {
+				return &models.SchemaTable{ID: tableID, TableName: "users"}, nil
 			},
-			updateColumnDetailsFunc: func(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error {
-				savedColumns = columns
+			getColumnByNameFunc: func(ctx context.Context, tID uuid.UUID, colName string) (*models.SchemaColumn, error) {
+				return &models.SchemaColumn{ID: colID, ColumnName: "new_col"}, nil
+			},
+		}
+		cfg.ColumnMetadataRepo = &mockColumnMetadataRepo{
+			getBySchemaColumnIDFunc: func(ctx context.Context, scID uuid.UUID) (*models.ColumnMetadata, error) {
+				return nil, nil // No existing metadata
+			},
+			upsertFunc: func(ctx context.Context, meta *models.ColumnMetadata) error {
+				savedMeta = meta
 				return nil
 			},
 		}
@@ -637,28 +669,37 @@ func TestOntologyToolExecutor_UpdateColumn_CreateNewColumn(t *testing.T) {
 		`{"table_name": "users", "column_name": "new_col", "description": "a new column", "semantic_type": "name"}`)
 
 	require.NoError(t, err)
-	require.Len(t, savedColumns, 1)
-	assert.Equal(t, "new_col", savedColumns[0].Name)
-	assert.Equal(t, "a new column", savedColumns[0].Description)
-	assert.Equal(t, "name", savedColumns[0].SemanticType)
+	require.NotNil(t, savedMeta)
+	assert.Equal(t, colID, savedMeta.SchemaColumnID)
+	assert.Equal(t, "a new column", *savedMeta.Description)
+	assert.Equal(t, "name", *savedMeta.SemanticType)
 }
 
 func TestOntologyToolExecutor_UpdateColumn_BusinessNameAddedToSynonyms(t *testing.T) {
-	var savedColumns []models.ColumnDetail
+	tableID := uuid.New()
+	colID := uuid.New()
+	var savedMeta *models.ColumnMetadata
+
 	executor := newTestExecutor(func(cfg *OntologyToolExecutorConfig) {
-		cfg.OntologyRepo = &mockOntologyRepo{
-			getActiveFunc: func(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error) {
-				return &models.TieredOntology{
-					ProjectID: projectID,
-					ColumnDetails: map[string][]models.ColumnDetail{
-						"users": {
-							{Name: "email", Synonyms: []string{"e-mail"}},
-						},
+		cfg.SchemaRepo = &mockSchemaRepo{
+			findTableByNameFunc: func(ctx context.Context, pID, dsID uuid.UUID, name string) (*models.SchemaTable, error) {
+				return &models.SchemaTable{ID: tableID, TableName: "users"}, nil
+			},
+			getColumnByNameFunc: func(ctx context.Context, tID uuid.UUID, colName string) (*models.SchemaColumn, error) {
+				return &models.SchemaColumn{ID: colID, ColumnName: "email"}, nil
+			},
+		}
+		cfg.ColumnMetadataRepo = &mockColumnMetadataRepo{
+			getBySchemaColumnIDFunc: func(ctx context.Context, scID uuid.UUID) (*models.ColumnMetadata, error) {
+				return &models.ColumnMetadata{
+					SchemaColumnID: scID,
+					Features: models.ColumnMetadataFeatures{
+						Synonyms: []string{"e-mail"},
 					},
 				}, nil
 			},
-			updateColumnDetailsFunc: func(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error {
-				savedColumns = columns
+			upsertFunc: func(ctx context.Context, meta *models.ColumnMetadata) error {
+				savedMeta = meta
 				return nil
 			},
 		}
@@ -668,15 +709,15 @@ func TestOntologyToolExecutor_UpdateColumn_BusinessNameAddedToSynonyms(t *testin
 		`{"table_name": "users", "column_name": "email", "business_name": "Email Address"}`)
 
 	require.NoError(t, err)
-	require.Len(t, savedColumns, 1)
-	assert.Contains(t, savedColumns[0].Synonyms, "e-mail")
-	assert.Contains(t, savedColumns[0].Synonyms, "Email Address")
+	require.NotNil(t, savedMeta)
+	assert.Contains(t, savedMeta.Features.Synonyms, "e-mail")
+	assert.Contains(t, savedMeta.Features.Synonyms, "Email Address")
 }
 
-func TestOntologyToolExecutor_UpdateColumn_NoActiveOntology(t *testing.T) {
+func TestOntologyToolExecutor_UpdateColumn_TableNotFound(t *testing.T) {
 	executor := newTestExecutor(func(cfg *OntologyToolExecutorConfig) {
-		cfg.OntologyRepo = &mockOntologyRepo{
-			getActiveFunc: func(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error) {
+		cfg.SchemaRepo = &mockSchemaRepo{
+			findTableByNameFunc: func(ctx context.Context, pID, dsID uuid.UUID, name string) (*models.SchemaTable, error) {
 				return nil, nil
 			},
 		}
@@ -686,5 +727,5 @@ func TestOntologyToolExecutor_UpdateColumn_NoActiveOntology(t *testing.T) {
 		`{"table_name": "users", "column_name": "email"}`)
 
 	require.NoError(t, err) // Returns JSON error, not Go error
-	assert.Contains(t, result, "No active ontology found")
+	assert.Contains(t, result, "Table not found")
 }

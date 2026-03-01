@@ -41,7 +41,6 @@ type OntologyDAGService interface {
 
 type ontologyDAGService struct {
 	dagRepo       repositories.OntologyDAGRepository
-	ontologyRepo  repositories.OntologyRepository
 	schemaRepo    repositories.SchemaRepository
 	questionRepo  repositories.OntologyQuestionRepository
 	chatRepo      repositories.OntologyChatRepository
@@ -75,7 +74,6 @@ type ontologyDAGService struct {
 // NewOntologyDAGService creates a new OntologyDAGService.
 func NewOntologyDAGService(
 	dagRepo repositories.OntologyDAGRepository,
-	ontologyRepo repositories.OntologyRepository,
 	schemaRepo repositories.SchemaRepository,
 	questionRepo repositories.OntologyQuestionRepository,
 	chatRepo repositories.OntologyChatRepository,
@@ -86,7 +84,6 @@ func NewOntologyDAGService(
 ) *ontologyDAGService {
 	return &ontologyDAGService{
 		dagRepo:          dagRepo,
-		ontologyRepo:     ontologyRepo,
 		schemaRepo:       schemaRepo,
 		questionRepo:     questionRepo,
 		chatRepo:         chatRepo,
@@ -231,19 +228,12 @@ func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID 
 		return existing, nil
 	}
 
-	// Get or create ontology
-	ontology, err := s.getOrCreateOntology(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("get or create ontology: %w", err)
-	}
-
 	// Create new DAG
 	now := time.Now()
 	dagRecord := &models.OntologyDAG{
 		ID:           uuid.New(),
 		ProjectID:    projectID,
 		DatasourceID: datasourceID,
-		OntologyID:   &ontology.ID,
 		Status:       models.DAGStatusPending,
 	}
 
@@ -417,13 +407,6 @@ func (s *ontologyDAGService) Delete(ctx context.Context, projectID uuid.UUID) er
 	}
 	s.logger.Debug("Deleted inferred relationships", zap.String("project_id", projectID.String()), zap.Int64("count", deletedRels))
 
-	// Delete ontologies (CASCADE handles: relationships, entities → aliases/key_columns)
-	if err := s.ontologyRepo.DeleteByProject(ctx, projectID); err != nil {
-		s.logger.Error("Failed to delete ontologies", zap.String("project_id", projectID.String()), zap.Error(err))
-		return fmt.Errorf("delete ontologies: %w", err)
-	}
-	s.logger.Debug("Deleted ontologies", zap.String("project_id", projectID.String()))
-
 	s.logger.Info("Successfully deleted all ontology data", zap.String("project_id", projectID.String()))
 	return nil
 }
@@ -452,43 +435,6 @@ func (s *ontologyDAGService) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// getOrCreateOntology gets the active ontology or creates a new one.
-func (s *ontologyDAGService) getOrCreateOntology(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error) {
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("get active ontology: %w", err)
-	}
-
-	if ontology != nil {
-		return ontology, nil
-	}
-
-	// Create new ontology
-	nextVersion, err := s.ontologyRepo.GetNextVersion(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("get next version: %w", err)
-	}
-
-	ontology = &models.TieredOntology{
-		ID:            uuid.New(),
-		ProjectID:     projectID,
-		Version:       nextVersion,
-		IsActive:      true,
-		ColumnDetails: make(map[string][]models.ColumnDetail),
-		Metadata:      make(map[string]any),
-	}
-
-	if err := s.ontologyRepo.Create(ctx, ontology); err != nil {
-		return nil, fmt.Errorf("create ontology: %w", err)
-	}
-
-	s.logger.Info("Created new ontology",
-		zap.String("project_id", projectID.String()),
-		zap.String("ontology_id", ontology.ID.String()),
-		zap.Int("version", nextVersion))
-
-	return ontology, nil
-}
 
 // createNodes creates all DAG nodes in pending state.
 func (s *ontologyDAGService) createNodes(dagID uuid.UUID) []models.DAGNode {

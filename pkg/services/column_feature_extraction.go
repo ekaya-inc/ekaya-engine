@@ -51,7 +51,6 @@ type columnFeatureExtractionService struct {
 
 	// Dependencies for question creation when classifiers are uncertain
 	questionService OntologyQuestionService
-	ontologyRepo    repositories.OntologyRepository
 
 	// Cached classifiers (created lazily)
 	classifiersMu sync.RWMutex
@@ -104,7 +103,6 @@ func NewColumnFeatureExtractionServiceFull(
 	workerPool *llm.WorkerPool,
 	getTenantCtx TenantContextFunc,
 	questionService OntologyQuestionService,
-	ontologyRepo repositories.OntologyRepository,
 	logger *zap.Logger,
 ) ColumnFeatureExtractionService {
 	return &columnFeatureExtractionService{
@@ -116,7 +114,6 @@ func NewColumnFeatureExtractionServiceFull(
 		workerPool:         workerPool,
 		getTenantCtx:       getTenantCtx,
 		questionService:    questionService,
-		ontologyRepo:       ontologyRepo,
 		logger:             logger.Named("column-feature-extraction"),
 		classifiers:        make(map[models.ClassificationPath]ColumnClassifier),
 	}
@@ -764,28 +761,14 @@ func (s *columnFeatureExtractionService) createQuestionsFromUncertainClassificat
 		return
 	}
 
-	// Get active ontology for question storage
-	if s.ontologyRepo == nil || s.questionService == nil {
-		s.logger.Debug("Question service or ontology repo not available, skipping question creation",
+	// Store questions if question service is available
+	if s.questionService == nil {
+		s.logger.Debug("Question service not available, skipping question creation",
 			zap.Int("questions_skipped", len(questionInputs)))
 		return
 	}
 
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err != nil {
-		s.logger.Error("failed to get active ontology for classification question storage",
-			zap.Error(err))
-		// Non-fatal: continue even if we can't store questions
-		return
-	}
-
-	if ontology == nil {
-		s.logger.Debug("No active ontology found, skipping classification question storage",
-			zap.Int("questions_skipped", len(questionInputs)))
-		return
-	}
-
-	questionModels := ConvertQuestionInputs(questionInputs, projectID, ontology.ID, nil)
+	questionModels := ConvertQuestionInputs(questionInputs, projectID, uuid.Nil, nil)
 	if len(questionModels) == 0 {
 		return
 	}

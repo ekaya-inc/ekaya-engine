@@ -82,6 +82,7 @@ func setupGlossaryTest(t *testing.T) *glossaryTestContext {
 	glossaryRepo := repositories.NewGlossaryRepository()
 	ontologyRepo := repositories.NewOntologyRepository()
 	dsRepo := repositories.NewDatasourceRepository()
+	columnMetadataRepo := repositories.NewColumnMetadataRepository()
 
 	// Create repositories
 	schemaRepo := repositories.NewSchemaRepository()
@@ -94,12 +95,12 @@ func setupGlossaryTest(t *testing.T) *glossaryTestContext {
 	mockLLMFactory := &mockLLMClientFactory{}
 
 	// Create service with real dependencies
-	service := services.NewGlossaryService(glossaryRepo, ontologyRepo, knowledgeRepo, schemaRepo, datasourceSvc, adapterFactory, mockLLMFactory, nil, zap.NewNop(), "test")
+	service := services.NewGlossaryService(glossaryRepo, columnMetadataRepo, knowledgeRepo, schemaRepo, nil, datasourceSvc, adapterFactory, mockLLMFactory, nil, zap.NewNop(), "test")
 
 	// Create handler
 	questionService := services.NewOntologyQuestionService(
-		repositories.NewOntologyQuestionRepository(), ontologyRepo, nil,
-		nil, zap.NewNop())
+		repositories.NewOntologyQuestionRepository(), columnMetadataRepo, schemaRepo,
+		knowledgeRepo, nil, zap.NewNop())
 	handler := NewGlossaryHandler(service, questionService, zap.NewNop())
 
 	// Use a unique project ID for consistent testing
