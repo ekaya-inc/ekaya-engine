@@ -46,6 +46,14 @@ func (s *stubChangeDetectionService) DetectChanges(ctx context.Context, projectI
 	return s.changes, nil
 }
 
+func (s *stubChangeDetectionService) ListPendingChanges(ctx context.Context, projectID uuid.UUID, status string, limit int) ([]*models.PendingChange, error) {
+	return nil, nil
+}
+
+func (s *stubChangeDetectionService) ResolvePendingChanges(ctx context.Context, projectID uuid.UUID, selectedTableNames map[string]bool, selectedColumnNames map[string]bool) (*ResolvedChangesResult, error) {
+	return &ResolvedChangesResult{}, nil
+}
+
 // ============================================================================
 // Tests
 // ============================================================================

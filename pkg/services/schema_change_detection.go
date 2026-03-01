@@ -13,11 +13,26 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
 
+// ResolvedChangesResult contains the counts of approved and rejected changes.
+type ResolvedChangesResult struct {
+	ApprovedCount int
+	RejectedCount int
+}
+
 // SchemaChangeDetectionService detects schema changes and creates pending changes for review.
 type SchemaChangeDetectionService interface {
 	// DetectChanges analyzes a RefreshResult and creates pending changes for review.
 	// Returns the pending changes that were created.
 	DetectChanges(ctx context.Context, projectID uuid.UUID, refreshResult *models.RefreshResult) ([]*models.PendingChange, error)
+
+	// ListPendingChanges returns pending changes for a project filtered by status.
+	ListPendingChanges(ctx context.Context, projectID uuid.UUID, status string, limit int) ([]*models.PendingChange, error)
+
+	// ResolvePendingChanges approves or rejects pending schema changes based on selections.
+	// selectedTableNames: table_name -> selected (e.g. "public.users" -> true)
+	// selectedColumnNames: "table_name.column_name" -> selected (e.g. "public.users.id" -> true)
+	// Auto-applied changes are skipped.
+	ResolvePendingChanges(ctx context.Context, projectID uuid.UUID, selectedTableNames map[string]bool, selectedColumnNames map[string]bool) (*ResolvedChangesResult, error)
 }
 
 type schemaChangeDetectionService struct {
@@ -144,6 +159,74 @@ func (s *schemaChangeDetectionService) DetectChanges(
 	}
 
 	return changes, nil
+}
+
+// ListPendingChanges returns pending changes for a project filtered by status.
+func (s *schemaChangeDetectionService) ListPendingChanges(ctx context.Context, projectID uuid.UUID, status string, limit int) ([]*models.PendingChange, error) {
+	return s.pendingChangeRepo.List(ctx, projectID, status, limit)
+}
+
+// ResolvePendingChanges approves or rejects pending schema changes based on name-based selections.
+func (s *schemaChangeDetectionService) ResolvePendingChanges(
+	ctx context.Context,
+	projectID uuid.UUID,
+	selectedTableNames map[string]bool,
+	selectedColumnNames map[string]bool,
+) (*ResolvedChangesResult, error) {
+	pendingChanges, err := s.pendingChangeRepo.List(ctx, projectID, models.ChangeStatusPending, 1000)
+	if err != nil {
+		return nil, fmt.Errorf("list pending changes: %w", err)
+	}
+
+	if len(pendingChanges) == 0 {
+		return &ResolvedChangesResult{}, nil
+	}
+
+	result := &ResolvedChangesResult{}
+
+	for _, change := range pendingChanges {
+		var shouldApprove bool
+
+		switch change.ChangeType {
+		case models.ChangeTypeNewTable:
+			shouldApprove = selectedTableNames[change.TableName]
+		case models.ChangeTypeNewColumn, models.ChangeTypeModifiedColumn:
+			key := change.TableName + "." + change.ColumnName
+			shouldApprove = selectedColumnNames[key]
+		default:
+			// Skip other change types (dropped_table, dropped_column are auto_applied)
+			continue
+		}
+
+		reviewedBy := "schema_selection"
+		if shouldApprove {
+			if err := s.pendingChangeRepo.UpdateStatus(ctx, change.ID, models.ChangeStatusApproved, reviewedBy); err != nil {
+				s.logger.Warn("Failed to approve pending change",
+					zap.String("change_id", change.ID.String()),
+					zap.Error(err))
+				continue
+			}
+			result.ApprovedCount++
+		} else {
+			if err := s.pendingChangeRepo.UpdateStatus(ctx, change.ID, models.ChangeStatusRejected, reviewedBy); err != nil {
+				s.logger.Warn("Failed to reject pending change",
+					zap.String("change_id", change.ID.String()),
+					zap.Error(err))
+				continue
+			}
+			result.RejectedCount++
+		}
+	}
+
+	if result.ApprovedCount > 0 || result.RejectedCount > 0 {
+		s.logger.Info("Resolved pending changes from schema selection",
+			zap.String("project_id", projectID.String()),
+			zap.Int("approved", result.ApprovedCount),
+			zap.Int("rejected", result.RejectedCount),
+		)
+	}
+
+	return result, nil
 }
 
 // toEntityName converts a table name to an entity name.

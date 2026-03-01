@@ -16,6 +16,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 func TestSchemaHandler_GetSchema_Success(t *testing.T) {
@@ -585,5 +586,263 @@ func TestSchemaHandler_ServiceError(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("expected status 500, got %d", rec.Code)
+	}
+}
+
+// --- Task 1: GetSchema includes pending changes ---
+
+func TestSchemaHandler_GetSchema_IncludesPendingChanges(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	changeID1 := uuid.New()
+	changeID2 := uuid.New()
+
+	service := &mockSchemaService{
+		schema: &models.DatasourceSchema{
+			ProjectID:    projectID,
+			DatasourceID: datasourceID,
+			Tables: []*models.DatasourceTable{
+				{
+					ID:         uuid.New(),
+					SchemaName: "public",
+					TableName:  "invoices",
+					IsSelected: true,
+					Columns: []*models.DatasourceColumn{
+						{ID: uuid.New(), ColumnName: "amount", DataType: "numeric", IsSelected: true},
+					},
+				},
+			},
+		},
+	}
+	changeDetectionSvc := &mockSchemaChangeDetectionService{
+		pendingChanges: []*models.PendingChange{
+			{
+				ID:         changeID1,
+				ProjectID:  projectID,
+				ChangeType: models.ChangeTypeNewTable,
+				TableName:  "public.invoices",
+				Status:     models.ChangeStatusPending,
+			},
+			{
+				ID:         changeID2,
+				ProjectID:  projectID,
+				ChangeType: models.ChangeTypeNewColumn,
+				TableName:  "public.invoices",
+				ColumnName: "amount",
+				Status:     models.ChangeStatusPending,
+			},
+		},
+	}
+	handler := NewSchemaHandler(service, changeDetectionSvc, zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema", nil)
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("dsid", datasourceID.String())
+
+	rec := httptest.NewRecorder()
+	handler.GetSchema(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp ApiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	dataMap := resp.Data.(map[string]any)
+
+	// Verify pending_changes map exists and has entries
+	pendingChanges, ok := dataMap["pending_changes"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected pending_changes to be a map, got %T", dataMap["pending_changes"])
+	}
+
+	// Table-level change: keyed by "schema_name.table_name"
+	tableChange, ok := pendingChanges["public.invoices"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected pending change for 'public.invoices', got %v", pendingChanges)
+	}
+	if tableChange["change_id"] != changeID1.String() {
+		t.Errorf("expected change_id %s, got %v", changeID1.String(), tableChange["change_id"])
+	}
+	if tableChange["change_type"] != models.ChangeTypeNewTable {
+		t.Errorf("expected change_type 'new_table', got %v", tableChange["change_type"])
+	}
+	if tableChange["status"] != models.ChangeStatusPending {
+		t.Errorf("expected status 'pending', got %v", tableChange["status"])
+	}
+
+	// Column-level change: keyed by "schema_name.table_name.column_name"
+	colChange, ok := pendingChanges["public.invoices.amount"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected pending change for 'public.invoices.amount', got %v", pendingChanges)
+	}
+	if colChange["change_id"] != changeID2.String() {
+		t.Errorf("expected change_id %s, got %v", changeID2.String(), colChange["change_id"])
+	}
+	if colChange["change_type"] != models.ChangeTypeNewColumn {
+		t.Errorf("expected change_type 'new_column', got %v", colChange["change_type"])
+	}
+}
+
+func TestSchemaHandler_GetSchema_NoPendingChanges(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	service := &mockSchemaService{
+		schema: &models.DatasourceSchema{
+			ProjectID:    projectID,
+			DatasourceID: datasourceID,
+			Tables:       []*models.DatasourceTable{},
+		},
+	}
+	// No pending changes — change detection service returns empty list
+	changeDetectionSvc := &mockSchemaChangeDetectionService{}
+	handler := NewSchemaHandler(service, changeDetectionSvc, zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema", nil)
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("dsid", datasourceID.String())
+
+	rec := httptest.NewRecorder()
+	handler.GetSchema(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	var resp ApiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	dataMap := resp.Data.(map[string]any)
+	pendingChanges, ok := dataMap["pending_changes"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected pending_changes to be a map, got %T", dataMap["pending_changes"])
+	}
+	if len(pendingChanges) != 0 {
+		t.Errorf("expected empty pending_changes map, got %d entries", len(pendingChanges))
+	}
+}
+
+// --- Task 2: SaveSelections resolves pending changes ---
+
+func TestSchemaHandler_SaveSelections_ResolvesPendingChanges(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	tableID := uuid.New()
+	columnID := uuid.New()
+
+	service := &mockSchemaService{
+		schema: &models.DatasourceSchema{
+			ProjectID:    projectID,
+			DatasourceID: datasourceID,
+			Tables: []*models.DatasourceTable{
+				{
+					ID:         tableID,
+					SchemaName: "public",
+					TableName:  "invoices",
+					IsSelected: true,
+					Columns: []*models.DatasourceColumn{
+						{ID: columnID, ColumnName: "amount", DataType: "numeric", IsSelected: true},
+					},
+				},
+			},
+		},
+	}
+	changeDetectionSvc := &mockSchemaChangeDetectionService{
+		resolvedResult: &services.ResolvedChangesResult{
+			ApprovedCount: 2,
+			RejectedCount: 1,
+		},
+	}
+	handler := NewSchemaHandler(service, changeDetectionSvc, zap.NewNop())
+
+	body := fmt.Sprintf(`{"table_selections": {"%s": true}, "column_selections": {"%s": ["%s"]}}`,
+		tableID.String(), tableID.String(), columnID.String())
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/selections", bytes.NewBufferString(body))
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("dsid", datasourceID.String())
+
+	rec := httptest.NewRecorder()
+	handler.SaveSelections(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp ApiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Error("expected success to be true")
+	}
+
+	dataMap, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be a map, got %T", resp.Data)
+	}
+
+	if dataMap["approved_count"] != float64(2) {
+		t.Errorf("expected approved_count 2, got %v", dataMap["approved_count"])
+	}
+	if dataMap["rejected_count"] != float64(1) {
+		t.Errorf("expected rejected_count 1, got %v", dataMap["rejected_count"])
+	}
+}
+
+func TestSchemaHandler_SaveSelections_NoPendingChanges_BackwardCompatible(t *testing.T) {
+	service := &mockSchemaService{
+		schema: &models.DatasourceSchema{
+			ProjectID:    uuid.New(),
+			DatasourceID: uuid.New(),
+			Tables:       []*models.DatasourceTable{},
+		},
+	}
+	// No pending changes to resolve
+	changeDetectionSvc := &mockSchemaChangeDetectionService{}
+	handler := NewSchemaHandler(service, changeDetectionSvc, zap.NewNop())
+
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	tableID := uuid.New()
+
+	body := fmt.Sprintf(`{"table_selections": {"%s": true}, "column_selections": {}}`, tableID.String())
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/selections", bytes.NewBufferString(body))
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("dsid", datasourceID.String())
+
+	rec := httptest.NewRecorder()
+	handler.SaveSelections(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp ApiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Error("expected success to be true")
+	}
+
+	dataMap, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be a map, got %T", resp.Data)
+	}
+
+	// Should return zero counts when no pending changes
+	if dataMap["approved_count"] != float64(0) {
+		t.Errorf("expected approved_count 0, got %v", dataMap["approved_count"])
+	}
+	if dataMap["rejected_count"] != float64(0) {
+		t.Errorf("expected rejected_count 0, got %v", dataMap["rejected_count"])
 	}
 }
