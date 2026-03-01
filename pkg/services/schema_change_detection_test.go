@@ -130,6 +130,7 @@ func TestSchemaChangeDetectionService_DetectChanges_DroppedTables(t *testing.T) 
 	assert.Equal(t, models.ChangeTypeDroppedTable, changes[0].ChangeType)
 	assert.Equal(t, "public.legacy_table", changes[0].TableName)
 	assert.Equal(t, models.SuggestedActionReviewEntity, changes[0].SuggestedAction)
+	assert.Equal(t, models.ChangeStatusAutoApplied, changes[0].Status, "destructive changes should be auto_applied, not pending")
 }
 
 func TestSchemaChangeDetectionService_DetectChanges_NewColumns(t *testing.T) {
@@ -177,6 +178,7 @@ func TestSchemaChangeDetectionService_DetectChanges_DroppedColumns(t *testing.T)
 	assert.Equal(t, "deprecated_field", changes[0].ColumnName)
 	assert.Equal(t, "text", changes[0].OldValue["type"])
 	assert.Equal(t, models.SuggestedActionReviewColumn, changes[0].SuggestedAction)
+	assert.Equal(t, models.ChangeStatusAutoApplied, changes[0].Status, "destructive changes should be auto_applied, not pending")
 }
 
 func TestSchemaChangeDetectionService_DetectChanges_ModifiedColumns(t *testing.T) {
@@ -253,7 +255,7 @@ func TestSchemaChangeDetectionService_DetectChanges_MixedChanges(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, changes, 5) // 1 new table + 1 dropped table + 1 new col + 1 dropped col + 1 modified col
 
-	// Verify all change types are represented
+	// Verify all change types are represented and statuses are correct
 	changeTypes := make(map[string]int)
 	for _, c := range changes {
 		changeTypes[c.ChangeType]++
@@ -263,6 +265,16 @@ func TestSchemaChangeDetectionService_DetectChanges_MixedChanges(t *testing.T) {
 	assert.Equal(t, 1, changeTypes[models.ChangeTypeNewColumn])
 	assert.Equal(t, 1, changeTypes[models.ChangeTypeDroppedColumn])
 	assert.Equal(t, 1, changeTypes[models.ChangeTypeModifiedColumn])
+
+	// Verify destructive changes are auto_applied, others are pending
+	for _, c := range changes {
+		switch c.ChangeType {
+		case models.ChangeTypeDroppedTable, models.ChangeTypeDroppedColumn:
+			assert.Equal(t, models.ChangeStatusAutoApplied, c.Status, "destructive change %s should be auto_applied", c.ChangeType)
+		default:
+			assert.Equal(t, models.ChangeStatusPending, c.Status, "non-destructive change %s should be pending", c.ChangeType)
+		}
+	}
 }
 
 func TestToEntityName(t *testing.T) {

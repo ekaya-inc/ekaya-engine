@@ -67,7 +67,7 @@ func (s *schemaChangeDetectionService) DetectChanges(
 		changes = append(changes, change)
 	}
 
-	// Dropped tables → flag for review (don't auto-delete entities)
+	// Dropped tables → auto-applied (the table is already gone from the datasource)
 	for _, tableName := range refreshResult.RemovedTableNames {
 		change := &models.PendingChange{
 			ProjectID:       projectID,
@@ -75,7 +75,7 @@ func (s *schemaChangeDetectionService) DetectChanges(
 			ChangeSource:    models.ChangeSourceSchemaRefresh,
 			TableName:       tableName,
 			SuggestedAction: models.SuggestedActionReviewEntity,
-			Status:          models.ChangeStatusPending,
+			Status:          models.ChangeStatusAutoApplied,
 		}
 		changes = append(changes, change)
 	}
@@ -95,7 +95,7 @@ func (s *schemaChangeDetectionService) DetectChanges(
 		changes = append(changes, change)
 	}
 
-	// Dropped columns → flag for review
+	// Dropped columns → auto-applied (the column is already gone from the datasource)
 	for _, col := range refreshResult.RemovedColumns {
 		change := &models.PendingChange{
 			ProjectID:       projectID,
@@ -105,7 +105,7 @@ func (s *schemaChangeDetectionService) DetectChanges(
 			ColumnName:      col.ColumnName,
 			OldValue:        map[string]any{"type": col.DataType},
 			SuggestedAction: models.SuggestedActionReviewColumn,
-			Status:          models.ChangeStatusPending,
+			Status:          models.ChangeStatusAutoApplied,
 		}
 		changes = append(changes, change)
 	}

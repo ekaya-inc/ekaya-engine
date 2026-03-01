@@ -94,6 +94,11 @@ func (s *changeReviewService) ApproveChange(ctx context.Context, changeID uuid.U
 		return nil, fmt.Errorf("pending change not found")
 	}
 
+	// Auto-applied changes are informational — approve is a no-op
+	if change.Status == models.ChangeStatusAutoApplied {
+		return change, nil
+	}
+
 	// Verify change is still pending
 	if change.Status != models.ChangeStatusPending {
 		return nil, fmt.Errorf("change is not pending (status: %s)", change.Status)
@@ -128,6 +133,11 @@ func (s *changeReviewService) RejectChange(ctx context.Context, changeID uuid.UU
 	}
 	if change == nil {
 		return nil, fmt.Errorf("pending change not found")
+	}
+
+	// Auto-applied changes are informational — reject is a no-op
+	if change.Status == models.ChangeStatusAutoApplied {
+		return change, nil
 	}
 
 	// Verify change is still pending
