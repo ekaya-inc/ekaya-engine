@@ -435,7 +435,6 @@ func (s *ontologyDAGService) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-
 // createNodes creates all DAG nodes in pending state.
 func (s *ontologyDAGService) createNodes(dagID uuid.UUID) []models.DAGNode {
 	allNodes := models.AllDAGNodes()

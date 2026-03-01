@@ -70,14 +70,14 @@ func (r *ontologyDAGRepository) Create(ctx context.Context, dag *models.Ontology
 
 	query := `
 		INSERT INTO engine_ontology_dag (
-			id, project_id, datasource_id, ontology_id,
+			id, project_id, datasource_id,
 			status, current_node, schema_fingerprint,
 			owner_id, last_heartbeat,
 			started_at, completed_at, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
 
 	_, err := scope.Conn.Exec(ctx, query,
-		dag.ID, dag.ProjectID, dag.DatasourceID, dag.OntologyID,
+		dag.ID, dag.ProjectID, dag.DatasourceID,
 		dag.Status, dag.CurrentNode, dag.SchemaFingerprint,
 		dag.OwnerID, dag.LastHeartbeat,
 		dag.StartedAt, dag.CompletedAt, dag.CreatedAt, dag.UpdatedAt,
@@ -96,7 +96,7 @@ func (r *ontologyDAGRepository) GetByID(ctx context.Context, id uuid.UUID) (*mod
 	}
 
 	query := `
-		SELECT id, project_id, datasource_id, ontology_id,
+		SELECT id, project_id, datasource_id,
 		       status, current_node, schema_fingerprint,
 		       owner_id, last_heartbeat,
 		       started_at, completed_at, created_at, updated_at
@@ -132,7 +132,7 @@ func (r *ontologyDAGRepository) GetLatestByDatasource(ctx context.Context, datas
 	}
 
 	query := `
-		SELECT id, project_id, datasource_id, ontology_id,
+		SELECT id, project_id, datasource_id,
 		       status, current_node, schema_fingerprint,
 		       owner_id, last_heartbeat,
 		       started_at, completed_at, created_at, updated_at
@@ -159,7 +159,7 @@ func (r *ontologyDAGRepository) GetLatestByProject(ctx context.Context, projectI
 	}
 
 	query := `
-		SELECT id, project_id, datasource_id, ontology_id,
+		SELECT id, project_id, datasource_id,
 		       status, current_node, schema_fingerprint,
 		       owner_id, last_heartbeat,
 		       started_at, completed_at, created_at, updated_at
@@ -186,7 +186,7 @@ func (r *ontologyDAGRepository) GetActiveByDatasource(ctx context.Context, datas
 	}
 
 	query := `
-		SELECT id, project_id, datasource_id, ontology_id,
+		SELECT id, project_id, datasource_id,
 		       status, current_node, schema_fingerprint,
 		       owner_id, last_heartbeat,
 		       started_at, completed_at, created_at, updated_at
@@ -213,7 +213,7 @@ func (r *ontologyDAGRepository) GetActiveByProject(ctx context.Context, projectI
 	}
 
 	query := `
-		SELECT id, project_id, datasource_id, ontology_id,
+		SELECT id, project_id, datasource_id,
 		       status, current_node, schema_fingerprint,
 		       owner_id, last_heartbeat,
 		       started_at, completed_at, created_at, updated_at
@@ -243,19 +243,18 @@ func (r *ontologyDAGRepository) Update(ctx context.Context, dag *models.Ontology
 
 	query := `
 		UPDATE engine_ontology_dag
-		SET ontology_id = $2,
-		    status = $3,
-		    current_node = $4,
-		    schema_fingerprint = $5,
-		    owner_id = $6,
-		    last_heartbeat = $7,
-		    started_at = $8,
-		    completed_at = $9,
-		    updated_at = $10
+		SET status = $2,
+		    current_node = $3,
+		    schema_fingerprint = $4,
+		    owner_id = $5,
+		    last_heartbeat = $6,
+		    started_at = $7,
+		    completed_at = $8,
+		    updated_at = $9
 		WHERE id = $1`
 
 	result, err := scope.Conn.Exec(ctx, query,
-		dag.ID, dag.OntologyID, dag.Status, dag.CurrentNode, dag.SchemaFingerprint,
+		dag.ID, dag.Status, dag.CurrentNode, dag.SchemaFingerprint,
 		dag.OwnerID, dag.LastHeartbeat, dag.StartedAt, dag.CompletedAt, dag.UpdatedAt,
 	)
 	if err != nil {
@@ -652,7 +651,7 @@ func scanDAGRow(row pgx.Row) (*models.OntologyDAG, error) {
 	var dag models.OntologyDAG
 
 	err := row.Scan(
-		&dag.ID, &dag.ProjectID, &dag.DatasourceID, &dag.OntologyID,
+		&dag.ID, &dag.ProjectID, &dag.DatasourceID,
 		&dag.Status, &dag.CurrentNode, &dag.SchemaFingerprint,
 		&dag.OwnerID, &dag.LastHeartbeat,
 		&dag.StartedAt, &dag.CompletedAt, &dag.CreatedAt, &dag.UpdatedAt,

@@ -54,11 +54,11 @@ func (m *mockGlossaryService) SuggestTerms(ctx context.Context, projectID uuid.U
 	return nil, nil
 }
 
-func (m *mockGlossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) (int, error) {
+func (m *mockGlossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 0, nil
 }
 
-func (m *mockGlossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error {
+func (m *mockGlossaryService) EnrichGlossaryTerms(ctx context.Context, projectID uuid.UUID) error {
 	return nil
 }
 

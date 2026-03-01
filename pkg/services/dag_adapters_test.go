@@ -13,8 +13,8 @@ import (
 
 // Mock GlossaryService for testing adapters
 type mockGlossaryService struct {
-	discoverFunc func(ctx context.Context, projectID, ontologyID uuid.UUID) (int, error)
-	enrichFunc   func(ctx context.Context, projectID, ontologyID uuid.UUID) error
+	discoverFunc func(ctx context.Context, projectID uuid.UUID) (int, error)
+	enrichFunc   func(ctx context.Context, projectID uuid.UUID) error
 }
 
 func (m *mockGlossaryService) CreateTerm(ctx context.Context, projectID uuid.UUID, term *models.BusinessGlossaryTerm) error {
@@ -57,16 +57,16 @@ func (m *mockGlossaryService) SuggestTerms(ctx context.Context, projectID uuid.U
 	return nil, nil
 }
 
-func (m *mockGlossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) (int, error) {
+func (m *mockGlossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID uuid.UUID) (int, error) {
 	if m.discoverFunc != nil {
-		return m.discoverFunc(ctx, projectID, ontologyID)
+		return m.discoverFunc(ctx, projectID)
 	}
 	return 0, nil
 }
 
-func (m *mockGlossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error {
+func (m *mockGlossaryService) EnrichGlossaryTerms(ctx context.Context, projectID uuid.UUID) error {
 	if m.enrichFunc != nil {
-		return m.enrichFunc(ctx, projectID, ontologyID)
+		return m.enrichFunc(ctx, projectID)
 	}
 	return nil
 }
@@ -83,19 +83,17 @@ func (m *mockGlossaryService) RunAutoGenerate(ctx context.Context, projectID uui
 
 func TestGlossaryDiscoveryAdapter_DiscoverGlossaryTerms_Success(t *testing.T) {
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	expectedCount := 5
 
 	mock := &mockGlossaryService{
-		discoverFunc: func(ctx context.Context, pid, oid uuid.UUID) (int, error) {
+		discoverFunc: func(ctx context.Context, pid uuid.UUID) (int, error) {
 			assert.Equal(t, projectID, pid)
-			assert.Equal(t, ontologyID, oid)
 			return expectedCount, nil
 		},
 	}
 
 	adapter := NewGlossaryDiscoveryAdapter(mock)
-	count, err := adapter.DiscoverGlossaryTerms(context.Background(), projectID, ontologyID)
+	count, err := adapter.DiscoverGlossaryTerms(context.Background(), projectID)
 
 	assert.NoError(t, err)
 	assert.Equal(t, expectedCount, count)
@@ -103,17 +101,16 @@ func TestGlossaryDiscoveryAdapter_DiscoverGlossaryTerms_Success(t *testing.T) {
 
 func TestGlossaryDiscoveryAdapter_DiscoverGlossaryTerms_Error(t *testing.T) {
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	expectedErr := errors.New("discovery failed")
 
 	mock := &mockGlossaryService{
-		discoverFunc: func(ctx context.Context, pid, oid uuid.UUID) (int, error) {
+		discoverFunc: func(ctx context.Context, pid uuid.UUID) (int, error) {
 			return 0, expectedErr
 		},
 	}
 
 	adapter := NewGlossaryDiscoveryAdapter(mock)
-	count, err := adapter.DiscoverGlossaryTerms(context.Background(), projectID, ontologyID)
+	count, err := adapter.DiscoverGlossaryTerms(context.Background(), projectID)
 
 	assert.Error(t, err)
 	assert.Equal(t, expectedErr, err)
@@ -122,16 +119,15 @@ func TestGlossaryDiscoveryAdapter_DiscoverGlossaryTerms_Error(t *testing.T) {
 
 func TestGlossaryDiscoveryAdapter_DiscoverGlossaryTerms_ZeroTerms(t *testing.T) {
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	mock := &mockGlossaryService{
-		discoverFunc: func(ctx context.Context, pid, oid uuid.UUID) (int, error) {
+		discoverFunc: func(ctx context.Context, pid uuid.UUID) (int, error) {
 			return 0, nil
 		},
 	}
 
 	adapter := NewGlossaryDiscoveryAdapter(mock)
-	count, err := adapter.DiscoverGlossaryTerms(context.Background(), projectID, ontologyID)
+	count, err := adapter.DiscoverGlossaryTerms(context.Background(), projectID)
 
 	assert.NoError(t, err)
 	assert.Equal(t, 0, count)

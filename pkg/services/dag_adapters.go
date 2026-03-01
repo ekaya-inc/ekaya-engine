@@ -134,8 +134,8 @@ func NewGlossaryDiscoveryAdapter(svc GlossaryService) dag.GlossaryDiscoveryMetho
 	return &GlossaryDiscoveryAdapter{svc: svc}
 }
 
-func (a *GlossaryDiscoveryAdapter) DiscoverGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) (int, error) {
-	return a.svc.DiscoverGlossaryTerms(ctx, projectID, ontologyID)
+func (a *GlossaryDiscoveryAdapter) DiscoverGlossaryTerms(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return a.svc.DiscoverGlossaryTerms(ctx, projectID)
 }
 
 // GlossaryEnrichmentAdapter adapts GlossaryService for the dag package.
@@ -148,6 +148,6 @@ func NewGlossaryEnrichmentAdapter(svc GlossaryService) dag.GlossaryEnrichmentMet
 	return &GlossaryEnrichmentAdapter{svc: svc}
 }
 
-func (a *GlossaryEnrichmentAdapter) EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error {
-	return a.svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+func (a *GlossaryEnrichmentAdapter) EnrichGlossaryTerms(ctx context.Context, projectID uuid.UUID) error {
+	return a.svc.EnrichGlossaryTerms(ctx, projectID)
 }

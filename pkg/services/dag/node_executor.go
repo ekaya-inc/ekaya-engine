@@ -87,21 +87,14 @@ type ExecutionContext struct {
 	NodeID       uuid.UUID
 	ProjectID    uuid.UUID
 	DatasourceID uuid.UUID
-	OntologyID   uuid.UUID
 }
 
 // NewExecutionContext creates an execution context from a DAG and node.
 func NewExecutionContext(dag *models.OntologyDAG, node *models.DAGNode) *ExecutionContext {
-	var ontologyID uuid.UUID
-	if dag.OntologyID != nil {
-		ontologyID = *dag.OntologyID
-	}
-
 	return &ExecutionContext{
 		DAG:          dag,
 		NodeID:       node.ID,
 		ProjectID:    dag.ProjectID,
 		DatasourceID: dag.DatasourceID,
-		OntologyID:   ontologyID,
 	}
 }

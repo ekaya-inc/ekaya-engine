@@ -103,7 +103,6 @@ func setupSchemaSelectionTest(t *testing.T) *schemaSelectionTestContext {
 			Logger:           zap.NewNop(),
 		},
 		SchemaRepo:         schemaRepo,
-		OntologyRepo:       repositories.NewOntologyRepository(),
 		ColumnMetadataRepo: repositories.NewColumnMetadataRepository(),
 		ProjectService:     mockProject,
 	})
@@ -116,7 +115,6 @@ func setupSchemaSelectionTest(t *testing.T) *schemaSelectionTestContext {
 			Logger:           zap.NewNop(),
 		},
 		SchemaRepo:         schemaRepo,
-		OntologyRepo:       repositories.NewOntologyRepository(),
 		ColumnMetadataRepo: repositories.NewColumnMetadataRepository(),
 		ProjectService:     mockProject,
 	})

@@ -157,10 +157,9 @@ func (p *DAGNodeProgress) Percentage() int {
 
 // OntologyDAG represents a DAG execution for ontology extraction.
 type OntologyDAG struct {
-	ID           uuid.UUID  `json:"id"`
-	ProjectID    uuid.UUID  `json:"project_id"`
-	DatasourceID uuid.UUID  `json:"datasource_id"`
-	OntologyID   *uuid.UUID `json:"ontology_id,omitempty"`
+	ID           uuid.UUID `json:"id"`
+	ProjectID    uuid.UUID `json:"project_id"`
+	DatasourceID uuid.UUID `json:"datasource_id"`
 
 	// Execution state
 	Status      DAGStatus `json:"status"`

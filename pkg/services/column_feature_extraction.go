@@ -768,7 +768,7 @@ func (s *columnFeatureExtractionService) createQuestionsFromUncertainClassificat
 		return
 	}
 
-	questionModels := ConvertQuestionInputs(questionInputs, projectID, uuid.Nil, nil)
+	questionModels := ConvertQuestionInputs(questionInputs, projectID, nil)
 	if len(questionModels) == 0 {
 		return
 	}

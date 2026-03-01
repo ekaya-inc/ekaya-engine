@@ -127,8 +127,8 @@ func (tc *dagTestContext) createTestDAG(ctx context.Context) *models.OntologyDAG
 		ID:           uuid.New(),
 		ProjectID:    tc.projectID,
 		DatasourceID: tc.datasourceID,
-		OntologyID:   &tc.ontologyID,
-		Status:       models.DAGStatusPending,
+
+		Status: models.DAGStatusPending,
 	}
 	err := tc.repo.Create(ctx, dag)
 	if err != nil {
@@ -149,10 +149,10 @@ func TestDAGRepository_Create(t *testing.T) {
 	defer cleanup()
 
 	dag := &models.OntologyDAG{
-		ID:                uuid.New(),
-		ProjectID:         tc.projectID,
-		DatasourceID:      tc.datasourceID,
-		OntologyID:        &tc.ontologyID,
+		ID:           uuid.New(),
+		ProjectID:    tc.projectID,
+		DatasourceID: tc.datasourceID,
+
 		Status:            models.DAGStatusPending,
 		SchemaFingerprint: strPtr("abc123"),
 	}
@@ -202,8 +202,8 @@ func TestDAGRepository_GetLatestByDatasource(t *testing.T) {
 		ID:           uuid.New(),
 		ProjectID:    tc.projectID,
 		DatasourceID: tc.datasourceID,
-		OntologyID:   &tc.ontologyID,
-		Status:       models.DAGStatusRunning,
+
+		Status: models.DAGStatusRunning,
 	}
 	err = tc.repo.Create(ctx, dag2)
 	if err != nil {
@@ -235,8 +235,8 @@ func TestDAGRepository_GetActiveByDatasource(t *testing.T) {
 		ID:           uuid.New(),
 		ProjectID:    tc.projectID,
 		DatasourceID: tc.datasourceID,
-		OntologyID:   &tc.ontologyID,
-		Status:       models.DAGStatusCompleted,
+
+		Status: models.DAGStatusCompleted,
 	}
 	err := tc.repo.Create(ctx, dag1)
 	if err != nil {
@@ -257,8 +257,8 @@ func TestDAGRepository_GetActiveByDatasource(t *testing.T) {
 		ID:           uuid.New(),
 		ProjectID:    tc.projectID,
 		DatasourceID: tc.datasourceID,
-		OntologyID:   &tc.ontologyID,
-		Status:       models.DAGStatusRunning,
+
+		Status: models.DAGStatusRunning,
 	}
 	err = tc.repo.Create(ctx, dag2)
 	if err != nil {

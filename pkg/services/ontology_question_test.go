@@ -87,10 +87,6 @@ func (m *mockQuestionRepo) UpdateStatusWithReason(ctx context.Context, id uuid.U
 	return nil
 }
 
-func (m *mockQuestionRepo) ListByOntologyID(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyQuestion, error) {
-	return nil, nil
-}
-
 func (m *mockQuestionRepo) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
 	return nil
 }
@@ -488,19 +484,17 @@ func TestAnswerQuestion_AcceptsPendingAndSkipped(t *testing.T) {
 func TestAnswerQuestion_FollowUpCreated(t *testing.T) {
 	projectID := uuid.New()
 	questionID := uuid.New()
-	ontologyID := uuid.New()
 	followUpText := "Can you clarify?"
 
 	var createdFollowUp *models.OntologyQuestion
 	questionRepo := &mockQuestionRepo{
 		getByIDFunc: func(ctx context.Context, id uuid.UUID) (*models.OntologyQuestion, error) {
 			return &models.OntologyQuestion{
-				ID:         questionID,
-				ProjectID:  projectID,
-				OntologyID: ontologyID,
-				Status:     models.QuestionStatusPending,
-				Priority:   2,
-				Affects:    &models.QuestionAffects{Tables: []string{"users"}},
+				ID:        questionID,
+				ProjectID: projectID,
+				Status:    models.QuestionStatusPending,
+				Priority:  2,
+				Affects:   &models.QuestionAffects{Tables: []string{"users"}},
 			}, nil
 		},
 		createFunc: func(ctx context.Context, q *models.OntologyQuestion) error {
@@ -523,7 +517,6 @@ func TestAnswerQuestion_FollowUpCreated(t *testing.T) {
 	require.NotNil(t, createdFollowUp, "follow-up question should be created")
 	assert.Equal(t, followUpText, createdFollowUp.Text)
 	assert.Equal(t, projectID, createdFollowUp.ProjectID)
-	assert.Equal(t, ontologyID, createdFollowUp.OntologyID)
 	assert.Equal(t, 2, createdFollowUp.Priority, "should inherit parent priority")
 	assert.False(t, createdFollowUp.IsRequired, "follow-ups are optional")
 	assert.Equal(t, "follow_up", createdFollowUp.Category)

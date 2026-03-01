@@ -136,9 +136,9 @@ func (m *mockTableMetadataRepository) Delete(ctx context.Context, schemaTableID 
 
 // mockProjectServiceForOntology is a mock for ProjectService in ontology context tests.
 type mockProjectServiceForOntology struct {
-	datasourceID  uuid.UUID
-	project       *models.Project
-	err           error
+	datasourceID uuid.UUID
+	project      *models.Project
+	err          error
 }
 
 func (m *mockProjectServiceForOntology) Provision(ctx context.Context, projectID uuid.UUID, name string, params map[string]interface{}) (*ProvisionResult, error) {

@@ -556,7 +556,7 @@ func TestOntologyRepository_DeleteByProject_CleansUpRelatedData(t *testing.T) {
 	defer cleanup()
 
 	// Create an ontology
-	ontology := tc.createTestOntology(ctx, 1, true)
+	_ = tc.createTestOntology(ctx, 1, true)
 
 	// Create knowledge facts linked to this project (project-level scope)
 	knowledgeRepo := NewKnowledgeRepository()
@@ -574,7 +574,6 @@ func TestOntologyRepository_DeleteByProject_CleansUpRelatedData(t *testing.T) {
 	glossaryRepo := NewGlossaryRepository()
 	term := &models.BusinessGlossaryTerm{
 		ProjectID:   tc.projectID,
-		OntologyID:  &ontology.ID,
 		Term:        "Active Users",
 		Definition:  "Users who logged in recently",
 		DefiningSQL: "SELECT * FROM users WHERE last_login > NOW() - INTERVAL '30 days'",

@@ -309,11 +309,10 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 			// When we see the first tool result, save the assistant message with tool calls
 			if len(pendingToolCalls) > 0 || textBuilder.Len() > 0 {
 				assistantMsg := &models.ChatMessage{
-					ProjectID:  projectID,
-					// OntologyID removed - column dropped from DB
-					Role:       models.ChatRoleAssistant,
-					Content:    textBuilder.String(),
-					ToolCalls:  pendingToolCalls,
+					ProjectID: projectID,
+					Role:      models.ChatRoleAssistant,
+					Content:   textBuilder.String(),
+					ToolCalls: pendingToolCalls,
 				}
 				if err := s.chatRepo.SaveMessage(ctx, assistantMsg); err != nil {
 					s.logger.Error("Failed to save assistant message with tool calls",
@@ -332,7 +331,6 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 			}
 			toolMsg := &models.ChatMessage{
 				ProjectID:  projectID,
-				// OntologyID removed - column dropped from DB
 				Role:       models.ChatRoleTool,
 				Content:    event.Content,
 				ToolCallID: toolCallID,
@@ -348,10 +346,9 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 			// Save any remaining text as final assistant message
 			if textBuilder.Len() > 0 {
 				assistantMsg := &models.ChatMessage{
-					ProjectID:  projectID,
-					// OntologyID removed - column dropped from DB
-					Role:       models.ChatRoleAssistant,
-					Content:    textBuilder.String(),
+					ProjectID: projectID,
+					Role:      models.ChatRoleAssistant,
+					Content:   textBuilder.String(),
 				}
 				if err := s.chatRepo.SaveMessage(ctx, assistantMsg); err != nil {
 					s.logger.Error("Failed to save final assistant message",

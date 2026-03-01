@@ -147,19 +147,6 @@ func (m *mockQuestionRepository) SubmitAnswer(ctx context.Context, id uuid.UUID,
 	return nil
 }
 
-func (m *mockQuestionRepository) ListByOntologyID(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyQuestion, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	result := make([]*models.OntologyQuestion, 0)
-	for _, q := range m.questions {
-		if q.OntologyID == ontologyID {
-			result = append(result, q)
-		}
-	}
-	return result, nil
-}
-
 func (m *mockQuestionRepository) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
 	if m.err != nil {
 		return m.err
@@ -310,13 +297,11 @@ func TestListOntologyQuestionsTool_Registration(t *testing.T) {
 func TestListOntologyQuestionsTool_ResponseStructure(t *testing.T) {
 	now := time.Now()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	questions := []*models.OntologyQuestion{
 		{
 			ID:         uuid.New(),
 			ProjectID:  projectID,
-			OntologyID: ontologyID,
 			Text:       "What does status='ACTIVE' mean?",
 			Category:   models.QuestionCategoryEnumeration,
 			Priority:   1,
@@ -328,7 +313,6 @@ func TestListOntologyQuestionsTool_ResponseStructure(t *testing.T) {
 		{
 			ID:         uuid.New(),
 			ProjectID:  projectID,
-			OntologyID: ontologyID,
 			Text:       "How are User and Account related?",
 			Category:   models.QuestionCategoryRelationship,
 			Priority:   2,
@@ -434,18 +418,16 @@ func TestMockQuestionRepository_SubmitAnswer(t *testing.T) {
 	repo := &mockQuestionRepository{}
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	// Create a pending question
 	question := &models.OntologyQuestion{
-		ID:         uuid.New(),
-		ProjectID:  projectID,
-		OntologyID: ontologyID,
-		Text:       "Test question",
-		Status:     models.QuestionStatusPending,
-		Priority:   1,
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
+		ID:        uuid.New(),
+		ProjectID: projectID,
+		Text:      "Test question",
+		Status:    models.QuestionStatusPending,
+		Priority:  1,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 
 	err := repo.Create(ctx, question)
@@ -609,11 +591,10 @@ func TestSkipOntologyQuestion_ResponseStructure(t *testing.T) {
 	repo := &mockQuestionRepository{
 		questions: []*models.OntologyQuestion{
 			{
-				ID:         questionID,
-				ProjectID:  uuid.New(),
-				OntologyID: uuid.New(),
-				Text:       "Test question",
-				Status:     models.QuestionStatusPending,
+				ID:        questionID,
+				ProjectID: uuid.New(),
+				Text:      "Test question",
+				Status:    models.QuestionStatusPending,
 			},
 		},
 	}
@@ -639,11 +620,10 @@ func TestEscalateOntologyQuestion_ResponseStructure(t *testing.T) {
 	repo := &mockQuestionRepository{
 		questions: []*models.OntologyQuestion{
 			{
-				ID:         questionID,
-				ProjectID:  uuid.New(),
-				OntologyID: uuid.New(),
-				Text:       "Test question",
-				Status:     models.QuestionStatusPending,
+				ID:        questionID,
+				ProjectID: uuid.New(),
+				Text:      "Test question",
+				Status:    models.QuestionStatusPending,
 			},
 		},
 	}
@@ -666,11 +646,10 @@ func TestDismissOntologyQuestion_ResponseStructure(t *testing.T) {
 	repo := &mockQuestionRepository{
 		questions: []*models.OntologyQuestion{
 			{
-				ID:         questionID,
-				ProjectID:  uuid.New(),
-				OntologyID: uuid.New(),
-				Text:       "Test question",
-				Status:     models.QuestionStatusPending,
+				ID:        questionID,
+				ProjectID: uuid.New(),
+				Text:      "Test question",
+				Status:    models.QuestionStatusPending,
 			},
 		},
 	}

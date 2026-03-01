@@ -109,7 +109,6 @@ func TestDAGNodeStatus_ValidStatuses(t *testing.T) {
 func TestNewExecutionContext(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
-	ontologyID := uuid.New()
 	dagID := uuid.New()
 	nodeID := uuid.New()
 
@@ -117,7 +116,6 @@ func TestNewExecutionContext(t *testing.T) {
 		ID:           dagID,
 		ProjectID:    projectID,
 		DatasourceID: datasourceID,
-		OntologyID:   &ontologyID,
 	}
 
 	node := &models.DAGNode{
@@ -132,31 +130,6 @@ func TestNewExecutionContext(t *testing.T) {
 	assert.Equal(t, nodeID, ctx.NodeID)
 	assert.Equal(t, projectID, ctx.ProjectID)
 	assert.Equal(t, datasourceID, ctx.DatasourceID)
-	assert.Equal(t, ontologyID, ctx.OntologyID)
-}
-
-func TestNewExecutionContext_NilOntologyID(t *testing.T) {
-	projectID := uuid.New()
-	datasourceID := uuid.New()
-	dagID := uuid.New()
-	nodeID := uuid.New()
-
-	dagRecord := &models.OntologyDAG{
-		ID:           dagID,
-		ProjectID:    projectID,
-		DatasourceID: datasourceID,
-		OntologyID:   nil, // No ontology assigned yet
-	}
-
-	node := &models.DAGNode{
-		ID:       nodeID,
-		DAGID:    dagID,
-		NodeName: string(models.DAGNodeKnowledgeSeeding),
-	}
-
-	ctx := dag.NewExecutionContext(dagRecord, node)
-
-	assert.Equal(t, uuid.Nil, ctx.OntologyID)
 }
 
 // Test implementations to verify interfaces compile correctly
@@ -187,7 +160,7 @@ func (t *testColumnEnrichment) EnrichProject(_ context.Context, _ uuid.UUID, _ [
 
 type testGlossaryDiscovery struct{}
 
-func (t *testGlossaryDiscovery) DiscoverGlossaryTerms(_ context.Context, _, _ uuid.UUID) (int, error) {
+func (t *testGlossaryDiscovery) DiscoverGlossaryTerms(_ context.Context, _ uuid.UUID) (int, error) {
 	return 0, nil
 }
 
@@ -399,7 +372,6 @@ func TestStart_StoresProjectOverview(t *testing.T) {
 		},
 	}
 
-
 	// Create entity and relationship repository mocks (use existing mocks from same package)
 	logger := zap.NewNop()
 	service := &ontologyDAGService{
@@ -489,7 +461,6 @@ func TestStart_UpdatesExistingProjectOverview(t *testing.T) {
 		},
 	}
 
-
 	logger := zap.NewNop()
 	service := &ontologyDAGService{
 		dagRepo:       mockDAGRepo,
@@ -545,7 +516,6 @@ func TestStart_SkipsOverviewStorageWhenEmpty(t *testing.T) {
 			}, nil
 		},
 	}
-
 
 	logger := zap.NewNop()
 	service := &ontologyDAGService{
@@ -603,7 +573,6 @@ func TestStart_ContinuesOnOverviewStorageError(t *testing.T) {
 			}, nil
 		},
 	}
-
 
 	logger := zap.NewNop()
 	service := &ontologyDAGService{
@@ -1202,7 +1171,6 @@ func TestStart_RequiresAuthenticatedUser(t *testing.T) {
 func TestExecuteDAG_SetsInferenceProvenance(t *testing.T) {
 	projectID := uuid.New()
 	dagID := uuid.New()
-	ontologyID := uuid.New()
 	userID := uuid.New()
 
 	// Track what provenance was set on the context
@@ -1218,7 +1186,6 @@ func TestExecuteDAG_SetsInferenceProvenance(t *testing.T) {
 				ID:           dagID,
 				ProjectID:    projectID,
 				DatasourceID: uuid.New(),
-				OntologyID:   &ontologyID,
 				Nodes:        []models.DAGNode{},
 			}, nil
 		},

@@ -171,7 +171,6 @@ func (s *ontologyQuestionService) AnswerQuestion(ctx context.Context, questionID
 	if processingResult.FollowUp != nil && *processingResult.FollowUp != "" {
 		followUp := &models.OntologyQuestion{
 			ProjectID:        question.ProjectID,
-			OntologyID:       question.OntologyID,
 			Text:             *processingResult.FollowUp,
 			Priority:         question.Priority,
 			IsRequired:       false, // Follow-ups are optional

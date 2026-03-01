@@ -92,7 +92,6 @@ func TestOntologyDAGHandler_StartExtraction_Success(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 	dagID := uuid.New()
-	ontologyID := uuid.New()
 	now := time.Now()
 	currentNode := "KnowledgeSeeding"
 
@@ -108,7 +107,6 @@ func TestOntologyDAGHandler_StartExtraction_Success(t *testing.T) {
 				ID:           dagID,
 				ProjectID:    projectID,
 				DatasourceID: datasourceID,
-				OntologyID:   &ontologyID,
 				Status:       models.DAGStatusRunning,
 				CurrentNode:  &currentNode,
 				StartedAt:    &now,

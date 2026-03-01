@@ -898,7 +898,6 @@ func TestGlossaryService_SuggestTerms_WithColumnDetails(t *testing.T) {
 }
 
 func TestGlossaryService_SuggestTerms_InvalidSQL(t *testing.T) {
-	ontologyID := uuid.New()
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
 
@@ -932,7 +931,7 @@ func TestGlossaryService_SuggestTerms_InvalidSQL(t *testing.T) {
 	adapterFactory := &mockAdapterFactoryForGlossary{}
 	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
-	count, err := svc.DiscoverGlossaryTerms(ctx, projectID, ontologyID)
+	count, err := svc.DiscoverGlossaryTerms(ctx, projectID)
 	require.NoError(t, err)
 
 	// In two-phase workflow, discovery saves ALL terms without SQL validation
@@ -983,7 +982,6 @@ func (m *mockAdapterFactoryWithInvalidSQL) ListTypes() []datasource.DatasourceAd
 // ============================================================================
 
 func TestGlossaryService_DiscoverGlossaryTerms(t *testing.T) {
-	ontologyID := uuid.New()
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
 
@@ -1012,7 +1010,7 @@ func TestGlossaryService_DiscoverGlossaryTerms(t *testing.T) {
 	adapterFactory := &mockAdapterFactoryForGlossary{}
 	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
-	count, err := svc.DiscoverGlossaryTerms(ctx, projectID, ontologyID)
+	count, err := svc.DiscoverGlossaryTerms(ctx, projectID)
 	require.NoError(t, err)
 	assert.Equal(t, 1, count)
 
@@ -1029,7 +1027,6 @@ func TestGlossaryService_DiscoverGlossaryTerms(t *testing.T) {
 }
 
 func TestGlossaryService_DiscoverGlossaryTerms_SkipsDuplicates(t *testing.T) {
-	ontologyID := uuid.New()
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
 
@@ -1069,7 +1066,7 @@ func TestGlossaryService_DiscoverGlossaryTerms_SkipsDuplicates(t *testing.T) {
 	require.NoError(t, err)
 
 	// Attempt to discover - should skip duplicate
-	count, err := svc.DiscoverGlossaryTerms(ctx, projectID, ontologyID)
+	count, err := svc.DiscoverGlossaryTerms(ctx, projectID)
 	require.NoError(t, err)
 	assert.Equal(t, 0, count) // No new terms discovered
 
@@ -1081,7 +1078,6 @@ func TestGlossaryService_DiscoverGlossaryTerms_SkipsDuplicates(t *testing.T) {
 }
 
 func TestGlossaryService_DiscoverGlossaryTerms_NoEntities(t *testing.T) {
-	ontologyID := uuid.New()
 	ctx := context.Background()
 	projectID := uuid.New()
 
@@ -1094,7 +1090,7 @@ func TestGlossaryService_DiscoverGlossaryTerms_NoEntities(t *testing.T) {
 	adapterFactory := &mockAdapterFactoryForGlossary{}
 	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
-	count, err := svc.DiscoverGlossaryTerms(ctx, projectID, ontologyID)
+	count, err := svc.DiscoverGlossaryTerms(ctx, projectID)
 	require.NoError(t, err)
 	assert.Equal(t, 0, count)
 }
@@ -1104,7 +1100,6 @@ func TestGlossaryService_DiscoverGlossaryTerms_NoEntities(t *testing.T) {
 // ============================================================================
 
 func TestGlossaryService_EnrichGlossaryTerms(t *testing.T) {
-	ontologyID := uuid.New()
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
 
@@ -1146,7 +1141,7 @@ func TestGlossaryService_EnrichGlossaryTerms(t *testing.T) {
 	glossaryRepo.terms[term.ID] = term
 
 	// Enrich terms
-	err := svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+	err := svc.EnrichGlossaryTerms(ctx, projectID)
 	// Note: This test may fail because the mock doesn't provide a real SQL validation
 	// The important thing is that it no longer panics on nil getTenant
 	if err != nil {
@@ -1165,7 +1160,6 @@ func TestGlossaryService_EnrichGlossaryTerms(t *testing.T) {
 }
 
 func TestGlossaryService_EnrichGlossaryTerms_OnlyEnrichesUnenrichedTerms(t *testing.T) {
-	ontologyID := uuid.New()
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
 
@@ -1209,7 +1203,7 @@ func TestGlossaryService_EnrichGlossaryTerms_OnlyEnrichesUnenrichedTerms(t *test
 	require.NoError(t, err)
 
 	// Enrich terms - should not process any terms
-	err = svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+	err = svc.EnrichGlossaryTerms(ctx, projectID)
 	require.NoError(t, err)
 
 	// Verify no changes
@@ -1219,7 +1213,6 @@ func TestGlossaryService_EnrichGlossaryTerms_OnlyEnrichesUnenrichedTerms(t *test
 }
 
 func TestGlossaryService_EnrichGlossaryTerms_NoUnenrichedTerms(t *testing.T) {
-	ontologyID := uuid.New()
 	ctx := context.Background()
 	projectID := uuid.New()
 
@@ -1233,7 +1226,7 @@ func TestGlossaryService_EnrichGlossaryTerms_NoUnenrichedTerms(t *testing.T) {
 	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, nil, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	// No terms exist
-	err := svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+	err := svc.EnrichGlossaryTerms(ctx, projectID)
 	require.NoError(t, err)
 }
 
@@ -1483,7 +1476,6 @@ func TestGlossaryService_SuggestTerms_WithoutDomainKnowledge_PromptDoesNotHaveKn
 }
 
 func TestGlossaryService_DiscoverGlossaryTerms_WithDomainKnowledge_GeneratesDomainSpecificTerms(t *testing.T) {
-	ontologyID := uuid.New()
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
 
@@ -1547,7 +1539,7 @@ func TestGlossaryService_DiscoverGlossaryTerms_WithDomainKnowledge_GeneratesDoma
 	adapterFactory := &mockAdapterFactoryForGlossary{}
 	svc := NewGlossaryService(glossaryRepo, &mockColumnMetadataRepoForGlossary{}, knowledgeRepo, schemaRepo, &mockProjectServiceForGlossary{}, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
-	count, err := svc.DiscoverGlossaryTerms(ctx, projectID, ontologyID)
+	count, err := svc.DiscoverGlossaryTerms(ctx, projectID)
 	require.NoError(t, err)
 	assert.Equal(t, 3, count)
 
@@ -1699,7 +1691,6 @@ func TestGetDomainHints_EngagementBasedNotSubscription(t *testing.T) {
 		},
 	}
 
-
 	hints := getDomainHints(tables, map[string][]*models.SchemaColumn{})
 
 	// Should detect engagement-based business
@@ -1736,7 +1727,6 @@ func TestGetDomainHints_SubscriptionBased(t *testing.T) {
 		},
 	}
 
-
 	hints := getDomainHints(tables, map[string][]*models.SchemaColumn{})
 
 	// Should detect subscription-based business
@@ -1767,7 +1757,6 @@ func TestGetDomainHints_BillingEntities(t *testing.T) {
 			TableName: "payments",
 		},
 	}
-
 
 	hints := getDomainHints(tables, map[string][]*models.SchemaColumn{})
 
@@ -1823,7 +1812,6 @@ func TestGetDomainHints_NoInventoryNoEcommerce(t *testing.T) {
 		},
 	}
 
-
 	hints := getDomainHints(tables, map[string][]*models.SchemaColumn{})
 
 	// Should include hint about not suggesting inventory/ecommerce metrics
@@ -1855,7 +1843,6 @@ func TestGetDomainHints_HasInventory(t *testing.T) {
 		},
 	}
 
-
 	hints := getDomainHints(tables, map[string][]*models.SchemaColumn{})
 
 	// Should NOT include the "not e-commerce" hint
@@ -1882,7 +1869,6 @@ func TestGetDomainHints_HasEcommerce(t *testing.T) {
 		},
 	}
 
-
 	hints := getDomainHints(tables, map[string][]*models.SchemaColumn{})
 
 	// Should NOT include the "not e-commerce" hint
@@ -1905,7 +1891,6 @@ func TestGetDomainHints_ExcludesDeletedTables(t *testing.T) {
 			TableName: "users",
 		},
 	}
-
 
 	hints := getDomainHints(tables, map[string][]*models.SchemaColumn{})
 
@@ -2629,7 +2614,6 @@ func TestGlossaryService_UpdateTerm_AllowsTestTermInNonProduction(t *testing.T) 
 // ============================================================================
 
 func TestGlossaryService_EnrichTermPrompt_IncludesEnumValues(t *testing.T) {
-	ontologyID := uuid.New()
 	// This test verifies that the enrich term prompt includes actual enum values
 	// so the LLM generates SQL with correct WHERE clause values (BUG-12 fix)
 	projectID := uuid.New()
@@ -2703,7 +2687,7 @@ func TestGlossaryService_EnrichTermPrompt_IncludesEnumValues(t *testing.T) {
 
 	// Enrich terms - this will call the LLM with the enrichment prompt
 	// We ignore the error because the mock adapter doesn't provide real SQL validation
-	_ = svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+	_ = svc.EnrichGlossaryTerms(ctx, projectID)
 
 	// Verify the prompt includes enum values
 	prompt := llmClient.capturedPrompt
@@ -2718,7 +2702,6 @@ func TestGlossaryService_EnrichTermPrompt_IncludesEnumValues(t *testing.T) {
 }
 
 func TestGlossaryService_EnrichTermPrompt_NoEnumValuesWhenColumnHasNone(t *testing.T) {
-	ontologyID := uuid.New()
 	// This test verifies that columns without enum values don't get the "Allowed values:" line
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
@@ -2759,7 +2742,7 @@ func TestGlossaryService_EnrichTermPrompt_NoEnumValuesWhenColumnHasNone(t *testi
 	}
 	glossaryRepo.terms[term.ID] = term
 
-	_ = svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+	_ = svc.EnrichGlossaryTerms(ctx, projectID)
 
 	prompt := llmClient.capturedPrompt
 
@@ -2768,7 +2751,6 @@ func TestGlossaryService_EnrichTermPrompt_NoEnumValuesWhenColumnHasNone(t *testi
 }
 
 func TestGlossaryService_EnrichTermSystemMessage_IncludesEnumInstructions(t *testing.T) {
-	ontologyID := uuid.New()
 	// This test verifies that the system message for term enrichment includes
 	// instructions to use EXACT enum values from schema context (BUG-12 fix)
 	projectID := uuid.New()
@@ -2809,7 +2791,7 @@ func TestGlossaryService_EnrichTermSystemMessage_IncludesEnumInstructions(t *tes
 	}
 	glossaryRepo.terms[term.ID] = term
 
-	_ = svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+	_ = svc.EnrichGlossaryTerms(ctx, projectID)
 
 	systemMessage := llmClient.capturedSystemMessage
 
@@ -3217,7 +3199,6 @@ func (m *mockLLMClientWithRetry) GetEndpoint() string {
 }
 
 func TestGlossaryService_EnrichSingleTerm_RetriesOnFailure(t *testing.T) {
-	ontologyID := uuid.New()
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
 
@@ -3263,7 +3244,7 @@ func TestGlossaryService_EnrichSingleTerm_RetriesOnFailure(t *testing.T) {
 	glossaryRepo.terms[term.ID] = term
 
 	// Enrich terms
-	err := svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+	err := svc.EnrichGlossaryTerms(ctx, projectID)
 	require.NoError(t, err)
 
 	// Verify LLM was called twice (first attempt + retry)
@@ -3277,7 +3258,6 @@ func TestGlossaryService_EnrichSingleTerm_RetriesOnFailure(t *testing.T) {
 }
 
 func TestGlossaryService_EnrichSingleTerm_EnhancedPromptIncludesAllColumns(t *testing.T) {
-	ontologyID := uuid.New()
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
 
@@ -3330,7 +3310,7 @@ func TestGlossaryService_EnrichSingleTerm_EnhancedPromptIncludesAllColumns(t *te
 	}
 	glossaryRepo.terms[term.ID] = term
 
-	_ = svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+	_ = svc.EnrichGlossaryTerms(ctx, projectID)
 
 	require.Len(t, llmClient.capturedPrompts, 2, "Should have captured 2 prompts")
 
@@ -3348,7 +3328,6 @@ func TestGlossaryService_EnrichSingleTerm_EnhancedPromptIncludesAllColumns(t *te
 }
 
 func TestGlossaryService_EnrichSingleTerm_FailsAfterBothAttemptsFail(t *testing.T) {
-	ontologyID := uuid.New()
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
 
@@ -3387,7 +3366,7 @@ func TestGlossaryService_EnrichSingleTerm_FailsAfterBothAttemptsFail(t *testing.
 	glossaryRepo.terms[term.ID] = term
 
 	// Enrich terms - should complete without error but term remains unenriched
-	err := svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+	err := svc.EnrichGlossaryTerms(ctx, projectID)
 	require.NoError(t, err)
 
 	// Verify LLM was called twice
@@ -3400,7 +3379,6 @@ func TestGlossaryService_EnrichSingleTerm_FailsAfterBothAttemptsFail(t *testing.
 }
 
 func TestGlossaryService_EnrichSingleTerm_SucceedsOnFirstAttempt(t *testing.T) {
-	ontologyID := uuid.New()
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
 
@@ -3442,7 +3420,7 @@ func TestGlossaryService_EnrichSingleTerm_SucceedsOnFirstAttempt(t *testing.T) {
 	}
 	glossaryRepo.terms[term.ID] = term
 
-	err := svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+	err := svc.EnrichGlossaryTerms(ctx, projectID)
 	require.NoError(t, err)
 
 	// Verify LLM was called only once (first attempt succeeded)
@@ -3464,7 +3442,6 @@ func TestBuildEnhancedEnrichTermPrompt_IncludesPreviousError(t *testing.T) {
 		Term:       "Test Metric",
 		Definition: "A test metric definition",
 	}
-
 
 	tables := []*models.SchemaTable{
 		{TableName: "test_table"},

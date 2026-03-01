@@ -989,7 +989,7 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 				Tables:   []string{tableCtx.TableName},
 			}
 		}
-		questionModels := ConvertQuestionInputs(questionInputs, projectID, uuid.Nil, nil)
+		questionModels := ConvertQuestionInputs(questionInputs, projectID, nil)
 		if len(questionModels) > 0 {
 			if err := s.questionService.CreateQuestions(ctx, questionModels); err != nil {
 				s.logger.Error("failed to store ontology questions from column enrichment",

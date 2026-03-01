@@ -87,15 +87,15 @@ type GlossaryService interface {
 	// SuggestTerms uses LLM to analyze the ontology and suggest business terms.
 	SuggestTerms(ctx context.Context, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error)
 
-	// DiscoverGlossaryTerms identifies candidate business terms from ontology.
+	// DiscoverGlossaryTerms identifies candidate business terms from the project schema.
 	// Saves discovered terms to database with source="discovered".
 	// Returns count of terms discovered.
-	DiscoverGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) (int, error)
+	DiscoverGlossaryTerms(ctx context.Context, projectID uuid.UUID) (int, error)
 
 	// EnrichGlossaryTerms adds SQL patterns, filters, and aggregations to discovered terms.
 	// Processes terms in parallel via LLM calls.
 	// Only enriches terms with source="discovered" that lack enrichment.
-	EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error
+	EnrichGlossaryTerms(ctx context.Context, projectID uuid.UUID) error
 
 	// GetGenerationStatus returns the current glossary generation status for a project.
 	// Returns an idle status if no generation has been started.
@@ -856,7 +856,7 @@ func (s *glossaryService) parseSuggestTermsResponse(content string, projectID uu
 	return terms, nil
 }
 
-func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) (int, error) {
+func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID uuid.UUID) (int, error) {
 	s.logger.Info("Starting glossary term discovery",
 		zap.String("project_id", projectID.String()))
 
@@ -984,10 +984,9 @@ func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, 
 	return discoveredCount, nil
 }
 
-func (s *glossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error {
+func (s *glossaryService) EnrichGlossaryTerms(ctx context.Context, projectID uuid.UUID) error {
 	s.logger.Info("Starting glossary term enrichment",
-		zap.String("project_id", projectID.String()),
-		zap.String("ontology_id", ontologyID.String()))
+		zap.String("project_id", projectID.String()))
 
 	// Get terms that need enrichment (inferred terms without DefiningSQL)
 	allTerms, err := s.glossaryRepo.GetByProject(ctx, projectID)
@@ -2671,7 +2670,7 @@ func (s *glossaryService) RunAutoGenerate(ctx context.Context, projectID uuid.UU
 
 	// Discovery phase
 	setGenerationStatus(projectID, "discovering", "Discovering glossary terms from schema...", "", &now)
-	count, err := s.DiscoverGlossaryTerms(tenantCtx, projectID, uuid.Nil)
+	count, err := s.DiscoverGlossaryTerms(tenantCtx, projectID)
 	if err != nil {
 		s.logger.Error("glossary auto-generate: discovery failed", zap.Error(err))
 		setGenerationStatus(projectID, "failed", "Discovery failed", err.Error(), &now)
@@ -2681,7 +2680,7 @@ func (s *glossaryService) RunAutoGenerate(ctx context.Context, projectID uuid.UU
 
 	// Enrichment phase
 	setGenerationStatus(projectID, "enriching", fmt.Sprintf("Enriching %d discovered terms with SQL...", count), "", &now)
-	err = s.EnrichGlossaryTerms(tenantCtx, projectID, uuid.Nil)
+	err = s.EnrichGlossaryTerms(tenantCtx, projectID)
 	if err != nil {
 		s.logger.Error("glossary auto-generate: enrichment failed", zap.Error(err))
 		setGenerationStatus(projectID, "failed", "Enrichment failed", err.Error(), &now)
