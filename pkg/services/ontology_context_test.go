@@ -17,6 +17,7 @@ import (
 // Mock Implementations
 // ============================================================================
 
+// mockOntologyRepository is a mock for OntologyRepository (shared across service tests).
 type mockOntologyRepository struct {
 	activeOntology *models.TieredOntology
 	getActiveErr   error
@@ -46,6 +47,52 @@ func (m *mockOntologyRepository) GetNextVersion(ctx context.Context, projectID u
 }
 
 func (m *mockOntologyRepository) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
+// mockColumnMetadataRepository is a mock for ColumnMetadataRepository.
+type mockColumnMetadataRepository struct {
+	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata
+}
+
+func (m *mockColumnMetadataRepository) Upsert(ctx context.Context, meta *models.ColumnMetadata) error {
+	return nil
+}
+
+func (m *mockColumnMetadataRepository) UpsertFromExtraction(ctx context.Context, meta *models.ColumnMetadata) error {
+	return nil
+}
+
+func (m *mockColumnMetadataRepository) GetBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
+	if m.metadataByColumnID == nil {
+		return nil, nil
+	}
+	return m.metadataByColumnID[schemaColumnID], nil
+}
+
+func (m *mockColumnMetadataRepository) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.ColumnMetadata, error) {
+	var result []*models.ColumnMetadata
+	for _, meta := range m.metadataByColumnID {
+		result = append(result, meta)
+	}
+	return result, nil
+}
+
+func (m *mockColumnMetadataRepository) GetBySchemaColumnIDs(ctx context.Context, schemaColumnIDs []uuid.UUID) ([]*models.ColumnMetadata, error) {
+	var result []*models.ColumnMetadata
+	for _, id := range schemaColumnIDs {
+		if meta, ok := m.metadataByColumnID[id]; ok {
+			result = append(result, meta)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockColumnMetadataRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (m *mockColumnMetadataRepository) DeleteBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) error {
 	return nil
 }
 
@@ -89,8 +136,9 @@ func (m *mockTableMetadataRepository) Delete(ctx context.Context, schemaTableID 
 
 // mockProjectServiceForOntology is a mock for ProjectService in ontology context tests.
 type mockProjectServiceForOntology struct {
-	datasourceID uuid.UUID
-	err          error
+	datasourceID  uuid.UUID
+	project       *models.Project
+	err           error
 }
 
 func (m *mockProjectServiceForOntology) Provision(ctx context.Context, projectID uuid.UUID, name string, params map[string]interface{}) (*ProvisionResult, error) {
@@ -102,7 +150,14 @@ func (m *mockProjectServiceForOntology) ProvisionFromClaims(ctx context.Context,
 }
 
 func (m *mockProjectServiceForOntology) GetByID(ctx context.Context, id uuid.UUID) (*models.Project, error) {
-	return nil, nil
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.project != nil {
+		return m.project, nil
+	}
+	// Return a minimal project if none set
+	return &models.Project{ID: id}, nil
 }
 
 func (m *mockProjectServiceForOntology) GetByIDWithoutTenant(ctx context.Context, id uuid.UUID) (*models.Project, error) {
@@ -129,7 +184,6 @@ func (m *mockProjectServiceForOntology) SetDefaultDatasourceID(ctx context.Conte
 }
 
 func (m *mockProjectServiceForOntology) SyncFromCentralAsync(projectID uuid.UUID, papiURL, token string) {
-	// No-op for tests
 }
 
 func (m *mockProjectServiceForOntology) GetAuthServerURL(ctx context.Context, projectID uuid.UUID) (string, error) {
@@ -167,38 +221,25 @@ func (m *mockProjectServiceForOntology) SyncServerURL(ctx context.Context, proje
 func TestGetDomainContext(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
-	ontology := &models.TieredOntology{
-		ID:        ontologyID,
-		ProjectID: projectID,
-		Version:   1,
-		IsActive:  true,
-		DomainSummary: &models.DomainSummary{
-			Description: "E-commerce platform",
-			Domains:     []string{"sales", "customer"},
+	projectService := &mockProjectServiceForOntology{
+		project: &models.Project{
+			ID: projectID,
+			DomainSummary: &models.DomainSummary{
+				Description: "E-commerce platform",
+				Domains:     []string{"sales", "customer"},
+			},
 		},
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"users":  {{Name: "id"}, {Name: "email"}},
-			"orders": {{Name: "id"}, {Name: "user_id"}, {Name: "total"}},
-		},
-	}
-
-	ontologyRepo := &mockOntologyRepository{
-		activeOntology: ontology,
 	}
 	schemaRepo := &mockSchemaRepository{
+		tableCount: 2,
 		columns: []*models.SchemaColumn{
-			{ColumnName: "id", SchemaTableID: uuid.New()},
-			{ColumnName: "email", SchemaTableID: uuid.New()},
-			{ColumnName: "id", SchemaTableID: uuid.New()},
-			{ColumnName: "user_id", SchemaTableID: uuid.New()},
-			{ColumnName: "total", SchemaTableID: uuid.New()},
+			{ColumnName: "id"}, {ColumnName: "email"},
+			{ColumnName: "id"}, {ColumnName: "user_id"}, {ColumnName: "total"},
 		},
 	}
-	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
+	svc := NewOntologyContextService(schemaRepo, &mockColumnMetadataRepository{}, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
 	result, err := svc.GetDomainContext(ctx, projectID)
 
@@ -208,75 +249,91 @@ func TestGetDomainContext(t *testing.T) {
 	// Verify domain info
 	assert.Equal(t, "E-commerce platform", result.Domain.Description)
 	assert.Equal(t, []string{"sales", "customer"}, result.Domain.PrimaryDomains)
-	assert.Equal(t, 2, result.Domain.TableCount)  // Number of tables from column_details
+	assert.Equal(t, 2, result.Domain.TableCount)  // From schema table count
 	assert.Equal(t, 5, result.Domain.ColumnCount) // From schema columns
 }
 
-func TestGetDomainContext_NoActiveOntology(t *testing.T) {
+func TestGetDomainContext_NoDomainSummary(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
 
-	ontologyRepo := &mockOntologyRepository{
-		activeOntology: nil,
+	projectService := &mockProjectServiceForOntology{
+		project: &models.Project{ID: projectID},
 	}
-	schemaRepo := &mockSchemaRepository{}
-	projectService := &mockProjectServiceForOntology{}
+	schemaRepo := &mockSchemaRepository{
+		tableCount: 0,
+	}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
+	svc := NewOntologyContextService(schemaRepo, &mockColumnMetadataRepository{}, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
 	result, err := svc.GetDomainContext(ctx, projectID)
 
-	assert.Error(t, err)
-	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "no active ontology found")
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Empty(t, result.Domain.Description)
+	assert.Equal(t, 0, result.Domain.TableCount)
+	assert.Equal(t, 0, result.Domain.ColumnCount)
 }
 
 func TestGetTablesContext(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	tableID := uuid.New()
 
-	ontology := &models.TieredOntology{
-		ID:        ontologyID,
-		ProjectID: projectID,
-		IsActive:  true,
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"users": {
-				{Name: "id", IsPrimaryKey: true, Role: models.ColumnRoleIdentifier},
-				{Name: "email", Role: models.ColumnRoleAttribute},
-				{Name: "status", EnumValues: []models.EnumValue{{Value: "active"}}},
-			},
-		},
-	}
+	// Schema columns with IDs for metadata lookup
+	idColID := uuid.New()
+	emailColID := uuid.New()
+	statusColID := uuid.New()
 
-	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
 	schemaRepo := &mockSchemaRepository{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"users": {
-				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
-				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "email", DataType: "varchar"},
-				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "status", DataType: "varchar"},
+				{ID: idColID, SchemaTableID: tableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+				{ID: emailColID, SchemaTableID: tableID, ColumnName: "email", DataType: "varchar"},
+				{ID: statusColID, SchemaTableID: tableID, ColumnName: "status", DataType: "varchar"},
 			},
 		},
 	}
+
+	// Column metadata with enrichment
+	identifierRole := models.ColumnRoleIdentifier
+	attributeRole := models.ColumnRoleAttribute
+	columnMetadataRepo := &mockColumnMetadataRepository{
+		metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+			idColID: {
+				SchemaColumnID: idColID,
+				Role:           &identifierRole,
+			},
+			emailColID: {
+				SchemaColumnID: emailColID,
+				Role:           &attributeRole,
+			},
+			statusColID: {
+				SchemaColumnID: statusColID,
+				Features: models.ColumnMetadataFeatures{
+					EnumFeatures: &models.EnumFeatures{
+						Values: []models.ColumnEnumValue{{Value: "active"}},
+					},
+				},
+			},
+		},
+	}
+
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
+	svc := NewOntologyContextService(schemaRepo, columnMetadataRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
-	// Test with specific table filter
 	result, err := svc.GetTablesContext(ctx, projectID, []string{"users"})
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Len(t, result.Tables, 1)
 
-	// Verify users table
 	usersTable := result.Tables["users"]
 	assert.Equal(t, 3, usersTable.ColumnCount)
 	assert.Len(t, usersTable.Columns, 3)
 
-	// Verify column roles from enriched data
+	// Verify column roles from metadata
 	columnByName := make(map[string]models.ColumnOverview)
 	for _, col := range usersTable.Columns {
 		columnByName[col.Name] = col
@@ -293,25 +350,15 @@ func TestGetTablesContext(t *testing.T) {
 func TestGetTablesContext_AllTables(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
-	ontology := &models.TieredOntology{
-		ID:        ontologyID,
-		ProjectID: projectID,
-		IsActive:  true,
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"users":  {{Name: "id"}},
-			"orders": {{Name: "id"}},
-		},
+	schemaRepo := &mockSchemaRepository{
+		selectedTableNames: []string{"users", "orders"},
 	}
-
-	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
-	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
+	svc := NewOntologyContextService(schemaRepo, &mockColumnMetadataRepository{}, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
-	// Test without filter - should return all tables from column_details
+	// Test without filter - should return all selected tables
 	result, err := svc.GetTablesContext(ctx, projectID, nil)
 
 	assert.NoError(t, err)
@@ -320,45 +367,76 @@ func TestGetTablesContext_AllTables(t *testing.T) {
 }
 
 func TestGetTablesContext_FKRoles(t *testing.T) {
-	// Tests that FK roles and analytical roles from enriched column_details are exposed at tables depth
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	tableID := uuid.New()
 
-	// Ontology with enriched column_details containing FK roles and analytical roles
-	ontology := &models.TieredOntology{
-		ID:        ontologyID,
-		ProjectID: projectID,
-		IsActive:  true,
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"billing_engagements": {
-				{Name: "id", IsPrimaryKey: true, Role: models.ColumnRoleIdentifier},
-				{Name: "host_id", IsForeignKey: true, ForeignTable: "users", FKAssociation: "host", Role: models.ColumnRoleDimension},
-				{Name: "visitor_id", IsForeignKey: true, ForeignTable: "users", FKAssociation: "visitor", Role: models.ColumnRoleDimension},
-				{Name: "status", EnumValues: []models.EnumValue{{Value: "active"}, {Value: "completed"}}, Role: models.ColumnRoleDimension},
-				{Name: "amount", Role: models.ColumnRoleMeasure},
-			},
-		},
-	}
+	idColID := uuid.New()
+	hostColID := uuid.New()
+	visitorColID := uuid.New()
+	statusColID := uuid.New()
+	amountColID := uuid.New()
 
-	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
-
-	// Mock schema columns for the table
 	schemaRepo := &mockSchemaRepository{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"billing_engagements": {
-				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
-				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "host_id", DataType: "uuid", IsPrimaryKey: false},
-				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "visitor_id", DataType: "uuid", IsPrimaryKey: false},
-				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "status", DataType: "varchar", IsPrimaryKey: false},
-				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "amount", DataType: "numeric", IsPrimaryKey: false},
+				{ID: idColID, SchemaTableID: tableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+				{ID: hostColID, SchemaTableID: tableID, ColumnName: "host_id", DataType: "uuid"},
+				{ID: visitorColID, SchemaTableID: tableID, ColumnName: "visitor_id", DataType: "uuid"},
+				{ID: statusColID, SchemaTableID: tableID, ColumnName: "status", DataType: "varchar"},
+				{ID: amountColID, SchemaTableID: tableID, ColumnName: "amount", DataType: "numeric"},
 			},
 		},
 	}
+
+	identifierRole := models.ColumnRoleIdentifier
+	dimensionRole := models.ColumnRoleDimension
+	measureRole := models.ColumnRoleMeasure
+	columnMetadataRepo := &mockColumnMetadataRepository{
+		metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+			idColID: {
+				SchemaColumnID: idColID,
+				Role:           &identifierRole,
+			},
+			hostColID: {
+				SchemaColumnID: hostColID,
+				Role:           &dimensionRole,
+				Features: models.ColumnMetadataFeatures{
+					IdentifierFeatures: &models.IdentifierFeatures{
+						FKAssociation: "host",
+						FKTargetTable: "users",
+					},
+				},
+			},
+			visitorColID: {
+				SchemaColumnID: visitorColID,
+				Role:           &dimensionRole,
+				Features: models.ColumnMetadataFeatures{
+					IdentifierFeatures: &models.IdentifierFeatures{
+						FKAssociation: "visitor",
+						FKTargetTable: "users",
+					},
+				},
+			},
+			statusColID: {
+				SchemaColumnID: statusColID,
+				Role:           &dimensionRole,
+				Features: models.ColumnMetadataFeatures{
+					EnumFeatures: &models.EnumFeatures{
+						Values: []models.ColumnEnumValue{{Value: "active"}, {Value: "completed"}},
+					},
+				},
+			},
+			amountColID: {
+				SchemaColumnID: amountColID,
+				Role:           &measureRole,
+			},
+		},
+	}
+
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
+	svc := NewOntologyContextService(schemaRepo, columnMetadataRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
 	result, err := svc.GetTablesContext(ctx, projectID, []string{"billing_engagements"})
 
@@ -369,7 +447,6 @@ func TestGetTablesContext_FKRoles(t *testing.T) {
 	table := result.Tables["billing_engagements"]
 	assert.Len(t, table.Columns, 5)
 
-	// Verify FK roles and analytical roles are exposed
 	columnByName := make(map[string]models.ColumnOverview)
 	for _, col := range table.Columns {
 		columnByName[col.Name] = col
@@ -377,61 +454,66 @@ func TestGetTablesContext_FKRoles(t *testing.T) {
 
 	// host_id should have FKAssociation = "host" and Role = "dimension"
 	hostCol := columnByName["host_id"]
-	assert.Equal(t, "host", hostCol.FKAssociation, "host_id should have FK association 'host'")
-	assert.Equal(t, models.ColumnRoleDimension, hostCol.Role, "host_id should have analytical role 'dimension'")
+	assert.Equal(t, "host", hostCol.FKAssociation)
+	assert.Equal(t, models.ColumnRoleDimension, hostCol.Role)
 
 	// visitor_id should have FKAssociation = "visitor" and Role = "dimension"
 	visitorCol := columnByName["visitor_id"]
-	assert.Equal(t, "visitor", visitorCol.FKAssociation, "visitor_id should have FK association 'visitor'")
-	assert.Equal(t, models.ColumnRoleDimension, visitorCol.Role, "visitor_id should have analytical role 'dimension'")
+	assert.Equal(t, "visitor", visitorCol.FKAssociation)
+	assert.Equal(t, models.ColumnRoleDimension, visitorCol.Role)
 
-	// id should have Role = "identifier" but no FKAssociation (it's a PK, not FK)
+	// id should have Role = "identifier" but no FKAssociation
 	idCol := columnByName["id"]
-	assert.Empty(t, idCol.FKAssociation, "primary key should not have FK association")
-	assert.Equal(t, models.ColumnRoleIdentifier, idCol.Role, "id should have analytical role 'identifier'")
+	assert.Empty(t, idCol.FKAssociation)
+	assert.Equal(t, models.ColumnRoleIdentifier, idCol.Role)
 
 	// status should have HasEnumValues = true and Role = "dimension"
 	statusCol := columnByName["status"]
-	assert.True(t, statusCol.HasEnumValues, "status should have enum values")
-	assert.Empty(t, statusCol.FKAssociation, "status should not have FK association")
-	assert.Equal(t, models.ColumnRoleDimension, statusCol.Role, "status should have analytical role 'dimension'")
+	assert.True(t, statusCol.HasEnumValues)
+	assert.Empty(t, statusCol.FKAssociation)
+	assert.Equal(t, models.ColumnRoleDimension, statusCol.Role)
 
 	// amount should have Role = "measure"
 	amountCol := columnByName["amount"]
-	assert.Equal(t, models.ColumnRoleMeasure, amountCol.Role, "amount should have analytical role 'measure'")
-	assert.Empty(t, amountCol.FKAssociation, "amount should not have FK association")
+	assert.Equal(t, models.ColumnRoleMeasure, amountCol.Role)
+	assert.Empty(t, amountCol.FKAssociation)
 }
 
 func TestGetColumnsContext(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	tableID := uuid.New()
 
-	ontology := &models.TieredOntology{
-		ID:        ontologyID,
-		ProjectID: projectID,
-		IsActive:  true,
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"users": {
-				{Name: "id", Description: "Unique user ID", IsPrimaryKey: true},
-				{Name: "email", Description: "User email address"},
-			},
-		},
-	}
+	idColID := uuid.New()
+	emailColID := uuid.New()
 
-	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
 	schemaRepo := &mockSchemaRepository{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"users": {
-				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
-				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "email", DataType: "varchar"},
+				{ID: idColID, SchemaTableID: tableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+				{ID: emailColID, SchemaTableID: tableID, ColumnName: "email", DataType: "varchar"},
 			},
 		},
 	}
+
+	idDesc := "Unique user ID"
+	emailDesc := "User email address"
+	columnMetadataRepo := &mockColumnMetadataRepository{
+		metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+			idColID: {
+				SchemaColumnID: idColID,
+				Description:    &idDesc,
+			},
+			emailColID: {
+				SchemaColumnID: emailColID,
+				Description:    &emailDesc,
+			},
+		},
+	}
+
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
+	svc := NewOntologyContextService(schemaRepo, columnMetadataRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
 	result, err := svc.GetColumnsContext(ctx, projectID, []string{"users"})
 
@@ -439,12 +521,11 @@ func TestGetColumnsContext(t *testing.T) {
 	assert.NotNil(t, result)
 	assert.Len(t, result.Tables, 1)
 
-	// Verify users table
 	usersTable := result.Tables["users"]
 	assert.Len(t, usersTable.Columns, 2)
 
 	// Verify enriched column details
-	var idCol, emailCol *models.ColumnDetail
+	var idCol, emailCol *models.ColumnDetailInfo
 	for i := range usersTable.Columns {
 		if usersTable.Columns[i].Name == "id" {
 			idCol = &usersTable.Columns[i]
@@ -466,11 +547,10 @@ func TestGetColumnsContext_RequiresTableFilter(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
 
-	ontologyRepo := &mockOntologyRepository{}
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
+	svc := NewOntologyContextService(schemaRepo, &mockColumnMetadataRepository{}, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
 	result, err := svc.GetColumnsContext(ctx, projectID, nil)
 
@@ -483,11 +563,10 @@ func TestGetColumnsContext_TooManyTables(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
 
-	ontologyRepo := &mockOntologyRepository{}
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
+	svc := NewOntologyContextService(schemaRepo, &mockColumnMetadataRepository{}, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
 	// Create list of tables exceeding the limit
 	tables := make([]string, MaxColumnsDepthTables+1)
@@ -504,21 +583,11 @@ func TestGetColumnsContext_TooManyTables(t *testing.T) {
 }
 
 func TestGetColumnsContext_NoEnrichment(t *testing.T) {
-	// Test that columns without enrichment still work (schema-only fallback)
+	// Columns without metadata should still work (schema-only fallback)
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	tableID := uuid.New()
 
-	// Ontology with empty column_details (no enrichment yet)
-	ontology := &models.TieredOntology{
-		ID:            ontologyID,
-		ProjectID:     projectID,
-		IsActive:      true,
-		ColumnDetails: map[string][]models.ColumnDetail{},
-	}
-
-	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
 	schemaRepo := &mockSchemaRepository{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"users": {
@@ -527,9 +596,12 @@ func TestGetColumnsContext_NoEnrichment(t *testing.T) {
 			},
 		},
 	}
+
+	// No column metadata — empty repo
+	columnMetadataRepo := &mockColumnMetadataRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
+	svc := NewOntologyContextService(schemaRepo, columnMetadataRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
 	result, err := svc.GetColumnsContext(ctx, projectID, []string{"users"})
 
@@ -540,8 +612,7 @@ func TestGetColumnsContext_NoEnrichment(t *testing.T) {
 	usersTable := result.Tables["users"]
 	assert.Len(t, usersTable.Columns, 2)
 
-	// Columns should have basic schema info even without enrichment
-	var idCol *models.ColumnDetail
+	var idCol *models.ColumnDetailInfo
 	for i := range usersTable.Columns {
 		if usersTable.Columns[i].Name == "id" {
 			idCol = &usersTable.Columns[i]
@@ -550,26 +621,14 @@ func TestGetColumnsContext_NoEnrichment(t *testing.T) {
 	}
 	assert.NotNil(t, idCol)
 	assert.True(t, idCol.IsPrimaryKey)
-	assert.Empty(t, idCol.Description) // No enrichment
+	assert.Empty(t, idCol.Description)
 }
 
 func TestGetTablesContext_WithTableMetadata(t *testing.T) {
-	// Test that table metadata from engine_ontology_table_metadata is merged correctly
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	tableID := uuid.New()
 
-	ontology := &models.TieredOntology{
-		ID:        ontologyID,
-		ProjectID: projectID,
-		IsActive:  true,
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"orders": {{Name: "id", IsPrimaryKey: true}},
-		},
-	}
-
-	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
 	schemaRepo := &mockSchemaRepository{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"orders": {
@@ -579,7 +638,6 @@ func TestGetTablesContext_WithTableMetadata(t *testing.T) {
 	}
 	projectService := &mockProjectServiceForOntology{}
 
-	// Set up table metadata with description and usage notes
 	description := "Customer order records"
 	usageNotes := "Contains payment information - handle with care"
 	preferredAlternative := "orders_v2"
@@ -595,7 +653,7 @@ func TestGetTablesContext_WithTableMetadata(t *testing.T) {
 		},
 	}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, tableMetadataRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(schemaRepo, &mockColumnMetadataRepository{}, tableMetadataRepo, projectService, zap.NewNop())
 
 	result, err := svc.GetTablesContext(ctx, projectID, []string{"orders"})
 
@@ -611,22 +669,10 @@ func TestGetTablesContext_WithTableMetadata(t *testing.T) {
 }
 
 func TestGetColumnsContext_WithTableMetadata(t *testing.T) {
-	// Test that table metadata from engine_ontology_table_metadata is merged at columns depth
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	tableID := uuid.New()
 
-	ontology := &models.TieredOntology{
-		ID:        ontologyID,
-		ProjectID: projectID,
-		IsActive:  true,
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"orders": {{Name: "id", IsPrimaryKey: true}},
-		},
-	}
-
-	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
 	schemaRepo := &mockSchemaRepository{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"orders": {
@@ -636,7 +682,6 @@ func TestGetColumnsContext_WithTableMetadata(t *testing.T) {
 	}
 	projectService := &mockProjectServiceForOntology{}
 
-	// Set up table metadata
 	description := "Customer order records"
 	usageNotes := "Join with customers table for full details"
 	tableMetadataRepo := &mockTableMetadataRepository{
@@ -649,7 +694,7 @@ func TestGetColumnsContext_WithTableMetadata(t *testing.T) {
 		},
 	}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, tableMetadataRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(schemaRepo, &mockColumnMetadataRepository{}, tableMetadataRepo, projectService, zap.NewNop())
 
 	result, err := svc.GetColumnsContext(ctx, projectID, []string{"orders"})
 
@@ -663,28 +708,15 @@ func TestGetColumnsContext_WithTableMetadata(t *testing.T) {
 }
 
 func TestGetTablesContext_RowCountPopulated(t *testing.T) {
-	// Test that TableSummary.RowCount is populated from SchemaTable.RowCount
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	usersTableID := uuid.New()
 	ordersTableID := uuid.New()
-
-	ontology := &models.TieredOntology{
-		ID:        ontologyID,
-		ProjectID: projectID,
-		IsActive:  true,
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"users":  {{Name: "id", IsPrimaryKey: true}},
-			"orders": {{Name: "id", IsPrimaryKey: true}},
-		},
-	}
-
-	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
 
 	usersRowCount := int64(95)
 	ordersRowCount := int64(250)
 	schemaRepo := &mockSchemaRepository{
+		selectedTableNames: []string{"users", "orders"},
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"users": {
 				{ID: uuid.New(), SchemaTableID: usersTableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
@@ -710,7 +742,7 @@ func TestGetTablesContext_RowCountPopulated(t *testing.T) {
 	}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
+	svc := NewOntologyContextService(schemaRepo, &mockColumnMetadataRepository{}, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
 	result, err := svc.GetTablesContext(ctx, projectID, nil)
 
@@ -718,28 +750,15 @@ func TestGetTablesContext_RowCountPopulated(t *testing.T) {
 	assert.NotNil(t, result)
 	assert.Len(t, result.Tables, 2)
 
-	// Row counts should be populated from SchemaTable data
-	assert.Equal(t, int64(95), result.Tables["users"].RowCount, "users table should have row_count 95")
-	assert.Equal(t, int64(250), result.Tables["orders"].RowCount, "orders table should have row_count 250")
+	assert.Equal(t, int64(95), result.Tables["users"].RowCount)
+	assert.Equal(t, int64(250), result.Tables["orders"].RowCount)
 }
 
 func TestGetTablesContext_RowCountNil(t *testing.T) {
-	// Test that tables with nil RowCount default to 0
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	tableID := uuid.New()
 
-	ontology := &models.TieredOntology{
-		ID:        ontologyID,
-		ProjectID: projectID,
-		IsActive:  true,
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"users": {{Name: "id", IsPrimaryKey: true}},
-		},
-	}
-
-	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
 	schemaRepo := &mockSchemaRepository{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"users": {
@@ -751,54 +770,58 @@ func TestGetTablesContext_RowCountNil(t *testing.T) {
 				ID:        tableID,
 				ProjectID: projectID,
 				TableName: "users",
-				RowCount:  nil, // No row count available
+				RowCount:  nil,
 			},
 		},
 	}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
+	svc := NewOntologyContextService(schemaRepo, &mockColumnMetadataRepository{}, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
 	result, err := svc.GetTablesContext(ctx, projectID, []string{"users"})
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
-	assert.Equal(t, int64(0), result.Tables["users"].RowCount, "nil row_count should default to 0")
+	assert.Equal(t, int64(0), result.Tables["users"].RowCount)
 }
 
 func TestGetTablesContext_HasDescriptionFlag(t *testing.T) {
-	// Test that ColumnOverview.HasDescription reflects whether the column has a description
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	tableID := uuid.New()
 
-	ontology := &models.TieredOntology{
-		ID:        ontologyID,
-		ProjectID: projectID,
-		IsActive:  true,
-		ColumnDetails: map[string][]models.ColumnDetail{
+	idColID := uuid.New()
+	emailColID := uuid.New()
+	statusColID := uuid.New()
+
+	schemaRepo := &mockSchemaRepository{
+		columnsByTable: map[string][]*models.SchemaColumn{
 			"users": {
-				{Name: "id", IsPrimaryKey: true, Description: "Unique user identifier"},
-				{Name: "email", Description: "User email address"},
-				{Name: "status"}, // No description
+				{ID: idColID, SchemaTableID: tableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+				{ID: emailColID, SchemaTableID: tableID, ColumnName: "email", DataType: "varchar"},
+				{ID: statusColID, SchemaTableID: tableID, ColumnName: "status", DataType: "varchar"},
 			},
 		},
 	}
 
-	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
-	schemaRepo := &mockSchemaRepository{
-		columnsByTable: map[string][]*models.SchemaColumn{
-			"users": {
-				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
-				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "email", DataType: "varchar"},
-				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "status", DataType: "varchar"},
+	idDesc := "Unique user identifier"
+	emailDesc := "User email address"
+	columnMetadataRepo := &mockColumnMetadataRepository{
+		metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+			idColID: {
+				SchemaColumnID: idColID,
+				Description:    &idDesc,
 			},
+			emailColID: {
+				SchemaColumnID: emailColID,
+				Description:    &emailDesc,
+			},
+			// statusColID has no metadata — no description
 		},
 	}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, schemaRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
+	svc := NewOntologyContextService(schemaRepo, columnMetadataRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
 
 	result, err := svc.GetTablesContext(ctx, projectID, []string{"users"})
 
@@ -810,10 +833,88 @@ func TestGetTablesContext_HasDescriptionFlag(t *testing.T) {
 		columnByName[col.Name] = col
 	}
 
-	// Columns with descriptions should have HasDescription = true
-	assert.True(t, columnByName["id"].HasDescription, "id should have HasDescription=true")
-	assert.True(t, columnByName["email"].HasDescription, "email should have HasDescription=true")
+	assert.True(t, columnByName["id"].HasDescription)
+	assert.True(t, columnByName["email"].HasDescription)
+	assert.False(t, columnByName["status"].HasDescription)
+}
 
-	// Column without description should have HasDescription = false
-	assert.False(t, columnByName["status"].HasDescription, "status should have HasDescription=false")
+func TestGetColumnsContext_FKAndEnumDetails(t *testing.T) {
+	// Test that FK info and enum values are properly conveyed in ColumnDetailInfo
+	ctx := context.Background()
+	projectID := uuid.New()
+	tableID := uuid.New()
+
+	hostColID := uuid.New()
+	statusColID := uuid.New()
+
+	schemaRepo := &mockSchemaRepository{
+		columnsByTable: map[string][]*models.SchemaColumn{
+			"visits": {
+				{ID: hostColID, SchemaTableID: tableID, ColumnName: "host_id", DataType: "uuid"},
+				{ID: statusColID, SchemaTableID: tableID, ColumnName: "status", DataType: "varchar"},
+			},
+		},
+	}
+
+	dimensionRole := models.ColumnRoleDimension
+	columnMetadataRepo := &mockColumnMetadataRepository{
+		metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+			hostColID: {
+				SchemaColumnID: hostColID,
+				Role:           &dimensionRole,
+				Features: models.ColumnMetadataFeatures{
+					IdentifierFeatures: &models.IdentifierFeatures{
+						FKAssociation: "host",
+						FKTargetTable: "users",
+					},
+				},
+			},
+			statusColID: {
+				SchemaColumnID: statusColID,
+				Role:           &dimensionRole,
+				Features: models.ColumnMetadataFeatures{
+					EnumFeatures: &models.EnumFeatures{
+						Values: []models.ColumnEnumValue{
+							{Value: "active", Label: "Active"},
+							{Value: "completed", Label: "Completed"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	projectService := &mockProjectServiceForOntology{}
+
+	svc := NewOntologyContextService(schemaRepo, columnMetadataRepo, &mockTableMetadataRepository{}, projectService, zap.NewNop())
+
+	result, err := svc.GetColumnsContext(ctx, projectID, []string{"visits"})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+
+	visitsTable := result.Tables["visits"]
+	assert.Len(t, visitsTable.Columns, 2)
+
+	var hostCol, statusCol *models.ColumnDetailInfo
+	for i := range visitsTable.Columns {
+		switch visitsTable.Columns[i].Name {
+		case "host_id":
+			hostCol = &visitsTable.Columns[i]
+		case "status":
+			statusCol = &visitsTable.Columns[i]
+		}
+	}
+
+	// Verify FK info
+	assert.NotNil(t, hostCol)
+	assert.True(t, hostCol.IsForeignKey)
+	assert.Equal(t, "users", hostCol.ForeignTable)
+	assert.Equal(t, "host", hostCol.FKAssociation)
+
+	// Verify enum values
+	assert.NotNil(t, statusCol)
+	assert.Len(t, statusCol.EnumValues, 2)
+	assert.Equal(t, "active", statusCol.EnumValues[0].Value)
+	assert.Equal(t, "Active", statusCol.EnumValues[0].Label)
 }

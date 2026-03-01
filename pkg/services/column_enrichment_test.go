@@ -148,6 +148,14 @@ func (r *testColEnrichmentSchemaRepo) GetColumnCountByProject(ctx context.Contex
 	return 0, nil
 }
 
+func (r *testColEnrichmentSchemaRepo) GetTableCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (r *testColEnrichmentSchemaRepo) GetSelectedTableNamesByProject(ctx context.Context, projectID uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+
 func (r *testColEnrichmentSchemaRepo) GetEmptyTables(ctx context.Context, projectID, datasourceID uuid.UUID) ([]string, error) {
 	return nil, nil
 }

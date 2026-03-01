@@ -130,6 +130,12 @@ func (m *mockSchemaRepo) GetTablesByNames(context.Context, uuid.UUID, []string) 
 func (m *mockSchemaRepo) GetColumnCountByProject(context.Context, uuid.UUID) (int, error) {
 	return 0, nil
 }
+func (m *mockSchemaRepo) GetTableCountByProject(context.Context, uuid.UUID) (int, error) {
+	return 0, nil
+}
+func (m *mockSchemaRepo) GetSelectedTableNamesByProject(context.Context, uuid.UUID) ([]string, error) {
+	return nil, nil
+}
 func (m *mockSchemaRepo) GetColumnByID(context.Context, uuid.UUID, uuid.UUID) (*models.SchemaColumn, error) {
 	return nil, nil
 }

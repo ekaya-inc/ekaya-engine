@@ -120,6 +120,12 @@ func (m *mockSchemaRepoForFinalization) ListColumnsByDatasource(ctx context.Cont
 func (m *mockSchemaRepoForFinalization) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 0, nil
 }
+func (m *mockSchemaRepoForFinalization) GetTableCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return 0, nil
+}
+func (m *mockSchemaRepoForFinalization) GetSelectedTableNamesByProject(ctx context.Context, projectID uuid.UUID) ([]string, error) {
+	return nil, nil
+}
 func (m *mockSchemaRepoForFinalization) GetColumnByID(ctx context.Context, projectID, columnID uuid.UUID) (*models.SchemaColumn, error) {
 	return nil, nil
 }

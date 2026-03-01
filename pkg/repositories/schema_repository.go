@@ -54,6 +54,10 @@ type SchemaRepository interface {
 	// GetColumnsByTables returns selected columns for multiple tables, grouped by table name.
 	GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error)
 	GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error)
+	// GetTableCountByProject returns the count of selected, non-deleted tables for a project.
+	GetTableCountByProject(ctx context.Context, projectID uuid.UUID) (int, error)
+	// GetSelectedTableNamesByProject returns the names of all selected, non-deleted tables for a project.
+	GetSelectedTableNamesByProject(ctx context.Context, projectID uuid.UUID) ([]string, error)
 	GetColumnByID(ctx context.Context, projectID, columnID uuid.UUID) (*models.SchemaColumn, error)
 	GetColumnByName(ctx context.Context, tableID uuid.UUID, columnName string) (*models.SchemaColumn, error)
 	UpsertColumn(ctx context.Context, column *models.SchemaColumn) error
@@ -599,6 +603,63 @@ func (r *schemaRepository) GetColumnCountByProject(ctx context.Context, projectI
 	}
 
 	return count, nil
+}
+
+func (r *schemaRepository) GetTableCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return 0, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT COUNT(*)
+		FROM engine_schema_tables
+		WHERE project_id = $1
+		  AND deleted_at IS NULL
+		  AND is_selected = true`
+
+	var count int
+	err := scope.Conn.QueryRow(ctx, query, projectID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get table count: %w", err)
+	}
+
+	return count, nil
+}
+
+func (r *schemaRepository) GetSelectedTableNamesByProject(ctx context.Context, projectID uuid.UUID) ([]string, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT table_name
+		FROM engine_schema_tables
+		WHERE project_id = $1
+		  AND deleted_at IS NULL
+		  AND is_selected = true
+		ORDER BY table_name`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get selected table names: %w", err)
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("failed to scan table name: %w", err)
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating table names: %w", err)
+	}
+
+	return names, nil
 }
 
 func (r *schemaRepository) GetColumnByID(ctx context.Context, projectID, columnID uuid.UUID) (*models.SchemaColumn, error) {

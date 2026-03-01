@@ -862,6 +862,12 @@ func (m *mockSchemaRepoForFeatureExtraction) GetTablesByNames(ctx context.Contex
 func (m *mockSchemaRepoForFeatureExtraction) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 0, nil
 }
+func (m *mockSchemaRepoForFeatureExtraction) GetTableCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return 0, nil
+}
+func (m *mockSchemaRepoForFeatureExtraction) GetSelectedTableNamesByProject(ctx context.Context, projectID uuid.UUID) ([]string, error) {
+	return nil, nil
+}
 func (m *mockSchemaRepoForFeatureExtraction) GetColumnByID(ctx context.Context, projectID, columnID uuid.UUID) (*models.SchemaColumn, error) {
 	return nil, nil
 }

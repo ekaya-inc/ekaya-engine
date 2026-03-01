@@ -104,11 +104,11 @@ The core of the refactor — 3 methods that build all ontology context for MCP t
 
 `pkg/services/ontology_context.go`:
 
-- [ ] Remove `ontologyRepo` from constructor, add `columnMetadataRepo`, `tableMetadataRepo`
-- [ ] `GetDomainContext()`: Read `project.DomainSummary` instead of `ontology.DomainSummary`. Get table/column counts from schema repo.
-- [ ] `GetTablesContext()`: Build column overviews from `ColumnMetadata` (via `columnMetadataRepo.GetBySchemaColumnIDs()`) instead of `ontology.ColumnDetails`. Get table descriptions from `TableMetadata`.
-- [ ] `GetColumnsContext()`: Build column details from `ColumnMetadata` + `SchemaColumn` instead of `ontology.ColumnDetails`. Create a new response type to replace `[]ColumnDetail`.
-- [ ] Update `pkg/services/ontology_context_test.go` and integration tests
+- [x] Remove `ontologyRepo` from constructor, add `columnMetadataRepo`, `tableMetadataRepo`
+- [x] `GetDomainContext()`: Read `project.DomainSummary` instead of `ontology.DomainSummary`. Get table/column counts from schema repo.
+- [x] `GetTablesContext()`: Build column overviews from `ColumnMetadata` (via `columnMetadataRepo.GetBySchemaColumnIDs()`) instead of `ontology.ColumnDetails`. Get table descriptions from `TableMetadata`.
+- [x] `GetColumnsContext()`: Build column details from `ColumnMetadata` + `SchemaColumn` instead of `ontology.ColumnDetails`. Create a new response type to replace `[]ColumnDetail`.
+- [x] Update `pkg/services/ontology_context_test.go` and integration tests
 
 ### Task 5: Refactor Column Enrichment Service
 

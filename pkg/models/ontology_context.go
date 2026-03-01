@@ -71,13 +71,28 @@ type OntologyColumnsContext struct {
 
 // TableDetail provides full table and column details.
 type TableDetail struct {
-	Schema       string         `json:"schema"`
-	BusinessName string         `json:"business_name"`
-	Description  string         `json:"description"`
-	Columns      []ColumnDetail `json:"columns"`
+	Schema       string             `json:"schema"`
+	BusinessName string             `json:"business_name"`
+	Description  string             `json:"description"`
+	Columns      []ColumnDetailInfo `json:"columns"`
 
 	// Table metadata (from engine_ontology_table_metadata)
 	UsageNotes           string `json:"usage_notes,omitempty"`
 	IsEphemeral          bool   `json:"is_ephemeral,omitempty"`
 	PreferredAlternative string `json:"preferred_alternative,omitempty"`
+}
+
+// ColumnDetailInfo represents detailed semantic information for a column in API responses.
+// Built from ColumnMetadata + SchemaColumn (replaces ColumnDetail from the ontology blob).
+type ColumnDetailInfo struct {
+	Name          string      `json:"name"`
+	Description   string      `json:"description,omitempty"`
+	Synonyms      []string    `json:"synonyms,omitempty"`
+	SemanticType  string      `json:"semantic_type,omitempty"`
+	Role          string      `json:"role,omitempty"`           // dimension, measure, identifier, attribute
+	FKAssociation string      `json:"fk_association,omitempty"` // payer, payee, host, visitor, etc.
+	EnumValues    []EnumValue `json:"enum_values,omitempty"`
+	IsPrimaryKey  bool        `json:"is_primary_key"`
+	IsForeignKey  bool        `json:"is_foreign_key"`
+	ForeignTable  string      `json:"foreign_table,omitempty"`
 }

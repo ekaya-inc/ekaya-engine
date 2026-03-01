@@ -25,58 +25,63 @@ type OntologyContextService interface {
 }
 
 type ontologyContextService struct {
-	ontologyRepo      repositories.OntologyRepository
-	schemaRepo        repositories.SchemaRepository
-	tableMetadataRepo repositories.TableMetadataRepository
-	projectService    ProjectService
-	logger            *zap.Logger
+	schemaRepo         repositories.SchemaRepository
+	columnMetadataRepo repositories.ColumnMetadataRepository
+	tableMetadataRepo  repositories.TableMetadataRepository
+	projectService     ProjectService
+	logger             *zap.Logger
 }
 
 // NewOntologyContextService creates a new OntologyContextService.
 func NewOntologyContextService(
-	ontologyRepo repositories.OntologyRepository,
 	schemaRepo repositories.SchemaRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
 	tableMetadataRepo repositories.TableMetadataRepository,
 	projectService ProjectService,
 	logger *zap.Logger,
 ) OntologyContextService {
 	return &ontologyContextService{
-		ontologyRepo:      ontologyRepo,
-		schemaRepo:        schemaRepo,
-		tableMetadataRepo: tableMetadataRepo,
-		projectService:    projectService,
-		logger:            logger,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		tableMetadataRepo:  tableMetadataRepo,
+		projectService:     projectService,
+		logger:             logger,
 	}
 }
 
 // GetDomainContext returns high-level domain information.
 func (s *ontologyContextService) GetDomainContext(ctx context.Context, projectID uuid.UUID) (*models.OntologyDomainContext, error) {
-	// Get active ontology for domain summary
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
+	// Get project for domain summary
+	project, err := s.projectService.GetByID(ctx, projectID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get active ontology: %w", err)
+		return nil, fmt.Errorf("failed to get project: %w", err)
 	}
-	if ontology == nil {
-		return nil, fmt.Errorf("no active ontology found")
+	if project == nil {
+		return nil, fmt.Errorf("project not found")
 	}
 
-	// Get column count from schema tables
+	// Get table count from schema
+	tableCount, err := s.schemaRepo.GetTableCountByProject(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get table count: %w", err)
+	}
+
+	// Get column count from schema
 	columnCount, err := s.schemaRepo.GetColumnCountByProject(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get column count: %w", err)
 	}
 
-	// Build domain info - TableCount from ontology column_details keys, ColumnCount from schema
 	domainInfo := models.DomainInfo{
-		TableCount:  ontology.TableCount(),
+		TableCount:  tableCount,
 		ColumnCount: columnCount,
 	}
 
 	// Use domain summary if available (populated by Ontology Finalization)
-	if ontology.DomainSummary != nil {
-		domainInfo.Description = ontology.DomainSummary.Description
-		domainInfo.PrimaryDomains = ontology.DomainSummary.Domains
-		domainInfo.Conventions = ontology.DomainSummary.Conventions
+	if project.DomainSummary != nil {
+		domainInfo.Description = project.DomainSummary.Description
+		domainInfo.PrimaryDomains = project.DomainSummary.Domains
+		domainInfo.Conventions = project.DomainSummary.Conventions
 	}
 
 	return &models.OntologyDomainContext{
@@ -86,32 +91,13 @@ func (s *ontologyContextService) GetDomainContext(ctx context.Context, projectID
 
 // GetTablesContext returns table summaries, optionally filtered by table names.
 func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID uuid.UUID, tableNames []string) (*models.OntologyTablesContext, error) {
-	// Get active ontology (contains enriched column_details)
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get active ontology: %w", err)
-	}
-	if ontology == nil {
-		return nil, fmt.Errorf("no active ontology found")
-	}
-
-	// Build enriched column lookup from ontology.ColumnDetails
-	// Key: tableName -> columnName -> ColumnDetail
-	enrichedColumns := make(map[string]map[string]models.ColumnDetail)
-	if ontology.ColumnDetails != nil {
-		for tableName, cols := range ontology.ColumnDetails {
-			enrichedColumns[tableName] = make(map[string]models.ColumnDetail)
-			for _, col := range cols {
-				enrichedColumns[tableName][col.Name] = col
-			}
-		}
-	}
-
-	// If no filter provided, return all tables from ontology column_details
+	// If no filter provided, get all selected table names from schema
 	tablesToInclude := tableNames
 	if len(tablesToInclude) == 0 {
-		for tableName := range ontology.ColumnDetails {
-			tablesToInclude = append(tablesToInclude, tableName)
+		var err error
+		tablesToInclude, err = s.schemaRepo.GetSelectedTableNamesByProject(ctx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get table names: %w", err)
 		}
 	}
 
@@ -119,6 +105,20 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tablesToInclude)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get columns: %w", err)
+	}
+
+	// Collect all schema column IDs for bulk metadata lookup
+	var allColumnIDs []uuid.UUID
+	for _, cols := range columnsByTable {
+		for _, col := range cols {
+			allColumnIDs = append(allColumnIDs, col.ID)
+		}
+	}
+
+	// Fetch column metadata in bulk, indexed by SchemaColumnID
+	metadataByColumnID, err := s.getColumnMetadataMap(ctx, allColumnIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get column metadata: %w", err)
 	}
 
 	// Fetch schema tables keyed by table name (for row_count)
@@ -140,9 +140,8 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 	tables := make(map[string]models.TableSummary)
 	for _, tableName := range tablesToInclude {
 		schemaColumns := columnsByTable[tableName]
-		tableEnriched := enrichedColumns[tableName] // nil if not enriched
 
-		// Build column overview from schema columns, merging enriched data
+		// Build column overview from schema columns, merging column metadata
 		columns := make([]models.ColumnOverview, 0, len(schemaColumns))
 		for _, col := range schemaColumns {
 			overview := models.ColumnOverview{
@@ -151,12 +150,16 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 				IsPrimaryKey: col.IsPrimaryKey,
 			}
 
-			// Merge enriched data if available (Role, FKAssociation, HasEnumValues, HasDescription)
-			if enriched, ok := tableEnriched[col.ColumnName]; ok {
-				overview.Role = enriched.Role
-				overview.FKAssociation = enriched.FKAssociation
-				overview.HasEnumValues = len(enriched.EnumValues) > 0
-				overview.HasDescription = enriched.Description != ""
+			// Merge column metadata if available
+			if meta, ok := metadataByColumnID[col.ID]; ok {
+				if meta.Role != nil {
+					overview.Role = *meta.Role
+				}
+				if meta.Features.IdentifierFeatures != nil {
+					overview.FKAssociation = meta.Features.IdentifierFeatures.FKAssociation
+				}
+				overview.HasEnumValues = meta.Features.EnumFeatures != nil && len(meta.Features.EnumFeatures.Values) > 0
+				overview.HasDescription = meta.Description != nil && *meta.Description != ""
 			}
 
 			columns = append(columns, overview)
@@ -208,31 +211,24 @@ func (s *ontologyContextService) GetColumnsContext(ctx context.Context, projectI
 		return nil, fmt.Errorf("too many tables requested: maximum %d tables allowed for columns depth, got %d", MaxColumnsDepthTables, len(tableNames))
 	}
 
-	// Get active ontology (contains enriched column_details)
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get active ontology: %w", err)
-	}
-	if ontology == nil {
-		return nil, fmt.Errorf("no active ontology found")
-	}
-
-	// Build enriched column lookup from ontology.ColumnDetails
-	// Key: tableName -> columnName -> ColumnDetail
-	enrichedColumns := make(map[string]map[string]models.ColumnDetail)
-	if ontology.ColumnDetails != nil {
-		for tableName, cols := range ontology.ColumnDetails {
-			enrichedColumns[tableName] = make(map[string]models.ColumnDetail)
-			for _, col := range cols {
-				enrichedColumns[tableName][col.Name] = col
-			}
-		}
-	}
-
 	// Get columns for the requested tables
 	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get columns: %w", err)
+	}
+
+	// Collect all schema column IDs for bulk metadata lookup
+	var allColumnIDs []uuid.UUID
+	for _, cols := range columnsByTable {
+		for _, col := range cols {
+			allColumnIDs = append(allColumnIDs, col.ID)
+		}
+	}
+
+	// Fetch column metadata in bulk, indexed by SchemaColumnID
+	metadataByColumnID, err := s.getColumnMetadataMap(ctx, allColumnIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get column metadata: %w", err)
 	}
 
 	// Fetch table metadata keyed by table name (joins with engine_schema_tables)
@@ -248,51 +244,117 @@ func (s *ontologyContextService) GetColumnsContext(ctx context.Context, projectI
 	tables := make(map[string]models.TableDetail)
 	for _, tableName := range tableNames {
 		schemaColumns := columnsByTable[tableName]
-		tableEnriched := enrichedColumns[tableName] // nil if not enriched
 
-		// Build column details by merging enriched data with schema
-		columnDetails := make([]models.ColumnDetail, 0, len(schemaColumns))
+		// Build column details from schema + column metadata
+		columnDetails := make([]models.ColumnDetailInfo, 0, len(schemaColumns))
 		for _, col := range schemaColumns {
-			// Check if we have enriched data for this column
-			if enriched, ok := tableEnriched[col.ColumnName]; ok {
-				// Use enriched data + overlay current schema PK info
-				enriched.IsPrimaryKey = col.IsPrimaryKey
-				columnDetails = append(columnDetails, enriched)
-			} else {
-				// Fall back to schema-only (no enrichment yet)
-				columnDetails = append(columnDetails, models.ColumnDetail{
-					Name:         col.ColumnName,
-					IsPrimaryKey: col.IsPrimaryKey,
-				})
+			detail := models.ColumnDetailInfo{
+				Name:         col.ColumnName,
+				IsPrimaryKey: col.IsPrimaryKey,
 			}
+
+			// Merge column metadata if available
+			if meta, ok := metadataByColumnID[col.ID]; ok {
+				if meta.Description != nil {
+					detail.Description = *meta.Description
+				}
+				if meta.SemanticType != nil {
+					detail.SemanticType = *meta.SemanticType
+				}
+				if meta.Role != nil {
+					detail.Role = *meta.Role
+				}
+				detail.Synonyms = meta.Features.Synonyms
+
+				// FK info from identifier features
+				if meta.Features.IdentifierFeatures != nil {
+					idFeatures := meta.Features.IdentifierFeatures
+					detail.FKAssociation = idFeatures.FKAssociation
+					if idFeatures.FKTargetTable != "" {
+						detail.IsForeignKey = true
+						detail.ForeignTable = idFeatures.FKTargetTable
+					}
+				}
+
+				// Enum values from enum features
+				if meta.Features.EnumFeatures != nil {
+					detail.EnumValues = columnEnumValuesToEnumValues(meta.Features.EnumFeatures.Values)
+				}
+			}
+
+			columnDetails = append(columnDetails, detail)
 		}
 
-		detail := models.TableDetail{
+		tableDetail := models.TableDetail{
 			Columns: columnDetails,
 		}
 
 		// Merge table metadata if available
 		if meta, ok := tableMetadataMap[tableName]; ok {
 			if meta.Description != nil && *meta.Description != "" {
-				detail.Description = *meta.Description
+				tableDetail.Description = *meta.Description
 			}
 			if meta.UsageNotes != nil && *meta.UsageNotes != "" {
-				detail.UsageNotes = *meta.UsageNotes
+				tableDetail.UsageNotes = *meta.UsageNotes
 			}
 			if meta.IsEphemeral {
-				detail.IsEphemeral = true
+				tableDetail.IsEphemeral = true
 			}
 			if meta.PreferredAlternative != nil && *meta.PreferredAlternative != "" {
-				detail.PreferredAlternative = *meta.PreferredAlternative
+				tableDetail.PreferredAlternative = *meta.PreferredAlternative
 			}
 		}
 
-		tables[tableName] = detail
+		tables[tableName] = tableDetail
 	}
 
 	return &models.OntologyColumnsContext{
 		Tables: tables,
 	}, nil
+}
+
+// getColumnMetadataMap fetches column metadata for the given schema column IDs
+// and returns them indexed by SchemaColumnID for efficient lookup.
+func (s *ontologyContextService) getColumnMetadataMap(ctx context.Context, schemaColumnIDs []uuid.UUID) (map[uuid.UUID]*models.ColumnMetadata, error) {
+	result := make(map[uuid.UUID]*models.ColumnMetadata)
+	if len(schemaColumnIDs) == 0 || s.columnMetadataRepo == nil {
+		return result, nil
+	}
+
+	metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, schemaColumnIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, meta := range metadataList {
+		result[meta.SchemaColumnID] = meta
+	}
+	return result, nil
+}
+
+// columnEnumValuesToEnumValues converts ColumnEnumValue (from column features)
+// to EnumValue (used in API responses).
+func columnEnumValuesToEnumValues(values []models.ColumnEnumValue) []models.EnumValue {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make([]models.EnumValue, 0, len(values))
+	for _, v := range values {
+		ev := models.EnumValue{
+			Value: v.Value,
+			Label: v.Label,
+		}
+		if v.Count > 0 {
+			count := v.Count
+			ev.Count = &count
+		}
+		if v.Percentage > 0 {
+			pct := v.Percentage
+			ev.Percentage = &pct
+		}
+		result = append(result, ev)
+	}
+	return result
 }
 
 // Ensure ontologyContextService implements OntologyContextService at compile time.

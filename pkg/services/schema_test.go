@@ -34,11 +34,13 @@ func testContextWithAuth(projectID, userID string) context.Context {
 // mockSchemaRepository is a configurable mock for testing.
 type mockSchemaRepository struct {
 	// Tables
-	tables            []*models.SchemaTable
-	tableByName       *models.SchemaTable
-	tablesByName      map[string]*models.SchemaTable
-	upsertTableErr    error
-	softDeletedTables int64
+	tables             []*models.SchemaTable
+	tableByName        *models.SchemaTable
+	tablesByName       map[string]*models.SchemaTable
+	tableCount         int
+	selectedTableNames []string
+	upsertTableErr     error
+	softDeletedTables  int64
 
 	// Columns
 	columns            []*models.SchemaColumn
@@ -391,6 +393,24 @@ func (m *mockSchemaRepository) GetTablesByNames(ctx context.Context, projectID u
 
 func (m *mockSchemaRepository) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return len(m.columns), nil
+}
+
+func (m *mockSchemaRepository) GetTableCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
+	if m.tableCount > 0 {
+		return m.tableCount, nil
+	}
+	return len(m.tables), nil
+}
+
+func (m *mockSchemaRepository) GetSelectedTableNamesByProject(ctx context.Context, projectID uuid.UUID) ([]string, error) {
+	if m.selectedTableNames != nil {
+		return m.selectedTableNames, nil
+	}
+	var names []string
+	for _, t := range m.tables {
+		names = append(names, t.TableName)
+	}
+	return names, nil
 }
 
 func (m *mockSchemaRepository) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {

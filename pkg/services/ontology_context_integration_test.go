@@ -111,10 +111,11 @@ func setupOntologyContextTest(t *testing.T) *ontologyContextTestContext {
 	engineDB := testhelpers.GetEngineDB(t)
 	ontologyRepo := repositories.NewOntologyRepository()
 	schemaRepo := repositories.NewSchemaRepository()
+	columnMetadataRepo := repositories.NewColumnMetadataRepository()
 	projectService := &mockProjectServiceForIntegration{dsID: ontologyContextTestDSID}
 	logger := zap.NewNop()
 
-	service := NewOntologyContextService(ontologyRepo, schemaRepo, nil, projectService, logger)
+	service := NewOntologyContextService(schemaRepo, columnMetadataRepo, nil, projectService, logger)
 
 	tc := &ontologyContextTestContext{
 		t:            t,
@@ -461,7 +462,7 @@ func TestOntologyContextService_Integration_GetColumnsContext(t *testing.T) {
 	assert.Len(t, ordersTable.Columns, 4)
 
 	// Find total_amount column - only structural fields populated in Phase 1
-	var totalAmountCol *models.ColumnDetail
+	var totalAmountCol *models.ColumnDetailInfo
 	for i := range ordersTable.Columns {
 		if ordersTable.Columns[i].Name == "total_amount" {
 			totalAmountCol = &ordersTable.Columns[i]
@@ -476,7 +477,7 @@ func TestOntologyContextService_Integration_GetColumnsContext(t *testing.T) {
 	assert.Equal(t, []string{"revenue", "order_total"}, totalAmountCol.Synonyms)
 
 	// Find user_id column to verify FK detection from enriched data
-	var userIDCol *models.ColumnDetail
+	var userIDCol *models.ColumnDetailInfo
 	for i := range ordersTable.Columns {
 		if ordersTable.Columns[i].Name == "user_id" {
 			userIDCol = &ordersTable.Columns[i]

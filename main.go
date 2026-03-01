@@ -197,7 +197,7 @@ func main() {
 	ontologyFinalizationService := services.NewOntologyFinalizationService(
 		ontologyRepo, schemaRepo, columnMetadataRepo, convRepo, llmFactory, getTenantCtx, logger)
 	ontologyContextService := services.NewOntologyContextService(
-		ontologyRepo, schemaRepo, tableMetadataRepo, projectService, logger)
+		schemaRepo, columnMetadataRepo, tableMetadataRepo, projectService, logger)
 
 	// Create worker pool for parallel LLM calls
 	workerPoolConfig := llm.DefaultWorkerPoolConfig()

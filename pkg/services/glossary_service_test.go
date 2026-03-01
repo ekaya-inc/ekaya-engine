@@ -225,6 +225,12 @@ func (m *mockSchemaRepoForGlossary) GetTablesByNames(ctx context.Context, projec
 func (m *mockSchemaRepoForGlossary) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 0, nil
 }
+func (m *mockSchemaRepoForGlossary) GetTableCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return 0, nil
+}
+func (m *mockSchemaRepoForGlossary) GetSelectedTableNamesByProject(ctx context.Context, projectID uuid.UUID) ([]string, error) {
+	return nil, nil
+}
 func (m *mockSchemaRepoForGlossary) GetColumnByID(ctx context.Context, projectID, columnID uuid.UUID) (*models.SchemaColumn, error) {
 	return nil, nil
 }
