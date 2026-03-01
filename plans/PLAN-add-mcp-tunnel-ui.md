@@ -89,7 +89,7 @@ if (installedApps.some((app) => app.app_id === APP_ID_MCP_TUNNEL)) {
 }
 ```
 
-### 4. [ ] `ui/src/App.tsx`
+### 4. [x] `ui/src/App.tsx`
 
 **a) Add import** (near the other page imports at the top):
 ```typescript

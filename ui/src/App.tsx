@@ -19,6 +19,7 @@ import GlossaryPage from './pages/GlossaryPage';
 import HelpPage from './pages/HelpPage';
 import HomePage from './pages/HomePage';
 import MCPServerPage from './pages/MCPServerPage';
+import MCPTunnelPage from './pages/MCPTunnelPage';
 import OAuthCallbackPage from './pages/OAuthCallbackPage';
 import OntologyPage from './pages/OntologyPage';
 import OntologyQuestionsPage from './pages/OntologyQuestionsPage';
@@ -60,6 +61,7 @@ const App = (): JSX.Element => {
                   <Route path="ontology-questions" element={<OntologyQuestionsPage />} />
                   <Route path="queries/*" element={<QueriesPage />} />
                   <Route path="mcp-server" element={<MCPServerPage />} />
+                  <Route path="mcp-tunnel" element={<MCPTunnelPage />} />
                   <Route path="server-setup" element={<ServerSetupPage />} />
                   <Route path="settings" element={<SettingsPage />} />
                   <Route path="help" element={<HelpPage />} />
