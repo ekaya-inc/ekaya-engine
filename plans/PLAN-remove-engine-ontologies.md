@@ -76,11 +76,11 @@ This plan completes the migration by making `engine_ontology_column_metadata` th
 
 Create `migrations/011_remove_ontologies.up.sql`:
 
-- [ ] Add `domain_summary JSONB` column to `engine_projects`
-- [ ] Drop `ontology_id` column from `engine_ontology_questions` (drop FK, drop column, update unique constraints)
-- [ ] Drop `ontology_id` column from `engine_business_glossary` (update unique constraint from `(project_id, ontology_id, term)` to `(project_id, term)`)
-- [ ] Drop `ontology_id` from any other tables that FK to `engine_ontologies` (check `engine_ontology_dag`, chat messages)
-- [ ] Drop `engine_ontologies` table (with CASCADE)
+- [x] Add `domain_summary JSONB` column to `engine_projects`
+- [x] Drop `ontology_id` column from `engine_ontology_questions` (drop FK, drop column, update unique constraints)
+- [x] Drop `ontology_id` column from `engine_business_glossary` (update unique constraint from `(project_id, ontology_id, term)` to `(project_id, term)`)
+- [x] Drop `ontology_id` from any other tables that FK to `engine_ontologies` (check `engine_ontology_dag`, chat messages)
+- [x] Drop `engine_ontologies` table (with CASCADE)
 
 ### Task 2: Add Missing Fields to ColumnMetadata
 
