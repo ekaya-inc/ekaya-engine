@@ -12,7 +12,8 @@ type QueryParameter struct {
 	Type        string `json:"type"` // string, integer, decimal, boolean, date, timestamp, uuid, string[], integer[]
 	Description string `json:"description"`
 	Required    bool   `json:"required"`
-	Default     any    `json:"default,omitempty"` // nil if no default
+	Default     any    `json:"default,omitempty"` // Explicit runtime fallback value; nil if no default
+	Example     any    `json:"example,omitempty"` // Used only for dry-run validation; never used at runtime
 }
 
 // OutputColumn describes a single column returned by a query.

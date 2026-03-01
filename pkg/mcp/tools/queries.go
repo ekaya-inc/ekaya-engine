@@ -283,8 +283,7 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 				return NewErrorResult("QUERY_NOT_FOUND",
 					fmt.Sprintf("query with ID %q not found. Use list_approved_queries to see available queries.", queryID)), nil
 			}
-			// Database/system errors remain as Go errors
-			return nil, fmt.Errorf("failed to get query metadata: %w", err)
+			return HandleServiceError(err, "get_query_failed")
 		}
 
 		// Check if query is enabled (approved)
@@ -593,15 +592,15 @@ func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		// Extract parameters
 		name, err := req.RequireString("name")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 		description, err := req.RequireString("description")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 		sqlQuery, err := req.RequireString("sql")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 
 		// Get default datasource
@@ -691,7 +690,7 @@ func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 
 		query, err := deps.QueryService.Create(tenantCtx, projectID, dsID, createReq)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create query suggestion: %w", err)
+			return HandleServiceError(err, "create_query_suggestion_failed")
 		}
 
 		// Format response
@@ -813,7 +812,7 @@ func registerSuggestQueryUpdateTool(s *server.MCPServer, deps *QueryToolDeps) {
 				return NewErrorResult("QUERY_NOT_FOUND",
 					fmt.Sprintf("query with ID %q not found. Use list_approved_queries to see available queries.", queryID)), nil
 			}
-			return nil, fmt.Errorf("failed to get original query: %w", err)
+			return HandleServiceError(err, "get_query_failed")
 		}
 
 		// Build the update request
@@ -916,7 +915,7 @@ func registerSuggestQueryUpdateTool(s *server.MCPServer, deps *QueryToolDeps) {
 				return NewErrorResult("QUERY_NOT_FOUND",
 					fmt.Sprintf("query with ID %q not found", queryID)), nil
 			}
-			return nil, fmt.Errorf("failed to create update suggestion: %w", err)
+			return HandleServiceError(err, "create_update_suggestion_failed")
 		}
 
 		// Format response
@@ -998,7 +997,11 @@ func parseParameterDefinitions(paramsArray []any) ([]models.QueryParameter, erro
 		}
 
 		if example, ok := paramMap["example"]; ok {
-			param.Default = example
+			param.Example = example
+		}
+
+		if def, ok := paramMap["default"]; ok {
+			param.Default = def
 		}
 
 		params = append(params, param)
@@ -1011,10 +1014,12 @@ func parseParameterDefinitions(paramsArray []any) ([]models.QueryParameter, erro
 // For modifying statements (INSERT/UPDATE/DELETE/CALL), uses EXPLAIN validation
 // instead of actually executing the query.
 func validateAndTestQuery(ctx context.Context, deps *QueryToolDeps, projectID, dsID uuid.UUID, sqlQuery string, paramDefs []models.QueryParameter) (*validationResult, error) {
-	// Build parameter values from examples
+	// Build parameter values from examples (for dry-run validation only)
 	paramValues := make(map[string]any)
 	for _, p := range paramDefs {
-		if p.Default != nil {
+		if p.Example != nil {
+			paramValues[p.Name] = p.Example
+		} else if p.Default != nil {
 			paramValues[p.Name] = p.Default
 		} else if p.Required {
 			return nil, fmt.Errorf("parameter %q is required but has no example value", p.Name)
@@ -1464,7 +1469,7 @@ func registerRecordQueryFeedbackTool(s *server.MCPServer, deps *QueryToolDeps) {
 			if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "not owned") {
 				return NewErrorResult("not_found", "query history entry not found or not accessible"), nil
 			}
-			return nil, fmt.Errorf("failed to record feedback: %w", err)
+			return HandleServiceError(err, "record_feedback_failed")
 		}
 
 		response := struct {

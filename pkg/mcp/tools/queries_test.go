@@ -518,7 +518,8 @@ func TestParseParameterDefinitions(t *testing.T) {
 				assert.Equal(t, "string", params[0].Type)
 				assert.Equal(t, "Host's username", params[0].Description)
 				assert.True(t, params[0].Required)
-				assert.Equal(t, "damon", params[0].Default)
+				assert.Equal(t, "damon", params[0].Example)
+				assert.Nil(t, params[0].Default)
 			},
 		},
 		{

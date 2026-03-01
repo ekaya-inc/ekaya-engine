@@ -89,7 +89,7 @@ func registerGetOntologyTool(s *server.MCPServer, deps *OntologyToolDeps) {
 		// Parse required depth parameter
 		depth, err := req.RequireString("depth")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 
 		// Validate depth value
@@ -144,7 +144,8 @@ func registerGetOntologyTool(s *server.MCPServer, deps *OntologyToolDeps) {
 		case "columns":
 			result, err = handleColumnsDepth(tenantCtx, deps, projectID, tables)
 		default:
-			return nil, fmt.Errorf("unexpected depth value: %s", depth)
+			return NewErrorResult("invalid_parameters",
+				fmt.Sprintf("unexpected depth value: %s; valid values are: domain, entities, tables, columns", depth)), nil
 		}
 
 		if err != nil {

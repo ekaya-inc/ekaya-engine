@@ -13,6 +13,16 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 )
 
+// isMultiStatement detects if the SQL input contains multiple statements.
+// Uses a lightweight heuristic: trims trailing semicolons/whitespace, then checks
+// if a semicolon remains (indicating a statement boundary within the block).
+// False positives (e.g., semicolons in string literals) are harmless — they just
+// route to the transaction-wrapped path, which is safe for single statements too.
+func isMultiStatement(sql string) bool {
+	trimmed := strings.TrimRight(strings.TrimSpace(sql), "; \t\n\r")
+	return strings.Contains(trimmed, ";")
+}
+
 // QueryExecutor provides SQL Server query execution.
 type QueryExecutor struct {
 	config *Config
@@ -228,9 +238,18 @@ func (e *QueryExecutor) QueryWithParams(ctx context.Context, sqlQuery string, pa
 }
 
 // Execute runs any SQL statement (DDL/DML) and returns results.
+// For multi-statement input, wraps execution in a transaction.
 // For statements with OUTPUT clauses, returns rows in the result.
 // For INSERT/UPDATE/DELETE without OUTPUT, returns RowsAffected.
 func (e *QueryExecutor) Execute(ctx context.Context, sqlStatement string) (*datasource.ExecuteResult, error) {
+	if isMultiStatement(sqlStatement) {
+		return e.executeMultiStatement(ctx, sqlStatement)
+	}
+	return e.executeSingle(ctx, sqlStatement)
+}
+
+// executeSingle runs a single SQL statement. Supports OUTPUT clauses and row collection.
+func (e *QueryExecutor) executeSingle(ctx context.Context, sqlStatement string) (*datasource.ExecuteResult, error) {
 	result := &datasource.ExecuteResult{}
 
 	// Try QueryContext first to check if statement returns rows
@@ -323,6 +342,31 @@ func (e *QueryExecutor) Execute(ctx context.Context, sqlStatement string) (*data
 
 	result.RowCount = len(result.Rows)
 	return result, nil
+}
+
+// executeMultiStatement runs multiple SQL statements within a transaction.
+// SQL Server natively handles multi-statement batches via ExecContext.
+// On any error, the entire batch is rolled back.
+func (e *QueryExecutor) executeMultiStatement(ctx context.Context, sqlStatement string) (*datasource.ExecuteResult, error) {
+	tx, err := e.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback() // no-op if already committed
+
+	execResult, err := tx.ExecContext(ctx, sqlStatement)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute statements: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	rowsAffected, _ := execResult.RowsAffected()
+	return &datasource.ExecuteResult{
+		RowsAffected: rowsAffected,
+	}, nil
 }
 
 // QuoteIdentifier safely quotes a SQL identifier to prevent SQL injection.

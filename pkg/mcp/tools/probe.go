@@ -72,7 +72,7 @@ func registerProbeColumnTool(s *server.MCPServer, deps *ProbeToolDeps) {
 		// Get required parameters
 		tableName, err := req.RequireString("table")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 		// Validate table is not empty after trimming whitespace
 		tableName = trimString(tableName)
@@ -82,7 +82,7 @@ func registerProbeColumnTool(s *server.MCPServer, deps *ProbeToolDeps) {
 
 		columnName, err := req.RequireString("column")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 		// Validate column is not empty after trimming whitespace
 		columnName = trimString(columnName)

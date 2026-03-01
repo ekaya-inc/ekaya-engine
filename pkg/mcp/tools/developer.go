@@ -433,7 +433,7 @@ func registerEchoTool(s *server.MCPServer, deps *MCPToolDeps) {
 		// Get the message argument
 		message, err := req.RequireString("message")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 
 		result, err := json.Marshal(map[string]string{
@@ -502,7 +502,7 @@ func registerQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 		// Get SQL parameter
 		sql, err := req.RequireString("sql")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 
 		// Get optional natural language context for query history
@@ -547,11 +547,8 @@ func registerQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 		queryResult, err := executor.Query(tenantCtx, sql, limit+1)
 		executionTimeMs := time.Since(startTime).Milliseconds()
 		if err != nil {
-			// Check if this is a SQL user error (syntax, missing table, etc.)
-			if errResult := NewSQLErrorResult(err); errResult != nil {
-				return errResult, nil
-			}
-			return nil, fmt.Errorf("query execution failed: %w", err)
+			// Classify: SQL user errors → JSON, infrastructure errors → Go error
+			return HandleServiceError(err, "query_execution_failed")
 		}
 
 		// Check if truncated
@@ -656,7 +653,7 @@ func registerSampleTool(s *server.MCPServer, deps *MCPToolDeps) {
 		// Get table parameter
 		table, err := req.RequireString("table")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 
 		// Parse schema.table format
@@ -716,11 +713,7 @@ func registerSampleTool(s *server.MCPServer, deps *MCPToolDeps) {
 		// Execute query - adapter handles dialect-specific limit (LIMIT for PostgreSQL, TOP for SQL Server)
 		queryResult, err := executor.Query(tenantCtx, sql, limit)
 		if err != nil {
-			// Check if this is a SQL user error (table not found, etc.)
-			if errResult := NewSQLErrorResult(err); errResult != nil {
-				return errResult, nil
-			}
-			return nil, fmt.Errorf("sample query failed: %w", err)
+			return HandleServiceError(err, "sample_query_failed")
 		}
 
 		// Extract column names from ColumnInfo for response
@@ -780,7 +773,7 @@ func registerExecuteTool(s *server.MCPServer, deps *MCPToolDeps) {
 		// Get SQL parameter
 		sql, err := req.RequireString("sql")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 
 		// Log execution for audit trail
@@ -829,23 +822,20 @@ func registerExecuteTool(s *server.MCPServer, deps *MCPToolDeps) {
 				ErrorMessage:    err.Error(),
 			})
 
-			// Check if this is a SQL user error (syntax, constraint, missing table, etc.)
-			// These should be returned as JSON errors, not MCP protocol errors
-			if errResult := NewSQLErrorResult(err); errResult != nil {
+			// Classify: SQL/input errors → JSON, infrastructure errors → Go error
+			if IsInputError(err) {
 				deps.Logger.Debug("DDL/DML execution failed (user error)",
 					zap.String("project_id", projectID.String()),
 					zap.String("sql_preview", truncateSQL(sql, 200)),
 					zap.Error(err),
 				)
-				return errResult, nil
+			} else {
+				deps.Logger.Error("DDL/DML execution failed",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err),
+				)
 			}
-
-			// Server error - return as MCP protocol error
-			deps.Logger.Error("DDL/DML execution failed",
-				zap.String("project_id", projectID.String()),
-				zap.Error(err),
-			)
-			return nil, fmt.Errorf("execution failed: %w", err)
+			return HandleServiceError(err, "execution_failed")
 		}
 
 		deps.Logger.Info("DDL/DML execution completed",
@@ -930,7 +920,7 @@ func registerValidateTool(s *server.MCPServer, deps *MCPToolDeps) {
 		// Get SQL parameter
 		sql, err := req.RequireString("sql")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 
 		// Get datasource config and create executor
@@ -1008,7 +998,7 @@ func registerExplainQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 		// Get SQL parameter
 		sql, err := req.RequireString("sql")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 
 		// Get datasource config and create executor
@@ -1026,11 +1016,7 @@ func registerExplainQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 		// Execute EXPLAIN ANALYZE
 		explainResult, err := executor.ExplainQuery(tenantCtx, sql)
 		if err != nil {
-			// Check if this is a SQL user error (syntax, missing table, etc.)
-			if errResult := NewSQLErrorResult(err); errResult != nil {
-				return errResult, nil
-			}
-			return nil, fmt.Errorf("EXPLAIN ANALYZE failed: %w", err)
+			return HandleServiceError(err, "explain_query_failed")
 		}
 
 		// Format response
@@ -1111,7 +1097,7 @@ func registerRefreshSchemaTool(s *server.MCPServer, deps *MCPToolDeps) {
 			return nil, fmt.Errorf("failed to get default datasource: %w", err)
 		}
 		if dsID == uuid.Nil {
-			return nil, fmt.Errorf("no default datasource configured for project")
+			return NewErrorResult("no_datasource", "no default datasource configured for project"), nil
 		}
 
 		autoSelect := getOptionalBoolWithDefaultDev(req, "auto_select", true)
@@ -1232,7 +1218,7 @@ func registerListPendingChangesTool(s *server.MCPServer, deps *MCPToolDeps) {
 
 		// Check if pending change repo is configured
 		if deps.PendingChangeRepo == nil {
-			return nil, fmt.Errorf("pending changes not available: repository not configured")
+			return NewErrorResult("service_not_available", "pending changes not available: repository not configured"), nil
 		}
 
 		// Get parameters
@@ -1339,10 +1325,10 @@ func registerApproveChangeTool(s *server.MCPServer, deps *MCPToolDeps) {
 
 		// Check if pending change repo is configured
 		if deps.PendingChangeRepo == nil {
-			return nil, fmt.Errorf("pending changes not available: repository not configured")
+			return NewErrorResult("service_not_available", "pending changes not available: repository not configured"), nil
 		}
 		if deps.ChangeReviewService == nil {
-			return nil, fmt.Errorf("change review service not available")
+			return NewErrorResult("service_not_available", "change review service not available"), nil
 		}
 
 		// Get change ID
@@ -1428,10 +1414,10 @@ func registerRejectChangeTool(s *server.MCPServer, deps *MCPToolDeps) {
 
 		// Check if pending change repo is configured
 		if deps.PendingChangeRepo == nil {
-			return nil, fmt.Errorf("pending changes not available: repository not configured")
+			return NewErrorResult("service_not_available", "pending changes not available: repository not configured"), nil
 		}
 		if deps.ChangeReviewService == nil {
-			return nil, fmt.Errorf("change review service not available")
+			return NewErrorResult("service_not_available", "change review service not available"), nil
 		}
 
 		// Get change ID
@@ -1512,10 +1498,10 @@ func registerApproveAllChangesTool(s *server.MCPServer, deps *MCPToolDeps) {
 
 		// Check if services are configured
 		if deps.PendingChangeRepo == nil {
-			return nil, fmt.Errorf("pending changes not available: repository not configured")
+			return NewErrorResult("service_not_available", "pending changes not available: repository not configured"), nil
 		}
 		if deps.ChangeReviewService == nil {
-			return nil, fmt.Errorf("change review service not available")
+			return NewErrorResult("service_not_available", "change review service not available"), nil
 		}
 
 		// Approve all changes
@@ -1574,7 +1560,7 @@ func registerScanDataChangesTool(s *server.MCPServer, deps *MCPToolDeps) {
 
 		// Check if data change detection service is configured
 		if deps.DataChangeDetectionService == nil {
-			return nil, fmt.Errorf("data change detection not available: service not configured")
+			return NewErrorResult("service_not_available", "data change detection not available: service not configured"), nil
 		}
 
 		// Get default datasource
@@ -1583,7 +1569,7 @@ func registerScanDataChangesTool(s *server.MCPServer, deps *MCPToolDeps) {
 			return nil, fmt.Errorf("failed to get default datasource: %w", err)
 		}
 		if dsID == uuid.Nil {
-			return nil, fmt.Errorf("no default datasource configured for project")
+			return NewErrorResult("no_datasource", "no default datasource configured for project"), nil
 		}
 
 		// Get optional tables parameter

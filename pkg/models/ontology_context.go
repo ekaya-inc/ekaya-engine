@@ -47,12 +47,13 @@ type TableSummary struct {
 
 // ColumnOverview provides basic column information for table summary.
 type ColumnOverview struct {
-	Name          string `json:"name"`
-	Type          string `json:"type"`
-	Role          string `json:"role"`
-	IsPrimaryKey  bool   `json:"is_primary_key"`
-	HasEnumValues bool   `json:"has_enum_values"`
-	FKAssociation string `json:"fk_association,omitempty"` // e.g., host, visitor, payer, payee
+	Name           string `json:"name"`
+	Type           string `json:"type"`
+	Role           string `json:"role"`
+	IsPrimaryKey   bool   `json:"is_primary_key"`
+	HasEnumValues  bool   `json:"has_enum_values"`
+	HasDescription bool   `json:"has_description"`
+	FKAssociation  string `json:"fk_association,omitempty"` // e.g., host, visitor, payer, payee
 }
 
 // TableRelationship represents a relationship at table level.

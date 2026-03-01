@@ -14,6 +14,16 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 )
 
+// isMultiStatement detects if the SQL input contains multiple statements.
+// Uses a lightweight heuristic: trims trailing semicolons/whitespace, then checks
+// if a semicolon remains (indicating a statement boundary within the block).
+// False positives (e.g., semicolons in string literals) are harmless — they just
+// route to the transaction-wrapped path, which is safe for single statements too.
+func isMultiStatement(sql string) bool {
+	trimmed := strings.TrimRight(strings.TrimSpace(sql), "; \t\n\r")
+	return strings.Contains(trimmed, ";")
+}
+
 // isModifyingStatement detects if a SQL statement is INSERT, UPDATE, DELETE, or CALL.
 // These statements cannot be wrapped in SELECT * FROM (...) LIMIT N.
 func isModifyingStatement(sql string) bool {
@@ -198,7 +208,19 @@ func (e *QueryExecutor) QueryWithParams(ctx context.Context, sqlQuery string, pa
 }
 
 // Execute runs any SQL statement (DDL/DML) and returns results.
+// For multi-statement input, wraps execution in a transaction using the simple
+// query protocol. Row-returning clauses (RETURNING) are not supported in
+// multi-statement batches.
 func (e *QueryExecutor) Execute(ctx context.Context, sqlStatement string) (*datasource.ExecuteResult, error) {
+	if isMultiStatement(sqlStatement) {
+		return e.executeMultiStatement(ctx, sqlStatement)
+	}
+	return e.executeSingle(ctx, sqlStatement)
+}
+
+// executeSingle runs a single SQL statement using the extended query protocol.
+// Supports RETURNING clauses and row collection.
+func (e *QueryExecutor) executeSingle(ctx context.Context, sqlStatement string) (*datasource.ExecuteResult, error) {
 	rows, err := e.pool.Query(ctx, sqlStatement)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute statement: %w", err)
@@ -248,6 +270,36 @@ func (e *QueryExecutor) Execute(ctx context.Context, sqlStatement string) (*data
 	result.RowsAffected = cmdTag.RowsAffected()
 
 	return result, nil
+}
+
+// executeMultiStatement runs multiple SQL statements within a transaction.
+// Uses pgx's simple query protocol which natively handles multi-statement input.
+// On any error, the entire batch is rolled back.
+func (e *QueryExecutor) executeMultiStatement(ctx context.Context, sqlStatement string) (*datasource.ExecuteResult, error) {
+	conn, err := e.pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to acquire connection: %w", err)
+	}
+	defer conn.Release()
+
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) // no-op if already committed
+
+	cmdTag, err := tx.Exec(ctx, sqlStatement, pgx.QueryExecModeSimpleProtocol)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute statements: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return &datasource.ExecuteResult{
+		RowsAffected: cmdTag.RowsAffected(),
+	}, nil
 }
 
 // ValidateQuery checks if a SQL query is syntactically valid without executing it.

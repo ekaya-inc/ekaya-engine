@@ -40,6 +40,9 @@ type SchemaRepository interface {
 	UpsertTable(ctx context.Context, table *models.SchemaTable) error
 	SoftDeleteRemovedTables(ctx context.Context, projectID, datasourceID uuid.UUID, activeTableKeys []TableKey) (int64, error)
 	UpdateTableSelection(ctx context.Context, projectID, tableID uuid.UUID, isSelected bool) error
+	// GetTablesByNames returns selected tables for a project filtered by table names, keyed by table name.
+	// Used by ontology context to retrieve table-level metadata (e.g., row_count).
+	GetTablesByNames(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string]*models.SchemaTable, error)
 
 	// Columns
 	// ListColumnsByTable returns selected columns for a specific table.
@@ -380,6 +383,51 @@ func (r *schemaRepository) UpdateTableSelection(ctx context.Context, projectID, 
 	}
 
 	return nil
+}
+
+func (r *schemaRepository) GetTablesByNames(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string]*models.SchemaTable, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	if len(tableNames) == 0 {
+		return make(map[string]*models.SchemaTable), nil
+	}
+
+	query := `
+		SELECT id, project_id, datasource_id, schema_name, table_name, is_selected,
+		       row_count, created_at, updated_at
+		FROM engine_schema_tables
+		WHERE project_id = $1
+		  AND table_name = ANY($2)
+		  AND deleted_at IS NULL
+		  AND is_selected = true
+		ORDER BY table_name`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID, tableNames)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tables by names: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]*models.SchemaTable)
+	for rows.Next() {
+		var t models.SchemaTable
+		err := rows.Scan(
+			&t.ID, &t.ProjectID, &t.DatasourceID, &t.SchemaName, &t.TableName,
+			&t.IsSelected, &t.RowCount, &t.CreatedAt, &t.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan table: %w", err)
+		}
+		result[t.TableName] = &t
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating tables: %w", err)
+	}
+
+	return result, nil
 }
 
 // ============================================================================

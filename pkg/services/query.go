@@ -209,21 +209,17 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 		return nil, fmt.Errorf("parameter validation failed: %w", err)
 	}
 
-	// Require output_columns for SELECT queries.
-	// Modifying queries (INSERT/UPDATE/DELETE/CALL) may not have output columns
-	// unless they use RETURNING clause, so empty is allowed for those.
-	if len(req.OutputColumns) == 0 && !req.AllowsModification {
-		return nil, fmt.Errorf("output_column_descriptions parameter is required. Provide descriptions for output columns, e.g., {\"total\": \"Total count of records\"}")
-	}
-
 	// Ensure Parameters is never nil (database column has NOT NULL constraint)
 	params := req.Parameters
 	if params == nil {
 		params = []models.QueryParameter{}
 	}
 
-	// OutputColumns already validated as non-empty above
+	// Default OutputColumns to empty slice when omitted
 	outputCols := req.OutputColumns
+	if outputCols == nil {
+		outputCols = []models.OutputColumn{}
+	}
 
 	// Ensure Tags is never nil
 	tags := req.Tags
@@ -319,24 +315,6 @@ func (s *queryService) Update(ctx context.Context, projectID, queryID uuid.UUID,
 		}
 		normalized := validationResult.NormalizedSQL
 		req.SQLQuery = &normalized
-	}
-
-	// If SQL is being updated, require new output_columns from test execution.
-	// Exception: Modifying queries (INSERT/UPDATE/DELETE/CALL) may not have output columns
-	// unless they use RETURNING clause, so empty is allowed for those.
-	if req.SQLQuery != nil && *req.SQLQuery != query.SQLQuery {
-		// Determine effective AllowsModification: use request value if provided, else existing
-		effectiveAllowsModification := query.AllowsModification
-		if req.AllowsModification != nil {
-			effectiveAllowsModification = *req.AllowsModification
-		}
-
-		// Only require output_columns for SELECT queries (non-modifying)
-		if !effectiveAllowsModification {
-			if req.OutputColumns == nil || len(*req.OutputColumns) == 0 {
-				return nil, fmt.Errorf("output_column_descriptions parameter is required when updating SQL. Provide descriptions for output columns, e.g., {\"total\": \"Total count of records\"}")
-			}
-		}
 	}
 
 	// Apply updates (dialect is not updatable - derived from datasource type)

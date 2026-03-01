@@ -60,6 +60,9 @@ func registerGetColumnMetadataTool(s *server.MCPServer, deps *ColumnToolDeps) {
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		projectID, tenantCtx, cleanup, err := AcquireToolAccessWithoutProvenance(ctx, deps, "get_column_metadata")
 		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
 			return nil, err
 		}
 		defer cleanup()
@@ -67,7 +70,7 @@ func registerGetColumnMetadataTool(s *server.MCPServer, deps *ColumnToolDeps) {
 		// Get required parameters
 		table, err := req.RequireString("table")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 		table = trimString(table)
 		if table == "" {
@@ -76,7 +79,7 @@ func registerGetColumnMetadataTool(s *server.MCPServer, deps *ColumnToolDeps) {
 
 		column, err := req.RequireString("column")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 		column = trimString(column)
 		if column == "" {
@@ -312,7 +315,7 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 		// Get required parameters
 		table, err := req.RequireString("table")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 		// Validate table is not empty after trimming whitespace
 		table = trimString(table)
@@ -322,7 +325,7 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 
 		column, err := req.RequireString("column")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 		// Validate column is not empty after trimming whitespace
 		column = trimString(column)
@@ -484,7 +487,7 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 
 		// Save updated column details back to ontology
 		if err := deps.OntologyRepo.UpdateColumnDetails(tenantCtx, projectID, table, existingColumns); err != nil {
-			return nil, fmt.Errorf("failed to update column details: %w", err)
+			return HandleServiceError(err, "update_column_details_failed")
 		}
 
 		// Also track provenance in column_metadata table if available
@@ -493,7 +496,7 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 			// Check if existing metadata exists and verify precedence
 			existing, err := deps.ColumnMetadataRepo.GetBySchemaColumnID(tenantCtx, schemaColumn.ID)
 			if err != nil {
-				return nil, fmt.Errorf("failed to check existing column metadata: %w", err)
+				return HandleServiceError(err, "check_column_metadata_failed")
 			}
 
 			// If metadata exists, check precedence before updating
@@ -547,7 +550,7 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 				colMeta.IsSensitive = isSensitive
 			}
 			if err := deps.ColumnMetadataRepo.Upsert(tenantCtx, colMeta); err != nil {
-				return nil, fmt.Errorf("failed to update column metadata: %w", err)
+				return HandleServiceError(err, "update_column_metadata_failed")
 			}
 		}
 
@@ -611,7 +614,7 @@ func registerDeleteColumnMetadataTool(s *server.MCPServer, deps *ColumnToolDeps)
 		// Get required parameters
 		table, err := req.RequireString("table")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 		table = trimString(table)
 		if table == "" {
@@ -620,7 +623,7 @@ func registerDeleteColumnMetadataTool(s *server.MCPServer, deps *ColumnToolDeps)
 
 		column, err := req.RequireString("column")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 		column = trimString(column)
 		if column == "" {
@@ -695,7 +698,7 @@ func registerDeleteColumnMetadataTool(s *server.MCPServer, deps *ColumnToolDeps)
 
 		// Save updated column details back to ontology
 		if err := deps.OntologyRepo.UpdateColumnDetails(tenantCtx, projectID, table, newColumns); err != nil {
-			return nil, fmt.Errorf("failed to update column details: %w", err)
+			return HandleServiceError(err, "update_column_details_failed")
 		}
 
 		// Build response

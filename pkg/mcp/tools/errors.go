@@ -255,6 +255,39 @@ func NewSQLErrorResult(err error) *mcp.CallToolResult {
 	return NewErrorResult(code, message)
 }
 
+// HandleServiceError classifies a service-layer error and returns the appropriate
+// MCP response. Application-level errors (validation, not found, constraint violations)
+// are wrapped as JSON tool results so the LLM can see and act on them. Infrastructure
+// errors (DB connection failures, timeouts) are returned as Go errors, which become
+// MCP protocol-level errors.
+//
+// The code parameter is used as the error code in the JSON response for application errors.
+//
+// Example usage:
+//
+//	query, err := deps.QueryService.DirectCreate(tenantCtx, projectID, datasourceID, req)
+//	if err != nil {
+//	    return HandleServiceError(err, "create_query_failed")
+//	}
+func HandleServiceError(err error, code string) (*mcp.CallToolResult, error) {
+	if err == nil {
+		return nil, nil
+	}
+
+	// SQL user errors get specific codes
+	if IsSQLUserError(err) {
+		return NewSQLErrorResult(err), nil
+	}
+
+	// Application-level errors (validation, not found, etc.) become JSON responses
+	if IsInputError(err) {
+		return NewErrorResult(code, err.Error()), nil
+	}
+
+	// Infrastructure errors remain as Go errors (MCP protocol errors)
+	return nil, err
+}
+
 // inputErrorPatterns are substrings that indicate an error is due to user input
 // rather than a server failure. These errors should be logged at DEBUG/INFO level,
 // not ERROR level, because they are expected when users provide invalid input.
@@ -262,7 +295,6 @@ var inputErrorPatterns = []string{
 	"not found",
 	"validation failed",
 	"SQL validation failed",
-	"output_column_descriptions parameter is required",
 	"already exists",
 	"invalid input",
 	"missing required",

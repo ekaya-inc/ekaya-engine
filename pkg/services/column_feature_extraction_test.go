@@ -856,6 +856,9 @@ func (m *mockSchemaRepoForFeatureExtraction) ListAllColumnsByTable(ctx context.C
 func (m *mockSchemaRepoForFeatureExtraction) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error) {
 	return nil, nil
 }
+func (m *mockSchemaRepoForFeatureExtraction) GetTablesByNames(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string]*models.SchemaTable, error) {
+	return nil, nil
+}
 func (m *mockSchemaRepoForFeatureExtraction) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 0, nil
 }
@@ -1845,6 +1848,174 @@ func TestTimestampClassifier_PromptIncludesClarificationFields(t *testing.T) {
 // This is just to avoid name collision with datasource_test.go's contains function
 func containsStr(s, substr string) bool {
 	return strings.Contains(s, substr)
+}
+
+// ============================================================================
+// Numeric Classifier Tests
+// ============================================================================
+
+func TestNumericClassifier_NonPKIdentifierGetsAttributeRole(t *testing.T) {
+	// Bug: FK columns like app_id, channel_id were getting role: "primary_key"
+	// because the LLM classified them as numeric_type: "identifier" and the code
+	// treated any "identifier" as a primary key regardless of IsPrimaryKey flag.
+	classifier := &numericClassifier{logger: zap.NewNop()}
+
+	profile := &models.ColumnDataProfile{
+		ColumnID:     uuid.New(),
+		ColumnName:   "app_id",
+		TableName:    "content_posts",
+		DataType:     "integer",
+		IsPrimaryKey: false, // NOT a primary key - it's a FK
+	}
+
+	// LLM returns identifier because it looks like an ID column
+	mockResponse := `{
+		"numeric_type": "identifier",
+		"may_be_monetary": false,
+		"confidence": 0.90,
+		"description": "Reference to applications table."
+	}`
+
+	features, err := classifier.parseResponse(profile, mockResponse, "test-model")
+	if err != nil {
+		t.Fatalf("parseResponse error: %v", err)
+	}
+
+	// Should NOT be primary_key since IsPrimaryKey is false
+	if features.Role == models.RolePrimaryKey {
+		t.Errorf("Role = %q, want anything other than %q for non-PK identifier column",
+			features.Role, models.RolePrimaryKey)
+	}
+}
+
+func TestNumericClassifier_TruePKGetsCorrectRole(t *testing.T) {
+	// Actual primary key columns should still get role: "primary_key"
+	classifier := &numericClassifier{logger: zap.NewNop()}
+
+	profile := &models.ColumnDataProfile{
+		ColumnID:     uuid.New(),
+		ColumnName:   "id",
+		TableName:    "users",
+		DataType:     "integer",
+		IsPrimaryKey: true, // Actually a primary key
+	}
+
+	mockResponse := `{
+		"numeric_type": "identifier",
+		"may_be_monetary": false,
+		"confidence": 0.95,
+		"description": "Auto-incrementing user identifier."
+	}`
+
+	features, err := classifier.parseResponse(profile, mockResponse, "test-model")
+	if err != nil {
+		t.Fatalf("parseResponse error: %v", err)
+	}
+
+	if features.Role != models.RolePrimaryKey {
+		t.Errorf("Role = %q, want %q for actual PK column", features.Role, models.RolePrimaryKey)
+	}
+}
+
+func TestNumericClassifier_NonPKIdentifierFlaggedForFKResolution(t *testing.T) {
+	// Non-PK identifier columns should be flagged for FK resolution in Phase 4
+	// so the system can determine if they're foreign keys
+	classifier := &numericClassifier{logger: zap.NewNop()}
+
+	profile := &models.ColumnDataProfile{
+		ColumnID:     uuid.New(),
+		ColumnName:   "task_id",
+		TableName:    "paid_placements",
+		DataType:     "integer",
+		IsPrimaryKey: false,
+	}
+
+	mockResponse := `{
+		"numeric_type": "identifier",
+		"may_be_monetary": false,
+		"confidence": 0.90,
+		"description": "Reference to marketing tasks."
+	}`
+
+	features, err := classifier.parseResponse(profile, mockResponse, "test-model")
+	if err != nil {
+		t.Fatalf("parseResponse error: %v", err)
+	}
+
+	if !features.NeedsFKResolution {
+		t.Error("NeedsFKResolution should be true for non-PK identifier columns")
+	}
+}
+
+func TestNumericClassifier_DimensionColumnGetsAttributeRole(t *testing.T) {
+	// Integer dimension columns like week_number, day_offset should not be PKs
+	classifier := &numericClassifier{logger: zap.NewNop()}
+
+	profile := &models.ColumnDataProfile{
+		ColumnID:     uuid.New(),
+		ColumnName:   "week_number",
+		TableName:    "content_posts",
+		DataType:     "integer",
+		IsPrimaryKey: false,
+	}
+
+	// LLM classifies as identifier (incorrectly, but it happens)
+	mockResponse := `{
+		"numeric_type": "identifier",
+		"may_be_monetary": false,
+		"confidence": 0.70,
+		"description": "Week number within the year."
+	}`
+
+	features, err := classifier.parseResponse(profile, mockResponse, "test-model")
+	if err != nil {
+		t.Fatalf("parseResponse error: %v", err)
+	}
+
+	if features.Role == models.RolePrimaryKey {
+		t.Errorf("Role = %q, want anything other than %q for dimension column",
+			features.Role, models.RolePrimaryKey)
+	}
+}
+
+func TestNumericClassifier_PromptIncludesMeasureGuidance(t *testing.T) {
+	// The prompt should include guidance about aggregation prefixes and
+	// business abbreviations so the LLM correctly classifies measure columns
+	classifier := &numericClassifier{logger: zap.NewNop()}
+
+	profile := &models.ColumnDataProfile{
+		ColumnID:   uuid.New(),
+		ColumnName: "total_revenue",
+		TableName:  "weekly_metrics",
+		DataType:   "numeric",
+	}
+
+	prompt := classifier.buildPrompt(profile)
+
+	// The measure type description should mention aggregation prefixes as measure indicators
+	// (not just the column name appearing in the prompt, but actual guidance text)
+	if !strings.Contains(prompt, "avg_") || !strings.Contains(prompt, "total_") {
+		t.Error("prompt should include guidance about aggregation prefixes (avg_, total_) as measure indicators")
+	}
+}
+
+func TestNumericClassifier_PromptMeasureTypeIncludesRatesAndCosts(t *testing.T) {
+	// The measure type description should be broad enough to cover cost metrics and rates
+	classifier := &numericClassifier{logger: zap.NewNop()}
+
+	profile := &models.ColumnDataProfile{
+		ColumnID:   uuid.New(),
+		ColumnName: "cpa",
+		TableName:  "paid_placements",
+		DataType:   "numeric",
+	}
+
+	prompt := classifier.buildPrompt(profile)
+
+	// The measure description should include cost-related terms
+	if !strings.Contains(prompt, "cost") && !strings.Contains(prompt, "rate") {
+		t.Error("prompt measure type should mention cost and rate metrics")
+	}
 }
 
 // ============================================================================

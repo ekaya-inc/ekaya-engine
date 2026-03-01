@@ -85,6 +85,10 @@ func (m *mockSchemaRepoForFinalization) GetColumnsByTables(ctx context.Context, 
 	return m.columnsByTable, nil
 }
 
+func (m *mockSchemaRepoForFinalization) GetTablesByNames(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string]*models.SchemaTable, error) {
+	return nil, nil
+}
+
 // Stub implementations for SchemaRepository interface
 func (m *mockSchemaRepoForFinalization) GetTableByID(ctx context.Context, projectID, tableID uuid.UUID) (*models.SchemaTable, error) {
 	return nil, nil
