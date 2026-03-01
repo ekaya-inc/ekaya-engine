@@ -1513,3 +1513,148 @@ func TestQueryExecutor_QueryWithParams_INSERT_UUID_Generation(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================================
+// Multi-Statement Execution Tests
+// ============================================================================
+
+func TestQueryExecutor_Execute_MultiStatement_DDL(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	// Cleanup
+	_, _ = tc.executor.Execute(ctx, "DROP TABLE IF EXISTS test_multi_b")
+	_, _ = tc.executor.Execute(ctx, "DROP TABLE IF EXISTS test_multi_a")
+	_, _ = tc.executor.Execute(ctx, "DROP TYPE IF EXISTS test_multi_enum")
+
+	// Execute multiple DDL statements in one call
+	result, err := tc.executor.Execute(ctx, `
+		CREATE TYPE test_multi_enum AS ENUM ('x', 'y', 'z');
+		CREATE TABLE test_multi_a (id SERIAL PRIMARY KEY, status test_multi_enum NOT NULL);
+		CREATE TABLE test_multi_b (id SERIAL PRIMARY KEY, a_id INT REFERENCES test_multi_a(id))
+	`)
+	if err != nil {
+		t.Fatalf("multi-statement DDL failed: %v", err)
+	}
+
+	// DDL doesn't affect rows
+	if result.RowsAffected != 0 {
+		t.Errorf("expected 0 rows affected for DDL batch, got %d", result.RowsAffected)
+	}
+
+	// Verify all objects were created by using them
+	insertResult, err := tc.executor.Execute(ctx, "INSERT INTO test_multi_a (status) VALUES ('x')")
+	if err != nil {
+		t.Fatalf("insert into table created by batch failed: %v", err)
+	}
+	if insertResult.RowsAffected != 1 {
+		t.Errorf("expected 1 row affected, got %d", insertResult.RowsAffected)
+	}
+
+	// Cleanup
+	_, _ = tc.executor.Execute(ctx, "DROP TABLE IF EXISTS test_multi_b")
+	_, _ = tc.executor.Execute(ctx, "DROP TABLE IF EXISTS test_multi_a")
+	_, _ = tc.executor.Execute(ctx, "DROP TYPE IF EXISTS test_multi_enum")
+}
+
+func TestQueryExecutor_Execute_MultiStatement_Rollback(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	// Cleanup
+	_, _ = tc.executor.Execute(ctx, "DROP TABLE IF EXISTS test_rollback_table")
+
+	// Create a table first (single statement)
+	_, err := tc.executor.Execute(ctx, "CREATE TABLE test_rollback_table (id SERIAL PRIMARY KEY, value TEXT)")
+	if err != nil {
+		t.Fatalf("setup CREATE TABLE failed: %v", err)
+	}
+
+	// Execute a batch where the second statement fails — should rollback the first
+	_, err = tc.executor.Execute(ctx, `
+		INSERT INTO test_rollback_table (value) VALUES ('should_be_rolled_back');
+		INSERT INTO nonexistent_table_xyz (col) VALUES ('fail')
+	`)
+	if err == nil {
+		t.Fatal("expected error from multi-statement batch with invalid table")
+	}
+
+	// Verify the first INSERT was rolled back
+	queryResult, err := tc.executor.Query(ctx, "SELECT COUNT(*) as cnt FROM test_rollback_table", 0)
+	if err != nil {
+		t.Fatalf("query after rollback failed: %v", err)
+	}
+	count := queryResult.Rows[0]["cnt"]
+	if count != int64(0) {
+		t.Errorf("expected 0 rows after rollback, got %v", count)
+	}
+
+	// Cleanup
+	_, _ = tc.executor.Execute(ctx, "DROP TABLE IF EXISTS test_rollback_table")
+}
+
+func TestQueryExecutor_Execute_MultiStatement_DML(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	// Setup
+	_, _ = tc.executor.Execute(ctx, "DROP TABLE IF EXISTS test_multi_dml")
+	_, err := tc.executor.Execute(ctx, "CREATE TABLE test_multi_dml (id SERIAL PRIMARY KEY, value TEXT)")
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	// Execute multiple DML statements
+	_, err = tc.executor.Execute(ctx, `
+		INSERT INTO test_multi_dml (value) VALUES ('one');
+		INSERT INTO test_multi_dml (value) VALUES ('two');
+		INSERT INTO test_multi_dml (value) VALUES ('three')
+	`)
+	if err != nil {
+		t.Fatalf("multi-statement DML failed: %v", err)
+	}
+
+	// Verify all inserts succeeded
+	queryResult, err := tc.executor.Query(ctx, "SELECT COUNT(*) as cnt FROM test_multi_dml", 0)
+	if err != nil {
+		t.Fatalf("verify query failed: %v", err)
+	}
+	count := queryResult.Rows[0]["cnt"]
+	if count != int64(3) {
+		t.Errorf("expected 3 rows, got %v", count)
+	}
+
+	// Cleanup
+	_, _ = tc.executor.Execute(ctx, "DROP TABLE IF EXISTS test_multi_dml")
+}
+
+func TestQueryExecutor_Execute_SingleStatement_Unchanged(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	// Verify single statements still work through the original path (with RETURNING)
+	_, _ = tc.executor.Execute(ctx, "DROP TABLE IF EXISTS test_single_stmt")
+	_, err := tc.executor.Execute(ctx, "CREATE TABLE test_single_stmt (id SERIAL PRIMARY KEY, value TEXT)")
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	// Single statement with RETURNING should still return rows
+	result, err := tc.executor.Execute(ctx, "INSERT INTO test_single_stmt (value) VALUES ('test') RETURNING id, value")
+	if err != nil {
+		t.Fatalf("single statement RETURNING failed: %v", err)
+	}
+
+	if result.RowCount != 1 {
+		t.Errorf("expected 1 row returned, got %d", result.RowCount)
+	}
+	if len(result.Columns) != 2 {
+		t.Errorf("expected 2 columns, got %d", len(result.Columns))
+	}
+	if result.Rows[0]["value"] != "test" {
+		t.Errorf("expected value 'test', got %v", result.Rows[0]["value"])
+	}
+
+	// Cleanup
+	_, _ = tc.executor.Execute(ctx, "DROP TABLE IF EXISTS test_single_stmt")
+}
