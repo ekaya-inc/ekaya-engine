@@ -133,27 +133,27 @@ The core of the refactor — 3 methods that build all ontology context for MCP t
 ### Task 7: Refactor MCP Tools
 
 **`pkg/mcp/tools/column.go` (update_column, get_column_metadata, delete_column_metadata):**
-- [ ] Remove `OntologyRepo` from deps
-- [ ] `update_column`: Remove the entire ontology blob read-modify-write block. Keep only `ColumnMetadataRepo.Upsert()` path.
-- [ ] `get_column_metadata`: Remove the "Fallback: check ontology JSONB" block. Only use `ColumnMetadataRepo`.
-- [ ] `delete_column_metadata`: Remove ontology blob deletion. Only delete from `ColumnMetadataRepo`.
+- [x] Remove `OntologyRepo` from deps
+- [x] `update_column`: Remove the entire ontology blob read-modify-write block. Keep only `ColumnMetadataRepo.Upsert()` path.
+- [x] `get_column_metadata`: Remove the "Fallback: check ontology JSONB" block. Only use `ColumnMetadataRepo`.
+- [x] `delete_column_metadata`: Remove ontology blob deletion. Only delete from `ColumnMetadataRepo`.
 
 **`pkg/mcp/tools/ontology_batch.go`:**
-- [ ] Remove all ontology blob reads/writes. Only write via `ColumnMetadataRepo`.
+- [x] Remove all ontology blob reads/writes. Only write via `ColumnMetadataRepo`.
 
 **`pkg/mcp/tools/probe.go`:**
-- [ ] Remove ontology blob reads. `ColumnMetadataRepo` path (already exists) becomes the only path.
+- [x] Remove ontology blob reads. `ColumnMetadataRepo` path (already exists) becomes the only path.
 
 **`pkg/mcp/tools/ontology.go` (get_ontology):**
-- [ ] Remove `OntologyRepo` from deps. Delegates to `OntologyContextService` (refactored in Task 4).
+- [x] Remove `OntologyRepo` from deps. Delegates to `OntologyContextService` (refactored in Task 4).
 
 **`pkg/mcp/tools/context.go` (get_context):**
-- [ ] Remove `OntologyRepo` from deps and the `GetActive()` call.
-- [ ] Remove the `handleContextWithOntology`/`handleContextWithoutOntology` split — single code path.
-- [ ] Remove `determineOntologyStatus()` — replace with a check on whether column metadata exists.
+- [x] Remove `OntologyRepo` from deps and the `GetActive()` call.
+- [x] Remove the `handleContextWithOntology`/`handleContextWithoutOntology` split — single code path.
+- [x] Remove `determineOntologyStatus()` — replace with a check on whether column metadata exists.
 
 **`pkg/mcp/tools/ontology_helpers.go`:**
-- [ ] Delete entirely. `ensureOntologyExists()` is no longer needed.
+- [x] Delete entirely. `ensureOntologyExists()` is no longer needed.
 
 ### Task 8: Refactor Remaining Services
 

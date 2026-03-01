@@ -19,7 +19,6 @@ type OntologyToolDeps struct {
 	BaseMCPToolDeps
 	ProjectService         services.ProjectService
 	OntologyContextService services.OntologyContextService
-	OntologyRepo           repositories.OntologyRepository
 	SchemaRepo             repositories.SchemaRepository
 }
 
@@ -112,25 +111,6 @@ func registerGetOntologyTool(s *server.MCPServer, deps *OntologyToolDeps) {
 			return NewErrorResult("invalid_parameters", parseErr.Error()), nil
 		}
 		includeRelationships := getOptionalBoolWithDefault(req, "include_relationships", true)
-
-		// Get the active ontology
-		ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get ontology: %w", err)
-		}
-
-		// Handle case where no ontology has been extracted yet
-		if ontology == nil {
-			result := map[string]any{
-				"error":        nil,
-				"has_ontology": false,
-				"message":      "Ontology not yet extracted. Use get_schema for raw schema information.",
-				"domain":       nil,
-				"entities":     []any{},
-			}
-			jsonResult, _ := json.Marshal(result)
-			return mcp.NewToolResultText(string(jsonResult)), nil
-		}
 
 		// Route to appropriate handler based on depth
 		var result any
