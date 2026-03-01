@@ -5,6 +5,7 @@ import {
   BrainCircuit,
   Check,
   ExternalLink,
+  Globe,
   Hammer,
   Loader2,
   MessageSquare,
@@ -85,6 +86,16 @@ const applications: ApplicationInfo[] = [
     learnMoreUrl: '/ai-agents/',
   },
   {
+    id: 'mcp-tunnel',
+    title: 'MCP Tunnel',
+    subtitle: 'Give your MCP Server a public URL accessible from outside your firewall — no port forwarding or TLS configuration required',
+    icon: Globe,
+    color: 'green',
+    available: true,
+    installable: true,
+    learnMoreUrl: 'https://try.ekaya.ai/',
+  },
+  {
     id: 'product-kit',
     title: 'Product Kit [BETA]',
     subtitle: 'Enable AI Features in your existing SaaS Product',
@@ -151,8 +162,9 @@ const ApplicationsPage = () => {
     }
   };
 
-  const handleLearnMore = (path: string) => {
-    window.open(`${marketingOrigin}${path}`, '_blank', 'noopener,noreferrer');
+  const handleLearnMore = (urlOrPath: string) => {
+    const url = urlOrPath.startsWith('http') ? urlOrPath : `${marketingOrigin}${urlOrPath}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   const handleContactSupport = () => {
@@ -202,7 +214,7 @@ const ApplicationsPage = () => {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => navigate(`/projects/${pid}/ai-data-liaison`)}
+              onClick={() => navigate(`/projects/${pid}/${app.id}`)}
             >
               Configure
             </Button>

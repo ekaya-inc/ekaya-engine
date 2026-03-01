@@ -26,7 +26,7 @@ Add the app ID constant alongside the existing ones (line 11):
 export const APP_ID_MCP_TUNNEL = 'mcp-tunnel';
 ```
 
-### 2. [ ] `ui/src/pages/ApplicationsPage.tsx`
+### 2. [x] `ui/src/pages/ApplicationsPage.tsx`
 
 **a) Add `Globe` to the lucide-react import** (line 2-12):
 ```typescript
