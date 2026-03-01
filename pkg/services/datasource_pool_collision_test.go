@@ -79,8 +79,8 @@ func TestDatasourceService_MCPHealthPoolCollision(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create datasource service - this is what MCP health uses
-	// We pass nil for repos/projectService since we only need TestConnection
-	dsService := services.NewDatasourceService(nil, nil, encryptor, adapterFactory, nil, logger)
+	// We pass nil for repo/projectService since we only need TestConnection
+	dsService := services.NewDatasourceService(nil, encryptor, adapterFactory, nil, logger)
 
 	// Create datasource configs pointing to different databases
 	configA := map[string]any{
@@ -179,7 +179,7 @@ func TestDatasourceService_SequentialTestConnections(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create minimal datasource service (no repos needed for TestConnection)
-	dsService := services.NewDatasourceService(nil, nil, encryptor, adapterFactory, nil, logger)
+	dsService := services.NewDatasourceService(nil, encryptor, adapterFactory, nil, logger)
 
 	// Configs matching the HOTFIX scenario
 	configTikrAll := map[string]any{

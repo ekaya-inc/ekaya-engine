@@ -186,7 +186,7 @@ func (m *mockProjectService) ProvisionFromClaims(ctx context.Context, claims *au
 }
 
 func (m *mockProjectService) GetByID(ctx context.Context, id uuid.UUID) (*models.Project, error) {
-	return nil, nil
+	return &models.Project{ID: id, Name: "Test Project"}, nil
 }
 
 func (m *mockProjectService) GetByIDWithoutTenant(ctx context.Context, id uuid.UUID) (*models.Project, error) {

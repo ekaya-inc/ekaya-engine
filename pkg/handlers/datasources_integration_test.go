@@ -735,102 +735,11 @@ func TestDatasourcesIntegration_OneDatasourcePerProject(t *testing.T) {
 	}
 }
 
-// TestDatasourcesIntegration_DeleteClearsOntology verifies that when a datasource
-// is deleted, the associated ontology data is also cleared.
-func TestDatasourcesIntegration_DeleteClearsOntology(t *testing.T) {
-	tc := setupIntegrationTest(t)
-	tc.cleanupDatasources()
-
-	// Create a datasource
-	createBody := CreateDatasourceRequest{
-		ProjectID: tc.projectID.String(),
-		Name:      "Test Datasource for Ontology",
-		Type:      "postgres",
-		Config: map[string]any{
-			"host":     "localhost",
-			"port":     5432,
-			"user":     "test",
-			"password": "secret",
-			"database": "testdb",
-			"ssl_mode": "disable",
-		},
-	}
-
-	createReq := tc.makeRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/datasources", createBody)
-	createReq.SetPathValue("pid", tc.projectID.String())
-
-	createRec := httptest.NewRecorder()
-	tc.handler.Create(createRec, createReq)
-
-	if createRec.Code != http.StatusCreated {
-		t.Fatalf("create datasource failed: %d - %s", createRec.Code, createRec.Body.String())
-	}
-
-	var createResp struct {
-		Success bool               `json:"success"`
-		Data    DatasourceResponse `json:"data"`
-	}
-	if err := json.Unmarshal(createRec.Body.Bytes(), &createResp); err != nil {
-		t.Fatalf("failed to parse create response: %v", err)
-	}
-	datasourceID := createResp.Data.DatasourceID
-
-	// Create ontology data for this project
-	// We'll insert directly into engine_ontologies table via raw SQL
-	ctx := context.Background()
-	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
-	if err != nil {
-		t.Fatalf("failed to create tenant scope: %v", err)
-	}
-	ctx = database.SetTenantScope(ctx, scope)
-
-	ontologyID := uuid.New()
-	_, err = scope.Conn.Exec(ctx, `
-		INSERT INTO engine_ontologies (id, project_id, version, is_active, domain_summary, column_details, metadata, created_at, updated_at)
-		VALUES ($1, $2, 1, true, '{"domain":"test"}'::jsonb, '{}'::jsonb, '{}'::jsonb, NOW(), NOW())
-	`, ontologyID, tc.projectID)
-	if err != nil {
-		t.Fatalf("failed to create test ontology: %v", err)
-	}
-
-	// Verify ontology exists
-	var countBefore int
-	err = scope.Conn.QueryRow(ctx, `SELECT COUNT(*) FROM engine_ontologies WHERE project_id = $1`, tc.projectID).Scan(&countBefore)
-	if err != nil {
-		t.Fatalf("failed to count ontologies before delete: %v", err)
-	}
-	if countBefore != 1 {
-		t.Fatalf("expected 1 ontology before delete, got %d", countBefore)
-	}
-
-	// Delete the datasource
-	deleteReq := tc.makeRequest(http.MethodDelete, "/api/projects/"+tc.projectID.String()+"/datasources/"+datasourceID, nil)
-	deleteReq.SetPathValue("pid", tc.projectID.String())
-	deleteReq.SetPathValue("id", datasourceID)
-
-	deleteRec := httptest.NewRecorder()
-	tc.handler.Delete(deleteRec, deleteReq)
-
-	if deleteRec.Code != http.StatusOK {
-		t.Fatalf("delete datasource failed: %d - %s", deleteRec.Code, deleteRec.Body.String())
-	}
-
-	// Verify ontology is gone
-	var countAfter int
-	err = scope.Conn.QueryRow(ctx, `SELECT COUNT(*) FROM engine_ontologies WHERE project_id = $1`, tc.projectID).Scan(&countAfter)
-	if err != nil {
-		t.Fatalf("failed to count ontologies after delete: %v", err)
-	}
-	if countAfter != 0 {
-		t.Errorf("expected 0 ontologies after delete, got %d", countAfter)
-	}
-}
-
-// TestDatasourcesIntegration_DeleteClearsKnowledgeAndGlossary verifies that when a datasource
-// is deleted (simulating a datasource change), associated knowledge facts and glossary terms
-// linked to the ontology are also deleted via CASCADE.
-// This is the key test for BUG-10: stale data not cleaned on ontology delete.
-func TestDatasourcesIntegration_DeleteClearsKnowledgeAndGlossary(t *testing.T) {
+// TestDatasourcesIntegration_DeletePreservesKnowledgeAndGlossary verifies that when a datasource
+// is deleted, knowledge facts and glossary terms (which are project-scoped) are preserved.
+// After migration 011 removed engine_ontologies, there is no ontology cascade -- glossary
+// and knowledge are retained at the project level.
+func TestDatasourcesIntegration_DeletePreservesKnowledgeAndGlossary(t *testing.T) {
 	tc := setupIntegrationTest(t)
 	tc.cleanupDatasources()
 
@@ -868,7 +777,6 @@ func TestDatasourcesIntegration_DeleteClearsKnowledgeAndGlossary(t *testing.T) {
 	}
 	datasourceID := createResp.Data.DatasourceID
 
-	// Create ontology data for this project
 	ctx := context.Background()
 	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
 	if err != nil {
@@ -876,16 +784,7 @@ func TestDatasourcesIntegration_DeleteClearsKnowledgeAndGlossary(t *testing.T) {
 	}
 	ctx = database.SetTenantScope(ctx, scope)
 
-	ontologyID := uuid.New()
-	_, err = scope.Conn.Exec(ctx, `
-		INSERT INTO engine_ontologies (id, project_id, version, is_active, domain_summary, column_details, metadata, created_at, updated_at)
-		VALUES ($1, $2, 1, true, '{"domain":"test"}'::jsonb, '{}'::jsonb, '{}'::jsonb, NOW(), NOW())
-	`, ontologyID, tc.projectID)
-	if err != nil {
-		t.Fatalf("failed to create test ontology: %v", err)
-	}
-
-	// Create knowledge facts (project-level scope, not linked to ontology)
+	// Create knowledge facts (project-level scope)
 	_, err = scope.Conn.Exec(ctx, `
 		INSERT INTO engine_project_knowledge (id, project_id, fact_type, value, context, source, created_at, updated_at)
 		VALUES ($1, $2, 'terminology', 'A user who logged in within the last 30 days', 'From old datasource', 'manual', NOW(), NOW())
@@ -894,11 +793,11 @@ func TestDatasourcesIntegration_DeleteClearsKnowledgeAndGlossary(t *testing.T) {
 		t.Fatalf("failed to create test knowledge fact: %v", err)
 	}
 
-	// Create glossary terms linked to this ontology
+	// Create glossary terms (project-level scope, no ontology_id after migration 011)
 	_, err = scope.Conn.Exec(ctx, `
-		INSERT INTO engine_business_glossary (id, project_id, ontology_id, term, definition, defining_sql, source, created_at, updated_at)
-		VALUES ($1, $2, $3, 'Active Users', 'Users who logged in recently', 'SELECT * FROM users WHERE last_login > NOW() - INTERVAL ''30 days''', 'inferred', NOW(), NOW())
-	`, uuid.New(), tc.projectID, ontologyID)
+		INSERT INTO engine_business_glossary (id, project_id, term, definition, defining_sql, source, created_at, updated_at)
+		VALUES ($1, $2, 'Active Users', 'Users who logged in recently', 'SELECT * FROM users WHERE last_login > NOW() - INTERVAL ''30 days''', 'inferred', NOW(), NOW())
+	`, uuid.New(), tc.projectID)
 	if err != nil {
 		t.Fatalf("failed to create test glossary term: %v", err)
 	}
@@ -934,17 +833,7 @@ func TestDatasourcesIntegration_DeleteClearsKnowledgeAndGlossary(t *testing.T) {
 		t.Fatalf("delete datasource failed: %d - %s", deleteRec.Code, deleteRec.Body.String())
 	}
 
-	// Verify ontology is gone
-	var ontologyCountAfter int
-	err = scope.Conn.QueryRow(ctx, `SELECT COUNT(*) FROM engine_ontologies WHERE project_id = $1`, tc.projectID).Scan(&ontologyCountAfter)
-	if err != nil {
-		t.Fatalf("failed to count ontologies after delete: %v", err)
-	}
-	if ontologyCountAfter != 0 {
-		t.Errorf("expected 0 ontologies after delete, got %d", ontologyCountAfter)
-	}
-
-	// Verify knowledge facts are preserved (project-level scope, survives ontology deletion)
+	// Verify knowledge facts are preserved (project-level scope, survives datasource deletion)
 	var knowledgeCountAfter int
 	err = scope.Conn.QueryRow(ctx, `SELECT COUNT(*) FROM engine_project_knowledge WHERE project_id = $1`, tc.projectID).Scan(&knowledgeCountAfter)
 	if err != nil {
@@ -954,13 +843,13 @@ func TestDatasourcesIntegration_DeleteClearsKnowledgeAndGlossary(t *testing.T) {
 		t.Errorf("expected 1 knowledge fact after datasource delete (project-level scope preserved), got %d", knowledgeCountAfter)
 	}
 
-	// Verify glossary terms are gone (CASCADE from ontology_id FK)
+	// Verify glossary terms are preserved (project-level scope after migration 011 removed ontology_id FK)
 	var glossaryCountAfter int
 	err = scope.Conn.QueryRow(ctx, `SELECT COUNT(*) FROM engine_business_glossary WHERE project_id = $1`, tc.projectID).Scan(&glossaryCountAfter)
 	if err != nil {
 		t.Fatalf("failed to count glossary terms after delete: %v", err)
 	}
-	if glossaryCountAfter != 0 {
-		t.Errorf("BUG-10: expected 0 glossary terms after datasource delete, got %d - stale glossary retained!", glossaryCountAfter)
+	if glossaryCountAfter != 1 {
+		t.Errorf("expected 1 glossary term after datasource delete (project-level scope preserved), got %d", glossaryCountAfter)
 	}
 }

@@ -129,7 +129,6 @@ func (tc *sensitiveTestContext) cleanup() {
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontology_column_metadata WHERE project_id = $1", tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_schema_columns WHERE project_id = $1", tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_schema_tables WHERE project_id = $1", tc.projectID)
-	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontologies WHERE project_id = $1", tc.projectID)
 }
 
 // createTestContext returns a context with tenant scope and project ID.

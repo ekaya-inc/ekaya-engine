@@ -273,7 +273,6 @@ func (tc *chatIntegrationTestContext) cleanup() {
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontology_chat_messages WHERE project_id = $1", tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_project_knowledge WHERE project_id = $1", tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontology_questions WHERE project_id = $1", tc.projectID)
-	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontologies WHERE project_id = $1", tc.projectID)
 }
 
 // makeRequest creates an HTTP request with proper context (tenant scope + auth claims).

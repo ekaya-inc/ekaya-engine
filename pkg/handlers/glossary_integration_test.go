@@ -55,7 +55,6 @@ type glossaryTestContext struct {
 	datasourceSvc  services.DatasourceService
 	glossaryRepo   repositories.GlossaryRepository
 	projectID      uuid.UUID
-	ontologyID     uuid.UUID
 	datasourceID   uuid.UUID
 	adapterFactory datasource.DatasourceAdapterFactory
 }
@@ -91,7 +90,8 @@ func setupGlossaryTest(t *testing.T) *glossaryTestContext {
 	mockLLMFactory := &mockLLMClientFactory{}
 
 	// Create service with real dependencies
-	service := services.NewGlossaryService(glossaryRepo, columnMetadataRepo, knowledgeRepo, schemaRepo, nil, datasourceSvc, adapterFactory, mockLLMFactory, nil, zap.NewNop(), "test")
+	projectSvc := &mockProjectService{}
+	service := services.NewGlossaryService(glossaryRepo, columnMetadataRepo, knowledgeRepo, schemaRepo, projectSvc, datasourceSvc, adapterFactory, mockLLMFactory, nil, zap.NewNop(), "test")
 
 	// Create handler
 	questionService := services.NewOntologyQuestionService(
@@ -239,31 +239,10 @@ func (tc *glossaryTestContext) ensureTestProject() {
 	}
 }
 
-// ensureTestOntology creates an active ontology for the test project.
+// ensureTestOntology is a no-op: engine_ontologies table was removed.
+// Ontology data now lives in engine_projects.domain_summary and engine_ontology_column_metadata.
 func (tc *glossaryTestContext) ensureTestOntology() {
 	tc.t.Helper()
-
-	// Generate a stable ontology ID for this test context
-	tc.ontologyID = uuid.MustParse("00000000-0000-0000-0000-000000000103")
-
-	ctx := context.Background()
-	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
-	if err != nil {
-		tc.t.Fatalf("Failed to create tenant scope: %v", err)
-	}
-	defer scope.Close()
-
-	// Use ON CONFLICT on the unique constraint (project_id, version) - version defaults to 1
-	// Don't change the ID if an ontology already exists (would violate FK constraints)
-	err = scope.Conn.QueryRow(ctx, `
-		INSERT INTO engine_ontologies (id, project_id, is_active, domain_summary, column_details)
-		VALUES ($1, $2, true, '{}', '{}')
-		ON CONFLICT (project_id, version) DO UPDATE SET is_active = true
-		RETURNING id
-	`, tc.ontologyID, tc.projectID).Scan(&tc.ontologyID)
-	if err != nil {
-		tc.t.Fatalf("Failed to ensure test ontology: %v", err)
-	}
 }
 
 // ensureTestDatasource creates a datasource pointing to the test_data database.
@@ -314,29 +293,11 @@ func (tc *glossaryTestContext) ensureTestDatasource() {
 	tc.datasourceID = ds.ID
 }
 
-// createTestOntology creates an active ontology for testing using raw SQL.
+// createTestOntology is a no-op: engine_ontologies table was removed.
+// Ontology data now lives in engine_projects.domain_summary and engine_ontology_column_metadata.
 func (tc *glossaryTestContext) createTestOntology() {
 	tc.t.Helper()
-
 	tc.ensureTestProject()
-
-	ctx := context.Background()
-	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
-	if err != nil {
-		tc.t.Fatalf("Failed to create tenant scope: %v", err)
-	}
-	defer scope.Close()
-
-	tc.ontologyID = uuid.New()
-	err = scope.Conn.QueryRow(ctx, `
-		INSERT INTO engine_ontologies (id, project_id, version, is_active, domain_summary, column_details, metadata, created_at, updated_at)
-		VALUES ($1, $2, 1, true, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, NOW(), NOW())
-		ON CONFLICT (project_id, version) DO UPDATE SET is_active = true
-		RETURNING id
-	`, tc.ontologyID, tc.projectID).Scan(&tc.ontologyID)
-	if err != nil {
-		tc.t.Fatalf("Failed to create ontology: %v", err)
-	}
 }
 
 // cleanup removes test data.
@@ -353,7 +314,6 @@ func (tc *glossaryTestContext) cleanup() {
 	// Delete in order respecting foreign keys
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_glossary_aliases WHERE glossary_id IN (SELECT id FROM engine_business_glossary WHERE project_id = $1)", tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_business_glossary WHERE project_id = $1", tc.projectID)
-	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontologies WHERE project_id = $1", tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_datasources WHERE project_id = $1", tc.projectID)
 }
 
@@ -850,17 +810,17 @@ func TestGlossaryIntegration_Suggest(t *testing.T) {
 	}
 }
 
-func TestGlossaryIntegration_Suggest_NoOntology(t *testing.T) {
+func TestGlossaryIntegration_Suggest_NoTables(t *testing.T) {
 	tc := setupGlossaryTest(t)
 	tc.cleanup()
 	tc.ensureTestProject()
-	// Don't create ontology
+	// No tables set up — suggest returns empty results
 
 	suggestRec := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary/suggest",
 		nil, tc.handler.Suggest, map[string]string{"pid": tc.projectID.String()})
 
-	if suggestRec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d: %s", suggestRec.Code, suggestRec.Body.String())
+	if suggestRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", suggestRec.Code, suggestRec.Body.String())
 	}
 }
 
