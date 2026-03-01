@@ -9,6 +9,7 @@
 export const APP_ID_MCP_SERVER = 'mcp-server';
 export const APP_ID_AI_DATA_LIAISON = 'ai-data-liaison';
 export const APP_ID_AI_AGENTS = 'ai-agents';
+export const APP_ID_MCP_TUNNEL = 'mcp-tunnel';
 
 /**
  * Installed application record
