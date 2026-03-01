@@ -231,10 +231,10 @@ Remove `ontologyRepo` from all services that still accept/store it. Some have ac
 
 ### Task 12: Update Tests and Final Cleanup
 
-- [ ] Update all mock files (`pkg/handlers/mocks_test.go`, `pkg/mcp/tools/mocks_test.go`, etc.)
-- [ ] Update integration tests (`ontology_context_integration_test.go`, `schema_integration_test.go`, etc.)
-- [ ] Run full test suite: `go test ./...`
-- [ ] Run `go vet ./...` and ensure clean compilation
+- [x] Update all mock files (`pkg/handlers/mocks_test.go`, `pkg/mcp/tools/mocks_test.go`, etc.)
+- [x] Update integration tests (`ontology_context_integration_test.go`, `schema_integration_test.go`, etc.)
+- [x] Run full test suite: `go test ./...`
+- [x] Run `go vet ./...` and ensure clean compilation
 
 ## Verification
 

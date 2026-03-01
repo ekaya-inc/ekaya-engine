@@ -141,6 +141,48 @@ func (m *mockBuilder) ProcessAnswer(ctx context.Context, projectID uuid.UUID, qu
 	return &AnswerProcessingResult{}, nil
 }
 
+// mockSchemaRepoForQuestion implements only methods called by applyColumnUpdates.
+type mockSchemaRepoForQuestion struct {
+	repositories.SchemaRepository
+	findTableByNameFunc func(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.SchemaTable, error)
+	getColumnByNameFunc func(ctx context.Context, tableID uuid.UUID, columnName string) (*models.SchemaColumn, error)
+}
+
+func (m *mockSchemaRepoForQuestion) FindTableByName(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+	if m.findTableByNameFunc != nil {
+		return m.findTableByNameFunc(ctx, projectID, datasourceID, tableName)
+	}
+	return nil, nil
+}
+
+func (m *mockSchemaRepoForQuestion) GetColumnByName(ctx context.Context, tableID uuid.UUID, columnName string) (*models.SchemaColumn, error) {
+	if m.getColumnByNameFunc != nil {
+		return m.getColumnByNameFunc(ctx, tableID, columnName)
+	}
+	return nil, nil
+}
+
+// mockColumnMetadataRepoForQuestion implements only methods called by applyColumnUpdates.
+type mockColumnMetadataRepoForQuestion struct {
+	repositories.ColumnMetadataRepository
+	getBySchemaColumnIDFunc func(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error)
+	upsertFunc              func(ctx context.Context, meta *models.ColumnMetadata) error
+}
+
+func (m *mockColumnMetadataRepoForQuestion) GetBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
+	if m.getBySchemaColumnIDFunc != nil {
+		return m.getBySchemaColumnIDFunc(ctx, schemaColumnID)
+	}
+	return nil, nil
+}
+
+func (m *mockColumnMetadataRepoForQuestion) Upsert(ctx context.Context, meta *models.ColumnMetadata) error {
+	if m.upsertFunc != nil {
+		return m.upsertFunc(ctx, meta)
+	}
+	return nil
+}
+
 // --- Helper to create a service with mocks ---
 
 func newTestQuestionService(
@@ -156,6 +198,23 @@ func newTestQuestionService(
 	}
 }
 
+func newTestQuestionServiceWithRepos(
+	questionRepo *mockQuestionRepo,
+	knowledgeRepo *mockKnowledgeRepo,
+	builder *mockBuilder,
+	schemaRepo *mockSchemaRepoForQuestion,
+	colMetaRepo *mockColumnMetadataRepoForQuestion,
+) *ontologyQuestionService {
+	return &ontologyQuestionService{
+		questionRepo:       questionRepo,
+		knowledgeRepo:      knowledgeRepo,
+		builder:            builder,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: colMetaRepo,
+		logger:             zap.NewNop(),
+	}
+}
+
 // --- Tests for applyColumnUpdates (transformation logic) ---
 
 func TestApplyColumnUpdates_EmptyUpdates(t *testing.T) {
@@ -165,42 +224,257 @@ func TestApplyColumnUpdates_EmptyUpdates(t *testing.T) {
 }
 
 func TestApplyColumnUpdates_SkipsWhenTableNotFound(t *testing.T) {
-	// When schemaRepo can't find the table, the update should be skipped (not error)
-	svc := newTestQuestionService(&mockQuestionRepo{}, &mockKnowledgeRepo{}, &mockBuilder{})
+	schemaRepo := &mockSchemaRepoForQuestion{
+		findTableByNameFunc: func(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+			return nil, nil // table not found
+		},
+	}
+	colMetaRepo := &mockColumnMetadataRepoForQuestion{}
+	svc := newTestQuestionServiceWithRepos(&mockQuestionRepo{}, &mockKnowledgeRepo{}, &mockBuilder{}, schemaRepo, colMetaRepo)
 
-	// schemaRepo is nil, so FindTableByName will panic -- we need a real service
-	// Since the service now requires schemaRepo and columnMetadataRepo, and these
-	// tests were written for the old ontology-based approach, they need to be
-	// rewritten when those dependencies are properly wired. For now, skip.
-	_ = svc
-	t.Skip("Test needs rewrite: applyColumnUpdates now uses schemaRepo/columnMetadataRepo instead of ontologyRepo")
+	desc := "some description"
+	err := svc.applyColumnUpdates(context.Background(), uuid.New(), []ColumnUpdate{
+		{TableName: "nonexistent", ColumnName: "col1", Description: &desc},
+	})
+	assert.NoError(t, err, "should skip missing tables without error")
 }
 
 func TestApplyColumnUpdates_SkipsWhenSchemaRepoError(t *testing.T) {
-	// When schemaRepo returns an error, the update should be skipped (not error)
-	svc := newTestQuestionService(&mockQuestionRepo{}, &mockKnowledgeRepo{}, &mockBuilder{})
-	_ = svc
-	t.Skip("Test needs rewrite: applyColumnUpdates now uses schemaRepo/columnMetadataRepo instead of ontologyRepo")
+	schemaRepo := &mockSchemaRepoForQuestion{
+		findTableByNameFunc: func(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+			return nil, fmt.Errorf("db error")
+		},
+	}
+	colMetaRepo := &mockColumnMetadataRepoForQuestion{}
+	svc := newTestQuestionServiceWithRepos(&mockQuestionRepo{}, &mockKnowledgeRepo{}, &mockBuilder{}, schemaRepo, colMetaRepo)
+
+	desc := "some description"
+	err := svc.applyColumnUpdates(context.Background(), uuid.New(), []ColumnUpdate{
+		{TableName: "users", ColumnName: "col1", Description: &desc},
+	})
+	assert.NoError(t, err, "should skip on schema repo error without failing")
 }
 
 func TestApplyColumnUpdates_UpdateExistingColumn(t *testing.T) {
-	t.Skip("Test needs rewrite: applyColumnUpdates now uses schemaRepo/columnMetadataRepo instead of ontologyRepo")
+	projectID := uuid.New()
+	tableID := uuid.New()
+	colID := uuid.New()
+
+	schemaRepo := &mockSchemaRepoForQuestion{
+		findTableByNameFunc: func(ctx context.Context, pid, dsID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+			return &models.SchemaTable{ID: tableID, ProjectID: projectID, TableName: tableName}, nil
+		},
+		getColumnByNameFunc: func(ctx context.Context, tID uuid.UUID, columnName string) (*models.SchemaColumn, error) {
+			return &models.SchemaColumn{ID: colID, ProjectID: projectID, SchemaTableID: tableID, ColumnName: columnName}, nil
+		},
+	}
+
+	existingDesc := "old description"
+	existingMeta := &models.ColumnMetadata{
+		ID:             uuid.New(),
+		ProjectID:      projectID,
+		SchemaColumnID: colID,
+		Description:    &existingDesc,
+		Source:         models.ProvenanceMCP,
+	}
+
+	var upserted *models.ColumnMetadata
+	colMetaRepo := &mockColumnMetadataRepoForQuestion{
+		getBySchemaColumnIDFunc: func(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
+			return existingMeta, nil
+		},
+		upsertFunc: func(ctx context.Context, meta *models.ColumnMetadata) error {
+			upserted = meta
+			return nil
+		},
+	}
+
+	svc := newTestQuestionServiceWithRepos(&mockQuestionRepo{}, &mockKnowledgeRepo{}, &mockBuilder{}, schemaRepo, colMetaRepo)
+
+	newDesc := "updated description"
+	err := svc.applyColumnUpdates(context.Background(), projectID, []ColumnUpdate{
+		{TableName: "users", ColumnName: "email", Description: &newDesc},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, upserted)
+	assert.Equal(t, "updated description", *upserted.Description)
+	assert.Equal(t, existingMeta.ID, upserted.ID, "should update existing metadata, not create new")
 }
 
 func TestApplyColumnUpdates_CreateNewColumn(t *testing.T) {
-	t.Skip("Test needs rewrite: applyColumnUpdates now uses schemaRepo/columnMetadataRepo instead of ontologyRepo")
+	projectID := uuid.New()
+	tableID := uuid.New()
+	colID := uuid.New()
+
+	schemaRepo := &mockSchemaRepoForQuestion{
+		findTableByNameFunc: func(ctx context.Context, pid, dsID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+			return &models.SchemaTable{ID: tableID, ProjectID: projectID, TableName: tableName}, nil
+		},
+		getColumnByNameFunc: func(ctx context.Context, tID uuid.UUID, columnName string) (*models.SchemaColumn, error) {
+			return &models.SchemaColumn{ID: colID, ProjectID: projectID, SchemaTableID: tableID, ColumnName: columnName}, nil
+		},
+	}
+
+	var upserted *models.ColumnMetadata
+	colMetaRepo := &mockColumnMetadataRepoForQuestion{
+		getBySchemaColumnIDFunc: func(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
+			return nil, nil // no existing metadata
+		},
+		upsertFunc: func(ctx context.Context, meta *models.ColumnMetadata) error {
+			upserted = meta
+			return nil
+		},
+	}
+
+	svc := newTestQuestionServiceWithRepos(&mockQuestionRepo{}, &mockKnowledgeRepo{}, &mockBuilder{}, schemaRepo, colMetaRepo)
+
+	desc := "new column description"
+	err := svc.applyColumnUpdates(context.Background(), projectID, []ColumnUpdate{
+		{TableName: "users", ColumnName: "email", Description: &desc},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, upserted)
+	assert.Equal(t, "new column description", *upserted.Description)
+	assert.Equal(t, colID, upserted.SchemaColumnID)
+	assert.Equal(t, projectID, upserted.ProjectID)
+	assert.Equal(t, models.ProvenanceMCP, upserted.Source)
 }
 
 func TestApplyColumnUpdates_MultipleTablesGrouped(t *testing.T) {
-	t.Skip("Test needs rewrite: applyColumnUpdates now uses schemaRepo/columnMetadataRepo instead of ontologyRepo")
+	projectID := uuid.New()
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+	emailColID := uuid.New()
+	amountColID := uuid.New()
+
+	schemaRepo := &mockSchemaRepoForQuestion{
+		findTableByNameFunc: func(ctx context.Context, pid, dsID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+			switch tableName {
+			case "users":
+				return &models.SchemaTable{ID: usersTableID, ProjectID: projectID, TableName: "users"}, nil
+			case "orders":
+				return &models.SchemaTable{ID: ordersTableID, ProjectID: projectID, TableName: "orders"}, nil
+			}
+			return nil, nil
+		},
+		getColumnByNameFunc: func(ctx context.Context, tID uuid.UUID, columnName string) (*models.SchemaColumn, error) {
+			switch {
+			case tID == usersTableID && columnName == "email":
+				return &models.SchemaColumn{ID: emailColID, SchemaTableID: usersTableID, ColumnName: "email"}, nil
+			case tID == ordersTableID && columnName == "amount":
+				return &models.SchemaColumn{ID: amountColID, SchemaTableID: ordersTableID, ColumnName: "amount"}, nil
+			}
+			return nil, nil
+		},
+	}
+
+	var upsertedIDs []uuid.UUID
+	colMetaRepo := &mockColumnMetadataRepoForQuestion{
+		getBySchemaColumnIDFunc: func(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
+			return nil, nil
+		},
+		upsertFunc: func(ctx context.Context, meta *models.ColumnMetadata) error {
+			upsertedIDs = append(upsertedIDs, meta.SchemaColumnID)
+			return nil
+		},
+	}
+
+	svc := newTestQuestionServiceWithRepos(&mockQuestionRepo{}, &mockKnowledgeRepo{}, &mockBuilder{}, schemaRepo, colMetaRepo)
+
+	emailDesc := "user email"
+	amountDesc := "order amount"
+	err := svc.applyColumnUpdates(context.Background(), projectID, []ColumnUpdate{
+		{TableName: "users", ColumnName: "email", Description: &emailDesc},
+		{TableName: "orders", ColumnName: "amount", Description: &amountDesc},
+	})
+	require.NoError(t, err)
+	assert.Len(t, upsertedIDs, 2)
+	assert.Contains(t, upsertedIDs, emailColID)
+	assert.Contains(t, upsertedIDs, amountColID)
 }
 
 func TestApplyColumnUpdates_PartialUpdate(t *testing.T) {
-	t.Skip("Test needs rewrite: applyColumnUpdates now uses schemaRepo/columnMetadataRepo instead of ontologyRepo")
+	// Only updates the fields that are non-nil
+	projectID := uuid.New()
+	tableID := uuid.New()
+	colID := uuid.New()
+
+	schemaRepo := &mockSchemaRepoForQuestion{
+		findTableByNameFunc: func(ctx context.Context, pid, dsID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+			return &models.SchemaTable{ID: tableID, ProjectID: projectID, TableName: tableName}, nil
+		},
+		getColumnByNameFunc: func(ctx context.Context, tID uuid.UUID, columnName string) (*models.SchemaColumn, error) {
+			return &models.SchemaColumn{ID: colID, ProjectID: projectID, SchemaTableID: tableID, ColumnName: columnName}, nil
+		},
+	}
+
+	existingDesc := "original description"
+	existingRole := "attribute"
+	existingMeta := &models.ColumnMetadata{
+		ID:             uuid.New(),
+		ProjectID:      projectID,
+		SchemaColumnID: colID,
+		Description:    &existingDesc,
+		Role:           &existingRole,
+		Source:         models.ProvenanceMCP,
+	}
+
+	var upserted *models.ColumnMetadata
+	colMetaRepo := &mockColumnMetadataRepoForQuestion{
+		getBySchemaColumnIDFunc: func(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
+			return existingMeta, nil
+		},
+		upsertFunc: func(ctx context.Context, meta *models.ColumnMetadata) error {
+			upserted = meta
+			return nil
+		},
+	}
+
+	svc := newTestQuestionServiceWithRepos(&mockQuestionRepo{}, &mockKnowledgeRepo{}, &mockBuilder{}, schemaRepo, colMetaRepo)
+
+	// Only update SemanticType, leave Description and Role untouched
+	semType := "email_address"
+	err := svc.applyColumnUpdates(context.Background(), projectID, []ColumnUpdate{
+		{TableName: "users", ColumnName: "email", SemanticType: &semType},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, upserted)
+	assert.Equal(t, "email_address", *upserted.SemanticType)
+	assert.Equal(t, "original description", *upserted.Description, "should preserve existing description")
+	assert.Equal(t, "attribute", *upserted.Role, "should preserve existing role")
 }
 
 func TestApplyColumnUpdates_RepoUpdateError(t *testing.T) {
-	t.Skip("Test needs rewrite: applyColumnUpdates now uses schemaRepo/columnMetadataRepo instead of ontologyRepo")
+	projectID := uuid.New()
+	tableID := uuid.New()
+	colID := uuid.New()
+
+	schemaRepo := &mockSchemaRepoForQuestion{
+		findTableByNameFunc: func(ctx context.Context, pid, dsID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+			return &models.SchemaTable{ID: tableID, ProjectID: projectID, TableName: tableName}, nil
+		},
+		getColumnByNameFunc: func(ctx context.Context, tID uuid.UUID, columnName string) (*models.SchemaColumn, error) {
+			return &models.SchemaColumn{ID: colID, ProjectID: projectID, SchemaTableID: tableID, ColumnName: columnName}, nil
+		},
+	}
+
+	colMetaRepo := &mockColumnMetadataRepoForQuestion{
+		getBySchemaColumnIDFunc: func(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
+			return nil, nil
+		},
+		upsertFunc: func(ctx context.Context, meta *models.ColumnMetadata) error {
+			return fmt.Errorf("upsert failed")
+		},
+	}
+
+	svc := newTestQuestionServiceWithRepos(&mockQuestionRepo{}, &mockKnowledgeRepo{}, &mockBuilder{}, schemaRepo, colMetaRepo)
+
+	desc := "some description"
+	err := svc.applyColumnUpdates(context.Background(), projectID, []ColumnUpdate{
+		{TableName: "users", ColumnName: "email", Description: &desc},
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "upsert column metadata")
 }
 
 // --- Tests for AnswerQuestion validation ---
