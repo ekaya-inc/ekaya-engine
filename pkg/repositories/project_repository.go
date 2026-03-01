@@ -20,6 +20,7 @@ type ProjectRepository interface {
 	Get(ctx context.Context, id uuid.UUID) (*models.Project, error)
 	Update(ctx context.Context, project *models.Project) error
 	Delete(ctx context.Context, id uuid.UUID) error
+	UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error
 }
 
 // projectRepository implements ProjectRepository using PostgreSQL.
@@ -58,15 +59,24 @@ func (r *projectRepository) Create(ctx context.Context, project *models.Project)
 		return fmt.Errorf("failed to marshal parameters: %w", err)
 	}
 
+	var domainSummaryJSON []byte
+	if project.DomainSummary != nil {
+		domainSummaryJSON, err = json.Marshal(project.DomainSummary)
+		if err != nil {
+			return fmt.Errorf("failed to marshal domain_summary: %w", err)
+		}
+	}
+
 	query := `
-		INSERT INTO engine_projects (id, name, parameters, created_at, updated_at, status, industry_type)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO engine_projects (id, name, parameters, created_at, updated_at, status, industry_type, domain_summary)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (id) DO UPDATE
 		SET name = EXCLUDED.name,
 		    parameters = EXCLUDED.parameters,
 		    updated_at = EXCLUDED.updated_at,
 		    status = EXCLUDED.status,
-		    industry_type = EXCLUDED.industry_type`
+		    industry_type = EXCLUDED.industry_type,
+		    domain_summary = EXCLUDED.domain_summary`
 
 	_, err = scope.Conn.Exec(ctx, query,
 		project.ID,
@@ -76,6 +86,7 @@ func (r *projectRepository) Create(ctx context.Context, project *models.Project)
 		project.UpdatedAt,
 		project.Status,
 		project.IndustryType,
+		domainSummaryJSON,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create project: %w", err)
@@ -92,12 +103,13 @@ func (r *projectRepository) Get(ctx context.Context, id uuid.UUID) (*models.Proj
 	}
 
 	query := `
-		SELECT id, name, parameters, created_at, updated_at, status, COALESCE(industry_type, 'general')
+		SELECT id, name, parameters, created_at, updated_at, status, COALESCE(industry_type, 'general'), domain_summary
 		FROM engine_projects
 		WHERE id = $1`
 
 	var project models.Project
 	var params []byte
+	var domainSummaryJSON []byte
 
 	err := scope.Conn.QueryRow(ctx, query, id).Scan(
 		&project.ID,
@@ -107,6 +119,7 @@ func (r *projectRepository) Get(ctx context.Context, id uuid.UUID) (*models.Proj
 		&project.UpdatedAt,
 		&project.Status,
 		&project.IndustryType,
+		&domainSummaryJSON,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -117,6 +130,14 @@ func (r *projectRepository) Get(ctx context.Context, id uuid.UUID) (*models.Proj
 
 	if err := json.Unmarshal(params, &project.Parameters); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal parameters: %w", err)
+	}
+
+	if len(domainSummaryJSON) > 0 && string(domainSummaryJSON) != "null" {
+		var ds models.DomainSummary
+		if err := json.Unmarshal(domainSummaryJSON, &ds); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal domain_summary: %w", err)
+		}
+		project.DomainSummary = &ds
 	}
 
 	return &project, nil
@@ -147,6 +168,39 @@ func (r *projectRepository) Update(ctx context.Context, project *models.Project)
 	result, err := scope.Conn.Exec(ctx, query, project.ID, project.Name, params, project.UpdatedAt, project.IndustryType)
 	if err != nil {
 		return fmt.Errorf("failed to update project: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return apperrors.ErrNotFound
+	}
+
+	return nil
+}
+
+// UpdateDomainSummary updates the domain_summary JSONB column for a project.
+func (r *projectRepository) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	var summaryJSON []byte
+	var err error
+	if summary != nil {
+		summaryJSON, err = json.Marshal(summary)
+		if err != nil {
+			return fmt.Errorf("failed to marshal domain_summary: %w", err)
+		}
+	}
+
+	query := `
+		UPDATE engine_projects
+		SET domain_summary = $2, updated_at = $3
+		WHERE id = $1`
+
+	result, err := scope.Conn.Exec(ctx, query, projectID, summaryJSON, time.Now())
+	if err != nil {
+		return fmt.Errorf("failed to update domain_summary: %w", err)
 	}
 
 	if result.RowsAffected() == 0 {

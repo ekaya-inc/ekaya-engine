@@ -92,11 +92,11 @@ Add fields to `ColumnMetadata` that exist in `ColumnDetail` but not yet in `Colu
 
 ### Task 3: Add DomainSummary to Project Model + Repository
 
-- [ ] Add `DomainSummary *DomainSummary` field to Project struct in `pkg/models/project.go`
-- [ ] Add `UpdateDomainSummary(ctx, projectID, *DomainSummary) error` to ProjectRepository interface
-- [ ] Implement the method — UPDATE `engine_projects` SET `domain_summary` = $2
-- [ ] Add `GetDomainSummary` or ensure existing `GetByID` scans the new column
-- [ ] Update `pkg/services/projects.go` CreateProject to initialize empty DomainSummary
+- [x] Add `DomainSummary *DomainSummary` field to Project struct in `pkg/models/project.go`
+- [x] Add `UpdateDomainSummary(ctx, projectID, *DomainSummary) error` to ProjectRepository interface
+- [x] Implement the method — UPDATE `engine_projects` SET `domain_summary` = $2
+- [x] Add `GetDomainSummary` or ensure existing `GetByID` scans the new column
+- [x] Update `pkg/services/projects.go` CreateProject to initialize empty DomainSummary
 
 ### Task 4: Refactor OntologyContextService
 
