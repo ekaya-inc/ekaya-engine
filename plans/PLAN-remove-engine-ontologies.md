@@ -124,11 +124,11 @@ The core of the refactor — 3 methods that build all ontology context for MCP t
 
 `pkg/services/ontology_finalization.go`:
 
-- [ ] Remove `ontologyRepo` from constructor, add project repo
-- [ ] Line 60: Remove `ontologyRepo.GetActive()`. Use schema repo to check if tables exist.
-- [ ] Line 146: Replace `ontologyRepo.UpdateDomainSummary()` with `projectRepo.UpdateDomainSummary()`
-- [ ] The `extractColumnFeatureInsights()` method (line 398) already reads from `columnMetadataRepo` — no changes needed there
-- [ ] Update tests
+- [x] Remove `ontologyRepo` from constructor, add project repo
+- [x] Line 60: Remove `ontologyRepo.GetActive()`. Use schema repo to check if tables exist.
+- [x] Line 146: Replace `ontologyRepo.UpdateDomainSummary()` with `projectRepo.UpdateDomainSummary()`
+- [x] The `extractColumnFeatureInsights()` method (line 398) already reads from `columnMetadataRepo` — no changes needed there
+- [x] Update tests
 
 ### Task 7: Refactor MCP Tools
 
