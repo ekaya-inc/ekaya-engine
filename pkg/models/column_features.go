@@ -391,6 +391,10 @@ type IdentifierFeatures struct {
 
 	// EntityReferenced describes what entity this identifier refers to.
 	EntityReferenced string `json:"entity_referenced,omitempty"`
+
+	// FKAssociation describes the semantic role of this FK reference (e.g., "host", "visitor", "payer", "payee").
+	// Distinguishes between multiple FKs pointing to the same entity table.
+	FKAssociation string `json:"fk_association,omitempty"`
 }
 
 // Identifier type constants.

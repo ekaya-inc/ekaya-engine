@@ -86,9 +86,9 @@ Create `migrations/011_remove_ontologies.up.sql`:
 
 Add fields to `ColumnMetadata` that exist in `ColumnDetail` but not yet in `ColumnMetadata`:
 
-- [ ] Add `Synonyms []string` to `ColumnMetadataFeatures` JSONB (in `pkg/models/column_metadata.go`)
-- [ ] Add `FKAssociation string` to `IdentifierFeatures` in `pkg/models/column_features.go`
-- [ ] No database migration needed — both go into existing `features` JSONB column
+- [x] Add `Synonyms []string` to `ColumnMetadataFeatures` JSONB (in `pkg/models/column_metadata.go`)
+- [x] Add `FKAssociation string` to `IdentifierFeatures` in `pkg/models/column_features.go`
+- [x] No database migration needed — both fields go into existing `features` JSONB column
 
 ### Task 3: Add DomainSummary to Project Model + Repository
 
