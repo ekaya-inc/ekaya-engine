@@ -1,6 +1,6 @@
 # PLAN: Schema Selection Shows Pending Changes for Approval
 
-**Status:** TODO
+**Status:** DONE
 **Created:** 2026-03-01
 **Depends on:** PLAN-dry-up-schema-refresh.md
 **Related:** DESIGN-pending-changes-workflow.md
