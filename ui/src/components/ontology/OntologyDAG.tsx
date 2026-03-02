@@ -19,7 +19,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import engineApi from '../../services/engineApi';
-import type { DAGNodeName, DAGNodeStatus, DAGStatusResponse, DAGStatus } from '../../types';
+import type { DAGNodeName, DAGNodeStatus, DAGStatusResponse, DAGStatus, OntologyStatusResponse } from '../../types';
 import { DAGNodeDescriptions } from '../../types';
 import { Button } from '../ui/Button';
 import {
@@ -99,6 +99,18 @@ const isTerminalStatus = (status: DAGStatus): boolean => {
   return status === 'completed' || status === 'failed' || status === 'cancelled';
 };
 
+// Helper to format change summary into a human-readable string
+const formatChangeSummary = (summary: { tables_added: number; tables_modified: number; tables_deleted: number; columns_added: number; columns_modified: number; columns_deleted: number }): string => {
+  const parts: string[] = [];
+  if (summary.tables_added > 0) parts.push(`${summary.tables_added} new table${summary.tables_added !== 1 ? 's' : ''}`);
+  if (summary.tables_modified > 0) parts.push(`${summary.tables_modified} modified table${summary.tables_modified !== 1 ? 's' : ''}`);
+  if (summary.tables_deleted > 0) parts.push(`${summary.tables_deleted} deleted table${summary.tables_deleted !== 1 ? 's' : ''}`);
+  if (summary.columns_added > 0) parts.push(`${summary.columns_added} new column${summary.columns_added !== 1 ? 's' : ''}`);
+  if (summary.columns_modified > 0) parts.push(`${summary.columns_modified} modified column${summary.columns_modified !== 1 ? 's' : ''}`);
+  if (summary.columns_deleted > 0) parts.push(`${summary.columns_deleted} deleted column${summary.columns_deleted !== 1 ? 's' : ''}`);
+  return parts.join(', ');
+};
+
 export const OntologyDAG = ({
   projectId,
   datasourceId,
@@ -107,12 +119,12 @@ export const OntologyDAG = ({
   onStatusChange,
 }: OntologyDAGProps) => {
   const [dagStatus, setDagStatus] = useState<DAGStatusResponse | null>(null);
+  const [ontologyStatus, setOntologyStatus] = useState<OntologyStatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isStarting, setIsStarting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showReextractDialog, setShowReextractDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [projectOverview, setProjectOverview] = useState('');
@@ -152,6 +164,15 @@ export const OntologyDAG = ({
           stopPolling();
 
           if (response.data.status === 'completed') {
+            // Refresh ontology status to clear schema change badge
+            try {
+              const statusResp = await engineApi.getOntologyStatus(projectId, datasourceId);
+              if (isMountedRef.current && statusResp.data) {
+                setOntologyStatus(statusResp.data);
+              }
+            } catch {
+              // Non-critical, ignore
+            }
             onComplete?.();
           }
         }
@@ -274,10 +295,11 @@ export const OntologyDAG = ({
       setIsLoadingOverview(true);
 
       try {
-        // Fetch DAG status and project overview in parallel
-        const [dagResponse, overviewResponse] = await Promise.all([
+        // Fetch DAG status, project overview, and ontology status in parallel
+        const [dagResponse, overviewResponse, ontologyStatusResponse] = await Promise.all([
           engineApi.getOntologyDAGStatus(projectId, datasourceId),
           engineApi.getProjectOverview(projectId),
+          engineApi.getOntologyStatus(projectId, datasourceId),
         ]);
 
         if (!isMountedRef.current) return;
@@ -285,6 +307,11 @@ export const OntologyDAG = ({
         // Handle project overview
         if (overviewResponse.data?.overview) {
           setProjectOverview(overviewResponse.data.overview);
+        }
+
+        // Handle ontology status (change detection)
+        if (ontologyStatusResponse.data) {
+          setOntologyStatus(ontologyStatusResponse.data);
         }
 
         // Handle DAG status
@@ -438,11 +465,23 @@ export const OntologyDAG = ({
   const getStatusBanner = () => {
     if (isComplete) {
       return (
-        <div className="mb-4 flex items-center gap-2 p-3 rounded-lg bg-green-50 border border-green-200 dark:bg-green-900/20 dark:border-green-800">
-          <Check className="h-5 w-5 text-green-600" />
-          <span className="text-green-800 dark:text-green-200 font-medium">
-            Ontology extraction complete
-          </span>
+        <div className="mb-4 space-y-2">
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-green-50 border border-green-200 dark:bg-green-900/20 dark:border-green-800">
+            <Check className="h-5 w-5 text-green-600" />
+            <span className="text-green-800 dark:text-green-200 font-medium">
+              Ontology extraction complete
+              {dagStatus?.is_incremental && ' (incremental refresh)'}
+            </span>
+          </div>
+          {ontologyStatus?.schema_changed_since_build && ontologyStatus.change_summary && (
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-800">
+              <AlertCircle className="h-5 w-5 text-amber-600" />
+              <span className="text-amber-800 dark:text-amber-200 text-sm">
+                Schema changes detected: {formatChangeSummary(ontologyStatus.change_summary)}.
+                Click <strong>Refresh Ontology</strong> to update.
+              </span>
+            </div>
+          )}
         </div>
       );
     }
@@ -474,11 +513,14 @@ export const OntologyDAG = ({
     }
 
     if (isRunning) {
+      const changeSummaryText = dagStatus?.is_incremental && dagStatus.change_summary
+        ? `Refreshing ontology: ${formatChangeSummary(dagStatus.change_summary)}`
+        : `Extracting ontology...`;
       return (
         <div className="mb-4 flex items-center gap-2 p-3 rounded-lg bg-blue-50 border border-blue-200 dark:bg-blue-900/20 dark:border-blue-800">
           <Loader2 className="h-5 w-5 text-blue-600 animate-spin" />
           <span className="text-blue-800 dark:text-blue-200 font-medium">
-            Extracting ontology... ({completedNodes}/{totalNodes} nodes complete)
+            {changeSummaryText} ({completedNodes}/{totalNodes} nodes complete)
           </span>
         </div>
       );
@@ -603,6 +645,26 @@ export const OntologyDAG = ({
             >
               <Trash2 className="h-4 w-4 mr-2" />
               Delete Ontology
+            </Button>
+          )}
+          {isComplete && (
+            <Button
+              onClick={() => void handleStart()}
+              disabled={isStarting}
+              variant="outline"
+              className="text-purple-600 hover:text-purple-700 hover:bg-purple-50 dark:hover:bg-purple-900/20"
+            >
+              {isStarting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Refreshing...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh Ontology
+                </>
+              )}
             </Button>
           )}
           {getActionButton()}
@@ -739,48 +801,6 @@ export const OntologyDAG = ({
           })}
         </div>
       </div>
-
-      {/* Re-extraction confirmation dialog */}
-      <Dialog open={showReextractDialog} onOpenChange={setShowReextractDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Re-extract Ontology?</DialogTitle>
-            <DialogDescription>
-              This will start a complete re-extraction of your ontology from scratch, which typically
-              takes 10-15 minutes. All existing ontology data will be replaced.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-4">
-            <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 dark:bg-amber-900/20 dark:border-amber-800">
-              <div className="flex items-start gap-3">
-                <AlertCircle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                <div className="text-sm text-amber-800 dark:text-amber-200">
-                  <p className="font-medium mb-1">This is a full re-extraction</p>
-                  <p>
-                    If you&apos;re looking to update the ontology with recent schema changes, this feature
-                    is not yet implemented. For now, re-extraction will analyze your entire database
-                    from the beginning.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowReextractDialog(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                setShowReextractDialog(false);
-                void handleStart();
-              }}
-              className="bg-purple-600 hover:bg-purple-700 text-white"
-            >
-              Start Re-extraction
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Delete ontology confirmation dialog */}
       <Dialog open={showDeleteDialog} onOpenChange={(open) => {

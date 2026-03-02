@@ -525,6 +525,19 @@ export interface DAGNode {
 }
 
 /**
+ * Change summary for incremental extraction
+ * Matches pkg/models/change_set.go ChangeSummary
+ */
+export interface ChangeSummary {
+  tables_added: number;
+  tables_modified: number;
+  tables_deleted: number;
+  columns_added: number;
+  columns_modified: number;
+  columns_deleted: number;
+}
+
+/**
  * Response from DAG status API
  * Matches pkg/handlers/ontology_dag_handler.go DAGStatusResponse
  */
@@ -532,9 +545,22 @@ export interface DAGStatusResponse {
   dag_id: string;
   status: DAGStatus;
   current_node?: string;
+  is_incremental: boolean;
+  change_summary?: ChangeSummary;
   nodes: DAGNode[];
   started_at?: string;
   completed_at?: string;
+}
+
+/**
+ * Response from GET /ontology/status API
+ * Matches pkg/models/ontology_dag.go OntologyStatusResponse
+ */
+export interface OntologyStatusResponse {
+  has_ontology: boolean;
+  last_built_at?: string;
+  schema_changed_since_build: boolean;
+  change_summary?: ChangeSummary;
 }
 
 // ===================================================================

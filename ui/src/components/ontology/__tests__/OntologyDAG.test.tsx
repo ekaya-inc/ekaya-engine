@@ -10,6 +10,7 @@ import { OntologyDAG } from '../OntologyDAG';
 vi.mock('../../../services/engineApi', () => ({
   default: {
     getOntologyDAGStatus: vi.fn(),
+    getOntologyStatus: vi.fn().mockResolvedValue({ success: true, data: { has_ontology: false, schema_changed_since_build: false } }),
     getProjectOverview: vi.fn(),
     startOntologyExtraction: vi.fn(),
     cancelOntologyDAG: vi.fn(),
@@ -58,6 +59,7 @@ vi.mock('../../ui/Input', () => ({
 const mockCompletedDAG: DAGStatusResponse = {
   dag_id: 'dag-1',
   status: 'completed',
+  is_incremental: false,
   nodes: [
     {
       name: 'KnowledgeSeeding',
@@ -77,6 +79,7 @@ const mockCompletedDAG: DAGStatusResponse = {
 const mockFailedDAG: DAGStatusResponse = {
   dag_id: 'dag-2',
   status: 'failed',
+  is_incremental: false,
   current_node: 'KnowledgeSeeding',
   nodes: [
     {
@@ -166,6 +169,7 @@ describe('OntologyDAG - Delete Ontology Functionality', () => {
   const mockRunningDAG: DAGStatusResponse = {
     dag_id: 'dag-running',
     status: 'running',
+    is_incremental: false,
     current_node: 'ColumnEnrichment',
     nodes: [
       {
