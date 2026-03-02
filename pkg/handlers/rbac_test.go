@@ -632,6 +632,9 @@ func (m *mockOntologyDAGServiceForRBAC) Cancel(ctx context.Context, dagID uuid.U
 func (m *mockOntologyDAGServiceForRBAC) Delete(ctx context.Context, projectID uuid.UUID) error {
 	return nil
 }
+func (m *mockOntologyDAGServiceForRBAC) GetOntologyStatus(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.OntologyStatusResponse, error) {
+	return &models.OntologyStatusResponse{}, nil
+}
 func (m *mockOntologyDAGServiceForRBAC) Shutdown(ctx context.Context) error { return nil }
 
 // mockOntologyChatServiceForRBAC implements services.OntologyChatService.

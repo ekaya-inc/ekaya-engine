@@ -20,12 +20,14 @@ import (
 // DAGStatusResponse represents the DAG status for UI polling.
 // Matches the response structure defined in PLAN-ontology-workflow-dag.md Section 6.
 type DAGStatusResponse struct {
-	DAGID       string            `json:"dag_id"`
-	Status      string            `json:"status"`
-	CurrentNode *string           `json:"current_node,omitempty"`
-	Nodes       []DAGNodeResponse `json:"nodes"`
-	StartedAt   *string           `json:"started_at,omitempty"`
-	CompletedAt *string           `json:"completed_at,omitempty"`
+	DAGID         string                `json:"dag_id"`
+	Status        string                `json:"status"`
+	CurrentNode   *string               `json:"current_node,omitempty"`
+	IsIncremental bool                  `json:"is_incremental"`
+	ChangeSummary *models.ChangeSummary `json:"change_summary,omitempty"`
+	Nodes         []DAGNodeResponse     `json:"nodes"`
+	StartedAt     *string               `json:"started_at,omitempty"`
+	CompletedAt   *string               `json:"completed_at,omitempty"`
 }
 
 // DAGNodeResponse represents a single node within the DAG.
@@ -80,6 +82,10 @@ func (h *OntologyDAGHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *
 	mux.HandleFunc("POST "+base+"/extract",
 		authMiddleware.RequireAuthWithPathValidation("pid")(
 			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.StartExtraction))))
+
+	// Get ontology status with change detection
+	mux.HandleFunc("GET "+base+"/status",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetOntologyStatus)))
 
 	// Get DAG status - for UI polling
 	mux.HandleFunc("GET "+base+"/dag",
@@ -214,6 +220,32 @@ func (h *OntologyDAGHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// GetOntologyStatus handles GET /api/projects/{pid}/datasources/{dsid}/ontology/status
+// Returns the ontology status with change detection for UI display.
+func (h *OntologyDAGHandler) GetOntologyStatus(w http.ResponseWriter, r *http.Request) {
+	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	status, err := h.dagService.GetOntologyStatus(r.Context(), projectID, datasourceID)
+	if err != nil {
+		h.logger.Error("Failed to get ontology status",
+			zap.String("project_id", projectID.String()),
+			zap.String("datasource_id", datasourceID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "get_status_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	response := ApiResponse{Success: true, Data: status}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
 // Delete handles DELETE /api/projects/{pid}/datasources/{dsid}/ontology
 // Deletes all ontology data for the project.
 func (h *OntologyDAGHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -250,10 +282,12 @@ func (h *OntologyDAGHandler) toDAGResponse(dag *models.OntologyDAG) DAGStatusRes
 	}
 
 	resp := DAGStatusResponse{
-		DAGID:       dag.ID.String(),
-		Status:      string(dag.Status),
-		CurrentNode: dag.CurrentNode,
-		Nodes:       nodes,
+		DAGID:         dag.ID.String(),
+		Status:        string(dag.Status),
+		CurrentNode:   dag.CurrentNode,
+		IsIncremental: dag.IsIncremental,
+		ChangeSummary: dag.ChangeSummary,
+		Nodes:         nodes,
 	}
 
 	if dag.StartedAt != nil {
