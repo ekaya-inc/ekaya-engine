@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services/dag"
@@ -91,6 +92,17 @@ func (v *relationshipValidator) ValidateCandidate(ctx context.Context, projectID
 	validationResult, err := v.parseValidationResponse(result.Content)
 	if err != nil {
 		return nil, fmt.Errorf("parse validation response: %w", err)
+	}
+
+	// Override LLM cardinality with deterministic computation.
+	// The LLM frequently gets cardinality wrong because it's a data property,
+	// not a semantic judgment. Schema constraints and join stats are authoritative.
+	if validationResult.IsValidFK {
+		validationResult.Cardinality = InferCardinality(candidate.SourceIsPK, candidate.SourceIsUnique,
+			&datasource.JoinAnalysis{
+				SourceMatched: candidate.SourceMatched,
+				TargetMatched: candidate.TargetMatched,
+			})
 	}
 
 	// If confidence is below threshold, treat as rejection regardless of is_valid_fk

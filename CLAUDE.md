@@ -45,7 +45,9 @@ make build            # Build Go binary
 make build-ui         # Build frontend (output to ui/dist/)
 ```
 
-Use `make lint` and `make test` for quick feedback during development. Run `make check` for major changes that are ready for commit.
+Use `make lint` and `make test` for quick feedback during development.
+
+**IMPORTANT:** Always run `make check` before considering any implementation task complete. Do not skip this step.
 
 ## Key Architecture Concepts
 

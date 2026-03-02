@@ -190,7 +190,7 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 				zap.String("target", fmt.Sprintf("%s.%s.%s", targetTable.SchemaName, targetTable.TableName, targetCol.ColumnName)),
 				zap.Error(err))
 		} else {
-			cardinality = InferCardinality(joinResult)
+			cardinality = InferCardinality(sourceCol.IsPrimaryKey, sourceCol.IsUnique, joinResult)
 			s.logger.Debug("Computed FK cardinality from data",
 				zap.String("source", fmt.Sprintf("%s.%s.%s", sourceTable.SchemaName, sourceTable.TableName, sourceCol.ColumnName)),
 				zap.String("target", fmt.Sprintf("%s.%s.%s", targetTable.SchemaName, targetTable.TableName, targetCol.ColumnName)),
@@ -351,7 +351,7 @@ func (s *deterministicRelationshipService) discoverSchemaRelationshipsFromColumn
 				zap.String("target", fmt.Sprintf("%s.%s.%s", targetTable.SchemaName, targetTable.TableName, targetCol.ColumnName)),
 				zap.Error(err))
 		} else {
-			cardinality = InferCardinality(joinResult)
+			cardinality = InferCardinality(col.IsPrimaryKey, col.IsUnique, joinResult)
 		}
 
 		// Use the FK confidence from ColumnFeatures
@@ -915,8 +915,8 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 
 			confidence := 0.9
 
-			// Calculate cardinality from join analysis
-			cardinality := InferCardinality(joinResult)
+			// Calculate cardinality from schema constraints + join analysis
+			cardinality := InferCardinality(candidate.column.IsPrimaryKey, candidate.column.IsUnique, joinResult)
 
 			// Create SchemaRelationship (unidirectional, source→target)
 			inferenceMethod := models.InferenceMethodPKMatch

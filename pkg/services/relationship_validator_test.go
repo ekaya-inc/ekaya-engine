@@ -510,13 +510,15 @@ func TestValidateCandidate_InvalidJSONResponse(t *testing.T) {
 }
 
 func TestValidateCandidate_CardinalityNormalization(t *testing.T) {
+	// All these candidates have SourceIsPK=false and SourceIsUnique=false,
+	// so deterministic override always produces N:1 regardless of LLM output.
 	tests := []struct {
 		name        string
 		llmResponse string
 		expected    string
 	}{
 		{
-			name: "lowercase cardinality",
+			name: "lowercase cardinality overridden to N:1",
 			llmResponse: `{
 				"is_valid_fk": true,
 				"confidence": 0.9,
@@ -526,34 +528,34 @@ func TestValidateCandidate_CardinalityNormalization(t *testing.T) {
 			expected: "N:1",
 		},
 		{
-			name: "1:1 cardinality",
+			name: "LLM 1:1 overridden to N:1 for non-unique source",
 			llmResponse: `{
 				"is_valid_fk": true,
 				"confidence": 0.9,
 				"cardinality": "1:1",
 				"reasoning": "One-to-one relationship"
 			}`,
-			expected: "1:1",
+			expected: "N:1",
 		},
 		{
-			name: "1:N cardinality",
+			name: "LLM 1:N overridden to N:1 for non-unique source",
 			llmResponse: `{
 				"is_valid_fk": true,
 				"confidence": 0.9,
 				"cardinality": "1:n",
 				"reasoning": "One-to-many relationship"
 			}`,
-			expected: "1:N",
+			expected: "N:1",
 		},
 		{
-			name: "N:M cardinality",
+			name: "LLM N:M overridden to N:1 for non-unique source",
 			llmResponse: `{
 				"is_valid_fk": true,
 				"confidence": 0.9,
 				"cardinality": "n:m",
 				"reasoning": "Many-to-many relationship"
 			}`,
-			expected: "N:M",
+			expected: "N:1",
 		},
 		{
 			name: "invalid cardinality defaults to N:1",
@@ -1300,6 +1302,87 @@ func TestBuildValidationPrompt_NoWarningSignalsForHighCoverage(t *testing.T) {
 	prompt := validator.buildValidationPrompt(candidate)
 
 	assert.NotContains(t, prompt, "Warning Signals")
+}
+
+func TestValidateCandidate_LLMNMOverriddenToN1(t *testing.T) {
+	// This tests the end-to-end override: LLM says N:M but source is non-unique,
+	// so computeCardinality returns N:1 which overrides the LLM result.
+	mockClient := &mockValidatorLLMClient{
+		responseContent: `{
+			"is_valid_fk": true,
+			"confidence": 0.9,
+			"cardinality": "N:M",
+			"reasoning": "Many-to-many relationship",
+			"source_role": "member"
+		}`,
+	}
+
+	validator := NewRelationshipValidator(
+		&mockValidatorLLMClientFactory{client: mockClient},
+		nil,
+		nil,
+		&mockRelValConversationRepo{},
+		nil,
+		zap.NewNop(),
+	)
+
+	candidate := &RelationshipCandidate{
+		SourceTable:         "content_posts",
+		SourceColumn:        "app_id",
+		SourceDataType:      "uuid",
+		SourceIsPK:          false,
+		SourceIsUnique:      false, // Non-unique → N:1, not N:M
+		SourceDistinctCount: 5,
+		SourceMatched:       5,
+		TargetTable:         "applications",
+		TargetColumn:        "id",
+		TargetDataType:      "uuid",
+		TargetIsPK:          true,
+		TargetDistinctCount: 10,
+		TargetMatched:       5,
+	}
+
+	result, err := validator.ValidateCandidate(context.Background(), uuid.New(), candidate)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.IsValidFK)
+	assert.Equal(t, "N:1", result.Cardinality, "LLM N:M should be overridden to N:1 for non-unique source")
+}
+
+func TestValidateCandidate_InvalidFKCardinalityNotOverridden(t *testing.T) {
+	// When LLM says is_valid_fk=false, cardinality should NOT be overridden
+	mockClient := &mockValidatorLLMClient{
+		responseContent: `{
+			"is_valid_fk": false,
+			"confidence": 0.8,
+			"cardinality": "N:M",
+			"reasoning": "Not a valid FK"
+		}`,
+	}
+
+	validator := NewRelationshipValidator(
+		&mockValidatorLLMClientFactory{client: mockClient},
+		nil,
+		nil,
+		&mockRelValConversationRepo{},
+		nil,
+		zap.NewNop(),
+	)
+
+	candidate := &RelationshipCandidate{
+		SourceTable:  "logs",
+		SourceColumn: "ref_id",
+		TargetTable:  "entities",
+		TargetColumn: "id",
+	}
+
+	result, err := validator.ValidateCandidate(context.Background(), uuid.New(), candidate)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.IsValidFK)
+	assert.Equal(t, "N:M", result.Cardinality, "cardinality should not be overridden for invalid FK")
 }
 
 func TestSystemMessage_IncludesCoincidentalMatchGuidance(t *testing.T) {

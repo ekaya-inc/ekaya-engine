@@ -450,6 +450,7 @@ func (c *relationshipCandidateCollector) generateCandidatePairs(
 				SourceColumn:   source.Column.ColumnName,
 				SourceDataType: source.Column.DataType,
 				SourceIsPK:     source.Column.IsPrimaryKey,
+				SourceIsUnique: source.Column.IsUnique,
 				SourceColumnID: source.Column.ID,
 
 				// Target column info
