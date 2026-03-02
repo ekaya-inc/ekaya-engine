@@ -452,6 +452,12 @@ const SchemaPage = () => {
     return pendingChanges[`${schemaName}.${tableName}.${columnName}`];
   }, [pendingChanges]);
 
+  // Helper to check if a table has any column-level pending changes
+  const tableHasColumnChanges = useCallback((schemaName: string, tableName: string): boolean => {
+    const prefix = `${schemaName}.${tableName}.`;
+    return Object.keys(pendingChanges).some(key => key.startsWith(prefix));
+  }, [pendingChanges]);
+
   // Loading state
   if (loading) {
     return (
@@ -713,6 +719,11 @@ const SchemaPage = () => {
                     {tablePendingChange?.change_type === 'new_table' && (
                       <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
                         New
+                      </span>
+                    )}
+                    {tablePendingChange?.change_type !== 'new_table' && tableHasColumnChanges(schemaName, table.name) && (
+                      <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                        Altered
                       </span>
                     )}
                     <span className="text-sm text-text-secondary">
