@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
@@ -204,6 +206,63 @@ func TestGetEffectiveSource(t *testing.T) {
 // Named uniquely to avoid collision with strPtr in other test files.
 func strPtrForChangeReview(s string) *string {
 	return &s
+}
+
+func TestApproveChange_AutoApplied_IsNoOp(t *testing.T) {
+	changeID := uuid.New()
+	projectID := uuid.New()
+
+	mockRepo := &mockPendingChangeRepoForApproveAll{
+		changes: []*models.PendingChange{
+			{
+				ID:         changeID,
+				ProjectID:  projectID,
+				ChangeType: models.ChangeTypeDroppedTable,
+				Status:     models.ChangeStatusAutoApplied,
+				TableName:  "public.legacy_table",
+			},
+		},
+	}
+
+	service := &changeReviewService{
+		pendingChangeRepo: mockRepo,
+		precedenceChecker: NewPrecedenceChecker(),
+		logger:            zap.NewNop(),
+	}
+
+	result, err := service.ApproveChange(context.Background(), changeID, "mcp")
+	require.NoError(t, err, "approving an auto_applied change should succeed as a no-op")
+	require.NotNil(t, result)
+	assert.Equal(t, models.ChangeStatusAutoApplied, result.Status, "status should remain auto_applied")
+}
+
+func TestRejectChange_AutoApplied_IsNoOp(t *testing.T) {
+	changeID := uuid.New()
+	projectID := uuid.New()
+
+	mockRepo := &mockPendingChangeRepoForApproveAll{
+		changes: []*models.PendingChange{
+			{
+				ID:         changeID,
+				ProjectID:  projectID,
+				ChangeType: models.ChangeTypeDroppedColumn,
+				Status:     models.ChangeStatusAutoApplied,
+				TableName:  "public.users",
+				ColumnName: "deprecated_field",
+			},
+		},
+	}
+
+	service := &changeReviewService{
+		pendingChangeRepo: mockRepo,
+		precedenceChecker: NewPrecedenceChecker(),
+		logger:            zap.NewNop(),
+	}
+
+	result, err := service.RejectChange(context.Background(), changeID, "mcp")
+	require.NoError(t, err, "rejecting an auto_applied change should succeed as a no-op")
+	require.NotNil(t, result)
+	assert.Equal(t, models.ChangeStatusAutoApplied, result.Status, "status should remain auto_applied")
 }
 
 // TestApproveAllChanges_UsesCancelSafeAsync verifies that ApproveAllChanges

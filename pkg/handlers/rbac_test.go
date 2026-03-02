@@ -542,10 +542,10 @@ func (m *mockGlossaryServiceForRBAC) DeleteAlias(ctx context.Context, termID uui
 func (m *mockGlossaryServiceForRBAC) SuggestTerms(ctx context.Context, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error) {
 	return nil, nil
 }
-func (m *mockGlossaryServiceForRBAC) DiscoverGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) (int, error) {
+func (m *mockGlossaryServiceForRBAC) DiscoverGlossaryTerms(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 0, nil
 }
-func (m *mockGlossaryServiceForRBAC) EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error {
+func (m *mockGlossaryServiceForRBAC) EnrichGlossaryTerms(ctx context.Context, projectID uuid.UUID) error {
 	return nil
 }
 func (m *mockGlossaryServiceForRBAC) GetGenerationStatus(projectID uuid.UUID) *models.GlossaryGenerationStatus {
@@ -835,7 +835,7 @@ func TestRBAC_SchemaHandler(t *testing.T) {
 	projectID := uuid.New()
 	dsID := uuid.New()
 	relID := uuid.New()
-	handler := NewSchemaHandler(&mockSchemaService{}, zap.NewNop())
+	handler := NewSchemaHandler(&mockSchemaService{}, nil, zap.NewNop())
 
 	schemaBase := "/api/projects/" + projectID.String() + "/datasources/" + dsID.String() + "/schema"
 

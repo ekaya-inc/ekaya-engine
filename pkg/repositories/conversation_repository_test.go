@@ -20,7 +20,6 @@ type conversationTestContext struct {
 	engineDB     *testhelpers.EngineDB
 	repo         ConversationRepository
 	projectID    uuid.UUID
-	ontologyID   uuid.UUID
 	dagID        uuid.UUID
 	datasourceID uuid.UUID
 }
@@ -33,7 +32,6 @@ func setupConversationTest(t *testing.T) *conversationTestContext {
 		engineDB:     engineDB,
 		repo:         NewConversationRepository(),
 		projectID:    uuid.MustParse("00000000-0000-0000-0000-000000000050"),
-		ontologyID:   uuid.MustParse("00000000-0000-0000-0000-000000000052"),
 		dagID:        uuid.MustParse("00000000-0000-0000-0000-000000000051"),
 		datasourceID: uuid.MustParse("00000000-0000-0000-0000-000000000053"),
 	}
@@ -71,23 +69,13 @@ func (tc *conversationTestContext) ensureTestData() {
 		tc.t.Fatalf("failed to ensure test datasource: %v", err)
 	}
 
-	// Create ontology (required for DAG FK)
+	// Create DAG
 	now := time.Now()
 	_, err = scope.Conn.Exec(ctx, `
-		INSERT INTO engine_ontologies (id, project_id, is_active, created_at, updated_at)
-		VALUES ($1, $2, true, $3, $3)
+		INSERT INTO engine_ontology_dag (id, project_id, datasource_id, status, created_at, updated_at)
+		VALUES ($1, $2, $3, 'pending', $4, $4)
 		ON CONFLICT (id) DO NOTHING
-	`, tc.ontologyID, tc.projectID, now)
-	if err != nil {
-		tc.t.Fatalf("failed to ensure test ontology: %v", err)
-	}
-
-	// Create DAG (replaces engine_ontology_workflows)
-	_, err = scope.Conn.Exec(ctx, `
-		INSERT INTO engine_ontology_dag (id, project_id, datasource_id, ontology_id, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, 'pending', $5, $5)
-		ON CONFLICT (id) DO NOTHING
-	`, tc.dagID, tc.projectID, tc.datasourceID, tc.ontologyID, now)
+	`, tc.dagID, tc.projectID, tc.datasourceID, now)
 	if err != nil {
 		tc.t.Fatalf("failed to ensure test DAG: %v", err)
 	}

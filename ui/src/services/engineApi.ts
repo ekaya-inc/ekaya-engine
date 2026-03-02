@@ -332,6 +332,20 @@ class EngineApiService {
   }
 
   /**
+   * Reject all pending schema changes for a datasource
+   * POST /api/projects/{projectId}/datasources/{datasourceId}/schema/reject-pending-changes
+   */
+  async rejectPendingChanges(
+    projectId: string,
+    datasourceId: string,
+  ): Promise<ApiResponse<{ rejected_count: number }>> {
+    return this.makeRequest<{ rejected_count: number }>(
+      `/${projectId}/datasources/${datasourceId}/schema/reject-pending-changes`,
+      { method: 'POST' }
+    );
+  }
+
+  /**
    * Refresh schema from datasource
    * Re-discovers tables and columns from the datasource and updates the schema cache
    * POST /api/projects/{projectId}/datasources/{datasourceId}/schema/refresh

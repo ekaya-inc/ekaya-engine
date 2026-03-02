@@ -133,8 +133,8 @@ const OntologyPage = () => {
 
       {/* Info panel - only show when no ontology exists */}
       {!hasOntology && (
-        <div className="mt-6 rounded-lg border border-purple-200 bg-purple-50 p-4">
-          <p className="text-purple-800 text-sm">
+        <div className="mt-6 rounded-lg border border-purple-200 bg-purple-50 dark:border-purple-800 dark:bg-purple-950 p-4">
+          <p className="text-purple-800 dark:text-purple-200 text-sm">
             <strong>How it works:</strong> The extraction process runs automatically through multiple
             steps—discovering relationships, enriching columns with semantic meaning,
             and building a complete domain model. You can leave this page and return later to check progress.

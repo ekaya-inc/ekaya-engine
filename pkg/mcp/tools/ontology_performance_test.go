@@ -214,15 +214,16 @@ func setupOntologyPerformanceTest(t *testing.T) *ontologyPerformanceTestContext 
 	logger := zap.NewNop()
 
 	// Create repositories
-	ontologyRepo := repositories.NewOntologyRepository()
 	schemaRepo := repositories.NewSchemaRepository()
 	// Create mock project service for tests
 	projectService := &mockProjectService{defaultDatasourceID: ontologyPerfTestDSID}
 
+	columnMetadataRepo := repositories.NewColumnMetadataRepository()
+
 	// Create services
 	ontologyContextService := services.NewOntologyContextService(
-		ontologyRepo,
 		schemaRepo,
+		columnMetadataRepo,
 		nil, // tableMetadataRepo
 		projectService,
 		logger,
@@ -242,7 +243,6 @@ func setupOntologyPerformanceTest(t *testing.T) *ontologyPerformanceTestContext 
 			Logger:           logger,
 		},
 		OntologyContextService: ontologyContextService,
-		OntologyRepo:           ontologyRepo,
 		SchemaRepo:             schemaRepo,
 	}
 
@@ -307,21 +307,19 @@ func (tc *ontologyPerformanceTestContext) ensureTestProject() {
 	}
 }
 
-// createTestOntology creates a representative ontology for performance testing
+// createTestOntology sets up domain summary on the project for performance testing.
+// OntologyContextService reads from engine_projects.domain_summary (not ontology blobs).
 func (tc *ontologyPerformanceTestContext) createTestOntology() {
 	tc.t.Helper()
 
 	ctx := context.Background()
-	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
+	scope, err := tc.engineDB.DB.WithoutTenant(ctx)
 	if err != nil {
-		tc.t.Fatalf("Failed to create tenant scope: %v", err)
+		tc.t.Fatalf("Failed to create scope: %v", err)
 	}
 	defer scope.Close()
 
-	ctx = database.SetTenantScope(ctx, scope)
-
-	// Create ontology
-	ontologyID := uuid.New()
+	// Store domain summary directly on the project
 	domainSummary := &models.DomainSummary{
 		Description: "E-commerce platform for B2B wholesale transactions",
 		Domains:     []string{"sales", "customer", "product"},
@@ -331,45 +329,16 @@ func (tc *ontologyPerformanceTestContext) createTestOntology() {
 		},
 	}
 
-	columnDetails := map[string][]models.ColumnDetail{
-		"users": {
-			{Name: "id", Role: "identifier", IsPrimaryKey: true},
-			{Name: "email", Role: "attribute"},
-			{Name: "name", Role: "attribute"},
-			{Name: "tier", Role: "dimension"},
-			{Name: "created_at", Role: "dimension"},
-		},
-		"orders": {
-			{Name: "id", Role: "identifier", IsPrimaryKey: true},
-			{Name: "user_id", Role: "identifier", IsForeignKey: true},
-			{Name: "status", Role: "dimension", EnumValues: []models.EnumValue{
-				{Value: "pending", Label: "Pending"},
-				{Value: "confirmed", Label: "Confirmed"},
-				{Value: "shipped", Label: "Shipped"},
-			}},
-			{Name: "total_amount", Role: "measure"},
-			{Name: "created_at", Role: "dimension"},
-		},
-		"products": {
-			{Name: "id", Role: "identifier", IsPrimaryKey: true},
-			{Name: "name", Role: "attribute"},
-			{Name: "price", Role: "measure"},
-			{Name: "category", Role: "dimension"},
-		},
-	}
-
-	ontology := &models.TieredOntology{
-		ID:            ontologyID,
-		ProjectID:     tc.projectID,
-		Version:       1,
-		IsActive:      true,
-		DomainSummary: domainSummary,
-		ColumnDetails: columnDetails,
-	}
-
-	err = tc.deps.OntologyRepo.Create(ctx, ontology)
+	domainJSON, err := json.Marshal(domainSummary)
 	if err != nil {
-		tc.t.Fatalf("Failed to create test ontology: %v", err)
+		tc.t.Fatalf("Failed to marshal domain summary: %v", err)
+	}
+
+	_, err = scope.Conn.Exec(ctx,
+		`UPDATE engine_projects SET domain_summary = $1 WHERE id = $2`,
+		domainJSON, tc.projectID)
+	if err != nil {
+		tc.t.Fatalf("Failed to set domain summary on project: %v", err)
 	}
 }
 
@@ -378,13 +347,13 @@ func (tc *ontologyPerformanceTestContext) cleanup() {
 	tc.t.Helper()
 
 	ctx := context.Background()
-	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
+	scope, err := tc.engineDB.DB.WithoutTenant(ctx)
 	if err != nil {
-		tc.t.Logf("Failed to create tenant scope for cleanup: %v", err)
+		tc.t.Logf("Failed to create scope for cleanup: %v", err)
 		return
 	}
 	defer scope.Close()
 
-	// Delete test data
-	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontologies WHERE project_id = $1`, tc.projectID)
+	// Clear domain summary from project
+	_, _ = scope.Conn.Exec(ctx, `UPDATE engine_projects SET domain_summary = NULL WHERE id = $1`, tc.projectID)
 }

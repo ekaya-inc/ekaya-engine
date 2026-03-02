@@ -54,6 +54,10 @@ type SchemaRepository interface {
 	// GetColumnsByTables returns selected columns for multiple tables, grouped by table name.
 	GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error)
 	GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error)
+	// GetTableCountByProject returns the count of selected, non-deleted tables for a project.
+	GetTableCountByProject(ctx context.Context, projectID uuid.UUID) (int, error)
+	// GetSelectedTableNamesByProject returns the names of all selected, non-deleted tables for a project.
+	GetSelectedTableNamesByProject(ctx context.Context, projectID uuid.UUID) ([]string, error)
 	GetColumnByID(ctx context.Context, projectID, columnID uuid.UUID) (*models.SchemaColumn, error)
 	GetColumnByName(ctx context.Context, tableID uuid.UUID, columnName string) (*models.SchemaColumn, error)
 	UpsertColumn(ctx context.Context, column *models.SchemaColumn) error
@@ -259,28 +263,27 @@ func (r *schemaRepository) UpsertTable(ctx context.Context, table *models.Schema
 	reactivateQuery := `
 		UPDATE engine_schema_tables
 		SET deleted_at = NULL,
-		    row_count = $5,
-		    updated_at = $6
+		    is_selected = $5,
+		    row_count = $6,
+		    updated_at = $7
 		WHERE project_id = $1
 		  AND datasource_id = $2
 		  AND schema_name = $3
 		  AND table_name = $4
 		  AND deleted_at IS NOT NULL
-		RETURNING id, created_at, is_selected`
+		RETURNING id, created_at`
 
 	var existingID uuid.UUID
 	var existingCreatedAt time.Time
-	var existingIsSelected bool
 	err := scope.Conn.QueryRow(ctx, reactivateQuery,
 		table.ProjectID, table.DatasourceID, table.SchemaName, table.TableName,
-		table.RowCount, now,
-	).Scan(&existingID, &existingCreatedAt, &existingIsSelected)
+		table.IsSelected, table.RowCount, now,
+	).Scan(&existingID, &existingCreatedAt)
 
 	if err == nil {
 		// Reactivated soft-deleted record
 		table.ID = existingID
 		table.CreatedAt = existingCreatedAt
-		table.IsSelected = existingIsSelected
 		return nil
 	}
 	if err != pgx.ErrNoRows {
@@ -601,6 +604,63 @@ func (r *schemaRepository) GetColumnCountByProject(ctx context.Context, projectI
 	return count, nil
 }
 
+func (r *schemaRepository) GetTableCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return 0, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT COUNT(*)
+		FROM engine_schema_tables
+		WHERE project_id = $1
+		  AND deleted_at IS NULL
+		  AND is_selected = true`
+
+	var count int
+	err := scope.Conn.QueryRow(ctx, query, projectID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get table count: %w", err)
+	}
+
+	return count, nil
+}
+
+func (r *schemaRepository) GetSelectedTableNamesByProject(ctx context.Context, projectID uuid.UUID) ([]string, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT table_name
+		FROM engine_schema_tables
+		WHERE project_id = $1
+		  AND deleted_at IS NULL
+		  AND is_selected = true
+		ORDER BY table_name`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get selected table names: %w", err)
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("failed to scan table name: %w", err)
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating table names: %w", err)
+	}
+
+	return names, nil
+}
+
 func (r *schemaRepository) GetColumnByID(ctx context.Context, projectID, columnID uuid.UUID) (*models.SchemaColumn, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
@@ -676,29 +736,28 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 		    is_unique = $7,
 		    ordinal_position = $8,
 		    default_value = $9,
-		    updated_at = $10
+		    is_selected = $10,
+		    updated_at = $11
 		WHERE schema_table_id = $1
 		  AND column_name = $2
 		  AND project_id = $3
 		  AND deleted_at IS NOT NULL
-		RETURNING id, created_at, is_selected, distinct_count, null_count`
+		RETURNING id, created_at, distinct_count, null_count`
 
 	var existingID uuid.UUID
 	var existingCreatedAt time.Time
-	var existingIsSelected bool
 	var existingDistinctCount, existingNullCount *int64
 	err := scope.Conn.QueryRow(ctx, reactivateQuery,
 		column.SchemaTableID, column.ColumnName, column.ProjectID,
 		column.DataType, column.IsNullable, column.IsPrimaryKey, column.IsUnique, column.OrdinalPosition,
-		column.DefaultValue, now,
-	).Scan(&existingID, &existingCreatedAt, &existingIsSelected,
+		column.DefaultValue, column.IsSelected, now,
+	).Scan(&existingID, &existingCreatedAt,
 		&existingDistinctCount, &existingNullCount)
 
 	if err == nil {
 		// Reactivated soft-deleted record - preserve stats
 		column.ID = existingID
 		column.CreatedAt = existingCreatedAt
-		column.IsSelected = existingIsSelected
 		column.DistinctCount = existingDistinctCount
 		column.NullCount = existingNullCount
 		return nil

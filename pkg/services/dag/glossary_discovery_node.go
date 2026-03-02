@@ -17,7 +17,7 @@ type GlossaryDiscoveryMethods interface {
 	// DiscoverGlossaryTerms identifies candidate business terms from ontology.
 	// Saves discovered terms to database with source="discovered".
 	// Returns count of terms discovered.
-	DiscoverGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) (int, error)
+	DiscoverGlossaryTerms(ctx context.Context, projectID uuid.UUID) (int, error)
 }
 
 // GlossaryDiscoveryNode wraps glossary term discovery from ontology data.
@@ -49,13 +49,8 @@ func (n *GlossaryDiscoveryNode) Execute(ctx context.Context, dag *models.Ontolog
 		n.Logger().Warn("Failed to report progress", zap.Error(err))
 	}
 
-	// Ensure we have an ontology ID
-	if dag.OntologyID == nil {
-		return fmt.Errorf("ontology ID is required for glossary discovery")
-	}
-
 	// Call the underlying service method
-	termCount, err := n.glossaryDiscovery.DiscoverGlossaryTerms(ctx, dag.ProjectID, *dag.OntologyID)
+	termCount, err := n.glossaryDiscovery.DiscoverGlossaryTerms(ctx, dag.ProjectID)
 	if err != nil {
 		// Log but don't fail - ontology is useful without glossary terms
 		n.Logger().Warn("Failed to discover glossary terms - continuing without glossary",

@@ -97,7 +97,6 @@ type QuestionAffects struct {
 type OntologyQuestion struct {
 	ID               uuid.UUID        `json:"id"`
 	ProjectID        uuid.UUID        `json:"project_id"`
-	OntologyID       uuid.UUID        `json:"ontology_id"`
 	WorkflowID       *uuid.UUID       `json:"workflow_id,omitempty"`
 	ParentQuestionID *uuid.UUID       `json:"parent_question_id,omitempty"` // For follow-up traceability
 	ContentHash      string           `json:"content_hash,omitempty"`       // SHA256 hash of category + text for deduplication

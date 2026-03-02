@@ -63,7 +63,6 @@ type ToolCallFunction struct {
 type ChatMessage struct {
 	ID         uuid.UUID      `json:"id"`
 	ProjectID  uuid.UUID      `json:"project_id"`
-	OntologyID uuid.UUID      `json:"ontology_id"`
 	Role       ChatRole       `json:"role"`
 	Content    string         `json:"content"`
 	ToolCalls  []ToolCall     `json:"tool_calls,omitempty"`

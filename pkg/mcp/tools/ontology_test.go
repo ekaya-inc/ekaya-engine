@@ -28,7 +28,6 @@ func TestOntologyToolDeps_Structure(t *testing.T) {
 	assert.Nil(t, deps.MCPConfigService, "MCPConfigService field should be nil by default")
 	assert.Nil(t, deps.ProjectService, "ProjectService field should be nil by default")
 	assert.Nil(t, deps.OntologyContextService, "OntologyContextService field should be nil by default")
-	assert.Nil(t, deps.OntologyRepo, "OntologyRepo field should be nil by default")
 	assert.Nil(t, deps.SchemaRepo, "SchemaRepo field should be nil by default")
 	assert.Nil(t, deps.Logger, "Logger field should be nil by default")
 }
@@ -40,7 +39,6 @@ func TestOntologyToolDeps_Initialization(t *testing.T) {
 	var mcpConfigService services.MCPConfigService
 	var projectService services.ProjectService
 	var ontologyContextService services.OntologyContextService
-	var ontologyRepo repositories.OntologyRepository
 	var schemaRepo repositories.SchemaRepository
 	logger := zap.NewNop()
 
@@ -53,7 +51,6 @@ func TestOntologyToolDeps_Initialization(t *testing.T) {
 		},
 		ProjectService:         projectService,
 		OntologyContextService: ontologyContextService,
-		OntologyRepo:           ontologyRepo,
 		SchemaRepo:             schemaRepo,
 	}
 

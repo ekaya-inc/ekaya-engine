@@ -16,39 +16,36 @@ import (
 // OntologyToolExecutor implements ToolExecutor for ontology chat and question answering.
 // It provides access to schema metadata, data sampling, and ontology updates.
 type OntologyToolExecutor struct {
-	projectID     uuid.UUID
-	ontologyID    uuid.UUID
-	datasourceID  uuid.UUID
-	ontologyRepo  repositories.OntologyRepository
-	knowledgeRepo repositories.KnowledgeRepository
-	schemaRepo    repositories.SchemaRepository
-	queryExecutor datasource.QueryExecutor
-	logger        *zap.Logger
+	projectID          uuid.UUID
+	datasourceID       uuid.UUID
+	columnMetadataRepo repositories.ColumnMetadataRepository
+	knowledgeRepo      repositories.KnowledgeRepository
+	schemaRepo         repositories.SchemaRepository
+	queryExecutor      datasource.QueryExecutor
+	logger             *zap.Logger
 }
 
 // OntologyToolExecutorConfig holds dependencies for creating an OntologyToolExecutor.
 type OntologyToolExecutorConfig struct {
-	ProjectID     uuid.UUID
-	OntologyID    uuid.UUID
-	DatasourceID  uuid.UUID
-	OntologyRepo  repositories.OntologyRepository
-	KnowledgeRepo repositories.KnowledgeRepository
-	SchemaRepo    repositories.SchemaRepository
-	QueryExecutor datasource.QueryExecutor
-	Logger        *zap.Logger
+	ProjectID          uuid.UUID
+	DatasourceID       uuid.UUID
+	ColumnMetadataRepo repositories.ColumnMetadataRepository
+	KnowledgeRepo      repositories.KnowledgeRepository
+	SchemaRepo         repositories.SchemaRepository
+	QueryExecutor      datasource.QueryExecutor
+	Logger             *zap.Logger
 }
 
 // NewOntologyToolExecutor creates a new tool executor for ontology operations.
 func NewOntologyToolExecutor(cfg *OntologyToolExecutorConfig) *OntologyToolExecutor {
 	return &OntologyToolExecutor{
-		projectID:     cfg.ProjectID,
-		ontologyID:    cfg.OntologyID,
-		datasourceID:  cfg.DatasourceID,
-		ontologyRepo:  cfg.OntologyRepo,
-		knowledgeRepo: cfg.KnowledgeRepo,
-		schemaRepo:    cfg.SchemaRepo,
-		queryExecutor: cfg.QueryExecutor,
-		logger:        cfg.Logger.Named("tool-executor"),
+		projectID:          cfg.ProjectID,
+		datasourceID:       cfg.DatasourceID,
+		columnMetadataRepo: cfg.ColumnMetadataRepo,
+		knowledgeRepo:      cfg.KnowledgeRepo,
+		schemaRepo:         cfg.SchemaRepo,
+		queryExecutor:      cfg.QueryExecutor,
+		logger:             cfg.Logger.Named("tool-executor"),
 	}
 }
 
@@ -330,56 +327,59 @@ func (e *OntologyToolExecutor) updateColumn(ctx context.Context, arguments strin
 		}
 	}
 
-	// Get the active ontology
-	ontology, err := e.ontologyRepo.GetActive(ctx, e.projectID)
+	// Resolve schema table and column
+	table, err := e.schemaRepo.FindTableByName(ctx, e.projectID, uuid.Nil, args.TableName)
 	if err != nil {
-		return "", fmt.Errorf("failed to get ontology: %w", err)
+		return "", fmt.Errorf("failed to find table %s: %w", args.TableName, err)
 	}
-	if ontology == nil {
-		return `{"error": "No active ontology found"}`, nil
-	}
-
-	// Get or create column details for the table
-	columns := ontology.ColumnDetails[args.TableName]
-	if columns == nil {
-		columns = []models.ColumnDetail{}
+	if table == nil {
+		return `{"error": "Table not found"}`, nil
 	}
 
-	// Find or create the column detail
-	found := false
-	for i := range columns {
-		if columns[i].Name == args.ColumnName {
-			if args.Description != "" {
-				columns[i].Description = args.Description
-			}
-			if args.SemanticType != "" {
-				columns[i].SemanticType = args.SemanticType
-			}
-			// BusinessName maps to synonyms in this model
-			if args.BusinessName != "" {
-				columns[i].Synonyms = append(columns[i].Synonyms, args.BusinessName)
-			}
-			found = true
-			break
+	schemaCol, err := e.schemaRepo.GetColumnByName(ctx, table.ID, args.ColumnName)
+	if err != nil {
+		return "", fmt.Errorf("failed to find column %s.%s: %w", args.TableName, args.ColumnName, err)
+	}
+	if schemaCol == nil {
+		return `{"error": "Column not found"}`, nil
+	}
+
+	// Get existing metadata or create new
+	meta, err := e.columnMetadataRepo.GetBySchemaColumnID(ctx, schemaCol.ID)
+	if err != nil {
+		e.logger.Warn("Failed to get column metadata, creating new",
+			zap.String("table", args.TableName),
+			zap.String("column", args.ColumnName),
+			zap.Error(err))
+	}
+	if meta == nil {
+		meta = &models.ColumnMetadata{
+			ProjectID:      e.projectID,
+			SchemaColumnID: schemaCol.ID,
+			Source:         models.ProvenanceMCP,
 		}
 	}
 
-	if !found {
-		synonyms := []string{}
-		if args.BusinessName != "" {
-			synonyms = append(synonyms, args.BusinessName)
+	// Apply updates
+	if args.Description != "" {
+		meta.Description = &args.Description
+	}
+	if args.SemanticType != "" {
+		meta.SemanticType = &args.SemanticType
+	}
+	if args.BusinessName != "" {
+		// Deduplicate synonyms
+		existingSynonyms := make(map[string]bool)
+		for _, syn := range meta.Features.Synonyms {
+			existingSynonyms[syn] = true
 		}
-		columns = append(columns, models.ColumnDetail{
-			Name:         args.ColumnName,
-			Description:  args.Description,
-			SemanticType: args.SemanticType,
-			Synonyms:     synonyms,
-		})
+		if !existingSynonyms[args.BusinessName] {
+			meta.Features.Synonyms = append(meta.Features.Synonyms, args.BusinessName)
+		}
 	}
 
-	// Save the update
-	if err := e.ontologyRepo.UpdateColumnDetails(ctx, e.projectID, args.TableName, columns); err != nil {
-		return "", fmt.Errorf("failed to update column: %w", err)
+	if err := e.columnMetadataRepo.Upsert(ctx, meta); err != nil {
+		return "", fmt.Errorf("failed to update column metadata: %w", err)
 	}
 
 	e.logger.Info("Updated column",

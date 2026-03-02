@@ -16,22 +16,20 @@ import (
 
 // chatTestContext holds test dependencies for chat repository tests.
 type chatTestContext struct {
-	t          *testing.T
-	engineDB   *testhelpers.EngineDB
-	repo       OntologyChatRepository
-	projectID  uuid.UUID
-	ontologyID uuid.UUID
+	t         *testing.T
+	engineDB  *testhelpers.EngineDB
+	repo      OntologyChatRepository
+	projectID uuid.UUID
 }
 
 // setupChatTest initializes the test context with shared testcontainer.
 func setupChatTest(t *testing.T) *chatTestContext {
 	engineDB := testhelpers.GetEngineDB(t)
 	tc := &chatTestContext{
-		t:          t,
-		engineDB:   engineDB,
-		repo:       NewOntologyChatRepository(),
-		projectID:  uuid.MustParse("00000000-0000-0000-0000-000000000042"),
-		ontologyID: uuid.MustParse("00000000-0000-0000-0000-000000000043"),
+		t:         t,
+		engineDB:  engineDB,
+		repo:      NewOntologyChatRepository(),
+		projectID: uuid.MustParse("00000000-0000-0000-0000-000000000042"),
 	}
 	tc.ensureTestProject()
 	return tc
@@ -54,17 +52,6 @@ func (tc *chatTestContext) ensureTestProject() {
 	`, tc.projectID, "Chat Test Project")
 	if err != nil {
 		tc.t.Fatalf("failed to ensure test project: %v", err)
-	}
-
-	// Create ontology (required for chat messages FK)
-	now := time.Now()
-	_, err = scope.Conn.Exec(ctx, `
-		INSERT INTO engine_ontologies (id, project_id, is_active, created_at, updated_at)
-		VALUES ($1, $2, true, $3, $3)
-		ON CONFLICT (id) DO NOTHING
-	`, tc.ontologyID, tc.projectID, now)
-	if err != nil {
-		tc.t.Fatalf("failed to ensure test ontology: %v", err)
 	}
 }
 
@@ -97,10 +84,9 @@ func (tc *chatTestContext) createTestContext() (context.Context, func()) {
 func (tc *chatTestContext) createTestMessage(ctx context.Context, role models.ChatRole, content string) *models.ChatMessage {
 	tc.t.Helper()
 	message := &models.ChatMessage{
-		ProjectID:  tc.projectID,
-		OntologyID: tc.ontologyID,
-		Role:       role,
-		Content:    content,
+		ProjectID: tc.projectID,
+		Role:      role,
+		Content:   content,
 	}
 	err := tc.repo.SaveMessage(ctx, message)
 	if err != nil {
@@ -123,11 +109,10 @@ func TestChatRepository_SaveMessage_UserMessage(t *testing.T) {
 	defer cleanup()
 
 	message := &models.ChatMessage{
-		ProjectID:  tc.projectID,
-		OntologyID: tc.ontologyID,
-		Role:       models.ChatRoleUser,
-		Content:    "What does the accounts table represent?",
-		Metadata:   map[string]any{"source": "web"},
+		ProjectID: tc.projectID,
+		Role:      models.ChatRoleUser,
+		Content:   "What does the accounts table represent?",
+		Metadata:  map[string]any{"source": "web"},
 	}
 
 	err := tc.repo.SaveMessage(ctx, message)
@@ -166,10 +151,9 @@ func TestChatRepository_SaveMessage_AssistantMessage(t *testing.T) {
 	defer cleanup()
 
 	message := &models.ChatMessage{
-		ProjectID:  tc.projectID,
-		OntologyID: tc.ontologyID,
-		Role:       models.ChatRoleAssistant,
-		Content:    "The accounts table represents customer accounts.",
+		ProjectID: tc.projectID,
+		Role:      models.ChatRoleAssistant,
+		Content:   "The accounts table represents customer accounts.",
 	}
 
 	err := tc.repo.SaveMessage(ctx, message)
@@ -194,10 +178,9 @@ func TestChatRepository_SaveMessage_WithToolCalls(t *testing.T) {
 	defer cleanup()
 
 	message := &models.ChatMessage{
-		ProjectID:  tc.projectID,
-		OntologyID: tc.ontologyID,
-		Role:       models.ChatRoleAssistant,
-		Content:    "",
+		ProjectID: tc.projectID,
+		Role:      models.ChatRoleAssistant,
+		Content:   "",
 		ToolCalls: []models.ToolCall{
 			{
 				ID:   "call_123",
@@ -248,7 +231,6 @@ func TestChatRepository_SaveMessage_ToolResult(t *testing.T) {
 
 	message := &models.ChatMessage{
 		ProjectID:  tc.projectID,
-		OntologyID: tc.ontologyID,
 		Role:       models.ChatRoleTool,
 		Content:    `["active", "inactive", "pending"]`,
 		ToolCallID: "call_123",
@@ -468,10 +450,9 @@ func TestChatRepository_ConversationFlow(t *testing.T) {
 
 	// 2. Assistant responds with tool call
 	assistantMsg := &models.ChatMessage{
-		ProjectID:  tc.projectID,
-		OntologyID: tc.ontologyID,
-		Role:       models.ChatRoleAssistant,
-		Content:    "",
+		ProjectID: tc.projectID,
+		Role:      models.ChatRoleAssistant,
+		Content:   "",
 		ToolCalls: []models.ToolCall{
 			{
 				ID:   "call_abc",
@@ -492,7 +473,6 @@ func TestChatRepository_ConversationFlow(t *testing.T) {
 	// 3. Tool result
 	toolMsg := &models.ChatMessage{
 		ProjectID:  tc.projectID,
-		OntologyID: tc.ontologyID,
 		Role:       models.ChatRoleTool,
 		Content:    `["active", "suspended", "closed"]`,
 		ToolCallID: "call_abc",
@@ -551,10 +531,9 @@ func TestChatRepository_NoTenantScope(t *testing.T) {
 	ctx := context.Background() // No tenant scope
 
 	message := &models.ChatMessage{
-		ProjectID:  tc.projectID,
-		OntologyID: tc.ontologyID,
-		Role:       models.ChatRoleUser,
-		Content:    "Test",
+		ProjectID: tc.projectID,
+		Role:      models.ChatRoleUser,
+		Content:   "Test",
 	}
 
 	// SaveMessage should fail

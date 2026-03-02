@@ -31,7 +31,6 @@ type sensitiveTestContext struct {
 	mcpServer          *server.MCPServer
 	columnMetadataRepo repositories.ColumnMetadataRepository
 	schemaRepo         repositories.SchemaRepository
-	ontologyRepo       repositories.OntologyRepository
 	contextDeps        *ContextToolDeps
 	columnDeps         *ColumnToolDeps
 }
@@ -68,7 +67,6 @@ func setupSensitiveIntegrationTest(t *testing.T) *sensitiveTestContext {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 	columnMetadataRepo := repositories.NewColumnMetadataRepository()
 	schemaRepo := repositories.NewSchemaRepository()
-	ontologyRepo := repositories.NewOntologyRepository()
 
 	// Configure mock to enable developer tools
 	mockMCPConfig := &mockMCPConfigService{
@@ -88,7 +86,6 @@ func setupSensitiveIntegrationTest(t *testing.T) *sensitiveTestContext {
 			MCPConfigService: mockMCPConfig,
 			Logger:           zap.NewNop(),
 		},
-		OntologyRepo:       ontologyRepo,
 		SchemaRepo:         schemaRepo,
 		ColumnMetadataRepo: columnMetadataRepo,
 		ProjectService:     mockProjectService,
@@ -103,7 +100,6 @@ func setupSensitiveIntegrationTest(t *testing.T) *sensitiveTestContext {
 			Logger:           zap.NewNop(),
 		},
 		ProjectService:     mockProjectService,
-		OntologyRepo:       ontologyRepo,
 		SchemaRepo:         schemaRepo,
 		ColumnMetadataRepo: columnMetadataRepo,
 	}
@@ -116,7 +112,6 @@ func setupSensitiveIntegrationTest(t *testing.T) *sensitiveTestContext {
 		mcpServer:          mcpServer,
 		columnMetadataRepo: columnMetadataRepo,
 		schemaRepo:         schemaRepo,
-		ontologyRepo:       ontologyRepo,
 		contextDeps:        contextDeps,
 		columnDeps:         columnDeps,
 	}
@@ -134,7 +129,6 @@ func (tc *sensitiveTestContext) cleanup() {
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontology_column_metadata WHERE project_id = $1", tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_schema_columns WHERE project_id = $1", tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_schema_tables WHERE project_id = $1", tc.projectID)
-	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontologies WHERE project_id = $1", tc.projectID)
 }
 
 // createTestContext returns a context with tenant scope and project ID.

@@ -13,13 +13,14 @@ import (
 
 // Project represents a project in the system.
 type Project struct {
-	ID           uuid.UUID              `json:"id"`
-	Name         string                 `json:"name"`
-	Parameters   map[string]interface{} `json:"parameters"`
-	CreatedAt    time.Time              `json:"created_at"`
-	UpdatedAt    time.Time              `json:"updated_at"`
-	Status       string                 `json:"status"`
-	IndustryType string                 `json:"industry_type"`
+	ID            uuid.UUID              `json:"id"`
+	Name          string                 `json:"name"`
+	Parameters    map[string]interface{} `json:"parameters"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
+	Status        string                 `json:"status"`
+	IndustryType  string                 `json:"industry_type"`
+	DomainSummary *DomainSummary         `json:"domain_summary,omitempty"`
 }
 
 // IndustryType constants for template selection.

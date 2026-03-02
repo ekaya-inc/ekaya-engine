@@ -87,51 +87,12 @@ func (m *mockQuestionRepo) UpdateStatusWithReason(ctx context.Context, id uuid.U
 	return nil
 }
 
-func (m *mockQuestionRepo) ListByOntologyID(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyQuestion, error) {
-	return nil, nil
-}
-
 func (m *mockQuestionRepo) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
 	return nil
 }
 
 func (m *mockQuestionRepo) List(ctx context.Context, projectID uuid.UUID, filters repositories.QuestionListFilters) (*repositories.QuestionListResult, error) {
 	return nil, nil
-}
-
-type mockOntologyRepo struct {
-	getActiveFunc           func(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error)
-	updateColumnDetailsFunc func(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error
-}
-
-func (m *mockOntologyRepo) GetActive(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error) {
-	if m.getActiveFunc != nil {
-		return m.getActiveFunc(ctx, projectID)
-	}
-	return nil, nil
-}
-
-func (m *mockOntologyRepo) UpdateColumnDetails(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error {
-	if m.updateColumnDetailsFunc != nil {
-		return m.updateColumnDetailsFunc(ctx, projectID, tableName, columns)
-	}
-	return nil
-}
-
-func (m *mockOntologyRepo) Create(ctx context.Context, ontology *models.TieredOntology) error {
-	return nil
-}
-
-func (m *mockOntologyRepo) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
-	return nil
-}
-
-func (m *mockOntologyRepo) GetNextVersion(ctx context.Context, projectID uuid.UUID) (int, error) {
-	return 0, nil
-}
-
-func (m *mockOntologyRepo) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
-	return nil
 }
 
 type mockKnowledgeRepo struct {
@@ -180,226 +141,340 @@ func (m *mockBuilder) ProcessAnswer(ctx context.Context, projectID uuid.UUID, qu
 	return &AnswerProcessingResult{}, nil
 }
 
+// mockSchemaRepoForQuestion implements only methods called by applyColumnUpdates.
+type mockSchemaRepoForQuestion struct {
+	repositories.SchemaRepository
+	findTableByNameFunc func(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.SchemaTable, error)
+	getColumnByNameFunc func(ctx context.Context, tableID uuid.UUID, columnName string) (*models.SchemaColumn, error)
+}
+
+func (m *mockSchemaRepoForQuestion) FindTableByName(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+	if m.findTableByNameFunc != nil {
+		return m.findTableByNameFunc(ctx, projectID, datasourceID, tableName)
+	}
+	return nil, nil
+}
+
+func (m *mockSchemaRepoForQuestion) GetColumnByName(ctx context.Context, tableID uuid.UUID, columnName string) (*models.SchemaColumn, error) {
+	if m.getColumnByNameFunc != nil {
+		return m.getColumnByNameFunc(ctx, tableID, columnName)
+	}
+	return nil, nil
+}
+
+// mockColumnMetadataRepoForQuestion implements only methods called by applyColumnUpdates.
+type mockColumnMetadataRepoForQuestion struct {
+	repositories.ColumnMetadataRepository
+	getBySchemaColumnIDFunc func(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error)
+	upsertFunc              func(ctx context.Context, meta *models.ColumnMetadata) error
+}
+
+func (m *mockColumnMetadataRepoForQuestion) GetBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
+	if m.getBySchemaColumnIDFunc != nil {
+		return m.getBySchemaColumnIDFunc(ctx, schemaColumnID)
+	}
+	return nil, nil
+}
+
+func (m *mockColumnMetadataRepoForQuestion) Upsert(ctx context.Context, meta *models.ColumnMetadata) error {
+	if m.upsertFunc != nil {
+		return m.upsertFunc(ctx, meta)
+	}
+	return nil
+}
+
 // --- Helper to create a service with mocks ---
 
 func newTestQuestionService(
 	questionRepo *mockQuestionRepo,
-	ontologyRepo *mockOntologyRepo,
 	knowledgeRepo *mockKnowledgeRepo,
 	builder *mockBuilder,
 ) *ontologyQuestionService {
 	return &ontologyQuestionService{
 		questionRepo:  questionRepo,
-		ontologyRepo:  ontologyRepo,
 		knowledgeRepo: knowledgeRepo,
 		builder:       builder,
 		logger:        zap.NewNop(),
 	}
 }
 
+func newTestQuestionServiceWithRepos(
+	questionRepo *mockQuestionRepo,
+	knowledgeRepo *mockKnowledgeRepo,
+	builder *mockBuilder,
+	schemaRepo *mockSchemaRepoForQuestion,
+	colMetaRepo *mockColumnMetadataRepoForQuestion,
+) *ontologyQuestionService {
+	return &ontologyQuestionService{
+		questionRepo:       questionRepo,
+		knowledgeRepo:      knowledgeRepo,
+		builder:            builder,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: colMetaRepo,
+		logger:             zap.NewNop(),
+	}
+}
+
 // --- Tests for applyColumnUpdates (transformation logic) ---
 
 func TestApplyColumnUpdates_EmptyUpdates(t *testing.T) {
-	svc := newTestQuestionService(&mockQuestionRepo{}, &mockOntologyRepo{}, &mockKnowledgeRepo{}, &mockBuilder{})
+	svc := newTestQuestionService(&mockQuestionRepo{}, &mockKnowledgeRepo{}, &mockBuilder{})
 	err := svc.applyColumnUpdates(context.Background(), uuid.New(), nil)
 	assert.NoError(t, err)
 }
 
-func TestApplyColumnUpdates_NoActiveOntology(t *testing.T) {
-	ontologyRepo := &mockOntologyRepo{
-		getActiveFunc: func(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error) {
-			return nil, nil
+func TestApplyColumnUpdates_SkipsWhenTableNotFound(t *testing.T) {
+	schemaRepo := &mockSchemaRepoForQuestion{
+		findTableByNameFunc: func(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+			return nil, nil // table not found
 		},
 	}
-	svc := newTestQuestionService(&mockQuestionRepo{}, ontologyRepo, &mockKnowledgeRepo{}, &mockBuilder{})
+	colMetaRepo := &mockColumnMetadataRepoForQuestion{}
+	svc := newTestQuestionServiceWithRepos(&mockQuestionRepo{}, &mockKnowledgeRepo{}, &mockBuilder{}, schemaRepo, colMetaRepo)
 
+	desc := "some description"
 	err := svc.applyColumnUpdates(context.Background(), uuid.New(), []ColumnUpdate{
-		{TableName: "users", ColumnName: "email"},
+		{TableName: "nonexistent", ColumnName: "col1", Description: &desc},
 	})
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no active ontology")
+	assert.NoError(t, err, "should skip missing tables without error")
 }
 
-func TestApplyColumnUpdates_GetActiveError(t *testing.T) {
-	ontologyRepo := &mockOntologyRepo{
-		getActiveFunc: func(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error) {
-			return nil, fmt.Errorf("db connection lost")
+func TestApplyColumnUpdates_SkipsWhenSchemaRepoError(t *testing.T) {
+	schemaRepo := &mockSchemaRepoForQuestion{
+		findTableByNameFunc: func(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+			return nil, fmt.Errorf("db error")
 		},
 	}
-	svc := newTestQuestionService(&mockQuestionRepo{}, ontologyRepo, &mockKnowledgeRepo{}, &mockBuilder{})
+	colMetaRepo := &mockColumnMetadataRepoForQuestion{}
+	svc := newTestQuestionServiceWithRepos(&mockQuestionRepo{}, &mockKnowledgeRepo{}, &mockBuilder{}, schemaRepo, colMetaRepo)
 
+	desc := "some description"
 	err := svc.applyColumnUpdates(context.Background(), uuid.New(), []ColumnUpdate{
-		{TableName: "users", ColumnName: "email"},
+		{TableName: "users", ColumnName: "col1", Description: &desc},
 	})
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "get active ontology")
+	assert.NoError(t, err, "should skip on schema repo error without failing")
 }
 
 func TestApplyColumnUpdates_UpdateExistingColumn(t *testing.T) {
 	projectID := uuid.New()
-	desc := "User email address"
-	semType := "email"
-	role := "identifier"
+	tableID := uuid.New()
+	colID := uuid.New()
 
-	var capturedColumns []models.ColumnDetail
-	ontologyRepo := &mockOntologyRepo{
-		getActiveFunc: func(ctx context.Context, pid uuid.UUID) (*models.TieredOntology, error) {
-			return &models.TieredOntology{
-				ProjectID: projectID,
-				ColumnDetails: map[string][]models.ColumnDetail{
-					"users": {
-						{Name: "email", Description: "old desc", Synonyms: []string{"mail"}},
-						{Name: "name", Description: "user name"},
-					},
-				},
-			}, nil
+	schemaRepo := &mockSchemaRepoForQuestion{
+		findTableByNameFunc: func(ctx context.Context, pid, dsID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+			return &models.SchemaTable{ID: tableID, ProjectID: projectID, TableName: tableName}, nil
 		},
-		updateColumnDetailsFunc: func(ctx context.Context, pid uuid.UUID, tableName string, columns []models.ColumnDetail) error {
-			capturedColumns = columns
+		getColumnByNameFunc: func(ctx context.Context, tID uuid.UUID, columnName string) (*models.SchemaColumn, error) {
+			return &models.SchemaColumn{ID: colID, ProjectID: projectID, SchemaTableID: tableID, ColumnName: columnName}, nil
+		},
+	}
+
+	existingDesc := "old description"
+	existingMeta := &models.ColumnMetadata{
+		ID:             uuid.New(),
+		ProjectID:      projectID,
+		SchemaColumnID: colID,
+		Description:    &existingDesc,
+		Source:         models.ProvenanceMCP,
+	}
+
+	var upserted *models.ColumnMetadata
+	colMetaRepo := &mockColumnMetadataRepoForQuestion{
+		getBySchemaColumnIDFunc: func(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
+			return existingMeta, nil
+		},
+		upsertFunc: func(ctx context.Context, meta *models.ColumnMetadata) error {
+			upserted = meta
 			return nil
 		},
 	}
-	svc := newTestQuestionService(&mockQuestionRepo{}, ontologyRepo, &mockKnowledgeRepo{}, &mockBuilder{})
 
+	svc := newTestQuestionServiceWithRepos(&mockQuestionRepo{}, &mockKnowledgeRepo{}, &mockBuilder{}, schemaRepo, colMetaRepo)
+
+	newDesc := "updated description"
 	err := svc.applyColumnUpdates(context.Background(), projectID, []ColumnUpdate{
-		{
-			TableName:    "users",
-			ColumnName:   "email",
-			Description:  &desc,
-			SemanticType: &semType,
-			Role:         &role,
-			Synonyms:     []string{"mail", "e-mail"}, // "mail" already exists, should be deduped
-		},
+		{TableName: "users", ColumnName: "email", Description: &newDesc},
 	})
 	require.NoError(t, err)
-	require.Len(t, capturedColumns, 2, "should still have 2 columns")
-
-	// Find the updated email column
-	var emailCol models.ColumnDetail
-	for _, c := range capturedColumns {
-		if c.Name == "email" {
-			emailCol = c
-			break
-		}
-	}
-	assert.Equal(t, "User email address", emailCol.Description)
-	assert.Equal(t, "email", emailCol.SemanticType)
-	assert.Equal(t, "identifier", emailCol.Role)
-	assert.ElementsMatch(t, []string{"mail", "e-mail"}, emailCol.Synonyms, "synonyms should be deduplicated")
+	require.NotNil(t, upserted)
+	assert.Equal(t, "updated description", *upserted.Description)
+	assert.Equal(t, existingMeta.ID, upserted.ID, "should update existing metadata, not create new")
 }
 
 func TestApplyColumnUpdates_CreateNewColumn(t *testing.T) {
 	projectID := uuid.New()
-	desc := "User age"
+	tableID := uuid.New()
+	colID := uuid.New()
 
-	var capturedColumns []models.ColumnDetail
-	ontologyRepo := &mockOntologyRepo{
-		getActiveFunc: func(ctx context.Context, pid uuid.UUID) (*models.TieredOntology, error) {
-			return &models.TieredOntology{
-				ProjectID:     projectID,
-				ColumnDetails: map[string][]models.ColumnDetail{},
-			}, nil
+	schemaRepo := &mockSchemaRepoForQuestion{
+		findTableByNameFunc: func(ctx context.Context, pid, dsID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+			return &models.SchemaTable{ID: tableID, ProjectID: projectID, TableName: tableName}, nil
 		},
-		updateColumnDetailsFunc: func(ctx context.Context, pid uuid.UUID, tableName string, columns []models.ColumnDetail) error {
-			capturedColumns = columns
+		getColumnByNameFunc: func(ctx context.Context, tID uuid.UUID, columnName string) (*models.SchemaColumn, error) {
+			return &models.SchemaColumn{ID: colID, ProjectID: projectID, SchemaTableID: tableID, ColumnName: columnName}, nil
+		},
+	}
+
+	var upserted *models.ColumnMetadata
+	colMetaRepo := &mockColumnMetadataRepoForQuestion{
+		getBySchemaColumnIDFunc: func(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
+			return nil, nil // no existing metadata
+		},
+		upsertFunc: func(ctx context.Context, meta *models.ColumnMetadata) error {
+			upserted = meta
 			return nil
 		},
 	}
-	svc := newTestQuestionService(&mockQuestionRepo{}, ontologyRepo, &mockKnowledgeRepo{}, &mockBuilder{})
 
+	svc := newTestQuestionServiceWithRepos(&mockQuestionRepo{}, &mockKnowledgeRepo{}, &mockBuilder{}, schemaRepo, colMetaRepo)
+
+	desc := "new column description"
 	err := svc.applyColumnUpdates(context.Background(), projectID, []ColumnUpdate{
-		{TableName: "users", ColumnName: "age", Description: &desc, Synonyms: []string{"years"}},
+		{TableName: "users", ColumnName: "email", Description: &desc},
 	})
 	require.NoError(t, err)
-	require.Len(t, capturedColumns, 1)
-	assert.Equal(t, "age", capturedColumns[0].Name)
-	assert.Equal(t, "User age", capturedColumns[0].Description)
-	assert.Equal(t, []string{"years"}, capturedColumns[0].Synonyms)
+	require.NotNil(t, upserted)
+	assert.Equal(t, "new column description", *upserted.Description)
+	assert.Equal(t, colID, upserted.SchemaColumnID)
+	assert.Equal(t, projectID, upserted.ProjectID)
+	assert.Equal(t, models.ProvenanceMCP, upserted.Source)
 }
 
 func TestApplyColumnUpdates_MultipleTablesGrouped(t *testing.T) {
 	projectID := uuid.New()
-	desc1 := "desc1"
-	desc2 := "desc2"
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+	emailColID := uuid.New()
+	amountColID := uuid.New()
 
-	updatedTables := map[string]bool{}
-	ontologyRepo := &mockOntologyRepo{
-		getActiveFunc: func(ctx context.Context, pid uuid.UUID) (*models.TieredOntology, error) {
-			return &models.TieredOntology{
-				ProjectID:     projectID,
-				ColumnDetails: map[string][]models.ColumnDetail{},
-			}, nil
+	schemaRepo := &mockSchemaRepoForQuestion{
+		findTableByNameFunc: func(ctx context.Context, pid, dsID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+			switch tableName {
+			case "users":
+				return &models.SchemaTable{ID: usersTableID, ProjectID: projectID, TableName: "users"}, nil
+			case "orders":
+				return &models.SchemaTable{ID: ordersTableID, ProjectID: projectID, TableName: "orders"}, nil
+			}
+			return nil, nil
 		},
-		updateColumnDetailsFunc: func(ctx context.Context, pid uuid.UUID, tableName string, columns []models.ColumnDetail) error {
-			updatedTables[tableName] = true
+		getColumnByNameFunc: func(ctx context.Context, tID uuid.UUID, columnName string) (*models.SchemaColumn, error) {
+			switch {
+			case tID == usersTableID && columnName == "email":
+				return &models.SchemaColumn{ID: emailColID, SchemaTableID: usersTableID, ColumnName: "email"}, nil
+			case tID == ordersTableID && columnName == "amount":
+				return &models.SchemaColumn{ID: amountColID, SchemaTableID: ordersTableID, ColumnName: "amount"}, nil
+			}
+			return nil, nil
+		},
+	}
+
+	var upsertedIDs []uuid.UUID
+	colMetaRepo := &mockColumnMetadataRepoForQuestion{
+		getBySchemaColumnIDFunc: func(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
+			return nil, nil
+		},
+		upsertFunc: func(ctx context.Context, meta *models.ColumnMetadata) error {
+			upsertedIDs = append(upsertedIDs, meta.SchemaColumnID)
 			return nil
 		},
 	}
-	svc := newTestQuestionService(&mockQuestionRepo{}, ontologyRepo, &mockKnowledgeRepo{}, &mockBuilder{})
 
+	svc := newTestQuestionServiceWithRepos(&mockQuestionRepo{}, &mockKnowledgeRepo{}, &mockBuilder{}, schemaRepo, colMetaRepo)
+
+	emailDesc := "user email"
+	amountDesc := "order amount"
 	err := svc.applyColumnUpdates(context.Background(), projectID, []ColumnUpdate{
-		{TableName: "users", ColumnName: "email", Description: &desc1},
-		{TableName: "orders", ColumnName: "total", Description: &desc2},
+		{TableName: "users", ColumnName: "email", Description: &emailDesc},
+		{TableName: "orders", ColumnName: "amount", Description: &amountDesc},
 	})
 	require.NoError(t, err)
-	assert.True(t, updatedTables["users"], "users table should be updated")
-	assert.True(t, updatedTables["orders"], "orders table should be updated")
+	assert.Len(t, upsertedIDs, 2)
+	assert.Contains(t, upsertedIDs, emailColID)
+	assert.Contains(t, upsertedIDs, amountColID)
 }
 
 func TestApplyColumnUpdates_PartialUpdate(t *testing.T) {
-	// Only set description, leave other fields unchanged
+	// Only updates the fields that are non-nil
 	projectID := uuid.New()
-	desc := "Updated description"
+	tableID := uuid.New()
+	colID := uuid.New()
 
-	var capturedColumns []models.ColumnDetail
-	ontologyRepo := &mockOntologyRepo{
-		getActiveFunc: func(ctx context.Context, pid uuid.UUID) (*models.TieredOntology, error) {
-			return &models.TieredOntology{
-				ProjectID: projectID,
-				ColumnDetails: map[string][]models.ColumnDetail{
-					"users": {{Name: "email", SemanticType: "email", Role: "identifier"}},
-				},
-			}, nil
+	schemaRepo := &mockSchemaRepoForQuestion{
+		findTableByNameFunc: func(ctx context.Context, pid, dsID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+			return &models.SchemaTable{ID: tableID, ProjectID: projectID, TableName: tableName}, nil
 		},
-		updateColumnDetailsFunc: func(ctx context.Context, pid uuid.UUID, tableName string, columns []models.ColumnDetail) error {
-			capturedColumns = columns
+		getColumnByNameFunc: func(ctx context.Context, tID uuid.UUID, columnName string) (*models.SchemaColumn, error) {
+			return &models.SchemaColumn{ID: colID, ProjectID: projectID, SchemaTableID: tableID, ColumnName: columnName}, nil
+		},
+	}
+
+	existingDesc := "original description"
+	existingRole := "attribute"
+	existingMeta := &models.ColumnMetadata{
+		ID:             uuid.New(),
+		ProjectID:      projectID,
+		SchemaColumnID: colID,
+		Description:    &existingDesc,
+		Role:           &existingRole,
+		Source:         models.ProvenanceMCP,
+	}
+
+	var upserted *models.ColumnMetadata
+	colMetaRepo := &mockColumnMetadataRepoForQuestion{
+		getBySchemaColumnIDFunc: func(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
+			return existingMeta, nil
+		},
+		upsertFunc: func(ctx context.Context, meta *models.ColumnMetadata) error {
+			upserted = meta
 			return nil
 		},
 	}
-	svc := newTestQuestionService(&mockQuestionRepo{}, ontologyRepo, &mockKnowledgeRepo{}, &mockBuilder{})
 
+	svc := newTestQuestionServiceWithRepos(&mockQuestionRepo{}, &mockKnowledgeRepo{}, &mockBuilder{}, schemaRepo, colMetaRepo)
+
+	// Only update SemanticType, leave Description and Role untouched
+	semType := "email_address"
 	err := svc.applyColumnUpdates(context.Background(), projectID, []ColumnUpdate{
-		{TableName: "users", ColumnName: "email", Description: &desc},
+		{TableName: "users", ColumnName: "email", SemanticType: &semType},
 	})
 	require.NoError(t, err)
-	require.Len(t, capturedColumns, 1)
-	assert.Equal(t, "Updated description", capturedColumns[0].Description)
-	assert.Equal(t, "email", capturedColumns[0].SemanticType, "should be unchanged")
-	assert.Equal(t, "identifier", capturedColumns[0].Role, "should be unchanged")
+	require.NotNil(t, upserted)
+	assert.Equal(t, "email_address", *upserted.SemanticType)
+	assert.Equal(t, "original description", *upserted.Description, "should preserve existing description")
+	assert.Equal(t, "attribute", *upserted.Role, "should preserve existing role")
 }
 
 func TestApplyColumnUpdates_RepoUpdateError(t *testing.T) {
 	projectID := uuid.New()
-	desc := "desc"
+	tableID := uuid.New()
+	colID := uuid.New()
 
-	ontologyRepo := &mockOntologyRepo{
-		getActiveFunc: func(ctx context.Context, pid uuid.UUID) (*models.TieredOntology, error) {
-			return &models.TieredOntology{
-				ProjectID:     projectID,
-				ColumnDetails: map[string][]models.ColumnDetail{},
-			}, nil
+	schemaRepo := &mockSchemaRepoForQuestion{
+		findTableByNameFunc: func(ctx context.Context, pid, dsID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+			return &models.SchemaTable{ID: tableID, ProjectID: projectID, TableName: tableName}, nil
 		},
-		updateColumnDetailsFunc: func(ctx context.Context, pid uuid.UUID, tableName string, columns []models.ColumnDetail) error {
-			return fmt.Errorf("write failed")
+		getColumnByNameFunc: func(ctx context.Context, tID uuid.UUID, columnName string) (*models.SchemaColumn, error) {
+			return &models.SchemaColumn{ID: colID, ProjectID: projectID, SchemaTableID: tableID, ColumnName: columnName}, nil
 		},
 	}
-	svc := newTestQuestionService(&mockQuestionRepo{}, ontologyRepo, &mockKnowledgeRepo{}, &mockBuilder{})
 
+	colMetaRepo := &mockColumnMetadataRepoForQuestion{
+		getBySchemaColumnIDFunc: func(ctx context.Context, schemaColumnID uuid.UUID) (*models.ColumnMetadata, error) {
+			return nil, nil
+		},
+		upsertFunc: func(ctx context.Context, meta *models.ColumnMetadata) error {
+			return fmt.Errorf("upsert failed")
+		},
+	}
+
+	svc := newTestQuestionServiceWithRepos(&mockQuestionRepo{}, &mockKnowledgeRepo{}, &mockBuilder{}, schemaRepo, colMetaRepo)
+
+	desc := "some description"
 	err := svc.applyColumnUpdates(context.Background(), projectID, []ColumnUpdate{
 		{TableName: "users", ColumnName: "email", Description: &desc},
 	})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "update columns for users")
+	assert.Contains(t, err.Error(), "upsert column metadata")
 }
 
 // --- Tests for AnswerQuestion validation ---
@@ -410,7 +485,7 @@ func TestAnswerQuestion_QuestionNotFound(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := newTestQuestionService(questionRepo, &mockOntologyRepo{}, &mockKnowledgeRepo{}, &mockBuilder{})
+	svc := newTestQuestionService(questionRepo, &mockKnowledgeRepo{}, &mockBuilder{})
 
 	_, err := svc.AnswerQuestion(context.Background(), uuid.New(), "yes", "")
 	assert.Error(t, err)
@@ -423,7 +498,7 @@ func TestAnswerQuestion_QuestionGetError(t *testing.T) {
 			return nil, fmt.Errorf("db error")
 		},
 	}
-	svc := newTestQuestionService(questionRepo, &mockOntologyRepo{}, &mockKnowledgeRepo{}, &mockBuilder{})
+	svc := newTestQuestionService(questionRepo, &mockKnowledgeRepo{}, &mockBuilder{})
 
 	_, err := svc.AnswerQuestion(context.Background(), uuid.New(), "yes", "")
 	assert.Error(t, err)
@@ -447,7 +522,7 @@ func TestAnswerQuestion_WrongStatus(t *testing.T) {
 					}, nil
 				},
 			}
-			svc := newTestQuestionService(questionRepo, &mockOntologyRepo{}, &mockKnowledgeRepo{}, &mockBuilder{})
+			svc := newTestQuestionService(questionRepo, &mockKnowledgeRepo{}, &mockBuilder{})
 
 			_, err := svc.AnswerQuestion(context.Background(), uuid.New(), "yes", "")
 			assert.Error(t, err)
@@ -481,7 +556,7 @@ func TestAnswerQuestion_AcceptsPendingAndSkipped(t *testing.T) {
 					}, nil
 				},
 			}
-			svc := newTestQuestionService(questionRepo, &mockOntologyRepo{}, &mockKnowledgeRepo{}, builder)
+			svc := newTestQuestionService(questionRepo, &mockKnowledgeRepo{}, builder)
 
 			result, err := svc.AnswerQuestion(context.Background(), questionID, "yes", "")
 			require.NoError(t, err)
@@ -495,19 +570,17 @@ func TestAnswerQuestion_AcceptsPendingAndSkipped(t *testing.T) {
 func TestAnswerQuestion_FollowUpCreated(t *testing.T) {
 	projectID := uuid.New()
 	questionID := uuid.New()
-	ontologyID := uuid.New()
 	followUpText := "Can you clarify?"
 
 	var createdFollowUp *models.OntologyQuestion
 	questionRepo := &mockQuestionRepo{
 		getByIDFunc: func(ctx context.Context, id uuid.UUID) (*models.OntologyQuestion, error) {
 			return &models.OntologyQuestion{
-				ID:         questionID,
-				ProjectID:  projectID,
-				OntologyID: ontologyID,
-				Status:     models.QuestionStatusPending,
-				Priority:   2,
-				Affects:    &models.QuestionAffects{Tables: []string{"users"}},
+				ID:        questionID,
+				ProjectID: projectID,
+				Status:    models.QuestionStatusPending,
+				Priority:  2,
+				Affects:   &models.QuestionAffects{Tables: []string{"users"}},
 			}, nil
 		},
 		createFunc: func(ctx context.Context, q *models.OntologyQuestion) error {
@@ -522,7 +595,7 @@ func TestAnswerQuestion_FollowUpCreated(t *testing.T) {
 			}, nil
 		},
 	}
-	svc := newTestQuestionService(questionRepo, &mockOntologyRepo{}, &mockKnowledgeRepo{}, builder)
+	svc := newTestQuestionService(questionRepo, &mockKnowledgeRepo{}, builder)
 
 	result, err := svc.AnswerQuestion(context.Background(), questionID, "yes", "")
 	require.NoError(t, err)
@@ -530,7 +603,6 @@ func TestAnswerQuestion_FollowUpCreated(t *testing.T) {
 	require.NotNil(t, createdFollowUp, "follow-up question should be created")
 	assert.Equal(t, followUpText, createdFollowUp.Text)
 	assert.Equal(t, projectID, createdFollowUp.ProjectID)
-	assert.Equal(t, ontologyID, createdFollowUp.OntologyID)
 	assert.Equal(t, 2, createdFollowUp.Priority, "should inherit parent priority")
 	assert.False(t, createdFollowUp.IsRequired, "follow-ups are optional")
 	assert.Equal(t, "follow_up", createdFollowUp.Category)
@@ -562,7 +634,7 @@ func TestAnswerQuestion_NoFollowUpWhenNil(t *testing.T) {
 			return &AnswerProcessingResult{FollowUp: nil}, nil
 		},
 	}
-	svc := newTestQuestionService(questionRepo, &mockOntologyRepo{}, &mockKnowledgeRepo{}, builder)
+	svc := newTestQuestionService(questionRepo, &mockKnowledgeRepo{}, builder)
 
 	_, err := svc.AnswerQuestion(context.Background(), questionID, "yes", "")
 	require.NoError(t, err)
@@ -593,7 +665,7 @@ func TestAnswerQuestion_NoFollowUpWhenEmpty(t *testing.T) {
 			return &AnswerProcessingResult{FollowUp: &empty}, nil
 		},
 	}
-	svc := newTestQuestionService(questionRepo, &mockOntologyRepo{}, &mockKnowledgeRepo{}, builder)
+	svc := newTestQuestionService(questionRepo, &mockKnowledgeRepo{}, builder)
 
 	_, err := svc.AnswerQuestion(context.Background(), questionID, "yes", "")
 	require.NoError(t, err)
@@ -624,7 +696,7 @@ func TestAnswerQuestion_UserIDParsing(t *testing.T) {
 			return &AnswerProcessingResult{}, nil
 		},
 	}
-	svc := newTestQuestionService(questionRepo, &mockOntologyRepo{}, &mockKnowledgeRepo{}, builder)
+	svc := newTestQuestionService(questionRepo, &mockKnowledgeRepo{}, builder)
 
 	t.Run("valid UUID", func(t *testing.T) {
 		capturedAnsweredBy = nil
@@ -657,7 +729,7 @@ func TestGetPendingCount_SumsRequiredAndOptional(t *testing.T) {
 			return &repositories.QuestionCounts{Required: 3, Optional: 7}, nil
 		},
 	}
-	svc := newTestQuestionService(questionRepo, &mockOntologyRepo{}, &mockKnowledgeRepo{}, &mockBuilder{})
+	svc := newTestQuestionService(questionRepo, &mockKnowledgeRepo{}, &mockBuilder{})
 
 	count, err := svc.GetPendingCount(context.Background(), uuid.New())
 	require.NoError(t, err)
@@ -670,7 +742,7 @@ func TestGetPendingCount_NilCounts(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := newTestQuestionService(questionRepo, &mockOntologyRepo{}, &mockKnowledgeRepo{}, &mockBuilder{})
+	svc := newTestQuestionService(questionRepo, &mockKnowledgeRepo{}, &mockBuilder{})
 
 	count, err := svc.GetPendingCount(context.Background(), uuid.New())
 	require.NoError(t, err)
@@ -683,7 +755,7 @@ func TestGetPendingCount_Error(t *testing.T) {
 			return nil, fmt.Errorf("db error")
 		},
 	}
-	svc := newTestQuestionService(questionRepo, &mockOntologyRepo{}, &mockKnowledgeRepo{}, &mockBuilder{})
+	svc := newTestQuestionService(questionRepo, &mockKnowledgeRepo{}, &mockBuilder{})
 
 	_, err := svc.GetPendingCount(context.Background(), uuid.New())
 	assert.Error(t, err)

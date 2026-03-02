@@ -12,18 +12,16 @@ import (
 
 func TestConvertQuestionInputs_EmptyInput(t *testing.T) {
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
-	result := ConvertQuestionInputs(nil, projectID, ontologyID, nil)
+	result := ConvertQuestionInputs(nil, projectID, nil)
 	assert.Nil(t, result)
 
-	result = ConvertQuestionInputs([]OntologyQuestionInput{}, projectID, ontologyID, nil)
+	result = ConvertQuestionInputs([]OntologyQuestionInput{}, projectID, nil)
 	assert.Nil(t, result)
 }
 
 func TestConvertQuestionInputs_ValidQuestions(t *testing.T) {
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	workflowID := uuid.New()
 
 	inputs := []OntologyQuestionInput{
@@ -47,13 +45,12 @@ func TestConvertQuestionInputs_ValidQuestions(t *testing.T) {
 		},
 	}
 
-	result := ConvertQuestionInputs(inputs, projectID, ontologyID, &workflowID)
+	result := ConvertQuestionInputs(inputs, projectID, &workflowID)
 
 	require.Len(t, result, 3)
 
 	// First question (priority 1 = critical = required)
 	assert.Equal(t, projectID, result[0].ProjectID)
-	assert.Equal(t, ontologyID, result[0].OntologyID)
 	assert.Equal(t, &workflowID, result[0].WorkflowID)
 	assert.Equal(t, "What does 'tik' mean in tiks_count?", result[0].Text)
 	assert.Equal(t, 1, result[0].Priority)
@@ -73,7 +70,6 @@ func TestConvertQuestionInputs_ValidQuestions(t *testing.T) {
 
 func TestConvertQuestionInputs_SkipsEmptyQuestions(t *testing.T) {
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	inputs := []OntologyQuestionInput{
 		{Category: "terminology", Priority: 1, Question: "Valid question?", Context: "ctx"},
@@ -81,7 +77,7 @@ func TestConvertQuestionInputs_SkipsEmptyQuestions(t *testing.T) {
 		{Category: "terminology", Priority: 1, Question: "Another valid?", Context: "ctx2"},
 	}
 
-	result := ConvertQuestionInputs(inputs, projectID, ontologyID, nil)
+	result := ConvertQuestionInputs(inputs, projectID, nil)
 
 	require.Len(t, result, 2)
 	assert.Equal(t, "Valid question?", result[0].Text)
@@ -90,7 +86,6 @@ func TestConvertQuestionInputs_SkipsEmptyQuestions(t *testing.T) {
 
 func TestConvertQuestionInputs_PriorityClamping(t *testing.T) {
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	inputs := []OntologyQuestionInput{
 		{Category: "test", Priority: 0, Question: "Zero priority?", Context: ""},
@@ -98,7 +93,7 @@ func TestConvertQuestionInputs_PriorityClamping(t *testing.T) {
 		{Category: "test", Priority: 10, Question: "High priority?", Context: ""},
 	}
 
-	result := ConvertQuestionInputs(inputs, projectID, ontologyID, nil)
+	result := ConvertQuestionInputs(inputs, projectID, nil)
 
 	require.Len(t, result, 3)
 	// Zero and negative priority should default to 3
@@ -110,7 +105,6 @@ func TestConvertQuestionInputs_PriorityClamping(t *testing.T) {
 
 func TestConvertQuestionInputs_AffectsPopulated(t *testing.T) {
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	inputs := []OntologyQuestionInput{
 		{
@@ -137,7 +131,7 @@ func TestConvertQuestionInputs_AffectsPopulated(t *testing.T) {
 		},
 	}
 
-	result := ConvertQuestionInputs(inputs, projectID, ontologyID, nil)
+	result := ConvertQuestionInputs(inputs, projectID, nil)
 	require.Len(t, result, 3)
 
 	// First: both tables and columns set
@@ -156,20 +150,19 @@ func TestConvertQuestionInputs_AffectsPopulated(t *testing.T) {
 
 func TestConvertQuestionInputs_WorkflowIDOptional(t *testing.T) {
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	inputs := []OntologyQuestionInput{
 		{Category: "test", Priority: 1, Question: "Test?", Context: ""},
 	}
 
 	// Without workflow ID
-	result := ConvertQuestionInputs(inputs, projectID, ontologyID, nil)
+	result := ConvertQuestionInputs(inputs, projectID, nil)
 	require.Len(t, result, 1)
 	assert.Nil(t, result[0].WorkflowID)
 
 	// With workflow ID
 	workflowID := uuid.New()
-	result = ConvertQuestionInputs(inputs, projectID, ontologyID, &workflowID)
+	result = ConvertQuestionInputs(inputs, projectID, &workflowID)
 	require.Len(t, result, 1)
 	assert.Equal(t, &workflowID, result[0].WorkflowID)
 }

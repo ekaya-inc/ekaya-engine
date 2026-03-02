@@ -399,3 +399,49 @@ func (m *mockSchemaService) ListAllColumnsByTable(ctx context.Context, projectID
 func (m *mockSchemaService) GetColumnMetadataByProject(ctx context.Context, projectID uuid.UUID) ([]*models.ColumnMetadata, error) {
 	return nil, m.err
 }
+
+// mockSchemaChangeDetectionService is a configurable mock for change detection in handler tests.
+type mockSchemaChangeDetectionService struct {
+	changes         []*models.PendingChange
+	pendingChanges  []*models.PendingChange // for ListPendingChanges
+	resolvedResult  *services.ResolvedChangesResult
+	rejectAllResult *services.RejectAllResult
+	err             error
+}
+
+func (m *mockSchemaChangeDetectionService) DetectChanges(ctx context.Context, projectID uuid.UUID, refreshResult *models.RefreshResult) ([]*models.PendingChange, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.changes, nil
+}
+
+func (m *mockSchemaChangeDetectionService) ListPendingChanges(ctx context.Context, projectID uuid.UUID, status string, limit int) ([]*models.PendingChange, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.pendingChanges != nil {
+		return m.pendingChanges, nil
+	}
+	return []*models.PendingChange{}, nil
+}
+
+func (m *mockSchemaChangeDetectionService) ResolvePendingChanges(ctx context.Context, projectID uuid.UUID, selectedTableNames map[string]bool, selectedColumnNames map[string]bool) (*services.ResolvedChangesResult, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.resolvedResult != nil {
+		return m.resolvedResult, nil
+	}
+	return &services.ResolvedChangesResult{}, nil
+}
+
+func (m *mockSchemaChangeDetectionService) RejectAllPendingChanges(ctx context.Context, projectID uuid.UUID) (*services.RejectAllResult, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.rejectAllResult != nil {
+		return m.rejectAllResult, nil
+	}
+	return &services.RejectAllResult{}, nil
+}

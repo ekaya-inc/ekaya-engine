@@ -54,9 +54,7 @@ type glossaryTestContext struct {
 	service        services.GlossaryService
 	datasourceSvc  services.DatasourceService
 	glossaryRepo   repositories.GlossaryRepository
-	ontologyRepo   repositories.OntologyRepository
 	projectID      uuid.UUID
-	ontologyID     uuid.UUID
 	datasourceID   uuid.UUID
 	adapterFactory datasource.DatasourceAdapterFactory
 }
@@ -80,26 +78,25 @@ func setupGlossaryTest(t *testing.T) *glossaryTestContext {
 
 	// Create repositories
 	glossaryRepo := repositories.NewGlossaryRepository()
-	ontologyRepo := repositories.NewOntologyRepository()
 	dsRepo := repositories.NewDatasourceRepository()
-
-	// Create repositories
+	columnMetadataRepo := repositories.NewColumnMetadataRepository()
 	schemaRepo := repositories.NewSchemaRepository()
 	knowledgeRepo := repositories.NewKnowledgeRepository()
 
 	// Create datasource service
-	datasourceSvc := services.NewDatasourceService(dsRepo, ontologyRepo, encryptor, adapterFactory, nil, zap.NewNop())
+	datasourceSvc := services.NewDatasourceService(dsRepo, encryptor, adapterFactory, nil, zap.NewNop())
 
 	// Create a mock LLM factory that returns nil (SuggestTerms needs ontology first)
 	mockLLMFactory := &mockLLMClientFactory{}
 
 	// Create service with real dependencies
-	service := services.NewGlossaryService(glossaryRepo, ontologyRepo, knowledgeRepo, schemaRepo, datasourceSvc, adapterFactory, mockLLMFactory, nil, zap.NewNop(), "test")
+	projectSvc := &mockProjectService{}
+	service := services.NewGlossaryService(glossaryRepo, columnMetadataRepo, knowledgeRepo, schemaRepo, projectSvc, datasourceSvc, adapterFactory, mockLLMFactory, nil, zap.NewNop(), "test")
 
 	// Create handler
 	questionService := services.NewOntologyQuestionService(
-		repositories.NewOntologyQuestionRepository(), ontologyRepo, nil,
-		nil, zap.NewNop())
+		repositories.NewOntologyQuestionRepository(), columnMetadataRepo, schemaRepo,
+		knowledgeRepo, nil, zap.NewNop())
 	handler := NewGlossaryHandler(service, questionService, zap.NewNop())
 
 	// Use a unique project ID for consistent testing
@@ -113,7 +110,6 @@ func setupGlossaryTest(t *testing.T) *glossaryTestContext {
 		service:        service,
 		datasourceSvc:  datasourceSvc,
 		glossaryRepo:   glossaryRepo,
-		ontologyRepo:   ontologyRepo,
 		projectID:      projectID,
 		adapterFactory: adapterFactory,
 	}
@@ -243,31 +239,10 @@ func (tc *glossaryTestContext) ensureTestProject() {
 	}
 }
 
-// ensureTestOntology creates an active ontology for the test project.
+// ensureTestOntology is a no-op: engine_ontologies table was removed.
+// Ontology data now lives in engine_projects.domain_summary and engine_ontology_column_metadata.
 func (tc *glossaryTestContext) ensureTestOntology() {
 	tc.t.Helper()
-
-	// Generate a stable ontology ID for this test context
-	tc.ontologyID = uuid.MustParse("00000000-0000-0000-0000-000000000103")
-
-	ctx := context.Background()
-	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
-	if err != nil {
-		tc.t.Fatalf("Failed to create tenant scope: %v", err)
-	}
-	defer scope.Close()
-
-	// Use ON CONFLICT on the unique constraint (project_id, version) - version defaults to 1
-	// Don't change the ID if an ontology already exists (would violate FK constraints)
-	err = scope.Conn.QueryRow(ctx, `
-		INSERT INTO engine_ontologies (id, project_id, is_active, domain_summary, column_details)
-		VALUES ($1, $2, true, '{}', '{}')
-		ON CONFLICT (project_id, version) DO UPDATE SET is_active = true
-		RETURNING id
-	`, tc.ontologyID, tc.projectID).Scan(&tc.ontologyID)
-	if err != nil {
-		tc.t.Fatalf("Failed to ensure test ontology: %v", err)
-	}
 }
 
 // ensureTestDatasource creates a datasource pointing to the test_data database.
@@ -318,33 +293,11 @@ func (tc *glossaryTestContext) ensureTestDatasource() {
 	tc.datasourceID = ds.ID
 }
 
-// createTestOntology creates an active ontology for testing.
+// createTestOntology is a no-op: engine_ontologies table was removed.
+// Ontology data now lives in engine_projects.domain_summary and engine_ontology_column_metadata.
 func (tc *glossaryTestContext) createTestOntology() {
 	tc.t.Helper()
-
 	tc.ensureTestProject()
-
-	ctx := context.Background()
-	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
-	if err != nil {
-		tc.t.Fatalf("Failed to create tenant scope: %v", err)
-	}
-	defer scope.Close()
-	ctx = database.SetTenantScope(ctx, scope)
-
-	tc.ontologyID = uuid.New()
-	ontology := &models.TieredOntology{
-		ID:            tc.ontologyID,
-		ProjectID:     tc.projectID,
-		Version:       1,
-		IsActive:      true,
-		ColumnDetails: make(map[string][]models.ColumnDetail),
-		Metadata:      make(map[string]any),
-	}
-
-	if err := tc.ontologyRepo.Create(ctx, ontology); err != nil {
-		tc.t.Fatalf("Failed to create ontology: %v", err)
-	}
 }
 
 // cleanup removes test data.
@@ -361,7 +314,6 @@ func (tc *glossaryTestContext) cleanup() {
 	// Delete in order respecting foreign keys
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_glossary_aliases WHERE glossary_id IN (SELECT id FROM engine_business_glossary WHERE project_id = $1)", tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_business_glossary WHERE project_id = $1", tc.projectID)
-	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontologies WHERE project_id = $1", tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_datasources WHERE project_id = $1", tc.projectID)
 }
 
@@ -858,17 +810,17 @@ func TestGlossaryIntegration_Suggest(t *testing.T) {
 	}
 }
 
-func TestGlossaryIntegration_Suggest_NoOntology(t *testing.T) {
+func TestGlossaryIntegration_Suggest_NoTables(t *testing.T) {
 	tc := setupGlossaryTest(t)
 	tc.cleanup()
 	tc.ensureTestProject()
-	// Don't create ontology
+	// No tables set up — suggest returns empty results
 
 	suggestRec := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary/suggest",
 		nil, tc.handler.Suggest, map[string]string{"pid": tc.projectID.String()})
 
-	if suggestRec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d: %s", suggestRec.Code, suggestRec.Body.String())
+	if suggestRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", suggestRec.Code, suggestRec.Body.String())
 	}
 }
 

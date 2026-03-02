@@ -129,7 +129,6 @@ func main() {
 	agentAPIKeyService := services.NewAgentAPIKeyService(mcpConfigRepo, credentialEncryptor, logger)
 
 	// Ontology repositories
-	ontologyRepo := repositories.NewOntologyRepository()
 	ontologyChatRepo := repositories.NewOntologyChatRepository()
 	knowledgeRepo := repositories.NewKnowledgeRepository()
 	ontologyQuestionRepo := repositories.NewOntologyQuestionRepository()
@@ -160,12 +159,12 @@ func main() {
 	// Create services
 	nonceStore := services.NewNonceStore()
 	installedAppService := services.NewInstalledAppService(installedAppRepo, centralClient, nonceStore, cfg.BaseURL, logger)
-	projectService := services.NewProjectService(db, projectRepo, userRepo, ontologyRepo, mcpConfigRepo, agentAPIKeyService, installedAppService, centralClient, nonceStore, cfg.BaseURL, logger)
+	projectService := services.NewProjectService(db, projectRepo, userRepo, mcpConfigRepo, agentAPIKeyService, installedAppService, centralClient, nonceStore, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
-	datasourceService := services.NewDatasourceService(datasourceRepo, ontologyRepo, credentialEncryptor, adapterFactory, projectService, logger)
-	schemaService := services.NewSchemaService(schemaRepo, ontologyRepo, columnMetadataRepo, datasourceService, adapterFactory, logger)
-	schemaChangeDetectionService := services.NewSchemaChangeDetectionService(pendingChangeRepo, logger)
-	dataChangeDetectionService := services.NewDataChangeDetectionService(schemaRepo, columnMetadataRepo, ontologyRepo, pendingChangeRepo, datasourceService, projectService, adapterFactory, logger)
+	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, adapterFactory, projectService, logger)
+	schemaService := services.NewSchemaService(schemaRepo, columnMetadataRepo, datasourceService, adapterFactory, logger)
+	schemaChangeDetectionService := services.NewSchemaChangeDetectionService(pendingChangeRepo, schemaRepo, logger)
+	dataChangeDetectionService := services.NewDataChangeDetectionService(schemaRepo, columnMetadataRepo, pendingChangeRepo, datasourceService, projectService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, securityAuditor, logger)
 	queryHistoryRepo := repositories.NewQueryHistoryRepository()
 	queryHistoryService := services.NewQueryHistoryService(queryHistoryRepo, logger)
@@ -176,10 +175,10 @@ func main() {
 	llmFactory := llm.NewClientFactory(aiConfigService, logger)
 
 	// Ontology services
-	knowledgeService := services.NewKnowledgeService(knowledgeRepo, projectRepo, ontologyRepo, logger)
+	knowledgeService := services.NewKnowledgeService(knowledgeRepo, projectRepo, logger)
 	ontologyBuilderService := services.NewOntologyBuilderService(llmFactory, logger)
 	ontologyQuestionService := services.NewOntologyQuestionService(
-		ontologyQuestionRepo, ontologyRepo, knowledgeRepo,
+		ontologyQuestionRepo, columnMetadataRepo, schemaRepo, knowledgeRepo,
 		ontologyBuilderService, logger)
 	getTenantCtx := services.NewTenantContextFunc(db)
 
@@ -189,15 +188,15 @@ func main() {
 	llmFactory.SetRecorder(convRecorder)
 
 	ontologyChatService := services.NewOntologyChatService(
-		ontologyChatRepo, ontologyRepo, knowledgeRepo,
-		schemaRepo, ontologyDAGRepo,
+		ontologyChatRepo, knowledgeRepo,
+		schemaRepo, ontologyDAGRepo, projectService,
 		llmFactory, datasourceService, adapterFactory, logger)
 	deterministicRelationshipService := services.NewDeterministicRelationshipService(
-		datasourceService, projectService, adapterFactory, ontologyRepo, schemaRepo, columnMetadataRepo, logger)
+		datasourceService, projectService, adapterFactory, schemaRepo, columnMetadataRepo, logger)
 	ontologyFinalizationService := services.NewOntologyFinalizationService(
-		ontologyRepo, schemaRepo, columnMetadataRepo, convRepo, llmFactory, getTenantCtx, logger)
+		projectRepo, schemaRepo, columnMetadataRepo, convRepo, llmFactory, getTenantCtx, logger)
 	ontologyContextService := services.NewOntologyContextService(
-		ontologyRepo, schemaRepo, tableMetadataRepo, projectService, logger)
+		schemaRepo, columnMetadataRepo, tableMetadataRepo, projectService, logger)
 
 	// Create worker pool for parallel LLM calls
 	workerPoolConfig := llm.DefaultWorkerPoolConfig()
@@ -208,14 +207,14 @@ func main() {
 	llmCircuitBreaker := llm.NewCircuitBreaker(circuitBreakerConfig)
 
 	columnEnrichmentService := services.NewColumnEnrichmentService(
-		ontologyRepo, schemaRepo, columnMetadataRepo, convRepo, projectRepo, ontologyQuestionService,
+		schemaRepo, columnMetadataRepo, convRepo, projectRepo, ontologyQuestionService,
 		datasourceService, adapterFactory, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
 	glossaryRepo := repositories.NewGlossaryRepository()
-	glossaryService := services.NewGlossaryService(glossaryRepo, ontologyRepo, knowledgeRepo, schemaRepo, datasourceService, adapterFactory, llmFactory, getTenantCtx, logger, cfg.Env)
+	glossaryService := services.NewGlossaryService(glossaryRepo, columnMetadataRepo, knowledgeRepo, schemaRepo, projectService, datasourceService, adapterFactory, llmFactory, getTenantCtx, logger, cfg.Env)
 
 	// Ontology DAG service for orchestrated workflow execution
 	ontologyDAGService := services.NewOntologyDAGService(
-		ontologyDAGRepo, ontologyRepo, schemaRepo,
+		ontologyDAGRepo, schemaRepo,
 		ontologyQuestionRepo, ontologyChatRepo, knowledgeRepo,
 		glossaryRepo, getTenantCtx, logger)
 
@@ -224,7 +223,7 @@ func main() {
 	ontologyDAGService.SetKnowledgeSeedingMethods(knowledgeSeedingService)
 	columnFeatureExtractionService := services.NewColumnFeatureExtractionServiceFull(
 		schemaRepo, columnMetadataRepo, datasourceService, adapterFactory, llmFactory, llmWorkerPool, getTenantCtx,
-		ontologyQuestionService, ontologyRepo, logger)
+		ontologyQuestionService, logger)
 	ontologyDAGService.SetColumnFeatureExtractionMethods(columnFeatureExtractionService)
 	ontologyDAGService.SetFKDiscoveryMethods(services.NewFKDiscoveryAdapter(deterministicRelationshipService))
 	ontologyDAGService.SetPKMatchDiscoveryMethods(services.NewPKMatchDiscoveryAdapter(deterministicRelationshipService))
@@ -248,7 +247,6 @@ func main() {
 	// Incremental DAG service for targeted LLM enrichment after changes
 	// Created first without ChangeReviewService due to circular dependency
 	incrementalDAGService := services.NewIncrementalDAGService(&services.IncrementalDAGServiceDeps{
-		OntologyRepo:       ontologyRepo,
 		ColumnMetadataRepo: columnMetadataRepo,
 		SchemaRepo:         schemaRepo,
 		ConversationRepo:   convRepo,
@@ -263,7 +261,6 @@ func main() {
 	changeReviewService := services.NewChangeReviewService(&services.ChangeReviewServiceDeps{
 		PendingChangeRepo:  pendingChangeRepo,
 		ColumnMetadataRepo: columnMetadataRepo,
-		OntologyRepo:       ontologyRepo,
 		IncrementalDAG:     incrementalDAGService,
 		Logger:             logger,
 	})
@@ -378,7 +375,6 @@ func main() {
 		},
 		ProjectService:         projectService,
 		OntologyContextService: ontologyContextService,
-		OntologyRepo:           ontologyRepo,
 		SchemaRepo:             schemaRepo,
 	}
 	mcptools.RegisterOntologyTools(mcpServer.MCP(), ontologyToolDeps)
@@ -416,7 +412,7 @@ func main() {
 	datasourcesHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register schema handler (protected)
-	schemaHandler := handlers.NewSchemaHandler(schemaService, logger)
+	schemaHandler := handlers.NewSchemaHandler(schemaService, schemaChangeDetectionService, logger)
 	schemaHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register queries handler (protected)
@@ -507,7 +503,6 @@ func main() {
 			InstalledAppService: installedAppService,
 		},
 		KnowledgeRepository: knowledgeRepo,
-		OntologyRepository:  ontologyRepo,
 	}
 	mcptools.RegisterKnowledgeTools(mcpServer.MCP(), knowledgeToolDeps)
 
@@ -521,7 +516,6 @@ func main() {
 		},
 		ProjectService:         projectService,
 		OntologyContextService: ontologyContextService,
-		OntologyRepo:           ontologyRepo,
 		SchemaService:          schemaService,
 		GlossaryService:        glossaryService,
 		SchemaRepo:             schemaRepo,
@@ -539,7 +533,6 @@ func main() {
 			Logger:              logger,
 			InstalledAppService: installedAppService,
 		},
-		OntologyRepo:       ontologyRepo,
 		SchemaRepo:         schemaRepo,
 		ColumnMetadataRepo: columnMetadataRepo,
 		ProjectService:     projectService,
@@ -570,7 +563,6 @@ func main() {
 			InstalledAppService: installedAppService,
 		},
 		SchemaRepo:         schemaRepo,
-		OntologyRepo:       ontologyRepo,
 		ColumnMetadataRepo: columnMetadataRepo,
 		ProjectService:     projectService,
 	}

@@ -57,8 +57,7 @@ func setupQueriesIntegrationTest(t *testing.T) *queriesIntegrationTestContext {
 
 	// Create datasource repository and service
 	dsRepo := repositories.NewDatasourceRepository()
-	ontologyRepo := repositories.NewOntologyRepository()
-	dsSvc := services.NewDatasourceService(dsRepo, ontologyRepo, encryptor, adapterFactory, nil, zap.NewNop())
+	dsSvc := services.NewDatasourceService(dsRepo, encryptor, adapterFactory, nil, zap.NewNop())
 
 	// Create security auditor
 	auditor := audit.NewSecurityAuditor(zap.NewNop())

@@ -15,12 +15,12 @@ import (
 
 // mockGlossaryDiscoveryMethods implements GlossaryDiscoveryMethods for testing.
 type mockGlossaryDiscoveryMethods struct {
-	discoverFunc func(ctx context.Context, projectID, ontologyID uuid.UUID) (int, error)
+	discoverFunc func(ctx context.Context, projectID uuid.UUID) (int, error)
 }
 
-func (m *mockGlossaryDiscoveryMethods) DiscoverGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) (int, error) {
+func (m *mockGlossaryDiscoveryMethods) DiscoverGlossaryTerms(ctx context.Context, projectID uuid.UUID) (int, error) {
 	if m.discoverFunc != nil {
-		return m.discoverFunc(ctx, projectID, ontologyID)
+		return m.discoverFunc(ctx, projectID)
 	}
 	return 0, nil
 }
@@ -148,16 +148,14 @@ func (m *mockGlossaryDiscoveryDAGRepo) GetNextPendingNode(ctx context.Context, d
 func TestGlossaryDiscoveryNode_Execute_Success(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	nodeID := uuid.New()
 
 	// Track progress reports
 	var progressReports []string
 
 	mockGlossary := &mockGlossaryDiscoveryMethods{
-		discoverFunc: func(ctx context.Context, pID, oID uuid.UUID) (int, error) {
+		discoverFunc: func(ctx context.Context, pID uuid.UUID) (int, error) {
 			assert.Equal(t, projectID, pID)
-			assert.Equal(t, ontologyID, oID)
 			return 5, nil // 5 terms discovered
 		},
 	}
@@ -174,8 +172,7 @@ func TestGlossaryDiscoveryNode_Execute_Success(t *testing.T) {
 	node.SetCurrentNodeID(nodeID)
 
 	dag := &models.OntologyDAG{
-		ProjectID:  projectID,
-		OntologyID: &ontologyID,
+		ProjectID: projectID,
 	}
 
 	err := node.Execute(ctx, dag)
@@ -187,30 +184,10 @@ func TestGlossaryDiscoveryNode_Execute_Success(t *testing.T) {
 	assert.Equal(t, "Discovered 5 business terms", progressReports[1])
 }
 
-func TestGlossaryDiscoveryNode_Execute_NoOntologyID(t *testing.T) {
-	ctx := context.Background()
-	projectID := uuid.New()
-
-	mockGlossary := &mockGlossaryDiscoveryMethods{}
-	mockRepo := &mockGlossaryDiscoveryDAGRepo{}
-
-	node := NewGlossaryDiscoveryNode(mockRepo, mockGlossary, zap.NewNop())
-
-	dag := &models.OntologyDAG{
-		ProjectID:  projectID,
-		OntologyID: nil, // Missing ontology ID
-	}
-
-	err := node.Execute(ctx, dag)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "ontology ID is required")
-}
-
 func TestGlossaryDiscoveryNode_Execute_DiscoveryError(t *testing.T) {
 	// Discovery errors should not fail the execution - should log warning and continue
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	nodeID := uuid.New()
 
 	expectedErr := errors.New("discovery failed")
@@ -219,7 +196,7 @@ func TestGlossaryDiscoveryNode_Execute_DiscoveryError(t *testing.T) {
 	var progressReports []string
 
 	mockGlossary := &mockGlossaryDiscoveryMethods{
-		discoverFunc: func(ctx context.Context, pID, oID uuid.UUID) (int, error) {
+		discoverFunc: func(ctx context.Context, pID uuid.UUID) (int, error) {
 			return 0, expectedErr
 		},
 	}
@@ -236,8 +213,7 @@ func TestGlossaryDiscoveryNode_Execute_DiscoveryError(t *testing.T) {
 	node.SetCurrentNodeID(nodeID)
 
 	dag := &models.OntologyDAG{
-		ProjectID:  projectID,
-		OntologyID: &ontologyID,
+		ProjectID: projectID,
 	}
 
 	// Should succeed despite discovery error (warning logged)
@@ -254,11 +230,10 @@ func TestGlossaryDiscoveryNode_Execute_ProgressReportingError(t *testing.T) {
 	// Progress reporting errors should not fail the execution
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	nodeID := uuid.New()
 
 	mockGlossary := &mockGlossaryDiscoveryMethods{
-		discoverFunc: func(ctx context.Context, pID, oID uuid.UUID) (int, error) {
+		discoverFunc: func(ctx context.Context, pID uuid.UUID) (int, error) {
 			return 3, nil
 		},
 	}
@@ -273,8 +248,7 @@ func TestGlossaryDiscoveryNode_Execute_ProgressReportingError(t *testing.T) {
 	node.SetCurrentNodeID(nodeID)
 
 	dag := &models.OntologyDAG{
-		ProjectID:  projectID,
-		OntologyID: &ontologyID,
+		ProjectID: projectID,
 	}
 
 	// Should succeed despite progress reporting errors

@@ -66,10 +66,10 @@ func (m *mockGlossaryServiceForHandler) DeleteAlias(ctx context.Context, termID 
 func (m *mockGlossaryServiceForHandler) SuggestTerms(ctx context.Context, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error) {
 	return nil, nil
 }
-func (m *mockGlossaryServiceForHandler) DiscoverGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) (int, error) {
+func (m *mockGlossaryServiceForHandler) DiscoverGlossaryTerms(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 0, nil
 }
-func (m *mockGlossaryServiceForHandler) EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error {
+func (m *mockGlossaryServiceForHandler) EnrichGlossaryTerms(ctx context.Context, projectID uuid.UUID) error {
 	return nil
 }
 func (m *mockGlossaryServiceForHandler) GetGenerationStatus(projectID uuid.UUID) *models.GlossaryGenerationStatus {

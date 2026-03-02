@@ -21,7 +21,6 @@ type ContextToolDeps struct {
 	BaseMCPToolDeps
 	ProjectService         services.ProjectService
 	OntologyContextService services.OntologyContextService
-	OntologyRepo           repositories.OntologyRepository
 	SchemaService          services.SchemaService
 	GlossaryService        services.GlossaryService
 	SchemaRepo             repositories.SchemaRepository
@@ -132,16 +131,7 @@ func registerGetContextTool(s *server.MCPServer, deps *ContextToolDeps) {
 		}
 		includeOptions := parseIncludeOptions(includeValues)
 
-		// Get the active ontology (may be nil)
-		ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check for ontology: %w", err)
-		}
-
-		// Determine ontology status
-		ontologyStatus := determineOntologyStatus(ontology)
-
-		// Get glossary terms (always available, not dependent on ontology)
+		// Get glossary terms (always available)
 		glossary, err := deps.GlossaryService.GetTerms(tenantCtx, projectID)
 		if err != nil {
 			deps.Logger.Warn("Failed to get glossary terms",
@@ -150,13 +140,9 @@ func registerGetContextTool(s *server.MCPServer, deps *ContextToolDeps) {
 			// Continue without glossary - not a fatal error
 		}
 
-		// Route to appropriate handler based on ontology availability and depth
+		// Handle context request
 		var result any
-		if ontology != nil {
-			result, err = handleContextWithOntology(tenantCtx, deps, projectID, depth, tables, includeRelationships, ontologyStatus, glossary, includeOptions)
-		} else {
-			result, err = handleContextWithoutOntology(tenantCtx, deps, projectID, depth, tables, ontologyStatus, glossary, includeOptions)
-		}
+		result, err = handleContext(tenantCtx, deps, projectID, depth, tables, includeRelationships, glossary, includeOptions)
 
 		if err != nil {
 			return nil, fmt.Errorf("failed to get context at depth '%s': %w", depth, err)
@@ -171,40 +157,22 @@ func registerGetContextTool(s *server.MCPServer, deps *ContextToolDeps) {
 	})
 }
 
-// determineOntologyStatus determines the current state of the ontology.
-func determineOntologyStatus(ontology *models.TieredOntology) string {
-	if ontology == nil {
-		return "none"
-	}
-	if ontology.IsActive {
-		return "complete"
-	}
-	return "extracting"
-}
-
-// handleContextWithOntology returns enriched context when ontology is available.
-func handleContextWithOntology(
+// handleContext returns unified context using OntologyContextService and schema.
+func handleContext(
 	ctx context.Context,
 	deps *ContextToolDeps,
 	projectID uuid.UUID,
 	depth string,
 	tables []string,
 	includeRelationships bool,
-	ontologyStatus string,
 	glossary []*models.BusinessGlossaryTerm,
 	include includeOptions,
 ) (any, error) {
 	// Build base response structure
 	response := map[string]any{
-		"has_ontology":    true,
-		"ontology_status": ontologyStatus,
-		"depth":           depth,
+		"depth": depth,
 	}
 
-	// Route to appropriate handler based on depth
-	// Domain: Ontology-driven (domain summary)
-	// Tables/Columns: Schema-driven (physical structure with column features)
-	// Note: "entities" depth has been removed for v1.0 entity simplification
 	switch depth {
 	case "domain":
 		domainCtx, err := deps.OntologyContextService.GetDomainContext(ctx, projectID)
@@ -220,7 +188,6 @@ func handleContextWithOntology(
 				deps.Logger.Warn("Failed to get project knowledge",
 					zap.String("project_id", projectID.String()),
 					zap.Error(err))
-				// Continue without project knowledge - not a fatal error
 			} else if len(knowledge) > 0 {
 				response["project_knowledge"] = buildProjectKnowledgeResponse(knowledge)
 			}
@@ -237,105 +204,6 @@ func handleContextWithOntology(
 		response["note"] = "Entity-level depth is deprecated. Use 'domain' or 'tables' instead."
 
 	case "tables", "columns":
-		// Tables and columns always come from schema (engine_schema_columns)
-		// not from ontology - column features are stored in schema metadata
-		tablesResponse, err := buildTablesFromSchema(ctx, deps, projectID, depth, tables, include)
-		if err != nil {
-			return nil, err
-		}
-		response["tables"] = tablesResponse
-	}
-
-	// Add glossary to response (always included regardless of depth)
-	response["glossary"] = buildGlossaryResponse(glossary)
-
-	return response, nil
-}
-
-// handleContextWithoutOntology returns schema-only context when ontology is not available.
-func handleContextWithoutOntology(
-	ctx context.Context,
-	deps *ContextToolDeps,
-	projectID uuid.UUID,
-	depth string,
-	tables []string,
-	ontologyStatus string,
-	glossary []*models.BusinessGlossaryTerm,
-	include includeOptions,
-) (any, error) {
-	// Get default datasource
-	dsID, err := deps.ProjectService.GetDefaultDatasourceID(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get default datasource: %w", err)
-	}
-
-	// Get schema information (only selected tables/columns)
-	schema, err := deps.SchemaService.GetSelectedDatasourceSchema(ctx, projectID, dsID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get schema: %w", err)
-	}
-
-	// Build base response
-	response := map[string]any{
-		"has_ontology":    false,
-		"ontology_status": ontologyStatus,
-		"depth":           depth,
-	}
-
-	// Build schema-only response based on depth
-	switch depth {
-	case "domain":
-		// High-level summary without ontology
-		tableCount := len(schema.Tables)
-		columnCount := 0
-		for _, table := range schema.Tables {
-			columnCount += len(table.Columns)
-		}
-
-		response["domain"] = map[string]any{
-			"description":     "Database schema information. Ontology not yet extracted for business context.",
-			"primary_domains": []string{},
-			"table_count":     tableCount,
-			"column_count":    columnCount,
-		}
-
-		// List tables with row counts
-		tableList := make([]map[string]any, 0, len(schema.Tables))
-		for _, table := range schema.Tables {
-			tableList = append(tableList, map[string]any{
-				"table":     fmt.Sprintf("%s.%s", table.SchemaName, table.TableName),
-				"row_count": table.RowCount,
-			})
-		}
-		response["entities"] = tableList
-
-		// Include project knowledge at domain level
-		if deps.KnowledgeRepo != nil {
-			knowledge, err := deps.KnowledgeRepo.GetByProject(ctx, projectID)
-			if err != nil {
-				deps.Logger.Warn("Failed to get project knowledge",
-					zap.String("project_id", projectID.String()),
-					zap.Error(err))
-				// Continue without project knowledge - not a fatal error
-			} else if len(knowledge) > 0 {
-				response["project_knowledge"] = buildProjectKnowledgeResponse(knowledge)
-			}
-		}
-
-	case "entities":
-		// Table list with basic information
-		tableList := make([]map[string]any, 0, len(schema.Tables))
-		for _, table := range schema.Tables {
-			tableList = append(tableList, map[string]any{
-				"name":         fmt.Sprintf("%s.%s", table.SchemaName, table.TableName),
-				"row_count":    table.RowCount,
-				"column_count": len(table.Columns),
-			})
-		}
-		response["entities"] = tableList
-
-	case "tables", "columns":
-		// Use shared function for schema-based table/column retrieval
 		tablesResponse, err := buildTablesFromSchema(ctx, deps, projectID, depth, tables, include)
 		if err != nil {
 			return nil, err

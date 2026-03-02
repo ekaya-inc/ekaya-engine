@@ -17,9 +17,6 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
 
-// ErrOntologyNotFound is returned when no active ontology exists for a project.
-var ErrOntologyNotFound = errors.New("no active ontology found for project")
-
 // CentralProjectClient is the subset of central.Client used by ProjectService for deletion.
 type CentralProjectClient interface {
 	DeleteProject(ctx context.Context, baseURL, projectID, token, callbackUrl string) (*central.AppActionResponse, error)
@@ -94,7 +91,6 @@ type projectService struct {
 	db                   *database.DB
 	projectRepo          repositories.ProjectRepository
 	userRepo             repositories.UserRepository
-	ontologyRepo         repositories.OntologyRepository
 	mcpConfigRepo        repositories.MCPConfigRepository
 	agentAPIKeyService   AgentAPIKeyService
 	installedAppService  InstalledAppService
@@ -110,7 +106,6 @@ func NewProjectService(
 	db *database.DB,
 	projectRepo repositories.ProjectRepository,
 	userRepo repositories.UserRepository,
-	ontologyRepo repositories.OntologyRepository,
 	mcpConfigRepo repositories.MCPConfigRepository,
 	agentAPIKeyService AgentAPIKeyService,
 	installedAppService InstalledAppService,
@@ -123,7 +118,6 @@ func NewProjectService(
 		db:                   db,
 		projectRepo:          projectRepo,
 		userRepo:             userRepo,
-		ontologyRepo:         ontologyRepo,
 		mcpConfigRepo:        mcpConfigRepo,
 		agentAPIKeyService:   agentAPIKeyService,
 		installedAppService:  installedAppService,
@@ -213,11 +207,6 @@ func (s *projectService) Provision(ctx context.Context, projectID uuid.UUID, nam
 		}
 	}
 
-	if hasMCPServer {
-		// Create empty ontology for immediate MCP tool use.
-		s.createEmptyOntology(ctx, projectID)
-	}
-
 	if hasMCPServer || hasAIAgents {
 		// Create MCP config with defaults.
 		s.createDefaultMCPConfig(ctx, projectID)
@@ -249,26 +238,6 @@ func (s *projectService) Provision(ctx context.Context, projectID uuid.UUID, nam
 		ProjectPageURL:  projectPageURL,
 		Created:         true,
 	}, nil
-}
-
-// createEmptyOntology creates an empty ontology record for the given project.
-// This enables immediate use of MCP ontology tools without requiring extraction.
-// Errors are logged but not propagated since this is best-effort.
-func (s *projectService) createEmptyOntology(ctx context.Context, projectID uuid.UUID) {
-	emptyOntology := &models.TieredOntology{
-		ProjectID:     projectID,
-		Version:       1,
-		IsActive:      true,
-		ColumnDetails: make(map[string][]models.ColumnDetail),
-		Metadata:      make(map[string]any),
-	}
-
-	if err := s.ontologyRepo.Create(ctx, emptyOntology); err != nil {
-		s.logger.Error("failed to create initial ontology",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err),
-		)
-	}
 }
 
 // createDefaultMCPConfig creates the MCP config with default settings for a new project.

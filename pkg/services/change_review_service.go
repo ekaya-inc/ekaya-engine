@@ -43,7 +43,6 @@ type ApproveAllResult struct {
 type changeReviewService struct {
 	pendingChangeRepo  repositories.PendingChangeRepository
 	columnMetadataRepo repositories.ColumnMetadataRepository
-	ontologyRepo       repositories.OntologyRepository
 	precedenceChecker  PrecedenceChecker     // Precedence validation service
 	incrementalDAG     IncrementalDAGService // Optional: triggers LLM enrichment after approval
 	logger             *zap.Logger
@@ -53,7 +52,6 @@ type changeReviewService struct {
 type ChangeReviewServiceDeps struct {
 	PendingChangeRepo  repositories.PendingChangeRepository
 	ColumnMetadataRepo repositories.ColumnMetadataRepository
-	OntologyRepo       repositories.OntologyRepository
 	PrecedenceChecker  PrecedenceChecker     // Optional: defaults to NewPrecedenceChecker() if nil
 	IncrementalDAG     IncrementalDAGService // Optional: set to enable LLM enrichment after approval
 	Logger             *zap.Logger
@@ -68,7 +66,6 @@ func NewChangeReviewService(deps *ChangeReviewServiceDeps) ChangeReviewService {
 	return &changeReviewService{
 		pendingChangeRepo:  deps.PendingChangeRepo,
 		columnMetadataRepo: deps.ColumnMetadataRepo,
-		ontologyRepo:       deps.OntologyRepo,
 		precedenceChecker:  precedenceChecker,
 		incrementalDAG:     deps.IncrementalDAG,
 		logger:             deps.Logger,
@@ -92,6 +89,11 @@ func (s *changeReviewService) ApproveChange(ctx context.Context, changeID uuid.U
 	}
 	if change == nil {
 		return nil, fmt.Errorf("pending change not found")
+	}
+
+	// Auto-applied changes are informational — approve is a no-op
+	if change.Status == models.ChangeStatusAutoApplied {
+		return change, nil
 	}
 
 	// Verify change is still pending
@@ -128,6 +130,11 @@ func (s *changeReviewService) RejectChange(ctx context.Context, changeID uuid.UU
 	}
 	if change == nil {
 		return nil, fmt.Errorf("pending change not found")
+	}
+
+	// Auto-applied changes are informational — reject is a no-op
+	if change.Status == models.ChangeStatusAutoApplied {
+		return change, nil
 	}
 
 	// Verify change is still pending

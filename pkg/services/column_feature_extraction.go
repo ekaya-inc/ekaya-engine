@@ -51,7 +51,6 @@ type columnFeatureExtractionService struct {
 
 	// Dependencies for question creation when classifiers are uncertain
 	questionService OntologyQuestionService
-	ontologyRepo    repositories.OntologyRepository
 
 	// Cached classifiers (created lazily)
 	classifiersMu sync.RWMutex
@@ -104,7 +103,6 @@ func NewColumnFeatureExtractionServiceFull(
 	workerPool *llm.WorkerPool,
 	getTenantCtx TenantContextFunc,
 	questionService OntologyQuestionService,
-	ontologyRepo repositories.OntologyRepository,
 	logger *zap.Logger,
 ) ColumnFeatureExtractionService {
 	return &columnFeatureExtractionService{
@@ -116,7 +114,6 @@ func NewColumnFeatureExtractionServiceFull(
 		workerPool:         workerPool,
 		getTenantCtx:       getTenantCtx,
 		questionService:    questionService,
-		ontologyRepo:       ontologyRepo,
 		logger:             logger.Named("column-feature-extraction"),
 		classifiers:        make(map[models.ClassificationPath]ColumnClassifier),
 	}
@@ -764,28 +761,14 @@ func (s *columnFeatureExtractionService) createQuestionsFromUncertainClassificat
 		return
 	}
 
-	// Get active ontology for question storage
-	if s.ontologyRepo == nil || s.questionService == nil {
-		s.logger.Debug("Question service or ontology repo not available, skipping question creation",
+	// Store questions if question service is available
+	if s.questionService == nil {
+		s.logger.Debug("Question service not available, skipping question creation",
 			zap.Int("questions_skipped", len(questionInputs)))
 		return
 	}
 
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err != nil {
-		s.logger.Error("failed to get active ontology for classification question storage",
-			zap.Error(err))
-		// Non-fatal: continue even if we can't store questions
-		return
-	}
-
-	if ontology == nil {
-		s.logger.Debug("No active ontology found, skipping classification question storage",
-			zap.Int("questions_skipped", len(questionInputs)))
-		return
-	}
-
-	questionModels := ConvertQuestionInputs(questionInputs, projectID, ontology.ID, nil)
+	questionModels := ConvertQuestionInputs(questionInputs, projectID, nil)
 	if len(questionModels) == 0 {
 		return
 	}
@@ -2631,6 +2614,19 @@ func (s *columnFeatureExtractionService) resolveFKTargetWithLLM(
 	profile *models.ColumnDataProfile,
 	candidates []phase4FKCandidate,
 ) (*FKResolutionResult, error) {
+	// Acquire fresh connection to avoid "conn busy" errors
+	// when multiple workers call CreateForProject simultaneously
+	workCtx := ctx
+	if s.getTenantCtx != nil {
+		var cleanup func()
+		var err error
+		workCtx, cleanup, err = s.getTenantCtx(ctx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("acquire tenant context: %w", err)
+		}
+		defer cleanup()
+	}
+
 	prompt := s.buildFKResolutionPrompt(profile, candidates)
 	systemMsg := `You are a database schema analyst. Your task is to identify the most likely foreign key target for a column based on data overlap analysis.
 
@@ -2642,13 +2638,13 @@ Focus on:
 Respond with valid JSON only.`
 
 	// Get LLM client
-	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
+	llmClient, err := s.llmFactory.CreateForProject(workCtx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("create LLM client: %w", err)
 	}
 
 	// Call LLM with low temperature for deterministic choice
-	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.1, false)
+	result, err := llmClient.GenerateResponse(workCtx, prompt, systemMsg, 0.1, false)
 	if err != nil {
 		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}
@@ -2663,6 +2659,19 @@ func (s *columnFeatureExtractionService) resolveFKTargetLLMOnly(
 	projectID uuid.UUID,
 	profile *models.ColumnDataProfile,
 ) (*FKResolutionResult, error) {
+	// Acquire fresh connection to avoid "conn busy" errors
+	// when multiple workers call CreateForProject simultaneously
+	workCtx := ctx
+	if s.getTenantCtx != nil {
+		var cleanup func()
+		var err error
+		workCtx, cleanup, err = s.getTenantCtx(ctx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("acquire tenant context: %w", err)
+		}
+		defer cleanup()
+	}
+
 	prompt := s.buildFKResolutionPromptLLMOnly(profile)
 	systemMsg := `You are a database schema analyst. Your task is to infer the most likely foreign key target based on column naming conventions and business logic.
 
@@ -2670,12 +2679,12 @@ If you cannot determine the target with reasonable confidence, respond with an e
 
 Respond with valid JSON only.`
 
-	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
+	llmClient, err := s.llmFactory.CreateForProject(workCtx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("create LLM client: %w", err)
 	}
 
-	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.1, false)
+	result, err := llmClient.GenerateResponse(workCtx, prompt, systemMsg, 0.1, false)
 	if err != nil {
 		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}

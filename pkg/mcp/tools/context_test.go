@@ -29,7 +29,6 @@ func TestContextToolDeps_Structure(t *testing.T) {
 	assert.Nil(t, deps.MCPConfigService, "MCPConfigService field should be nil by default")
 	assert.Nil(t, deps.ProjectService, "ProjectService field should be nil by default")
 	assert.Nil(t, deps.OntologyContextService, "OntologyContextService field should be nil by default")
-	assert.Nil(t, deps.OntologyRepo, "OntologyRepo field should be nil by default")
 	assert.Nil(t, deps.SchemaService, "SchemaService field should be nil by default")
 	assert.Nil(t, deps.GlossaryService, "GlossaryService field should be nil by default")
 	assert.Nil(t, deps.SchemaRepo, "SchemaRepo field should be nil by default")
@@ -46,7 +45,6 @@ func TestContextToolDeps_Initialization(t *testing.T) {
 	var mcpConfigService services.MCPConfigService
 	var projectService services.ProjectService
 	var ontologyContextService services.OntologyContextService
-	var ontologyRepo repositories.OntologyRepository
 	var schemaService services.SchemaService
 	var glossaryService services.GlossaryService
 	var schemaRepo repositories.SchemaRepository
@@ -62,7 +60,6 @@ func TestContextToolDeps_Initialization(t *testing.T) {
 		},
 		ProjectService:         projectService,
 		OntologyContextService: ontologyContextService,
-		OntologyRepo:           ontologyRepo,
 		SchemaService:          schemaService,
 		GlossaryService:        glossaryService,
 		SchemaRepo:             schemaRepo,
@@ -165,42 +162,6 @@ func TestCheckContextToolsEnabled(t *testing.T) {
 			assert.Equal(t, uuid.Nil, projectID)
 			assert.Nil(t, tenantCtx)
 			assert.Nil(t, cleanup)
-		})
-	}
-}
-
-// TestDetermineOntologyStatus tests the determineOntologyStatus function.
-func TestDetermineOntologyStatus(t *testing.T) {
-	tests := []struct {
-		name     string
-		ontology *models.TieredOntology
-		expected string
-	}{
-		{
-			name:     "nil ontology returns none",
-			ontology: nil,
-			expected: "none",
-		},
-		{
-			name: "active ontology returns complete",
-			ontology: &models.TieredOntology{
-				IsActive: true,
-			},
-			expected: "complete",
-		},
-		{
-			name: "inactive ontology returns extracting",
-			ontology: &models.TieredOntology{
-				IsActive: false,
-			},
-			expected: "extracting",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := determineOntologyStatus(tt.ontology)
-			assert.Equal(t, tt.expected, result)
 		})
 	}
 }

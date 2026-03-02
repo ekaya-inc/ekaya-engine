@@ -186,7 +186,7 @@ func (m *mockProjectService) ProvisionFromClaims(ctx context.Context, claims *au
 }
 
 func (m *mockProjectService) GetByID(ctx context.Context, id uuid.UUID) (*models.Project, error) {
-	return nil, nil
+	return &models.Project{ID: id, Name: "Test Project"}, nil
 }
 
 func (m *mockProjectService) GetByIDWithoutTenant(ctx context.Context, id uuid.UUID) (*models.Project, error) {
@@ -410,6 +410,12 @@ func (m *mockSchemaRepository) GetTablesByNames(ctx context.Context, projectID u
 }
 func (m *mockSchemaRepository) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 0, nil
+}
+func (m *mockSchemaRepository) GetTableCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return 0, nil
+}
+func (m *mockSchemaRepository) GetSelectedTableNamesByProject(ctx context.Context, projectID uuid.UUID) ([]string, error) {
+	return nil, nil
 }
 func (m *mockSchemaRepository) GetColumnByID(ctx context.Context, projectID, columnID uuid.UUID) (*models.SchemaColumn, error) {
 	return nil, nil

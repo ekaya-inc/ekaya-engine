@@ -40,10 +40,10 @@ type OntologyChatService interface {
 
 type ontologyChatService struct {
 	chatRepo          repositories.OntologyChatRepository
-	ontologyRepo      repositories.OntologyRepository
 	knowledgeRepo     repositories.KnowledgeRepository
 	schemaRepo        repositories.SchemaRepository
 	dagRepo           repositories.OntologyDAGRepository
+	projectService    ProjectService
 	llmFactory        llm.LLMClientFactory
 	datasourceService DatasourceService
 	adapterFactory    datasource.DatasourceAdapterFactory
@@ -53,10 +53,10 @@ type ontologyChatService struct {
 // NewOntologyChatService creates a new ontology chat service.
 func NewOntologyChatService(
 	chatRepo repositories.OntologyChatRepository,
-	ontologyRepo repositories.OntologyRepository,
 	knowledgeRepo repositories.KnowledgeRepository,
 	schemaRepo repositories.SchemaRepository,
 	dagRepo repositories.OntologyDAGRepository,
+	projectService ProjectService,
 	llmFactory llm.LLMClientFactory,
 	datasourceService DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
@@ -64,10 +64,10 @@ func NewOntologyChatService(
 ) OntologyChatService {
 	return &ontologyChatService{
 		chatRepo:          chatRepo,
-		ontologyRepo:      ontologyRepo,
 		knowledgeRepo:     knowledgeRepo,
 		schemaRepo:        schemaRepo,
 		dagRepo:           dagRepo,
+		projectService:    projectService,
 		llmFactory:        llmFactory,
 		datasourceService: datasourceService,
 		adapterFactory:    adapterFactory,
@@ -91,10 +91,10 @@ func (s *ontologyChatService) Initialize(ctx context.Context, projectID uuid.UUI
 	// Pending question count is now always 0 since questions are handled differently.
 	pendingCount := 0
 
-	// Get the ontology to provide context
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
+	// Get project for domain context
+	project, err := s.projectService.GetByID(ctx, projectID)
 	if err != nil {
-		s.logger.Error("Failed to get active ontology",
+		s.logger.Error("Failed to get project",
 			zap.String("project_id", projectID.String()),
 			zap.Error(err))
 		return nil, err
@@ -104,17 +104,29 @@ func (s *ontologyChatService) Initialize(ctx context.Context, projectID uuid.UUI
 
 	if historyCount == 0 {
 		// First conversation
-		if ontology == nil || ontology.DomainSummary == nil {
+		if project == nil || project.DomainSummary == nil {
 			openingMessage = "Hello! I'm here to help you build and refine your data ontology. " +
 				"It looks like we haven't extracted any ontology yet. " +
 				"Would you like to start the extraction process?"
 		} else {
-			entityCount := ontology.TableCount()
+			// Get table count from schema
+			tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil)
+			if err != nil {
+				s.logger.Warn("Failed to get tables for opening message",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err))
+			}
+			tableCount := 0
+			for _, t := range tables {
+				if t.IsSelected {
+					tableCount++
+				}
+			}
 			openingMessage = fmt.Sprintf(
 				"Hello! I'm here to help you refine your data ontology. "+
 					"I have analyzed %d tables in your database. "+
 					"Feel free to ask me anything about your schema or tell me about specific business rules.",
-				entityCount,
+				tableCount,
 			)
 		}
 	} else {
@@ -145,7 +157,7 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 		return fmt.Errorf("user ID not found in context: %w", err)
 	}
 
-	// Get DAG first to get ontologyID for all messages
+	// Get DAG to check extraction status and load chat history
 	dag, err := s.dagRepo.GetLatestByProject(ctx, projectID)
 	if err != nil {
 		s.logger.Error("Failed to get DAG",
@@ -161,20 +173,11 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 		return fmt.Errorf("no DAG found for project %s", projectID)
 	}
 
-	if dag.OntologyID == nil {
-		s.logger.Error("DAG has no ontology",
-			zap.String("project_id", projectID.String()),
-			zap.String("dag_id", dag.ID.String()))
-		eventChan <- models.NewErrorEvent("DAG has no ontology")
-		return fmt.Errorf("DAG %s has no ontology", dag.ID)
-	}
-
-	// Save user message with ontologyID from DAG
+	// Save user message
 	userMessage := &models.ChatMessage{
-		ProjectID:  projectID,
-		OntologyID: *dag.OntologyID,
-		Role:       models.ChatRoleUser,
-		Content:    message,
+		ProjectID: projectID,
+		Role:      models.ChatRoleUser,
+		Content:   message,
 	}
 
 	if err := s.chatRepo.SaveMessage(ctx, userMessage); err != nil {
@@ -210,9 +213,7 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 	// Create tool executor
 	toolExecutor := llm.NewOntologyToolExecutor(&llm.OntologyToolExecutorConfig{
 		ProjectID:     projectID,
-		OntologyID:    *dag.OntologyID,
 		DatasourceID:  dag.DatasourceID,
-		OntologyRepo:  s.ontologyRepo,
 		KnowledgeRepo: s.knowledgeRepo,
 		SchemaRepo:    s.schemaRepo,
 		QueryExecutor: queryExecutor,
@@ -229,14 +230,22 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 		return err
 	}
 
-	// Get ontology for system prompt context
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
+	// Get project for domain summary context
+	project, err := s.projectService.GetByID(ctx, projectID)
 	if err != nil {
-		s.logger.Error("Failed to get active ontology",
+		s.logger.Error("Failed to get project for chat context",
 			zap.String("project_id", projectID.String()),
 			zap.Error(err))
-		eventChan <- models.NewErrorEvent("Failed to get ontology")
+		eventChan <- models.NewErrorEvent("Failed to get project")
 		return err
+	}
+
+	// Get schema tables for system prompt context
+	schemaTables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil)
+	if err != nil {
+		s.logger.Warn("Failed to get schema tables for chat context",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
 	}
 
 	// Build messages from chat history
@@ -251,8 +260,8 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 
 	messages := s.convertChatHistoryToLLMMessages(history)
 
-	// Build system prompt with ontology context
-	systemPrompt := s.buildChatSystemPrompt(ontology)
+	// Build system prompt with project domain summary and schema tables
+	systemPrompt := s.buildChatSystemPrompt(project, schemaTables)
 
 	// Create streaming request
 	req := &llm.StreamingRequest{
@@ -300,11 +309,10 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 			// When we see the first tool result, save the assistant message with tool calls
 			if len(pendingToolCalls) > 0 || textBuilder.Len() > 0 {
 				assistantMsg := &models.ChatMessage{
-					ProjectID:  projectID,
-					OntologyID: ontology.ID,
-					Role:       models.ChatRoleAssistant,
-					Content:    textBuilder.String(),
-					ToolCalls:  pendingToolCalls,
+					ProjectID: projectID,
+					Role:      models.ChatRoleAssistant,
+					Content:   textBuilder.String(),
+					ToolCalls: pendingToolCalls,
 				}
 				if err := s.chatRepo.SaveMessage(ctx, assistantMsg); err != nil {
 					s.logger.Error("Failed to save assistant message with tool calls",
@@ -323,7 +331,6 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 			}
 			toolMsg := &models.ChatMessage{
 				ProjectID:  projectID,
-				OntologyID: ontology.ID,
 				Role:       models.ChatRoleTool,
 				Content:    event.Content,
 				ToolCallID: toolCallID,
@@ -339,10 +346,9 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 			// Save any remaining text as final assistant message
 			if textBuilder.Len() > 0 {
 				assistantMsg := &models.ChatMessage{
-					ProjectID:  projectID,
-					OntologyID: ontology.ID,
-					Role:       models.ChatRoleAssistant,
-					Content:    textBuilder.String(),
+					ProjectID: projectID,
+					Role:      models.ChatRoleAssistant,
+					Content:   textBuilder.String(),
 				}
 				if err := s.chatRepo.SaveMessage(ctx, assistantMsg); err != nil {
 					s.logger.Error("Failed to save final assistant message",
@@ -443,8 +449,8 @@ func (s *ontologyChatService) convertChatHistoryToLLMMessages(history []*models.
 	return messages
 }
 
-// buildChatSystemPrompt creates a system prompt with ontology context.
-func (s *ontologyChatService) buildChatSystemPrompt(ontology *models.TieredOntology) string {
+// buildChatSystemPrompt creates a system prompt with project domain and schema context.
+func (s *ontologyChatService) buildChatSystemPrompt(project *models.Project, tables []*models.SchemaTable) string {
 	var sb strings.Builder
 
 	sb.WriteString(`You are an AI assistant helping users understand and refine their data ontology. Your role is to:
@@ -469,22 +475,22 @@ Guidelines:
 
 `)
 
-	if ontology != nil && ontology.DomainSummary != nil {
+	if project != nil && project.DomainSummary != nil {
 		sb.WriteString("## Current Domain Context\n\n")
-		if ontology.DomainSummary.Description != "" {
-			if len(ontology.DomainSummary.Domains) > 0 {
-				sb.WriteString(fmt.Sprintf("**Domains:** %s\n", strings.Join(ontology.DomainSummary.Domains, ", ")))
+		if project.DomainSummary.Description != "" {
+			if len(project.DomainSummary.Domains) > 0 {
+				sb.WriteString(fmt.Sprintf("**Domains:** %s\n", strings.Join(project.DomainSummary.Domains, ", ")))
 			}
-			sb.WriteString(fmt.Sprintf("**Description:** %s\n\n", ontology.DomainSummary.Description))
+			sb.WriteString(fmt.Sprintf("**Description:** %s\n\n", project.DomainSummary.Description))
 		}
 
-		if len(ontology.ColumnDetails) > 0 {
+		if len(tables) > 0 {
 			sb.WriteString("## Available Tables\n\n")
-			// RESEARCH: Consider ordering by relevance (row count, relationship degree,
-			// query frequency) rather than alphabetically to signal importance to the LLM.
-			tableNames := make([]string, 0, len(ontology.ColumnDetails))
-			for name := range ontology.ColumnDetails {
-				tableNames = append(tableNames, name)
+			tableNames := make([]string, 0, len(tables))
+			for _, t := range tables {
+				if t.IsSelected {
+					tableNames = append(tableNames, t.TableName)
+				}
 			}
 			sort.Strings(tableNames)
 			for _, tableName := range tableNames {

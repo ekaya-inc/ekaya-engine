@@ -16,6 +16,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 func TestSchemaHandler_GetSchema_Success(t *testing.T) {
@@ -48,7 +49,7 @@ func TestSchemaHandler_GetSchema_Success(t *testing.T) {
 			},
 		},
 	}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema", nil)
 	req.SetPathValue("pid", projectID.String())
@@ -97,7 +98,7 @@ func TestSchemaHandler_GetSchema_Success(t *testing.T) {
 }
 
 func TestSchemaHandler_GetSchema_InvalidProjectID(t *testing.T) {
-	handler := NewSchemaHandler(&mockSchemaService{}, zap.NewNop())
+	handler := NewSchemaHandler(&mockSchemaService{}, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/not-a-uuid/datasources/abc/schema", nil)
 	req.SetPathValue("pid", "not-a-uuid")
@@ -121,7 +122,7 @@ func TestSchemaHandler_GetSchema_InvalidProjectID(t *testing.T) {
 }
 
 func TestSchemaHandler_GetSchema_InvalidDatasourceID(t *testing.T) {
-	handler := NewSchemaHandler(&mockSchemaService{}, zap.NewNop())
+	handler := NewSchemaHandler(&mockSchemaService{}, nil, zap.NewNop())
 
 	projectID := uuid.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/not-a-uuid/schema", nil)
@@ -156,7 +157,7 @@ func TestSchemaHandler_GetSelectedSchema_Success(t *testing.T) {
 			Tables:       []*models.DatasourceTable{},
 		},
 	}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/selected", nil)
 	req.SetPathValue("pid", projectID.String())
@@ -186,7 +187,7 @@ func TestSchemaHandler_GetSchemaPrompt_Success(t *testing.T) {
 	service := &mockSchemaService{
 		prompt: "CREATE TABLE users (id uuid PRIMARY KEY);",
 	}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/prompt", nil)
 	req.SetPathValue("pid", projectID.String())
@@ -222,9 +223,18 @@ func TestSchemaHandler_RefreshSchema_Success(t *testing.T) {
 			ColumnsDeleted:       5,
 			RelationshipsCreated: 8,
 			RelationshipsDeleted: 1,
+			NewTableNames:        []string{"public.orders", "public.products"},
+			RemovedTableNames:    []string{"public.old_table"},
 		},
 	}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	changeDetectionSvc := &mockSchemaChangeDetectionService{
+		changes: []*models.PendingChange{
+			{ID: uuid.New()},
+			{ID: uuid.New()},
+			{ID: uuid.New()},
+		},
+	}
+	handler := NewSchemaHandler(service, changeDetectionSvc, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/refresh", nil)
 	req.SetPathValue("pid", projectID.String())
@@ -246,6 +256,28 @@ func TestSchemaHandler_RefreshSchema_Success(t *testing.T) {
 	if dataMap["tables_upserted"] != float64(10) {
 		t.Errorf("expected tables_upserted 10, got %v", dataMap["tables_upserted"])
 	}
+
+	// Verify pending changes are included in response
+	if dataMap["pending_changes_created"] != float64(3) {
+		t.Errorf("expected pending_changes_created 3, got %v", dataMap["pending_changes_created"])
+	}
+
+	// Verify new_table_names and removed_table_names are included
+	newTables, ok := dataMap["new_table_names"].([]any)
+	if !ok {
+		t.Fatalf("expected new_table_names to be an array, got %T", dataMap["new_table_names"])
+	}
+	if len(newTables) != 2 {
+		t.Errorf("expected 2 new tables, got %d", len(newTables))
+	}
+
+	removedTables, ok := dataMap["removed_table_names"].([]any)
+	if !ok {
+		t.Fatalf("expected removed_table_names to be an array, got %T", dataMap["removed_table_names"])
+	}
+	if len(removedTables) != 1 {
+		t.Errorf("expected 1 removed table, got %d", len(removedTables))
+	}
 }
 
 func TestSchemaHandler_GetTable_Success(t *testing.T) {
@@ -262,7 +294,7 @@ func TestSchemaHandler_GetTable_Success(t *testing.T) {
 			Columns:    []*models.DatasourceColumn{},
 		},
 	}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/tables/public.users", nil)
 	req.SetPathValue("pid", projectID.String())
@@ -289,7 +321,7 @@ func TestSchemaHandler_GetTable_Success(t *testing.T) {
 
 func TestSchemaHandler_GetTable_NotFound(t *testing.T) {
 	service := &mockSchemaService{err: apperrors.ErrNotFound}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -318,7 +350,7 @@ func TestSchemaHandler_GetTable_NotFound(t *testing.T) {
 
 func TestSchemaHandler_SaveSelections_Success(t *testing.T) {
 	service := &mockSchemaService{}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -342,7 +374,7 @@ func TestSchemaHandler_SaveSelections_Success(t *testing.T) {
 }
 
 func TestSchemaHandler_SaveSelections_InvalidBody(t *testing.T) {
-	handler := NewSchemaHandler(&mockSchemaService{}, zap.NewNop())
+	handler := NewSchemaHandler(&mockSchemaService{}, nil, zap.NewNop())
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -366,7 +398,7 @@ func TestSchemaHandler_GetRelationships_Success(t *testing.T) {
 
 	// The handler now calls GetRelationshipsResponse which returns enriched data
 	service := &mockSchemaService{}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/relationships", nil)
 	req.SetPathValue("pid", projectID.String())
@@ -423,7 +455,7 @@ func TestSchemaHandler_AddRelationship_Success(t *testing.T) {
 			Confidence:       1.0,
 		},
 	}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	body := `{"source_table": "public.orders", "source_column": "user_id", "target_table": "public.users", "target_column": "id"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/relationships", bytes.NewBufferString(body))
@@ -440,7 +472,7 @@ func TestSchemaHandler_AddRelationship_Success(t *testing.T) {
 
 func TestSchemaHandler_AddRelationship_Conflict(t *testing.T) {
 	service := &mockSchemaService{err: apperrors.ErrConflict}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -459,7 +491,7 @@ func TestSchemaHandler_AddRelationship_Conflict(t *testing.T) {
 }
 
 func TestSchemaHandler_AddRelationship_MissingFields(t *testing.T) {
-	handler := NewSchemaHandler(&mockSchemaService{}, zap.NewNop())
+	handler := NewSchemaHandler(&mockSchemaService{}, nil, zap.NewNop())
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -479,7 +511,7 @@ func TestSchemaHandler_AddRelationship_MissingFields(t *testing.T) {
 
 func TestSchemaHandler_RemoveRelationship_Success(t *testing.T) {
 	service := &mockSchemaService{}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -500,7 +532,7 @@ func TestSchemaHandler_RemoveRelationship_Success(t *testing.T) {
 
 func TestSchemaHandler_RemoveRelationship_NotFound(t *testing.T) {
 	service := &mockSchemaService{err: apperrors.ErrNotFound}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -520,7 +552,7 @@ func TestSchemaHandler_RemoveRelationship_NotFound(t *testing.T) {
 }
 
 func TestSchemaHandler_RemoveRelationship_InvalidID(t *testing.T) {
-	handler := NewSchemaHandler(&mockSchemaService{}, zap.NewNop())
+	handler := NewSchemaHandler(&mockSchemaService{}, nil, zap.NewNop())
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -540,7 +572,7 @@ func TestSchemaHandler_RemoveRelationship_InvalidID(t *testing.T) {
 
 func TestSchemaHandler_ServiceError(t *testing.T) {
 	service := &mockSchemaService{err: errors.New("database error")}
-	handler := NewSchemaHandler(service, zap.NewNop())
+	handler := NewSchemaHandler(service, nil, zap.NewNop())
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -554,5 +586,337 @@ func TestSchemaHandler_ServiceError(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("expected status 500, got %d", rec.Code)
+	}
+}
+
+// --- Task 1: GetSchema includes pending changes ---
+
+func TestSchemaHandler_GetSchema_IncludesPendingChanges(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	changeID1 := uuid.New()
+	changeID2 := uuid.New()
+
+	service := &mockSchemaService{
+		schema: &models.DatasourceSchema{
+			ProjectID:    projectID,
+			DatasourceID: datasourceID,
+			Tables: []*models.DatasourceTable{
+				{
+					ID:         uuid.New(),
+					SchemaName: "public",
+					TableName:  "invoices",
+					IsSelected: true,
+					Columns: []*models.DatasourceColumn{
+						{ID: uuid.New(), ColumnName: "amount", DataType: "numeric", IsSelected: true},
+					},
+				},
+			},
+		},
+	}
+	changeDetectionSvc := &mockSchemaChangeDetectionService{
+		pendingChanges: []*models.PendingChange{
+			{
+				ID:         changeID1,
+				ProjectID:  projectID,
+				ChangeType: models.ChangeTypeNewTable,
+				TableName:  "public.invoices",
+				Status:     models.ChangeStatusPending,
+			},
+			{
+				ID:         changeID2,
+				ProjectID:  projectID,
+				ChangeType: models.ChangeTypeNewColumn,
+				TableName:  "public.invoices",
+				ColumnName: "amount",
+				Status:     models.ChangeStatusPending,
+			},
+		},
+	}
+	handler := NewSchemaHandler(service, changeDetectionSvc, zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema", nil)
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("dsid", datasourceID.String())
+
+	rec := httptest.NewRecorder()
+	handler.GetSchema(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp ApiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	dataMap := resp.Data.(map[string]any)
+
+	// Verify pending_changes map exists and has entries
+	pendingChanges, ok := dataMap["pending_changes"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected pending_changes to be a map, got %T", dataMap["pending_changes"])
+	}
+
+	// Table-level change: keyed by "schema_name.table_name"
+	tableChange, ok := pendingChanges["public.invoices"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected pending change for 'public.invoices', got %v", pendingChanges)
+	}
+	if tableChange["change_id"] != changeID1.String() {
+		t.Errorf("expected change_id %s, got %v", changeID1.String(), tableChange["change_id"])
+	}
+	if tableChange["change_type"] != models.ChangeTypeNewTable {
+		t.Errorf("expected change_type 'new_table', got %v", tableChange["change_type"])
+	}
+	if tableChange["status"] != models.ChangeStatusPending {
+		t.Errorf("expected status 'pending', got %v", tableChange["status"])
+	}
+
+	// Column-level change: keyed by "schema_name.table_name.column_name"
+	colChange, ok := pendingChanges["public.invoices.amount"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected pending change for 'public.invoices.amount', got %v", pendingChanges)
+	}
+	if colChange["change_id"] != changeID2.String() {
+		t.Errorf("expected change_id %s, got %v", changeID2.String(), colChange["change_id"])
+	}
+	if colChange["change_type"] != models.ChangeTypeNewColumn {
+		t.Errorf("expected change_type 'new_column', got %v", colChange["change_type"])
+	}
+}
+
+func TestSchemaHandler_GetSchema_NoPendingChanges(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	service := &mockSchemaService{
+		schema: &models.DatasourceSchema{
+			ProjectID:    projectID,
+			DatasourceID: datasourceID,
+			Tables:       []*models.DatasourceTable{},
+		},
+	}
+	// No pending changes — change detection service returns empty list
+	changeDetectionSvc := &mockSchemaChangeDetectionService{}
+	handler := NewSchemaHandler(service, changeDetectionSvc, zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema", nil)
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("dsid", datasourceID.String())
+
+	rec := httptest.NewRecorder()
+	handler.GetSchema(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	var resp ApiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	dataMap := resp.Data.(map[string]any)
+	pendingChanges, ok := dataMap["pending_changes"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected pending_changes to be a map, got %T", dataMap["pending_changes"])
+	}
+	if len(pendingChanges) != 0 {
+		t.Errorf("expected empty pending_changes map, got %d entries", len(pendingChanges))
+	}
+}
+
+// --- Task 2: SaveSelections resolves pending changes ---
+
+func TestSchemaHandler_SaveSelections_ResolvesPendingChanges(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	tableID := uuid.New()
+	columnID := uuid.New()
+
+	service := &mockSchemaService{
+		schema: &models.DatasourceSchema{
+			ProjectID:    projectID,
+			DatasourceID: datasourceID,
+			Tables: []*models.DatasourceTable{
+				{
+					ID:         tableID,
+					SchemaName: "public",
+					TableName:  "invoices",
+					IsSelected: true,
+					Columns: []*models.DatasourceColumn{
+						{ID: columnID, ColumnName: "amount", DataType: "numeric", IsSelected: true},
+					},
+				},
+			},
+		},
+	}
+	changeDetectionSvc := &mockSchemaChangeDetectionService{
+		resolvedResult: &services.ResolvedChangesResult{
+			ApprovedCount: 2,
+			RejectedCount: 1,
+		},
+	}
+	handler := NewSchemaHandler(service, changeDetectionSvc, zap.NewNop())
+
+	body := fmt.Sprintf(`{"table_selections": {"%s": true}, "column_selections": {"%s": ["%s"]}}`,
+		tableID.String(), tableID.String(), columnID.String())
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/selections", bytes.NewBufferString(body))
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("dsid", datasourceID.String())
+
+	rec := httptest.NewRecorder()
+	handler.SaveSelections(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp ApiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Error("expected success to be true")
+	}
+
+	dataMap, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be a map, got %T", resp.Data)
+	}
+
+	if dataMap["approved_count"] != float64(2) {
+		t.Errorf("expected approved_count 2, got %v", dataMap["approved_count"])
+	}
+	if dataMap["rejected_count"] != float64(1) {
+		t.Errorf("expected rejected_count 1, got %v", dataMap["rejected_count"])
+	}
+}
+
+func TestSchemaHandler_SaveSelections_NoPendingChanges_BackwardCompatible(t *testing.T) {
+	service := &mockSchemaService{
+		schema: &models.DatasourceSchema{
+			ProjectID:    uuid.New(),
+			DatasourceID: uuid.New(),
+			Tables:       []*models.DatasourceTable{},
+		},
+	}
+	// No pending changes to resolve
+	changeDetectionSvc := &mockSchemaChangeDetectionService{}
+	handler := NewSchemaHandler(service, changeDetectionSvc, zap.NewNop())
+
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	tableID := uuid.New()
+
+	body := fmt.Sprintf(`{"table_selections": {"%s": true}, "column_selections": {}}`, tableID.String())
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/selections", bytes.NewBufferString(body))
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("dsid", datasourceID.String())
+
+	rec := httptest.NewRecorder()
+	handler.SaveSelections(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp ApiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Error("expected success to be true")
+	}
+
+	dataMap, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be a map, got %T", resp.Data)
+	}
+
+	// Should return zero counts when no pending changes
+	if dataMap["approved_count"] != float64(0) {
+		t.Errorf("expected approved_count 0, got %v", dataMap["approved_count"])
+	}
+	if dataMap["rejected_count"] != float64(0) {
+		t.Errorf("expected rejected_count 0, got %v", dataMap["rejected_count"])
+	}
+}
+
+func TestSchemaHandler_RejectPendingChanges_RejectsAll(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	changeDetectionSvc := &mockSchemaChangeDetectionService{
+		rejectAllResult: &services.RejectAllResult{RejectedCount: 3},
+	}
+	handler := NewSchemaHandler(&mockSchemaService{}, changeDetectionSvc, zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/reject-pending-changes", nil)
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("dsid", datasourceID.String())
+
+	rec := httptest.NewRecorder()
+	handler.RejectPendingChanges(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp ApiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Error("expected success to be true")
+	}
+
+	dataMap, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be a map, got %T", resp.Data)
+	}
+
+	if dataMap["rejected_count"] != float64(3) {
+		t.Errorf("expected rejected_count 3, got %v", dataMap["rejected_count"])
+	}
+}
+
+func TestSchemaHandler_RejectPendingChanges_NoPending(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	changeDetectionSvc := &mockSchemaChangeDetectionService{
+		rejectAllResult: &services.RejectAllResult{RejectedCount: 0},
+	}
+	handler := NewSchemaHandler(&mockSchemaService{}, changeDetectionSvc, zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/reject-pending-changes", nil)
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("dsid", datasourceID.String())
+
+	rec := httptest.NewRecorder()
+	handler.RejectPendingChanges(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp ApiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	dataMap, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be a map, got %T", resp.Data)
+	}
+
+	if dataMap["rejected_count"] != float64(0) {
+		t.Errorf("expected rejected_count 0, got %v", dataMap["rejected_count"])
 	}
 }

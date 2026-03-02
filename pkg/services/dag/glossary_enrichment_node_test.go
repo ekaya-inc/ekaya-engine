@@ -15,12 +15,12 @@ import (
 
 // mockGlossaryEnrichmentMethods implements GlossaryEnrichmentMethods for testing.
 type mockGlossaryEnrichmentMethods struct {
-	enrichFunc func(ctx context.Context, projectID, ontologyID uuid.UUID) error
+	enrichFunc func(ctx context.Context, projectID uuid.UUID) error
 }
 
-func (m *mockGlossaryEnrichmentMethods) EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error {
+func (m *mockGlossaryEnrichmentMethods) EnrichGlossaryTerms(ctx context.Context, projectID uuid.UUID) error {
 	if m.enrichFunc != nil {
-		return m.enrichFunc(ctx, projectID, ontologyID)
+		return m.enrichFunc(ctx, projectID)
 	}
 	return nil
 }
@@ -148,16 +148,14 @@ func (m *mockGlossaryEnrichmentDAGRepo) GetNextPendingNode(ctx context.Context, 
 func TestGlossaryEnrichmentNode_Execute_Success(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	nodeID := uuid.New()
 
 	// Track progress reports
 	var progressReports []string
 
 	mockGlossary := &mockGlossaryEnrichmentMethods{
-		enrichFunc: func(ctx context.Context, pID, oID uuid.UUID) error {
+		enrichFunc: func(ctx context.Context, pID uuid.UUID) error {
 			assert.Equal(t, projectID, pID)
-			assert.Equal(t, ontologyID, oID)
 			return nil
 		},
 	}
@@ -174,8 +172,7 @@ func TestGlossaryEnrichmentNode_Execute_Success(t *testing.T) {
 	node.SetCurrentNodeID(nodeID)
 
 	dag := &models.OntologyDAG{
-		ProjectID:  projectID,
-		OntologyID: &ontologyID,
+		ProjectID: projectID,
 	}
 
 	err := node.Execute(ctx, dag)
@@ -187,30 +184,10 @@ func TestGlossaryEnrichmentNode_Execute_Success(t *testing.T) {
 	assert.Equal(t, "Glossary enrichment complete", progressReports[1])
 }
 
-func TestGlossaryEnrichmentNode_Execute_NoOntologyID(t *testing.T) {
-	ctx := context.Background()
-	projectID := uuid.New()
-
-	mockGlossary := &mockGlossaryEnrichmentMethods{}
-	mockRepo := &mockGlossaryEnrichmentDAGRepo{}
-
-	node := NewGlossaryEnrichmentNode(mockRepo, mockGlossary, zap.NewNop())
-
-	dag := &models.OntologyDAG{
-		ProjectID:  projectID,
-		OntologyID: nil, // Missing ontology ID
-	}
-
-	err := node.Execute(ctx, dag)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "ontology ID is required")
-}
-
 func TestGlossaryEnrichmentNode_Execute_EnrichmentError(t *testing.T) {
 	// Enrichment errors should not fail the execution - should log warning and continue
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	nodeID := uuid.New()
 
 	expectedErr := errors.New("enrichment failed")
@@ -219,7 +196,7 @@ func TestGlossaryEnrichmentNode_Execute_EnrichmentError(t *testing.T) {
 	var progressReports []string
 
 	mockGlossary := &mockGlossaryEnrichmentMethods{
-		enrichFunc: func(ctx context.Context, pID, oID uuid.UUID) error {
+		enrichFunc: func(ctx context.Context, pID uuid.UUID) error {
 			return expectedErr
 		},
 	}
@@ -236,8 +213,7 @@ func TestGlossaryEnrichmentNode_Execute_EnrichmentError(t *testing.T) {
 	node.SetCurrentNodeID(nodeID)
 
 	dag := &models.OntologyDAG{
-		ProjectID:  projectID,
-		OntologyID: &ontologyID,
+		ProjectID: projectID,
 	}
 
 	// Should succeed despite enrichment error (warning logged)
@@ -254,11 +230,10 @@ func TestGlossaryEnrichmentNode_Execute_ProgressReportingError(t *testing.T) {
 	// Progress reporting errors should not fail the execution
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	nodeID := uuid.New()
 
 	mockGlossary := &mockGlossaryEnrichmentMethods{
-		enrichFunc: func(ctx context.Context, pID, oID uuid.UUID) error {
+		enrichFunc: func(ctx context.Context, pID uuid.UUID) error {
 			return nil
 		},
 	}
@@ -273,8 +248,7 @@ func TestGlossaryEnrichmentNode_Execute_ProgressReportingError(t *testing.T) {
 	node.SetCurrentNodeID(nodeID)
 
 	dag := &models.OntologyDAG{
-		ProjectID:  projectID,
-		OntologyID: &ontologyID,
+		ProjectID: projectID,
 	}
 
 	// Should succeed despite progress reporting errors

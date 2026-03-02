@@ -144,10 +144,9 @@ func TestBaseNode_Name(t *testing.T) {
 	assert.Equal(t, models.DAGNodeColumnEnrichment, node.Name())
 }
 
-func TestNewExecutionContext_WithOntologyID(t *testing.T) {
+func TestNewExecutionContext(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
-	ontologyID := uuid.New()
 	dagID := uuid.New()
 	nodeID := uuid.New()
 
@@ -155,7 +154,6 @@ func TestNewExecutionContext_WithOntologyID(t *testing.T) {
 		ID:           dagID,
 		ProjectID:    projectID,
 		DatasourceID: datasourceID,
-		OntologyID:   &ontologyID,
 	}
 
 	dagNode := &models.DAGNode{
@@ -168,31 +166,4 @@ func TestNewExecutionContext_WithOntologyID(t *testing.T) {
 	assert.Equal(t, nodeID, execCtx.NodeID)
 	assert.Equal(t, projectID, execCtx.ProjectID)
 	assert.Equal(t, datasourceID, execCtx.DatasourceID)
-	assert.Equal(t, ontologyID, execCtx.OntologyID)
-}
-
-func TestNewExecutionContext_NilOntologyID(t *testing.T) {
-	projectID := uuid.New()
-	datasourceID := uuid.New()
-	dagID := uuid.New()
-	nodeID := uuid.New()
-
-	dag := &models.OntologyDAG{
-		ID:           dagID,
-		ProjectID:    projectID,
-		DatasourceID: datasourceID,
-		OntologyID:   nil, // No ontology yet
-	}
-
-	dagNode := &models.DAGNode{
-		ID: nodeID,
-	}
-
-	execCtx := NewExecutionContext(dag, dagNode)
-
-	assert.Equal(t, dag, execCtx.DAG)
-	assert.Equal(t, nodeID, execCtx.NodeID)
-	assert.Equal(t, projectID, execCtx.ProjectID)
-	assert.Equal(t, datasourceID, execCtx.DatasourceID)
-	assert.Equal(t, uuid.Nil, execCtx.OntologyID, "OntologyID should be zero value when dag.OntologyID is nil")
 }

@@ -68,7 +68,7 @@ func (tc *glossaryTestContext) ensureTestProject() {
 	}
 }
 
-// cleanup removes test glossary terms and ontologies.
+// cleanup removes test glossary terms.
 func (tc *glossaryTestContext) cleanup() {
 	tc.t.Helper()
 	ctx := context.Background()
@@ -78,10 +78,7 @@ func (tc *glossaryTestContext) cleanup() {
 	}
 	defer scope.Close()
 
-	// Delete glossary terms first (depends on ontologies)
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_business_glossary WHERE project_id = $1", tc.projectID)
-	// Delete test ontologies
-	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontologies WHERE project_id = $1", tc.projectID)
 }
 
 // createTestContext returns a context with tenant scope and manual provenance.
@@ -121,53 +118,6 @@ func (tc *glossaryTestContext) createTestTerm(ctx context.Context, termName, def
 		tc.t.Fatalf("failed to create test term: %v", err)
 	}
 	return term
-}
-
-// Fixed ontology IDs for testing unique constraint behavior
-var (
-	testOntologyID1 = uuid.MustParse("00000000-0000-0000-0000-000000000101")
-	testOntologyID2 = uuid.MustParse("00000000-0000-0000-0000-000000000102")
-)
-
-// ensureTestOntology creates a test ontology if it doesn't exist and returns its ID.
-func (tc *glossaryTestContext) ensureTestOntology(ctx context.Context) uuid.UUID {
-	tc.t.Helper()
-	scope, ok := database.GetTenantScope(ctx)
-	if !ok {
-		tc.t.Fatal("no tenant scope in context")
-	}
-
-	now := time.Now()
-	_, err := scope.Conn.Exec(ctx, `
-		INSERT INTO engine_ontologies (id, project_id, version, is_active, created_at, updated_at)
-		VALUES ($1, $2, 1, true, $3, $3)
-		ON CONFLICT (id) DO NOTHING
-	`, testOntologyID1, tc.projectID, now)
-	if err != nil {
-		tc.t.Fatalf("failed to ensure test ontology: %v", err)
-	}
-	return testOntologyID1
-}
-
-// ensureTestOntology2 creates a second test ontology for testing different ontology scenarios.
-// Uses version 2 to avoid unique constraint conflict with ensureTestOntology.
-func (tc *glossaryTestContext) ensureTestOntology2(ctx context.Context) uuid.UUID {
-	tc.t.Helper()
-	scope, ok := database.GetTenantScope(ctx)
-	if !ok {
-		tc.t.Fatal("no tenant scope in context")
-	}
-
-	now := time.Now()
-	_, err := scope.Conn.Exec(ctx, `
-		INSERT INTO engine_ontologies (id, project_id, version, is_active, created_at, updated_at)
-		VALUES ($1, $2, 2, false, $3, $3)
-		ON CONFLICT (id) DO NOTHING
-	`, testOntologyID2, tc.projectID, now)
-	if err != nil {
-		tc.t.Fatalf("failed to ensure test ontology 2: %v", err)
-	}
-	return testOntologyID2
 }
 
 // ============================================================================
@@ -289,20 +239,16 @@ func TestGlossaryRepository_Create_MinimalFields(t *testing.T) {
 	}
 }
 
-func TestGlossaryRepository_Create_DuplicateTerm_SameOntology(t *testing.T) {
+func TestGlossaryRepository_Create_DuplicateTerm_SameProject(t *testing.T) {
 	tc := setupGlossaryTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
 
-	// Create an ontology for testing the unique constraint
-	ontologyID := tc.ensureTestOntology(ctx)
-
-	// Create first term with ontology_id
+	// Create first term
 	term1 := &models.BusinessGlossaryTerm{
 		ProjectID:   tc.projectID,
-		OntologyID:  &ontologyID,
 		Term:        "GMV",
 		Definition:  "Gross Merchandise Value",
 		DefiningSQL: "SELECT 1",
@@ -313,10 +259,9 @@ func TestGlossaryRepository_Create_DuplicateTerm_SameOntology(t *testing.T) {
 		t.Fatalf("failed to create first term: %v", err)
 	}
 
-	// Attempt to create duplicate (same project_id, ontology_id, term)
+	// Attempt to create duplicate (same project_id, term)
 	term2 := &models.BusinessGlossaryTerm{
 		ProjectID:   tc.projectID,
-		OntologyID:  &ontologyID,
 		Term:        "GMV",
 		Definition:  "Different definition",
 		DefiningSQL: "SELECT 1",
@@ -325,50 +270,7 @@ func TestGlossaryRepository_Create_DuplicateTerm_SameOntology(t *testing.T) {
 
 	err = tc.repo.Create(ctx, term2)
 	if err == nil {
-		t.Error("expected error for duplicate term with same ontology_id")
-	}
-}
-
-func TestGlossaryRepository_Create_DuplicateTerm_DifferentOntology(t *testing.T) {
-	tc := setupGlossaryTest(t)
-	tc.cleanup()
-
-	// Use inference provenance for this test
-	ctx, cleanup := tc.createTestContextWithSource(models.SourceInferred)
-	defer cleanup()
-
-	// Create two ontologies for testing
-	ontologyID1 := tc.ensureTestOntology(ctx)
-	ontologyID2 := tc.ensureTestOntology2(ctx)
-
-	// Create first term with ontology_id1
-	term1 := &models.BusinessGlossaryTerm{
-		ProjectID:   tc.projectID,
-		OntologyID:  &ontologyID1,
-		Term:        "Revenue",
-		Definition:  "First ontology revenue",
-		DefiningSQL: "SELECT 1",
-		// Source is set from provenance context
-	}
-	err := tc.repo.Create(ctx, term1)
-	if err != nil {
-		t.Fatalf("failed to create first term: %v", err)
-	}
-
-	// Create same term with different ontology_id - should succeed
-	// This supports ontology refresh where new ontology can have same terms
-	term2 := &models.BusinessGlossaryTerm{
-		ProjectID:   tc.projectID,
-		OntologyID:  &ontologyID2,
-		Term:        "Revenue",
-		Definition:  "Second ontology revenue",
-		DefiningSQL: "SELECT 1",
-		// Source is set from provenance context
-	}
-
-	err = tc.repo.Create(ctx, term2)
-	if err != nil {
-		t.Errorf("expected success for duplicate term with different ontology_id, got: %v", err)
+		t.Error("expected error for duplicate term in same project")
 	}
 }
 

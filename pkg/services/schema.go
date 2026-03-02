@@ -78,7 +78,6 @@ type SchemaService interface {
 
 type schemaService struct {
 	schemaRepo         repositories.SchemaRepository
-	ontologyRepo       repositories.OntologyRepository
 	columnMetadataRepo repositories.ColumnMetadataRepository
 	datasourceSvc      DatasourceService
 	adapterFactory     datasource.DatasourceAdapterFactory
@@ -88,7 +87,6 @@ type schemaService struct {
 // NewSchemaService creates a new schema service with dependencies.
 func NewSchemaService(
 	schemaRepo repositories.SchemaRepository,
-	ontologyRepo repositories.OntologyRepository,
 	columnMetadataRepo repositories.ColumnMetadataRepository,
 	datasourceSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
@@ -96,7 +94,6 @@ func NewSchemaService(
 ) SchemaService {
 	return &schemaService{
 		schemaRepo:         schemaRepo,
-		ontologyRepo:       ontologyRepo,
 		columnMetadataRepo: columnMetadataRepo,
 		datasourceSvc:      datasourceSvc,
 		adapterFactory:     adapterFactory,
@@ -211,8 +208,13 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 		result.TablesUpserted++
 
 		// Discover and sync columns for this table
-		// Auto-select columns only if the table is auto-selected
+		// Auto-select new columns when autoSelect is true:
+		// - New tables: select columns if the table itself was auto-selected
+		// - Existing tables: select new columns (table becomes partially selected)
 		autoSelectColumns := tableAutoSelect
+		if !isNewTable && autoSelect {
+			autoSelectColumns = true
+		}
 		colResult, err := s.syncColumnsForTable(ctx, discoverer, projectID, table, autoSelectColumns)
 		if err != nil {
 			return nil, fmt.Errorf("failed to sync columns for table %s.%s: %w", dt.SchemaName, dt.TableName, err)
@@ -222,6 +224,11 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 		result.NewColumns = append(result.NewColumns, colResult.NewColumns...)
 		result.RemovedColumns = append(result.RemovedColumns, colResult.RemovedColumns...)
 		result.ModifiedColumns = append(result.ModifiedColumns, colResult.ModifiedColumns...)
+
+		// Track if auto-selection was applied (new tables selected or new columns on existing tables)
+		if autoSelect && (tableAutoSelect || (!isNewTable && len(colResult.NewColumns) > 0)) {
+			result.AutoSelectApplied = true
+		}
 	}
 
 	// Identify removed tables (existed before but not discovered now)
@@ -999,3 +1006,38 @@ func (s *schemaService) GetColumnMetadataByProject(ctx context.Context, projectI
 
 // Ensure schemaService implements SchemaService at compile time.
 var _ SchemaService = (*schemaService)(nil)
+
+// RefreshSchemaWithChangeDetection performs a schema refresh and then runs change detection.
+// If change detection fails, the refresh result is still returned (change detection is non-fatal).
+// changeDetectionSvc may be nil, in which case change detection is skipped.
+func RefreshSchemaWithChangeDetection(
+	ctx context.Context,
+	schemaSvc SchemaService,
+	changeDetectionSvc SchemaChangeDetectionService,
+	logger *zap.Logger,
+	projectID, datasourceID uuid.UUID,
+	autoSelect bool,
+) (*models.RefreshResultWithChanges, error) {
+	result, err := schemaSvc.RefreshDatasourceSchema(ctx, projectID, datasourceID, autoSelect)
+	if err != nil {
+		return nil, err
+	}
+
+	var pendingChangesCreated int
+	if changeDetectionSvc != nil {
+		changes, detectErr := changeDetectionSvc.DetectChanges(ctx, projectID, result)
+		if detectErr != nil {
+			logger.Warn("Change detection failed after schema refresh",
+				zap.String("project_id", projectID.String()),
+				zap.Error(detectErr),
+			)
+		} else {
+			pendingChangesCreated = len(changes)
+		}
+	}
+
+	return &models.RefreshResultWithChanges{
+		RefreshResult:         result,
+		PendingChangesCreated: pendingChangesCreated,
+	}, nil
+}

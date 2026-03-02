@@ -18,11 +18,10 @@ type OntologyQuestionInput struct {
 }
 
 // ConvertQuestionInputs converts LLM question inputs to OntologyQuestion models.
-// The projectID and ontologyID are required; workflowID is optional (can be nil).
+// The projectID is required; workflowID is optional (can be nil).
 func ConvertQuestionInputs(
 	inputs []OntologyQuestionInput,
 	projectID uuid.UUID,
-	ontologyID uuid.UUID,
 	workflowID *uuid.UUID,
 ) []*models.OntologyQuestion {
 	if len(inputs) == 0 {
@@ -52,7 +51,6 @@ func ConvertQuestionInputs(
 
 		q := &models.OntologyQuestion{
 			ProjectID:  projectID,
-			OntologyID: ontologyID,
 			WorkflowID: workflowID,
 			Text:       input.Question,
 			Priority:   priority,

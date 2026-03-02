@@ -503,6 +503,208 @@ func TestProjectRepository_Update_IndustryType(t *testing.T) {
 	}
 }
 
+// TestProjectRepository_UpdateDomainSummary_Success tests updating domain summary on a project.
+func TestProjectRepository_UpdateDomainSummary_Success(t *testing.T) {
+	tc := setupProjectTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create a project first
+	tc.createTestProject(ctx, "Domain Summary Test")
+
+	// Update domain summary
+	summary := &models.DomainSummary{
+		Description: "A video streaming platform",
+		Domains:     []string{"video_streaming", "analytics"},
+	}
+	err := tc.repo.UpdateDomainSummary(ctx, tc.projectID, summary)
+	if err != nil {
+		t.Fatalf("UpdateDomainSummary failed: %v", err)
+	}
+
+	// Retrieve and verify
+	retrieved, err := tc.repo.Get(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	if retrieved.DomainSummary == nil {
+		t.Fatal("expected DomainSummary to be set, got nil")
+	}
+	if retrieved.DomainSummary.Description != "A video streaming platform" {
+		t.Errorf("expected description %q, got %q", "A video streaming platform", retrieved.DomainSummary.Description)
+	}
+	if len(retrieved.DomainSummary.Domains) != 2 {
+		t.Errorf("expected 2 domains, got %d", len(retrieved.DomainSummary.Domains))
+	}
+}
+
+// TestProjectRepository_UpdateDomainSummary_WithConventions tests domain summary with nested conventions.
+func TestProjectRepository_UpdateDomainSummary_WithConventions(t *testing.T) {
+	tc := setupProjectTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	tc.createTestProject(ctx, "Conventions Test")
+
+	summary := &models.DomainSummary{
+		Description: "A marketplace platform",
+		Domains:     []string{"marketplace"},
+		Conventions: &models.ProjectConventions{
+			SoftDelete: &models.SoftDeleteConvention{
+				Enabled:    true,
+				Column:     "deleted_at",
+				ColumnType: "timestamp",
+				Filter:     "deleted_at IS NULL",
+				Coverage:   0.75,
+			},
+		},
+		RelationshipGraph: []models.RelationshipEdge{
+			{From: "users", To: "orders", Label: "places", Cardinality: "1:N"},
+		},
+	}
+	err := tc.repo.UpdateDomainSummary(ctx, tc.projectID, summary)
+	if err != nil {
+		t.Fatalf("UpdateDomainSummary failed: %v", err)
+	}
+
+	retrieved, err := tc.repo.Get(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	if retrieved.DomainSummary == nil {
+		t.Fatal("expected DomainSummary to be set")
+	}
+	if retrieved.DomainSummary.Conventions == nil {
+		t.Fatal("expected Conventions to be set")
+	}
+	if !retrieved.DomainSummary.Conventions.SoftDelete.Enabled {
+		t.Error("expected SoftDelete.Enabled to be true")
+	}
+	if len(retrieved.DomainSummary.RelationshipGraph) != 1 {
+		t.Errorf("expected 1 relationship edge, got %d", len(retrieved.DomainSummary.RelationshipGraph))
+	}
+	if retrieved.DomainSummary.RelationshipGraph[0].From != "users" {
+		t.Errorf("expected edge from 'users', got %q", retrieved.DomainSummary.RelationshipGraph[0].From)
+	}
+}
+
+// TestProjectRepository_UpdateDomainSummary_NilClearsSummary tests that nil clears domain summary.
+func TestProjectRepository_UpdateDomainSummary_NilClearsSummary(t *testing.T) {
+	tc := setupProjectTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	tc.createTestProject(ctx, "Clear Summary Test")
+
+	// Set a domain summary first
+	summary := &models.DomainSummary{
+		Description: "To be cleared",
+		Domains:     []string{"test"},
+	}
+	err := tc.repo.UpdateDomainSummary(ctx, tc.projectID, summary)
+	if err != nil {
+		t.Fatalf("UpdateDomainSummary (set) failed: %v", err)
+	}
+
+	// Clear it by setting nil
+	err = tc.repo.UpdateDomainSummary(ctx, tc.projectID, nil)
+	if err != nil {
+		t.Fatalf("UpdateDomainSummary (clear) failed: %v", err)
+	}
+
+	retrieved, err := tc.repo.Get(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	if retrieved.DomainSummary != nil {
+		t.Errorf("expected DomainSummary to be nil after clearing, got %+v", retrieved.DomainSummary)
+	}
+}
+
+// TestProjectRepository_UpdateDomainSummary_NotFound tests UpdateDomainSummary returns ErrNotFound for missing project.
+func TestProjectRepository_UpdateDomainSummary_NotFound(t *testing.T) {
+	tc := setupProjectTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	nonExistentID := uuid.MustParse("00000000-0000-0000-0000-999999999997")
+	summary := &models.DomainSummary{Description: "test"}
+	err := tc.repo.UpdateDomainSummary(ctx, nonExistentID, summary)
+	if err != apperrors.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// TestProjectRepository_Get_NilDomainSummary tests that Get returns nil DomainSummary when not set.
+func TestProjectRepository_Get_NilDomainSummary(t *testing.T) {
+	tc := setupProjectTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create project without DomainSummary
+	tc.createTestProject(ctx, "Nil Domain Summary Test")
+
+	retrieved, err := tc.repo.Get(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	if retrieved.DomainSummary != nil {
+		t.Errorf("expected nil DomainSummary for new project, got %+v", retrieved.DomainSummary)
+	}
+}
+
+// TestProjectRepository_Create_WithDomainSummary tests creating a project with DomainSummary set.
+func TestProjectRepository_Create_WithDomainSummary(t *testing.T) {
+	tc := setupProjectTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	project := &models.Project{
+		ID:   tc.projectID,
+		Name: "Project With Summary",
+		Parameters: map[string]interface{}{
+			"tier": "premium",
+		},
+		DomainSummary: &models.DomainSummary{
+			Description: "Created with summary",
+			Domains:     []string{"finance"},
+		},
+	}
+
+	err := tc.repo.Create(ctx, project)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	retrieved, err := tc.repo.Get(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	if retrieved.DomainSummary == nil {
+		t.Fatal("expected DomainSummary to be set on created project")
+	}
+	if retrieved.DomainSummary.Description != "Created with summary" {
+		t.Errorf("expected description %q, got %q", "Created with summary", retrieved.DomainSummary.Description)
+	}
+}
+
 // TestProjectRepository_NoTenantScope tests that operations fail without tenant scope.
 func TestProjectRepository_NoTenantScope(t *testing.T) {
 	tc := setupProjectTest(t)

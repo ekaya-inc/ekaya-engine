@@ -19,41 +19,32 @@ import (
 // Mock Implementations for Finalization Tests
 // ============================================================================
 
-type mockOntologyRepoForFinalization struct {
-	activeOntology       *models.TieredOntology
+type mockProjectRepoForFinalization struct {
 	updatedDomainSummary *models.DomainSummary
-	getActiveErr         error
 	updateSummaryErr     error
 }
 
-func (m *mockOntologyRepoForFinalization) Create(ctx context.Context, ontology *models.TieredOntology) error {
+func (m *mockProjectRepoForFinalization) Create(ctx context.Context, project *models.Project) error {
 	return nil
 }
 
-func (m *mockOntologyRepoForFinalization) GetActive(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error) {
-	if m.getActiveErr != nil {
-		return nil, m.getActiveErr
-	}
-	return m.activeOntology, nil
+func (m *mockProjectRepoForFinalization) Get(ctx context.Context, id uuid.UUID) (*models.Project, error) {
+	return nil, nil
 }
 
-func (m *mockOntologyRepoForFinalization) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
+func (m *mockProjectRepoForFinalization) Update(ctx context.Context, project *models.Project) error {
+	return nil
+}
+
+func (m *mockProjectRepoForFinalization) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (m *mockProjectRepoForFinalization) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
 	if m.updateSummaryErr != nil {
 		return m.updateSummaryErr
 	}
 	m.updatedDomainSummary = summary
-	return nil
-}
-
-func (m *mockOntologyRepoForFinalization) UpdateColumnDetails(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error {
-	return nil
-}
-
-func (m *mockOntologyRepoForFinalization) GetNextVersion(ctx context.Context, projectID uuid.UUID) (int, error) {
-	return 1, nil
-}
-
-func (m *mockOntologyRepoForFinalization) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
 	return nil
 }
 
@@ -119,6 +110,12 @@ func (m *mockSchemaRepoForFinalization) ListColumnsByDatasource(ctx context.Cont
 }
 func (m *mockSchemaRepoForFinalization) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 0, nil
+}
+func (m *mockSchemaRepoForFinalization) GetTableCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return 0, nil
+}
+func (m *mockSchemaRepoForFinalization) GetSelectedTableNamesByProject(ctx context.Context, projectID uuid.UUID) ([]string, error) {
+	return nil, nil
 }
 func (m *mockSchemaRepoForFinalization) GetColumnByID(ctx context.Context, projectID, columnID uuid.UUID) (*models.SchemaColumn, error) {
 	return nil, nil
@@ -326,20 +323,13 @@ func noopTenantCtxForFinalization() TenantContextFunc {
 func TestOntologyFinalization_GeneratesDomainDescription(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{TableName: "users"},
 		{TableName: "orders"},
 	}
 
-	ontologyRepo := &mockOntologyRepoForFinalization{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
+	projectRepo := &mockProjectRepoForFinalization{}
 
 	schemaRepo := &mockSchemaRepoForFinalization{
 		tables:         tables,
@@ -355,7 +345,7 @@ func TestOntologyFinalization_GeneratesDomainDescription(t *testing.T) {
 	logger := zap.NewNop()
 
 	svc := NewOntologyFinalizationService(
-		ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{},
+		projectRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{},
 		&mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger,
 	)
 
@@ -363,22 +353,15 @@ func TestOntologyFinalization_GeneratesDomainDescription(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify domain summary was updated with LLM-generated description
-	require.NotNil(t, ontologyRepo.updatedDomainSummary)
-	assert.Equal(t, expectedDescription, ontologyRepo.updatedDomainSummary.Description)
+	require.NotNil(t, projectRepo.updatedDomainSummary)
+	assert.Equal(t, expectedDescription, projectRepo.updatedDomainSummary.Description)
 }
 
 func TestOntologyFinalization_SkipsIfNoTables(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
-	ontologyRepo := &mockOntologyRepoForFinalization{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
+	projectRepo := &mockProjectRepoForFinalization{}
 	schemaRepo := &mockSchemaRepoForFinalization{
 		tables:         []*models.SchemaTable{},
 		columnsByTable: map[string][]*models.SchemaColumn{},
@@ -388,7 +371,7 @@ func TestOntologyFinalization_SkipsIfNoTables(t *testing.T) {
 	logger := zap.NewNop()
 
 	svc := NewOntologyFinalizationService(
-		ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{},
+		projectRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{},
 		&mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger,
 	)
 
@@ -396,49 +379,43 @@ func TestOntologyFinalization_SkipsIfNoTables(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify no domain summary was updated (skipped)
-	assert.Nil(t, ontologyRepo.updatedDomainSummary)
+	assert.Nil(t, projectRepo.updatedDomainSummary)
 }
 
-func TestOntologyFinalization_SkipsIfNoActiveOntology(t *testing.T) {
+func TestOntologyFinalization_ListTablesError(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
 
-	ontologyRepo := &mockOntologyRepoForFinalization{
-		activeOntology: nil, // No active ontology
+	projectRepo := &mockProjectRepoForFinalization{}
+	schemaRepo := &mockSchemaRepoForFinalization{
+		listTablesErr: errors.New("database error"),
 	}
-	schemaRepo := &mockSchemaRepoForFinalization{}
 	llmFactory := &mockLLMFactoryForFinalization{}
 
 	logger := zap.NewNop()
 
 	svc := NewOntologyFinalizationService(
-		ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{},
+		projectRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{},
 		&mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger,
 	)
 
 	err := svc.Finalize(ctx, projectID)
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "list tables")
 
-	// Verify no domain summary was updated (skipped)
-	assert.Nil(t, ontologyRepo.updatedDomainSummary)
+	// Verify no domain summary was updated
+	assert.Nil(t, projectRepo.updatedDomainSummary)
 }
 
 func TestOntologyFinalization_LLMFailure(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{TableName: "users"},
 	}
 
-	ontologyRepo := &mockOntologyRepoForFinalization{
-		activeOntology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
+	projectRepo := &mockProjectRepoForFinalization{}
 	schemaRepo := &mockSchemaRepoForFinalization{
 		tables:         tables,
 		columnsByTable: map[string][]*models.SchemaColumn{},
@@ -452,7 +429,7 @@ func TestOntologyFinalization_LLMFailure(t *testing.T) {
 	logger := zap.NewNop()
 
 	svc := NewOntologyFinalizationService(
-		ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{},
+		projectRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{},
 		&mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger,
 	)
 
@@ -463,7 +440,7 @@ func TestOntologyFinalization_LLMFailure(t *testing.T) {
 	assert.Contains(t, err.Error(), "LLM unavailable")
 
 	// Verify domain summary was NOT updated
-	assert.Nil(t, ontologyRepo.updatedDomainSummary)
+	assert.Nil(t, projectRepo.updatedDomainSummary)
 }
 
 // ============================================================================
@@ -473,7 +450,6 @@ func TestOntologyFinalization_LLMFailure(t *testing.T) {
 func TestOntologyFinalization_DiscoversSoftDelete_Timestamp(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	// Two tables
 	tables := []*models.SchemaTable{
@@ -493,23 +469,21 @@ func TestOntologyFinalization_DiscoversSoftDelete_Timestamp(t *testing.T) {
 		},
 	}
 
-	ontologyRepo := &mockOntologyRepoForFinalization{
-		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
-	}
+	projectRepo := &mockProjectRepoForFinalization{}
 	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
+	svc := NewOntologyFinalizationService(projectRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
-	require.NotNil(t, ontologyRepo.updatedDomainSummary)
-	require.NotNil(t, ontologyRepo.updatedDomainSummary.Conventions)
-	require.NotNil(t, ontologyRepo.updatedDomainSummary.Conventions.SoftDelete)
+	require.NotNil(t, projectRepo.updatedDomainSummary)
+	require.NotNil(t, projectRepo.updatedDomainSummary.Conventions)
+	require.NotNil(t, projectRepo.updatedDomainSummary.Conventions.SoftDelete)
 
-	sd := ontologyRepo.updatedDomainSummary.Conventions.SoftDelete
+	sd := projectRepo.updatedDomainSummary.Conventions.SoftDelete
 	assert.True(t, sd.Enabled)
 	assert.Equal(t, "deleted_at", sd.Column)
 	assert.Equal(t, "timestamp", sd.ColumnType)
@@ -520,7 +494,6 @@ func TestOntologyFinalization_DiscoversSoftDelete_Timestamp(t *testing.T) {
 func TestOntologyFinalization_DiscoversSoftDelete_Boolean(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{TableName: "users"},
@@ -539,22 +512,20 @@ func TestOntologyFinalization_DiscoversSoftDelete_Boolean(t *testing.T) {
 		},
 	}
 
-	ontologyRepo := &mockOntologyRepoForFinalization{
-		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
-	}
+	projectRepo := &mockProjectRepoForFinalization{}
 	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
+	svc := NewOntologyFinalizationService(projectRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
-	require.NotNil(t, ontologyRepo.updatedDomainSummary.Conventions)
-	require.NotNil(t, ontologyRepo.updatedDomainSummary.Conventions.SoftDelete)
+	require.NotNil(t, projectRepo.updatedDomainSummary.Conventions)
+	require.NotNil(t, projectRepo.updatedDomainSummary.Conventions.SoftDelete)
 
-	sd := ontologyRepo.updatedDomainSummary.Conventions.SoftDelete
+	sd := projectRepo.updatedDomainSummary.Conventions.SoftDelete
 	assert.True(t, sd.Enabled)
 	assert.Equal(t, "is_deleted", sd.Column)
 	assert.Equal(t, "boolean", sd.ColumnType)
@@ -564,7 +535,6 @@ func TestOntologyFinalization_DiscoversSoftDelete_Boolean(t *testing.T) {
 func TestOntologyFinalization_DiscoversSoftDelete_Coverage(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	// 4 tables, only 1 has deleted_at (25% coverage - below threshold)
 	tables := []*models.SchemaTable{
@@ -581,29 +551,26 @@ func TestOntologyFinalization_DiscoversSoftDelete_Coverage(t *testing.T) {
 		"categories": {{ColumnName: "id", DataType: "uuid"}},
 	}
 
-	ontologyRepo := &mockOntologyRepoForFinalization{
-		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
-	}
+	projectRepo := &mockProjectRepoForFinalization{}
 	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
+	svc := NewOntologyFinalizationService(projectRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
 
 	// Should NOT report soft delete convention (below 50% threshold)
-	if ontologyRepo.updatedDomainSummary.Conventions != nil {
-		assert.Nil(t, ontologyRepo.updatedDomainSummary.Conventions.SoftDelete)
+	if projectRepo.updatedDomainSummary.Conventions != nil {
+		assert.Nil(t, projectRepo.updatedDomainSummary.Conventions.SoftDelete)
 	}
 }
 
 func TestOntologyFinalization_DiscoversCurrency_Cents(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{TableName: "transactions"},
@@ -619,22 +586,20 @@ func TestOntologyFinalization_DiscoversCurrency_Cents(t *testing.T) {
 		},
 	}
 
-	ontologyRepo := &mockOntologyRepoForFinalization{
-		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
-	}
+	projectRepo := &mockProjectRepoForFinalization{}
 	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
+	svc := NewOntologyFinalizationService(projectRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
-	require.NotNil(t, ontologyRepo.updatedDomainSummary.Conventions)
-	require.NotNil(t, ontologyRepo.updatedDomainSummary.Conventions.Currency)
+	require.NotNil(t, projectRepo.updatedDomainSummary.Conventions)
+	require.NotNil(t, projectRepo.updatedDomainSummary.Conventions.Currency)
 
-	cur := ontologyRepo.updatedDomainSummary.Conventions.Currency
+	cur := projectRepo.updatedDomainSummary.Conventions.Currency
 	assert.Equal(t, "USD", cur.DefaultCurrency)
 	assert.Equal(t, "cents", cur.Format)
 	assert.Equal(t, "divide_by_100", cur.Transform)
@@ -644,7 +609,6 @@ func TestOntologyFinalization_DiscoversCurrency_Cents(t *testing.T) {
 func TestOntologyFinalization_DiscoversCurrency_Dollars(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{TableName: "transactions"},
@@ -659,22 +623,20 @@ func TestOntologyFinalization_DiscoversCurrency_Dollars(t *testing.T) {
 		},
 	}
 
-	ontologyRepo := &mockOntologyRepoForFinalization{
-		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
-	}
+	projectRepo := &mockProjectRepoForFinalization{}
 	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
+	svc := NewOntologyFinalizationService(projectRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
-	require.NotNil(t, ontologyRepo.updatedDomainSummary.Conventions)
-	require.NotNil(t, ontologyRepo.updatedDomainSummary.Conventions.Currency)
+	require.NotNil(t, projectRepo.updatedDomainSummary.Conventions)
+	require.NotNil(t, projectRepo.updatedDomainSummary.Conventions.Currency)
 
-	cur := ontologyRepo.updatedDomainSummary.Conventions.Currency
+	cur := projectRepo.updatedDomainSummary.Conventions.Currency
 	assert.Equal(t, "dollars", cur.Format)
 	assert.Equal(t, "none", cur.Transform)
 }
@@ -682,7 +644,6 @@ func TestOntologyFinalization_DiscoversCurrency_Dollars(t *testing.T) {
 func TestOntologyFinalization_DiscoversAuditColumns_WithCoverage(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{TableName: "users"},
@@ -704,21 +665,19 @@ func TestOntologyFinalization_DiscoversAuditColumns_WithCoverage(t *testing.T) {
 		},
 	}
 
-	ontologyRepo := &mockOntologyRepoForFinalization{
-		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
-	}
+	projectRepo := &mockProjectRepoForFinalization{}
 	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
+	svc := NewOntologyFinalizationService(projectRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
-	require.NotNil(t, ontologyRepo.updatedDomainSummary.Conventions)
+	require.NotNil(t, projectRepo.updatedDomainSummary.Conventions)
 
-	audit := ontologyRepo.updatedDomainSummary.Conventions.AuditColumns
+	audit := projectRepo.updatedDomainSummary.Conventions.AuditColumns
 	require.Len(t, audit, 3) // created_at and updated_at (100% coverage), created_by is 50% (meets >= 0.5 threshold)
 
 	// Verify created_at and updated_at are included with 100% coverage
@@ -744,7 +703,6 @@ func TestOntologyFinalization_DiscoversAuditColumns_WithCoverage(t *testing.T) {
 func TestOntologyFinalization_NoConventions(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{TableName: "users"},
@@ -759,21 +717,19 @@ func TestOntologyFinalization_NoConventions(t *testing.T) {
 		},
 	}
 
-	ontologyRepo := &mockOntologyRepoForFinalization{
-		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
-	}
+	projectRepo := &mockProjectRepoForFinalization{}
 	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
+	svc := NewOntologyFinalizationService(projectRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
 
 	// Conventions should be nil when nothing detected
-	assert.Nil(t, ontologyRepo.updatedDomainSummary.Conventions)
+	assert.Nil(t, projectRepo.updatedDomainSummary.Conventions)
 }
 
 // ============================================================================
@@ -783,7 +739,6 @@ func TestOntologyFinalization_NoConventions(t *testing.T) {
 func TestOntologyFinalization_ExtractsColumnFeatureInsights_SoftDelete(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{TableName: "users"},
@@ -828,24 +783,22 @@ func TestOntologyFinalization_ExtractsColumnFeatureInsights_SoftDelete(t *testin
 		},
 	}
 
-	ontologyRepo := &mockOntologyRepoForFinalization{
-		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
-	}
+	projectRepo := &mockProjectRepoForFinalization{}
 	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
 	colMetaRepo := &mockColumnMetadataRepoForFinalization{metadataByColumnID: metadataByColumnID}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, colMetaRepo, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
+	svc := NewOntologyFinalizationService(projectRepo, schemaRepo, colMetaRepo, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
-	require.NotNil(t, ontologyRepo.updatedDomainSummary)
-	require.NotNil(t, ontologyRepo.updatedDomainSummary.Conventions)
-	require.NotNil(t, ontologyRepo.updatedDomainSummary.Conventions.SoftDelete)
+	require.NotNil(t, projectRepo.updatedDomainSummary)
+	require.NotNil(t, projectRepo.updatedDomainSummary.Conventions)
+	require.NotNil(t, projectRepo.updatedDomainSummary.Conventions.SoftDelete)
 
-	sd := ontologyRepo.updatedDomainSummary.Conventions.SoftDelete
+	sd := projectRepo.updatedDomainSummary.Conventions.SoftDelete
 	assert.True(t, sd.Enabled)
 	assert.Equal(t, "deleted_at", sd.Column)
 	assert.Equal(t, "timestamp", sd.ColumnType)
@@ -856,7 +809,6 @@ func TestOntologyFinalization_ExtractsColumnFeatureInsights_SoftDelete(t *testin
 func TestOntologyFinalization_ExtractsColumnFeatureInsights_AuditColumns(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{TableName: "users"},
@@ -923,24 +875,22 @@ func TestOntologyFinalization_ExtractsColumnFeatureInsights_AuditColumns(t *test
 		},
 	}
 
-	ontologyRepo := &mockOntologyRepoForFinalization{
-		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
-	}
+	projectRepo := &mockProjectRepoForFinalization{}
 	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
 	colMetaRepo := &mockColumnMetadataRepoForFinalization{metadataByColumnID: metadataByColumnID}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, colMetaRepo, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
+	svc := NewOntologyFinalizationService(projectRepo, schemaRepo, colMetaRepo, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
-	require.NotNil(t, ontologyRepo.updatedDomainSummary)
-	require.NotNil(t, ontologyRepo.updatedDomainSummary.Conventions)
+	require.NotNil(t, projectRepo.updatedDomainSummary)
+	require.NotNil(t, projectRepo.updatedDomainSummary.Conventions)
 
 	// Audit columns should be discovered from ColumnFeatures
-	audit := ontologyRepo.updatedDomainSummary.Conventions.AuditColumns
+	audit := projectRepo.updatedDomainSummary.Conventions.AuditColumns
 	require.Len(t, audit, 2) // created_at and updated_at
 
 	var createdAt, updatedAt *models.AuditColumnInfo
@@ -961,7 +911,6 @@ func TestOntologyFinalization_ExtractsColumnFeatureInsights_AuditColumns(t *test
 func TestOntologyFinalization_FallsBackToPatternDetection_WhenNoColumnFeatures(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 
 	tables := []*models.SchemaTable{
 		{TableName: "users"},
@@ -982,27 +931,25 @@ func TestOntologyFinalization_FallsBackToPatternDetection_WhenNoColumnFeatures(t
 		},
 	}
 
-	ontologyRepo := &mockOntologyRepoForFinalization{
-		activeOntology: &models.TieredOntology{ID: ontologyID, ProjectID: projectID, IsActive: true},
-	}
+	projectRepo := &mockProjectRepoForFinalization{}
 	schemaRepo := &mockSchemaRepoForFinalization{tables: tables, columnsByTable: columnsByTable}
 	llmClient := &mockLLMClient{responseContent: `{"description": "Test system."}`}
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
+	svc := NewOntologyFinalizationService(projectRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{}, &mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
 
-	require.NotNil(t, ontologyRepo.updatedDomainSummary)
-	require.NotNil(t, ontologyRepo.updatedDomainSummary.Conventions)
+	require.NotNil(t, projectRepo.updatedDomainSummary)
+	require.NotNil(t, projectRepo.updatedDomainSummary.Conventions)
 
 	// Should still detect soft-delete via pattern matching fallback
-	require.NotNil(t, ontologyRepo.updatedDomainSummary.Conventions.SoftDelete)
-	assert.Equal(t, "deleted_at", ontologyRepo.updatedDomainSummary.Conventions.SoftDelete.Column)
+	require.NotNil(t, projectRepo.updatedDomainSummary.Conventions.SoftDelete)
+	assert.Equal(t, "deleted_at", projectRepo.updatedDomainSummary.Conventions.SoftDelete.Column)
 
 	// Should still detect audit columns via pattern matching fallback
 	// Both created_at and deleted_at are in the auditColumnNames list
-	require.Len(t, ontologyRepo.updatedDomainSummary.Conventions.AuditColumns, 2)
+	require.Len(t, projectRepo.updatedDomainSummary.Conventions.AuditColumns, 2)
 }

@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronRight,
+  Info,
   ListTree,
   RefreshCw,
   Table2,
@@ -21,7 +22,7 @@ import {
 import { useDatasourceConnection } from "../contexts/DatasourceConnectionContext";
 import { useToast } from "../hooks/useToast";
 import engineApi from "../services/engineApi";
-import type { SchemaTable as ApiSchemaTable } from "../types";
+import type { SchemaTable as ApiSchemaTable, PendingChangeInfo } from "../types";
 import { buildSelectionPayloads } from "../utils/schemaUtils";
 
 interface Column {
@@ -63,6 +64,7 @@ const SchemaPage = () => {
   // State for schema data from API
   const [schemaData, setSchemaData] = useState<SchemaData | null>(null);
   const [apiTables, setApiTables] = useState<ApiSchemaTable[]>([]); // Raw API response for is_selected
+  const [pendingChanges, setPendingChanges] = useState<Record<string, PendingChangeInfo>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isStartingExtraction, setIsStartingExtraction] = useState(false);
@@ -97,6 +99,7 @@ const SchemaPage = () => {
 
         setSchemaData(transformedData);
         setApiTables(response.data.tables); // Store raw API tables for is_selected
+        setPendingChanges(response.data.pending_changes ?? {});
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Failed to fetch schema";
         console.error("Failed to fetch schema:", errorMessage);
@@ -157,6 +160,14 @@ const SchemaPage = () => {
           tableState.columns[column.name] = apiColumn?.is_selected ?? false;
         }
       });
+
+      // Derive table selection from columns: if any column is selected, table should be selected
+      if (!isFirstTime) {
+        const anyColumnSelected = Object.values(tableState.columns).some((col) => col);
+        if (anyColumnSelected && !tableState.selected) {
+          tableState.selected = true;
+        }
+      }
     });
 
     setSelectionState(state);
@@ -260,6 +271,44 @@ const SchemaPage = () => {
     []
   );
 
+  // Compute auto-applied removals for the info banner
+  const autoAppliedRemovals = useMemo(() => {
+    const removals: string[] = [];
+    for (const [key, change] of Object.entries(pendingChanges)) {
+      if (change.status === 'auto_applied' && (change.change_type === 'dropped_table' || change.change_type === 'dropped_column')) {
+        removals.push(key);
+      }
+    }
+    return removals;
+  }, [pendingChanges]);
+
+  // Whether there are actionable pending changes (not auto_applied)
+  const hasPendingChanges = useMemo(() => {
+    return Object.values(pendingChanges).some(change => change.status === 'pending');
+  }, [pendingChanges]);
+
+  // Handle reject all pending changes and navigate away
+  const handleRejectChanges = useCallback(async (): Promise<void> => {
+    if (!pid || !selectedDatasource?.datasourceId) return;
+
+    try {
+      await engineApi.rejectPendingChanges(pid, selectedDatasource.datasourceId);
+      toast({
+        title: "Changes Rejected",
+        description: "All pending schema changes have been rejected.",
+        variant: "default",
+      });
+      navigate(`/projects/${pid}`);
+    } catch (err) {
+      console.error('Failed to reject pending changes:', err);
+      toast({
+        title: "Error",
+        description: "Failed to reject pending changes. Please try again.",
+        variant: "destructive",
+      });
+    }
+  }, [pid, selectedDatasource?.datasourceId, toast, navigate]);
+
   // Handle save schema
   const handleSaveSchema = useCallback(async (): Promise<void> => {
     if (!schemaData || !pid || !selectedDatasource?.datasourceId) return;
@@ -274,7 +323,7 @@ const SchemaPage = () => {
       );
 
       // Save schema selections to database
-      await engineApi.saveSchemaSelections(pid, selectedDatasource.datasourceId, tableSelections, columnSelections);
+      const saveResponse = await engineApi.saveSchemaSelections(pid, selectedDatasource.datasourceId, tableSelections, columnSelections);
 
       // Refresh schema selections state to enable ontology tile
       await refreshSchemaSelections(pid);
@@ -282,11 +331,26 @@ const SchemaPage = () => {
       // Update initial state after successful save (no longer dirty)
       setInitialSelectionState(JSON.parse(JSON.stringify(selectionState)));
       setIsFirstTimeSetup(false);
+      setPendingChanges({}); // Clear pending changes after save
+
+      // Build toast description with resolved change counts
+      const approved = saveResponse.data?.approved_count ?? 0;
+      const rejected = saveResponse.data?.rejected_count ?? 0;
+      let description = "Schema selections saved successfully!";
+      if (approved > 0 || rejected > 0) {
+        const parts: string[] = [];
+        if (approved > 0) parts.push(`${approved} changes approved`);
+        if (rejected > 0) parts.push(`${rejected} changes rejected`);
+        description = `Schema saved. ${parts.join(', ')}.`;
+      }
+      if (autoAppliedRemovals.length > 0) {
+        description += ` ${autoAppliedRemovals.length} items were automatically removed (no longer in datasource).`;
+      }
 
       // Show success toast
       toast({
         title: "Success",
-        description: "Schema selections saved successfully!",
+        description,
         variant: "success",
       });
 
@@ -302,7 +366,7 @@ const SchemaPage = () => {
     } finally {
       setIsStartingExtraction(false);
     }
-  }, [schemaData, pid, selectedDatasource?.datasourceId, selectionState, apiTables, refreshSchemaSelections, toast, navigate]);
+  }, [schemaData, pid, selectedDatasource?.datasourceId, selectionState, apiTables, refreshSchemaSelections, toast, navigate, autoAppliedRemovals]);
 
   // Handle refresh schema from datasource
   const handleRefreshSchema = useCallback(async (): Promise<void> => {
@@ -344,6 +408,7 @@ const SchemaPage = () => {
 
       setSchemaData(transformedData);
       setApiTables(response.data.tables); // Update raw API tables
+      setPendingChanges(response.data.pending_changes ?? {});
       setError(null);
 
       toast({
@@ -384,6 +449,22 @@ const SchemaPage = () => {
     if (!initialSelectionState) return false;
     return JSON.stringify(selectionState) !== JSON.stringify(initialSelectionState);
   }, [selectionState, initialSelectionState]);
+
+  // Helper to get pending change for a table
+  const getTablePendingChange = useCallback((schemaName: string, tableName: string): PendingChangeInfo | undefined => {
+    return pendingChanges[`${schemaName}.${tableName}`];
+  }, [pendingChanges]);
+
+  // Helper to get pending change for a column
+  const getColumnPendingChange = useCallback((schemaName: string, tableName: string, columnName: string): PendingChangeInfo | undefined => {
+    return pendingChanges[`${schemaName}.${tableName}.${columnName}`];
+  }, [pendingChanges]);
+
+  // Helper to check if a table has any column-level pending changes
+  const tableHasColumnChanges = useCallback((schemaName: string, tableName: string): boolean => {
+    const prefix = `${schemaName}.${tableName}.`;
+    return Object.keys(pendingChanges).some(key => key.startsWith(prefix));
+  }, [pendingChanges]);
 
   // Loading state
   if (loading) {
@@ -484,17 +565,17 @@ const SchemaPage = () => {
           <div className="flex gap-2">
             <Button
               variant="outline"
-              onClick={() => navigate(`/projects/${pid}`)}
-              disabled={!(isFirstTimeSetup || isDirty)}
+              onClick={hasPendingChanges ? handleRejectChanges : () => navigate(`/projects/${pid}`)}
+              disabled={!(isFirstTimeSetup || isDirty || hasPendingChanges)}
             >
-              Cancel
+              {hasPendingChanges ? 'Reject Changes' : 'Cancel'}
             </Button>
             <Button
               onClick={handleSaveSchema}
-              disabled={isStartingExtraction || !(isFirstTimeSetup || isDirty)}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-medium"
+              disabled={isStartingExtraction || !(isFirstTimeSetup || isDirty || hasPendingChanges)}
+              className={hasPendingChanges ? "bg-green-600 hover:bg-green-700 text-white font-medium" : "bg-blue-600 hover:bg-blue-700 text-white font-medium"}
             >
-              {isStartingExtraction ? 'Saving...' : 'Save Schema'}
+              {isStartingExtraction ? 'Saving...' : (hasPendingChanges ? 'Approve Changes' : 'Save Schema')}
             </Button>
           </div>
         </div>
@@ -555,6 +636,17 @@ const SchemaPage = () => {
           </div>
         </CardHeader>
         <CardContent>
+          {/* Auto-applied removals banner */}
+          {autoAppliedRemovals.length > 0 && (
+            <div className="mb-4 flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200">
+              <Info className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <span className="font-medium">Last refresh removed: </span>
+                {autoAppliedRemovals.join(', ')}
+              </div>
+            </div>
+          )}
+
           <div className="space-y-2">
             {/* Select/Unselect All */}
             <div className="flex items-center gap-2 border-b border-border-light pb-3 mb-3">
@@ -588,6 +680,11 @@ const SchemaPage = () => {
               const allColumnsSelected = columnSelections.every((col) => col);
               const someColumnsSelected =
                 columnSelections.some((col) => col) && !allColumnsSelected;
+
+              // Look up pending change for this table
+              const apiTable = apiTables.find((t) => t.table_name === table.name);
+              const schemaName = apiTable?.schema_name ?? "public";
+              const tablePendingChange = getTablePendingChange(schemaName, table.name);
 
               return (
                 <div
@@ -627,6 +724,16 @@ const SchemaPage = () => {
                     >
                       {table.name}
                     </label>
+                    {tablePendingChange?.change_type === 'new_table' && (
+                      <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                        New
+                      </span>
+                    )}
+                    {tablePendingChange?.change_type !== 'new_table' && tableHasColumnChanges(schemaName, table.name) && (
+                      <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                        Altered
+                      </span>
+                    )}
                     <span className="text-sm text-text-secondary">
                       {table.columns.length} columns
                     </span>
@@ -635,7 +742,9 @@ const SchemaPage = () => {
                   {/* Columns (when expanded) */}
                   {isExpanded && (
                     <div className="border-t border-border-light bg-surface-secondary/50">
-                      {table.columns.map((column) => (
+                      {table.columns.map((column) => {
+                        const colPendingChange = getColumnPendingChange(schemaName, table.name, column.name);
+                        return (
                         <div
                           key={column.name}
                           className="flex items-center gap-2 px-3 py-2 pl-11 hover:bg-surface-secondary"
@@ -664,6 +773,16 @@ const SchemaPage = () => {
                           >
                             {column.name}
                           </label>
+                          {colPendingChange?.change_type === 'new_column' && (
+                            <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                              New
+                            </span>
+                          )}
+                          {colPendingChange?.change_type === 'modified_column' && (
+                            <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                              Modified
+                            </span>
+                          )}
                           <span className="text-xs text-text-tertiary">
                             {column.type}
                           </span>
@@ -673,7 +792,8 @@ const SchemaPage = () => {
                             </span>
                           )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

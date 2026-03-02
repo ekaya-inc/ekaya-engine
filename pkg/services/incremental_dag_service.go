@@ -39,7 +39,6 @@ type IncrementalDAGService interface {
 }
 
 type incrementalDAGService struct {
-	ontologyRepo       repositories.OntologyRepository
 	columnMetadataRepo repositories.ColumnMetadataRepository
 	schemaRepo         repositories.SchemaRepository
 	conversationRepo   repositories.ConversationRepository
@@ -52,7 +51,6 @@ type incrementalDAGService struct {
 
 // IncrementalDAGServiceDeps contains dependencies for IncrementalDAGService.
 type IncrementalDAGServiceDeps struct {
-	OntologyRepo       repositories.OntologyRepository
 	ColumnMetadataRepo repositories.ColumnMetadataRepository
 	SchemaRepo         repositories.SchemaRepository
 	ConversationRepo   repositories.ConversationRepository
@@ -66,7 +64,6 @@ type IncrementalDAGServiceDeps struct {
 // NewIncrementalDAGService creates a new IncrementalDAGService.
 func NewIncrementalDAGService(deps *IncrementalDAGServiceDeps) IncrementalDAGService {
 	return &incrementalDAGService{
-		ontologyRepo:       deps.OntologyRepo,
 		columnMetadataRepo: deps.ColumnMetadataRepo,
 		schemaRepo:         deps.SchemaRepo,
 		conversationRepo:   deps.ConversationRepo,

@@ -50,7 +50,6 @@ func DefaultDataChangeDetectionConfig() DataChangeDetectionConfig {
 type dataChangeDetectionService struct {
 	schemaRepo         repositories.SchemaRepository
 	columnMetadataRepo repositories.ColumnMetadataRepository
-	ontologyRepo       repositories.OntologyRepository
 	pendingChangeRepo  repositories.PendingChangeRepository
 	datasourceService  DatasourceService
 	projectService     ProjectService
@@ -63,7 +62,6 @@ type dataChangeDetectionService struct {
 func NewDataChangeDetectionService(
 	schemaRepo repositories.SchemaRepository,
 	columnMetadataRepo repositories.ColumnMetadataRepository,
-	ontologyRepo repositories.OntologyRepository,
 	pendingChangeRepo repositories.PendingChangeRepository,
 	datasourceService DatasourceService,
 	projectService ProjectService,
@@ -73,7 +71,6 @@ func NewDataChangeDetectionService(
 	return &dataChangeDetectionService{
 		schemaRepo:         schemaRepo,
 		columnMetadataRepo: columnMetadataRepo,
-		ontologyRepo:       ontologyRepo,
 		pendingChangeRepo:  pendingChangeRepo,
 		datasourceService:  datasourceService,
 		projectService:     projectService,
@@ -130,12 +127,6 @@ func (s *dataChangeDetectionService) ScanTables(
 	}
 	defer discoverer.Close()
 
-	// Get active ontology for existing enum values
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get active ontology: %w", err)
-	}
-
 	// Get tables for schema info
 	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
 	if err != nil {
@@ -166,23 +157,36 @@ func (s *dataChangeDetectionService) ScanTables(
 			continue
 		}
 
+		// Fetch column metadata for this table to get existing enum values
+		columnIDs := make([]uuid.UUID, 0, len(columns))
+		for _, col := range columns {
+			if col.IsSelected {
+				columnIDs = append(columnIDs, col.ID)
+			}
+		}
+		metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, columnIDs)
+		if err != nil {
+			s.logger.Warn("Failed to fetch column metadata for enum check",
+				zap.String("table", tableName),
+				zap.Error(err))
+		}
+		metadataByColID := make(map[uuid.UUID]*models.ColumnMetadata)
+		for _, meta := range metadataList {
+			metadataByColID[meta.SchemaColumnID] = meta
+		}
+
 		// Check each column for enum changes
 		for _, col := range columns {
 			if !col.IsSelected {
 				continue
 			}
 
-			// Get existing column details from ontology
+			// Get existing enum values from column metadata
 			var existingEnumValues []string
-			if ontology != nil && ontology.ColumnDetails != nil {
-				if colDetails, ok := ontology.ColumnDetails[tableName]; ok {
-					for _, cd := range colDetails {
-						if cd.Name == col.ColumnName && len(cd.EnumValues) > 0 {
-							for _, ev := range cd.EnumValues {
-								existingEnumValues = append(existingEnumValues, ev.Value)
-							}
-							break
-						}
+			if meta, ok := metadataByColID[col.ID]; ok {
+				if enumFeatures := meta.GetEnumFeatures(); enumFeatures != nil && len(enumFeatures.Values) > 0 {
+					for _, ev := range enumFeatures.Values {
+						existingEnumValues = append(existingEnumValues, ev.Value)
 					}
 				}
 			}
@@ -202,24 +206,9 @@ func (s *dataChangeDetectionService) ScanTables(
 			}
 		}
 
-		// Fetch metadata for columns in this table
-		columnIDs := make([]uuid.UUID, len(columns))
-		for i, col := range columns {
-			columnIDs[i] = col.ID
-		}
-		metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, columnIDs)
-		if err != nil {
-			s.logger.Warn("Failed to fetch column metadata",
-				zap.String("table", tableName),
-				zap.Error(err))
-		}
-		metadataByColumnID := make(map[uuid.UUID]*models.ColumnMetadata)
-		for _, meta := range metadataList {
-			metadataByColumnID[meta.SchemaColumnID] = meta
-		}
-
 		// Detect potential FK patterns for non-FK columns
-		fkChanges, err := s.detectPotentialFKs(ctx, discoverer, table, columns, tables, metadataByColumnID)
+		// Reuse metadataByColID built earlier for enum detection
+		fkChanges, err := s.detectPotentialFKs(ctx, discoverer, table, columns, tables, metadataByColID)
 		if err != nil {
 			s.logger.Warn("Failed to detect FK patterns",
 				zap.String("table", tableName),

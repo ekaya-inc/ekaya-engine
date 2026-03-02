@@ -1102,8 +1102,15 @@ func registerRefreshSchemaTool(s *server.MCPServer, deps *MCPToolDeps) {
 
 		autoSelect := getOptionalBoolWithDefaultDev(req, "auto_select", true)
 
-		// Refresh schema - autoSelect causes new tables/columns to be marked as selected at creation time
-		result, err := deps.SchemaService.RefreshDatasourceSchema(tenantCtx, projectID, dsID, autoSelect)
+		// Refresh schema with change detection via shared orchestrator
+		result, err := services.RefreshSchemaWithChangeDetection(
+			tenantCtx,
+			deps.SchemaService,
+			deps.SchemaChangeDetectionService,
+			deps.Logger,
+			projectID, dsID,
+			autoSelect,
+		)
 		if err != nil {
 			deps.Logger.Error("Schema refresh failed",
 				zap.String("project_id", projectID.String()),
@@ -1113,8 +1120,7 @@ func registerRefreshSchemaTool(s *server.MCPServer, deps *MCPToolDeps) {
 			return nil, fmt.Errorf("schema refresh failed: %w", err)
 		}
 
-		// Auto-select was applied if new tables were discovered and autoSelect was true
-		autoSelectApplied := autoSelect && len(result.NewTableNames) > 0
+		autoSelectApplied := result.AutoSelectApplied
 
 		// Get relationships for response (uses enriched response with table/column names)
 		relsResp, _ := deps.SchemaService.GetRelationshipsResponse(tenantCtx, projectID, dsID)
@@ -1132,21 +1138,6 @@ func registerRefreshSchemaTool(s *server.MCPServer, deps *MCPToolDeps) {
 			}
 		}
 
-		// Detect changes and queue for review (if change detection service is configured)
-		var pendingChangesCreated int
-		if deps.SchemaChangeDetectionService != nil {
-			changes, err := deps.SchemaChangeDetectionService.DetectChanges(tenantCtx, projectID, result)
-			if err != nil {
-				// Log but don't fail - schema refresh succeeded
-				deps.Logger.Warn("Change detection failed",
-					zap.String("project_id", projectID.String()),
-					zap.Error(err),
-				)
-			} else {
-				pendingChangesCreated = len(changes)
-			}
-		}
-
 		deps.Logger.Info("Schema refresh completed via MCP",
 			zap.String("project_id", projectID.String()),
 			zap.String("datasource_id", dsID.String()),
@@ -1154,7 +1145,7 @@ func registerRefreshSchemaTool(s *server.MCPServer, deps *MCPToolDeps) {
 			zap.Int64("tables_deleted", result.TablesDeleted),
 			zap.Int("columns_upserted", result.ColumnsUpserted),
 			zap.Int("relationships_created", result.RelationshipsCreated),
-			zap.Int("pending_changes_created", pendingChangesCreated),
+			zap.Int("pending_changes_created", result.PendingChangesCreated),
 		)
 
 		response := struct {
@@ -1172,7 +1163,7 @@ func registerRefreshSchemaTool(s *server.MCPServer, deps *MCPToolDeps) {
 			RelationshipsFound:    len(relPairs),
 			Relationships:         relPairs,
 			AutoSelectApplied:     autoSelectApplied,
-			PendingChangesCreated: pendingChangesCreated,
+			PendingChangesCreated: result.PendingChangesCreated,
 		}
 
 		jsonResult, err := json.Marshal(response)

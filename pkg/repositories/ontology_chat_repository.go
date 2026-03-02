@@ -59,11 +59,11 @@ func (r *ontologyChatRepository) SaveMessage(ctx context.Context, message *model
 
 	query := `
 		INSERT INTO engine_ontology_chat_messages (
-			id, project_id, ontology_id, role, content, tool_calls, tool_call_id, metadata, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+			id, project_id, role, content, tool_calls, tool_call_id, metadata, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
 
 	_, err = scope.Conn.Exec(ctx, query,
-		message.ID, message.ProjectID, message.OntologyID, message.Role, message.Content,
+		message.ID, message.ProjectID, message.Role, message.Content,
 		toolCallsJSON, message.ToolCallID, metadataJSON, message.CreatedAt,
 	)
 	if err != nil {
@@ -85,7 +85,7 @@ func (r *ontologyChatRepository) GetHistory(ctx context.Context, projectID uuid.
 
 	// Get messages in chronological order, but limit to most recent
 	query := `
-		SELECT id, project_id, ontology_id, role, content, tool_calls, tool_call_id, metadata, created_at
+		SELECT id, project_id, role, content, tool_calls, tool_call_id, metadata, created_at
 		FROM engine_ontology_chat_messages
 		WHERE project_id = $1
 		ORDER BY created_at DESC
@@ -163,7 +163,7 @@ func scanChatMessageRows(rows pgx.Rows) (*models.ChatMessage, error) {
 	var toolCallID *string
 
 	err := rows.Scan(
-		&m.ID, &m.ProjectID, &m.OntologyID, &m.Role, &m.Content,
+		&m.ID, &m.ProjectID, &m.Role, &m.Content,
 		&toolCallsJSON, &toolCallID, &metadataJSON, &m.CreatedAt,
 	)
 	if err != nil {

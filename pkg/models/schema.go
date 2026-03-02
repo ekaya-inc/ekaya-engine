@@ -210,6 +210,8 @@ type RefreshResult struct {
 	RelationshipsDeleted int64    `json:"relationships_deleted"`
 	NewTableNames        []string `json:"new_table_names,omitempty"`
 	RemovedTableNames    []string `json:"removed_table_names,omitempty"`
+	// Whether auto-select was applied (new tables or new columns on existing tables)
+	AutoSelectApplied bool `json:"auto_select_applied"`
 	// Detailed column changes for change detection (PLAN-03)
 	NewColumns      []RefreshColumnChange       `json:"new_columns,omitempty"`
 	RemovedColumns  []RefreshColumnChange       `json:"removed_columns,omitempty"`
@@ -229,6 +231,12 @@ type RefreshColumnModification struct {
 	ColumnName string `json:"column_name"`
 	OldType    string `json:"old_type"`
 	NewType    string `json:"new_type"`
+}
+
+// RefreshResultWithChanges wraps RefreshResult with change detection output.
+type RefreshResultWithChanges struct {
+	*RefreshResult
+	PendingChangesCreated int `json:"pending_changes_created"`
 }
 
 // DatasourceSchema represents the complete schema for a customer's datasource.

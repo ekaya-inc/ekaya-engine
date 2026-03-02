@@ -26,18 +26,20 @@ var (
 
 // ontologyContextTestContext holds all dependencies for ontology context integration tests.
 type ontologyContextTestContext struct {
-	t            *testing.T
-	engineDB     *testhelpers.EngineDB
-	service      OntologyContextService
-	ontologyRepo repositories.OntologyRepository
-	schemaRepo   repositories.SchemaRepository
-	projectID    uuid.UUID
-	dsID         uuid.UUID
+	t                  *testing.T
+	engineDB           *testhelpers.EngineDB
+	service            OntologyContextService
+	schemaRepo         repositories.SchemaRepository
+	columnMetadataRepo repositories.ColumnMetadataRepository
+	projectMock        *mockProjectServiceForIntegration
+	projectID          uuid.UUID
+	dsID               uuid.UUID
 }
 
 // mockProjectServiceForIntegration implements ProjectService for integration tests.
 type mockProjectServiceForIntegration struct {
-	dsID uuid.UUID
+	dsID          uuid.UUID
+	domainSummary *models.DomainSummary
 }
 
 func (m *mockProjectServiceForIntegration) Provision(ctx context.Context, projectID uuid.UUID, name string, params map[string]interface{}) (*ProvisionResult, error) {
@@ -49,7 +51,12 @@ func (m *mockProjectServiceForIntegration) ProvisionFromClaims(ctx context.Conte
 }
 
 func (m *mockProjectServiceForIntegration) GetByID(ctx context.Context, id uuid.UUID) (*models.Project, error) {
-	return nil, nil
+	return &models.Project{
+		ID:            id,
+		Name:          "Ontology Context Test Project",
+		Status:        "active",
+		DomainSummary: m.domainSummary,
+	}, nil
 }
 
 func (m *mockProjectServiceForIntegration) GetByIDWithoutTenant(ctx context.Context, id uuid.UUID) (*models.Project, error) {
@@ -109,21 +116,22 @@ func setupOntologyContextTest(t *testing.T) *ontologyContextTestContext {
 	t.Helper()
 
 	engineDB := testhelpers.GetEngineDB(t)
-	ontologyRepo := repositories.NewOntologyRepository()
 	schemaRepo := repositories.NewSchemaRepository()
+	columnMetadataRepo := repositories.NewColumnMetadataRepository()
 	projectService := &mockProjectServiceForIntegration{dsID: ontologyContextTestDSID}
 	logger := zap.NewNop()
 
-	service := NewOntologyContextService(ontologyRepo, schemaRepo, nil, projectService, logger)
+	service := NewOntologyContextService(schemaRepo, columnMetadataRepo, nil, projectService, logger)
 
 	tc := &ontologyContextTestContext{
-		t:            t,
-		engineDB:     engineDB,
-		service:      service,
-		ontologyRepo: ontologyRepo,
-		schemaRepo:   schemaRepo,
-		projectID:    ontologyContextTestProjectID,
-		dsID:         ontologyContextTestDSID,
+		t:                  t,
+		engineDB:           engineDB,
+		service:            service,
+		schemaRepo:         schemaRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		projectMock:        projectService,
+		projectID:          ontologyContextTestProjectID,
+		dsID:               ontologyContextTestDSID,
 	}
 
 	// Ensure project exists
@@ -192,96 +200,23 @@ func (tc *ontologyContextTestContext) cleanup() {
 	defer scope.Close()
 
 	// Delete in reverse order of dependencies
-	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontologies WHERE project_id = $1`, tc.projectID)
+	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontology_column_metadata WHERE project_id = $1`, tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_schema_columns WHERE schema_table_id IN (SELECT id FROM engine_schema_tables WHERE project_id = $1)`, tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_schema_tables WHERE project_id = $1`, tc.projectID)
 }
 
-// createTestOntology creates a complete ontology with enriched column details.
+// createTestOntology sets up domain summary on the project mock, creates schema tables/columns,
+// and writes column metadata records for enriched data.
 func (tc *ontologyContextTestContext) createTestOntology(ctx context.Context) uuid.UUID {
 	tc.t.Helper()
 
 	ontologyID := uuid.New()
 
-	// Create ontology with domain summary and column details
-	ontology := &models.TieredOntology{
-		ID:        ontologyID,
-		ProjectID: tc.projectID,
-		Version:   1,
-		IsActive:  true,
-		DomainSummary: &models.DomainSummary{
-			Description: "E-commerce platform for online retail",
-			Domains:     []string{"sales", "customer", "product"},
-		},
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"users": {
-				{
-					Name:         "id",
-					Description:  "Unique user identifier",
-					SemanticType: "identifier",
-					Role:         "identifier",
-					IsPrimaryKey: true,
-					Synonyms:     []string{"user_id"},
-				},
-				{
-					Name:         "email",
-					Description:  "User email address",
-					SemanticType: "email",
-					Role:         "attribute",
-					Synonyms:     []string{"email_address"},
-				},
-				{
-					Name:         "status",
-					Description:  "Account status",
-					SemanticType: "category",
-					Role:         "dimension",
-					EnumValues: []models.EnumValue{
-						{Value: "active", Label: "Active", Description: "Account is active"},
-						{Value: "inactive", Label: "Inactive", Description: "Account is inactive"},
-					},
-				},
-			},
-			"orders": {
-				{
-					Name:         "id",
-					Description:  "Unique order identifier",
-					SemanticType: "identifier",
-					Role:         "identifier",
-					IsPrimaryKey: true,
-					Synonyms:     []string{"order_id"},
-				},
-				{
-					Name:         "user_id",
-					Description:  "Reference to customer",
-					SemanticType: "identifier",
-					Role:         "identifier",
-					IsForeignKey: true,
-					ForeignTable: "users",
-				},
-				{
-					Name:         "total_amount",
-					Description:  "Total order value",
-					SemanticType: "currency",
-					Role:         "measure",
-					Synonyms:     []string{"revenue", "order_total"},
-				},
-				{
-					Name:         "status",
-					Description:  "Order status",
-					SemanticType: "category",
-					Role:         "dimension",
-					EnumValues: []models.EnumValue{
-						{Value: "pending", Label: "Pending"},
-						{Value: "shipped", Label: "Shipped"},
-						{Value: "delivered", Label: "Delivered"},
-					},
-				},
-			},
-		},
+	// Set domain summary on the project mock (replaces old engine_ontologies insert)
+	tc.projectMock.domainSummary = &models.DomainSummary{
+		Description: "E-commerce platform for online retail",
+		Domains:     []string{"sales", "customer", "product"},
 	}
-
-	err := tc.ontologyRepo.Create(ctx, ontology)
-	require.NoError(tc.t, err, "Failed to create test ontology")
 
 	// Create schema tables and columns for column count
 	usersTableID := uuid.New()
@@ -290,7 +225,7 @@ func (tc *ontologyContextTestContext) createTestOntology(ctx context.Context) uu
 	usersRowCount := int64(95)
 	ordersRowCount := int64(250)
 
-	err = tc.schemaRepo.UpsertTable(ctx, &models.SchemaTable{
+	err := tc.schemaRepo.UpsertTable(ctx, &models.SchemaTable{
 		ID:           usersTableID,
 		ProjectID:    tc.projectID,
 		DatasourceID: tc.dsID,
@@ -312,11 +247,14 @@ func (tc *ontologyContextTestContext) createTestOntology(ctx context.Context) uu
 	})
 	require.NoError(tc.t, err)
 
-	// Create columns for users table (3 columns)
+	// Create columns for users table (3 columns) and track IDs for metadata
+	columnIDs := make(map[string]uuid.UUID)
 	for _, colName := range []string{"id", "email", "status"} {
+		colID := uuid.New()
+		columnIDs["users."+colName] = colID
 		isPK := colName == "id"
 		err = tc.schemaRepo.UpsertColumn(ctx, &models.SchemaColumn{
-			ID:            uuid.New(),
+			ID:            colID,
 			ProjectID:     tc.projectID,
 			SchemaTableID: usersTableID,
 			ColumnName:    colName,
@@ -329,9 +267,11 @@ func (tc *ontologyContextTestContext) createTestOntology(ctx context.Context) uu
 
 	// Create columns for orders table (4 columns)
 	for _, colName := range []string{"id", "user_id", "total_amount", "status"} {
+		colID := uuid.New()
+		columnIDs["orders."+colName] = colID
 		isPK := colName == "id"
 		err = tc.schemaRepo.UpsertColumn(ctx, &models.SchemaColumn{
-			ID:            uuid.New(),
+			ID:            colID,
 			ProjectID:     tc.projectID,
 			SchemaTableID: ordersTableID,
 			ColumnName:    colName,
@@ -341,6 +281,63 @@ func (tc *ontologyContextTestContext) createTestOntology(ctx context.Context) uu
 		})
 		require.NoError(tc.t, err)
 	}
+
+	// Create column metadata for enriched columns
+	identifierRole := "identifier"
+	err = tc.columnMetadataRepo.Upsert(ctx, &models.ColumnMetadata{
+		ProjectID:      tc.projectID,
+		SchemaColumnID: columnIDs["users.id"],
+		Role:           &identifierRole,
+		Source:         "inferred",
+	})
+	require.NoError(tc.t, err)
+
+	err = tc.columnMetadataRepo.Upsert(ctx, &models.ColumnMetadata{
+		ProjectID:      tc.projectID,
+		SchemaColumnID: columnIDs["users.status"],
+		Source:         "inferred",
+		Features: models.ColumnMetadataFeatures{
+			EnumFeatures: &models.EnumFeatures{
+				Values: []models.ColumnEnumValue{
+					{Value: "active", Label: "Active user"},
+					{Value: "inactive", Label: "Inactive user"},
+				},
+			},
+		},
+	})
+	require.NoError(tc.t, err)
+
+	totalAmountDesc := "Total order value"
+	totalAmountSemType := "currency"
+	measureRole := "measure"
+	err = tc.columnMetadataRepo.Upsert(ctx, &models.ColumnMetadata{
+		ProjectID:      tc.projectID,
+		SchemaColumnID: columnIDs["orders.total_amount"],
+		Description:    &totalAmountDesc,
+		SemanticType:   &totalAmountSemType,
+		Role:           &measureRole,
+		Source:         "inferred",
+		Features: models.ColumnMetadataFeatures{
+			Synonyms: []string{"revenue", "order_total"},
+		},
+	})
+	require.NoError(tc.t, err)
+
+	fkRole := "foreign_key"
+	err = tc.columnMetadataRepo.Upsert(ctx, &models.ColumnMetadata{
+		ProjectID:      tc.projectID,
+		SchemaColumnID: columnIDs["orders.user_id"],
+		Role:           &fkRole,
+		Source:         "inferred",
+		Features: models.ColumnMetadataFeatures{
+			IdentifierFeatures: &models.IdentifierFeatures{
+				IdentifierType: "foreign_key",
+				FKTargetTable:  "users",
+				FKTargetColumn: "id",
+			},
+		},
+	})
+	require.NoError(tc.t, err)
 
 	return ontologyID
 }
@@ -461,7 +458,7 @@ func TestOntologyContextService_Integration_GetColumnsContext(t *testing.T) {
 	assert.Len(t, ordersTable.Columns, 4)
 
 	// Find total_amount column - only structural fields populated in Phase 1
-	var totalAmountCol *models.ColumnDetail
+	var totalAmountCol *models.ColumnDetailInfo
 	for i := range ordersTable.Columns {
 		if ordersTable.Columns[i].Name == "total_amount" {
 			totalAmountCol = &ordersTable.Columns[i]
@@ -476,7 +473,7 @@ func TestOntologyContextService_Integration_GetColumnsContext(t *testing.T) {
 	assert.Equal(t, []string{"revenue", "order_total"}, totalAmountCol.Synonyms)
 
 	// Find user_id column to verify FK detection from enriched data
-	var userIDCol *models.ColumnDetail
+	var userIDCol *models.ColumnDetailInfo
 	for i := range ordersTable.Columns {
 		if ordersTable.Columns[i].Name == "user_id" {
 			userIDCol = &ordersTable.Columns[i]
@@ -512,18 +509,18 @@ func TestOntologyContextService_Integration_GetTablesContext_RowCount(t *testing
 	assert.Equal(t, int64(250), ordersTable.RowCount, "orders table should have row_count from schema")
 }
 
-func TestOntologyContextService_Integration_NoOntology(t *testing.T) {
+func TestOntologyContextService_Integration_NoDomainSummary(t *testing.T) {
 	tc := setupOntologyContextTest(t)
 	defer tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
 
-	// Don't create any ontology - test error handling
-
+	// Don't set domain summary — returns empty but valid context
 	result, err := tc.service.GetDomainContext(ctx, tc.projectID)
 
-	assert.Error(t, err)
-	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "no active ontology found")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Empty(t, result.Domain.Description)
+	assert.Equal(t, 0, result.Domain.TableCount)
 }

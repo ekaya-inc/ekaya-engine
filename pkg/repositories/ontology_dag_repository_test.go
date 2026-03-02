@@ -21,7 +21,6 @@ type dagTestContext struct {
 	repo         OntologyDAGRepository
 	projectID    uuid.UUID
 	datasourceID uuid.UUID
-	ontologyID   uuid.UUID
 }
 
 // setupDAGTest initializes the test context with shared testcontainer.
@@ -33,11 +32,9 @@ func setupDAGTest(t *testing.T) *dagTestContext {
 		repo:         NewOntologyDAGRepository(),
 		projectID:    uuid.New(),
 		datasourceID: uuid.New(),
-		ontologyID:   uuid.New(),
 	}
 	tc.ensureTestProject()
 	tc.ensureTestDatasource()
-	tc.ensureTestOntology()
 	return tc
 }
 
@@ -79,25 +76,6 @@ func (tc *dagTestContext) ensureTestDatasource() {
 	}
 }
 
-func (tc *dagTestContext) ensureTestOntology() {
-	tc.t.Helper()
-	ctx := context.Background()
-	scope, err := tc.engineDB.DB.WithoutTenant(ctx)
-	if err != nil {
-		tc.t.Fatalf("failed to create scope for ontology setup: %v", err)
-	}
-	defer scope.Close()
-
-	_, err = scope.Conn.Exec(ctx, `
-		INSERT INTO engine_ontologies (id, project_id, version, is_active)
-		VALUES ($1, $2, 1, true)
-		ON CONFLICT (id) DO NOTHING
-	`, tc.ontologyID, tc.projectID)
-	if err != nil {
-		tc.t.Fatalf("failed to ensure test ontology: %v", err)
-	}
-}
-
 func (tc *dagTestContext) cleanup() {
 	tc.t.Helper()
 	ctx := context.Background()
@@ -127,8 +105,8 @@ func (tc *dagTestContext) createTestDAG(ctx context.Context) *models.OntologyDAG
 		ID:           uuid.New(),
 		ProjectID:    tc.projectID,
 		DatasourceID: tc.datasourceID,
-		OntologyID:   &tc.ontologyID,
-		Status:       models.DAGStatusPending,
+
+		Status: models.DAGStatusPending,
 	}
 	err := tc.repo.Create(ctx, dag)
 	if err != nil {
@@ -149,10 +127,10 @@ func TestDAGRepository_Create(t *testing.T) {
 	defer cleanup()
 
 	dag := &models.OntologyDAG{
-		ID:                uuid.New(),
-		ProjectID:         tc.projectID,
-		DatasourceID:      tc.datasourceID,
-		OntologyID:        &tc.ontologyID,
+		ID:           uuid.New(),
+		ProjectID:    tc.projectID,
+		DatasourceID: tc.datasourceID,
+
 		Status:            models.DAGStatusPending,
 		SchemaFingerprint: strPtr("abc123"),
 	}
@@ -202,8 +180,8 @@ func TestDAGRepository_GetLatestByDatasource(t *testing.T) {
 		ID:           uuid.New(),
 		ProjectID:    tc.projectID,
 		DatasourceID: tc.datasourceID,
-		OntologyID:   &tc.ontologyID,
-		Status:       models.DAGStatusRunning,
+
+		Status: models.DAGStatusRunning,
 	}
 	err = tc.repo.Create(ctx, dag2)
 	if err != nil {
@@ -235,8 +213,8 @@ func TestDAGRepository_GetActiveByDatasource(t *testing.T) {
 		ID:           uuid.New(),
 		ProjectID:    tc.projectID,
 		DatasourceID: tc.datasourceID,
-		OntologyID:   &tc.ontologyID,
-		Status:       models.DAGStatusCompleted,
+
+		Status: models.DAGStatusCompleted,
 	}
 	err := tc.repo.Create(ctx, dag1)
 	if err != nil {
@@ -257,8 +235,8 @@ func TestDAGRepository_GetActiveByDatasource(t *testing.T) {
 		ID:           uuid.New(),
 		ProjectID:    tc.projectID,
 		DatasourceID: tc.datasourceID,
-		OntologyID:   &tc.ontologyID,
-		Status:       models.DAGStatusRunning,
+
+		Status: models.DAGStatusRunning,
 	}
 	err = tc.repo.Create(ctx, dag2)
 	if err != nil {

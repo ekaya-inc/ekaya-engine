@@ -21,39 +21,6 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
 
-// Mock repositories for column enrichment testing
-type testColEnrichmentOntologyRepo struct {
-	columnDetails map[string][]models.ColumnDetail
-}
-
-func (r *testColEnrichmentOntologyRepo) UpdateColumnDetails(ctx context.Context, projectID uuid.UUID, tableName string, details []models.ColumnDetail) error {
-	if r.columnDetails == nil {
-		r.columnDetails = make(map[string][]models.ColumnDetail)
-	}
-	r.columnDetails[tableName] = details
-	return nil
-}
-
-func (r *testColEnrichmentOntologyRepo) Create(ctx context.Context, ontology *models.TieredOntology) error {
-	return nil
-}
-
-func (r *testColEnrichmentOntologyRepo) GetActive(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error) {
-	return nil, nil
-}
-
-func (r *testColEnrichmentOntologyRepo) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
-	return nil
-}
-
-func (r *testColEnrichmentOntologyRepo) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
-	return nil
-}
-
-func (r *testColEnrichmentOntologyRepo) GetNextVersion(ctx context.Context, projectID uuid.UUID) (int, error) {
-	return 1, nil
-}
-
 type testColEnrichmentSchemaRepo struct {
 	columnsByTable map[string][]*models.SchemaColumn
 }
@@ -148,6 +115,14 @@ func (r *testColEnrichmentSchemaRepo) GetColumnCountByProject(ctx context.Contex
 	return 0, nil
 }
 
+func (r *testColEnrichmentSchemaRepo) GetTableCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (r *testColEnrichmentSchemaRepo) GetSelectedTableNamesByProject(ctx context.Context, projectID uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+
 func (r *testColEnrichmentSchemaRepo) GetEmptyTables(ctx context.Context, projectID, datasourceID uuid.UUID) ([]string, error) {
 	return nil, nil
 }
@@ -223,12 +198,22 @@ func (r *testColEnrichmentSchemaRepo) DeleteInferredRelationshipsByProject(ctx c
 	return 0, nil
 }
 
-// Mock column metadata repository for column enrichment testing
+// Mock column metadata repository for column enrichment testing.
+// Tracks all Upsert calls so tests can verify enrichment results.
 type testColEnrichmentColumnMetadataRepo struct {
 	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata
+	upsertCalls        int
 }
 
 func (r *testColEnrichmentColumnMetadataRepo) Upsert(ctx context.Context, meta *models.ColumnMetadata) error {
+	if r.metadataByColumnID == nil {
+		r.metadataByColumnID = make(map[uuid.UUID]*models.ColumnMetadata)
+	}
+	// Store a copy to prevent test mutations
+	copied := *meta
+	copied.Features = meta.Features
+	r.metadataByColumnID[meta.SchemaColumnID] = &copied
+	r.upsertCalls++
 	return nil
 }
 
@@ -452,9 +437,12 @@ func (c *testColEnrichmentLLMClient) Close() error {
 func TestColumnEnrichmentService_EnrichProject_Success(t *testing.T) {
 	projectID := uuid.New()
 
+	idColID := uuid.New()
+	emailColID := uuid.New()
+
 	columns := []*models.SchemaColumn{
-		{ColumnName: "id", DataType: "bigint", IsPrimaryKey: true},
-		{ColumnName: "email", DataType: "varchar"},
+		{ID: idColID, ColumnName: "id", DataType: "bigint", IsPrimaryKey: true},
+		{ID: emailColID, ColumnName: "email", DataType: "varchar"},
 	}
 
 	// Mock LLM response
@@ -478,7 +466,7 @@ func TestColumnEnrichmentService_EnrichProject_Success(t *testing.T) {
 	}`
 
 	// Setup service
-	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
+	colMetadataRepo := &testColEnrichmentColumnMetadataRepo{}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"users": columns,
@@ -491,9 +479,8 @@ func TestColumnEnrichmentService_EnrichProject_Success(t *testing.T) {
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:       ontologyRepo,
 		schemaRepo:         schemaRepo,
-		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
+		columnMetadataRepo: colMetadataRepo,
 		dsSvc:              &testColEnrichmentDatasourceService{},
 		llmFactory:         llmFactory,
 		workerPool:         llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
@@ -514,13 +501,14 @@ func TestColumnEnrichmentService_EnrichProject_Success(t *testing.T) {
 	client := llmFactory.client.(*testColEnrichmentLLMClient)
 	assert.Equal(t, 1, client.callCount)
 
-	// Verify column details were saved
-	details := ontologyRepo.columnDetails["users"]
-	require.Equal(t, 2, len(details))
-	assert.Equal(t, "id", details[0].Name)
-	assert.Equal(t, "identifier", details[0].SemanticType)
-	assert.Equal(t, "email", details[1].Name)
-	assert.Equal(t, "email", details[1].SemanticType)
+	// Verify column metadata was saved
+	assert.Equal(t, 2, colMetadataRepo.upsertCalls)
+	idMeta := colMetadataRepo.metadataByColumnID[idColID]
+	require.NotNil(t, idMeta)
+	assert.Equal(t, "identifier", *idMeta.SemanticType)
+	emailMeta := colMetadataRepo.metadataByColumnID[emailColID]
+	require.NotNil(t, emailMeta)
+	assert.Equal(t, "email", *emailMeta.SemanticType)
 }
 
 func TestColumnEnrichmentService_EnrichProject_WithRetryOnTransientError(t *testing.T) {
@@ -543,7 +531,6 @@ func TestColumnEnrichmentService_EnrichProject_WithRetryOnTransientError(t *test
 	}`
 
 	// Setup service with LLM that fails twice then succeeds
-	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"users": columns,
@@ -559,7 +546,6 @@ func TestColumnEnrichmentService_EnrichProject_WithRetryOnTransientError(t *test
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:       ontologyRepo,
 		schemaRepo:         schemaRepo,
 		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
 		dsSvc:              &testColEnrichmentDatasourceService{},
@@ -590,7 +576,6 @@ func TestColumnEnrichmentService_EnrichProject_NonRetryableError(t *testing.T) {
 	}
 
 	// Setup service with non-retryable error
-	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"users": columns,
@@ -607,7 +592,6 @@ func TestColumnEnrichmentService_EnrichProject_NonRetryableError(t *testing.T) {
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:       ontologyRepo,
 		schemaRepo:         schemaRepo,
 		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
 		dsSvc:              &testColEnrichmentDatasourceService{},
@@ -659,7 +643,7 @@ func TestColumnEnrichmentService_EnrichProject_LargeTable(t *testing.T) {
 	allEnrichmentsJSON := `{"columns": [` + joinStrings(enrichmentResponse, ",") + `]}`
 
 	// Setup service
-	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
+	colMetadataRepo := &testColEnrichmentColumnMetadataRepo{}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"large_table": columns,
@@ -672,9 +656,8 @@ func TestColumnEnrichmentService_EnrichProject_LargeTable(t *testing.T) {
 	llmFactory := &testColEnrichmentLLMFactory{client: client}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:       ontologyRepo,
 		schemaRepo:         schemaRepo,
-		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
+		columnMetadataRepo: colMetadataRepo,
 		dsSvc:              &testColEnrichmentDatasourceService{},
 		llmFactory:         llmFactory,
 		workerPool:         llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
@@ -694,8 +677,7 @@ func TestColumnEnrichmentService_EnrichProject_LargeTable(t *testing.T) {
 	assert.Equal(t, 2, client.callCount, "Should have made 2 LLM calls for chunked processing")
 
 	// Verify all columns were enriched
-	details := ontologyRepo.columnDetails["large_table"]
-	assert.Equal(t, 60, len(details))
+	assert.Equal(t, 60, colMetadataRepo.upsertCalls)
 }
 
 func TestColumnEnrichmentService_EnrichProject_ProgressCallback(t *testing.T) {
@@ -711,7 +693,6 @@ func TestColumnEnrichmentService_EnrichProject_ProgressCallback(t *testing.T) {
 		]
 	}`
 
-	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"table1": columns,
@@ -723,7 +704,6 @@ func TestColumnEnrichmentService_EnrichProject_ProgressCallback(t *testing.T) {
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:       ontologyRepo,
 		schemaRepo:         schemaRepo,
 		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
 		dsSvc:              &testColEnrichmentDatasourceService{},
@@ -763,14 +743,12 @@ func TestColumnEnrichmentService_EnrichProject_ProgressCallback(t *testing.T) {
 func TestColumnEnrichmentService_EnrichProject_EmptyProject(t *testing.T) {
 	projectID := uuid.New()
 
-	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
 	schemaRepo := &testColEnrichmentSchemaRepo{columnsByTable: make(map[string][]*models.SchemaColumn)}
 	llmFactory := &testColEnrichmentLLMFactory{
 		client: &testColEnrichmentLLMClient{},
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:       ontologyRepo,
 		schemaRepo:         schemaRepo,
 		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
 		dsSvc:              &testColEnrichmentDatasourceService{},
@@ -806,7 +784,6 @@ func TestColumnEnrichmentService_EnrichProject_PartialFailure(t *testing.T) {
 		]
 	}`
 
-	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"table1": columns,
@@ -824,7 +801,6 @@ func TestColumnEnrichmentService_EnrichProject_PartialFailure(t *testing.T) {
 	llmFactory := &testColEnrichmentLLMFactory{client: client}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:       ontologyRepo,
 		schemaRepo:         schemaRepo,
 		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
 		dsSvc:              &testColEnrichmentDatasourceService{},
@@ -888,9 +864,12 @@ func (c *testColEnrichmentPartialFailureClient) Close() error {
 func TestColumnEnrichmentService_EnrichTable_WithForeignKeys(t *testing.T) {
 	projectID := uuid.New()
 
+	idColID := uuid.New()
+	userIDColID := uuid.New()
+
 	columns := []*models.SchemaColumn{
-		{ColumnName: "id", DataType: "bigint", IsPrimaryKey: true},
-		{ColumnName: "user_id", DataType: "bigint"},
+		{ID: idColID, ColumnName: "id", DataType: "bigint", IsPrimaryKey: true},
+		{ID: userIDColID, ColumnName: "user_id", DataType: "bigint"},
 	}
 
 	llmResponse := `{
@@ -912,7 +891,7 @@ func TestColumnEnrichmentService_EnrichTable_WithForeignKeys(t *testing.T) {
 		]
 	}`
 
-	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
+	colMetadataRepo := &testColEnrichmentColumnMetadataRepo{}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"orders": columns,
@@ -923,9 +902,8 @@ func TestColumnEnrichmentService_EnrichTable_WithForeignKeys(t *testing.T) {
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:       ontologyRepo,
 		schemaRepo:         schemaRepo,
-		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
+		columnMetadataRepo: colMetadataRepo,
 		dsSvc:              &testColEnrichmentDatasourceService{},
 		llmFactory:         llmFactory,
 		workerPool:         llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
@@ -938,21 +916,24 @@ func TestColumnEnrichmentService_EnrichTable_WithForeignKeys(t *testing.T) {
 
 	// Verify
 	require.NoError(t, err)
-	details := ontologyRepo.columnDetails["orders"]
-	require.Equal(t, 2, len(details))
+	assert.Equal(t, 2, colMetadataRepo.upsertCalls)
 
-	// Check FK role was captured
-	userIDCol := details[1]
-	assert.Equal(t, "user_id", userIDCol.Name)
-	assert.Equal(t, "customer", userIDCol.FKAssociation)
+	// Check FK association was captured
+	userIDMeta := colMetadataRepo.metadataByColumnID[userIDColID]
+	require.NotNil(t, userIDMeta)
+	require.NotNil(t, userIDMeta.Features.IdentifierFeatures)
+	assert.Equal(t, "customer", userIDMeta.Features.IdentifierFeatures.FKAssociation)
 }
 
 func TestColumnEnrichmentService_EnrichTable_WithEnumValues(t *testing.T) {
 	projectID := uuid.New()
 
+	idColID := uuid.New()
+	statusColID := uuid.New()
+
 	columns := []*models.SchemaColumn{
-		{ColumnName: "id", DataType: "bigint", IsPrimaryKey: true},
-		{ColumnName: "status", DataType: "varchar"},
+		{ID: idColID, ColumnName: "id", DataType: "bigint", IsPrimaryKey: true},
+		{ID: statusColID, ColumnName: "status", DataType: "varchar"},
 	}
 
 	llmResponse := `{
@@ -980,7 +961,7 @@ func TestColumnEnrichmentService_EnrichTable_WithEnumValues(t *testing.T) {
 		]
 	}`
 
-	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
+	colMetadataRepo := &testColEnrichmentColumnMetadataRepo{}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"orders": columns,
@@ -991,9 +972,8 @@ func TestColumnEnrichmentService_EnrichTable_WithEnumValues(t *testing.T) {
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:       ontologyRepo,
 		schemaRepo:         schemaRepo,
-		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
+		columnMetadataRepo: colMetadataRepo,
 		dsSvc:              &testColEnrichmentDatasourceService{},
 		llmFactory:         llmFactory,
 		workerPool:         llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
@@ -1006,18 +986,18 @@ func TestColumnEnrichmentService_EnrichTable_WithEnumValues(t *testing.T) {
 
 	// Verify
 	require.NoError(t, err)
-	details := ontologyRepo.columnDetails["orders"]
-	require.Equal(t, 2, len(details))
+	assert.Equal(t, 2, colMetadataRepo.upsertCalls)
 
 	// Check enum values were captured
-	statusCol := details[1]
-	assert.Equal(t, "status", statusCol.Name)
-	assert.Equal(t, "status", statusCol.SemanticType)
-	require.Equal(t, 3, len(statusCol.EnumValues))
-	assert.Equal(t, "pending", statusCol.EnumValues[0].Value)
-	assert.Equal(t, "Pending", statusCol.EnumValues[0].Label)
-	assert.Equal(t, 2, len(statusCol.Synonyms))
-	assert.Contains(t, statusCol.Synonyms, "state")
+	statusMeta := colMetadataRepo.metadataByColumnID[statusColID]
+	require.NotNil(t, statusMeta)
+	assert.Equal(t, "status", *statusMeta.SemanticType)
+	require.NotNil(t, statusMeta.Features.EnumFeatures)
+	require.Equal(t, 3, len(statusMeta.Features.EnumFeatures.Values))
+	assert.Equal(t, "pending", statusMeta.Features.EnumFeatures.Values[0].Value)
+	assert.Equal(t, "Pending", statusMeta.Features.EnumFeatures.Values[0].Label)
+	assert.Equal(t, 2, len(statusMeta.Features.Synonyms))
+	assert.Contains(t, statusMeta.Features.Synonyms, "state")
 }
 
 func TestColumnEnrichmentService_identifyEnumCandidates(t *testing.T) {
@@ -1073,14 +1053,12 @@ func TestColumnEnrichmentService_identifyEnumCandidates(t *testing.T) {
 func TestColumnEnrichmentService_EnrichTable_NoTable(t *testing.T) {
 	projectID := uuid.New()
 
-	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
 	schemaRepo := &testColEnrichmentSchemaRepo{columnsByTable: make(map[string][]*models.SchemaColumn)}
 	llmFactory := &testColEnrichmentLLMFactory{
 		client: &testColEnrichmentLLMClient{},
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:       ontologyRepo,
 		schemaRepo:         schemaRepo,
 		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
 		dsSvc:              &testColEnrichmentDatasourceService{},
@@ -1104,7 +1082,6 @@ func TestColumnEnrichmentService_EnrichTable_NoTable(t *testing.T) {
 func TestColumnEnrichmentService_EnrichTable_NoColumns(t *testing.T) {
 	projectID := uuid.New()
 
-	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"empty_table": {}, // No columns
@@ -1115,7 +1092,6 @@ func TestColumnEnrichmentService_EnrichTable_NoColumns(t *testing.T) {
 	}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:       ontologyRepo,
 		schemaRepo:         schemaRepo,
 		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
 		dsSvc:              &testColEnrichmentDatasourceService{},
@@ -1149,7 +1125,6 @@ func TestColumnEnrichmentService_EnrichProject_ContinuesOnFailure(t *testing.T) 
 		]
 	}`
 
-	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"table1": columns,
@@ -1174,7 +1149,6 @@ func TestColumnEnrichmentService_EnrichProject_ContinuesOnFailure(t *testing.T) 
 	})
 
 	service := &columnEnrichmentService{
-		ontologyRepo:       ontologyRepo,
 		schemaRepo:         schemaRepo,
 		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
 		dsSvc:              &testColEnrichmentDatasourceService{},
@@ -1440,16 +1414,6 @@ func TestColumnEnrichmentService_EnrichColumnsInChunks_ChunkFailure(t *testing.T
 	assert.Contains(t, err.Error(), "failed")
 }
 
-// Helper to find a column detail by name
-func findColumnDetail(details []models.ColumnDetail, name string) *models.ColumnDetail {
-	for i := range details {
-		if details[i].Name == name {
-			return &details[i]
-		}
-	}
-	return nil
-}
-
 // Helper function to join strings
 func joinStrings(strs []string, sep string) string {
 	if len(strs) == 0 {
@@ -1467,9 +1431,12 @@ func joinStrings(strs []string, sep string) string {
 func TestColumnEnrichmentService_EnrichTable_IntegerEnumInference(t *testing.T) {
 	projectID := uuid.New()
 
+	idColID := uuid.New()
+	stateColID := uuid.New()
+
 	columns := []*models.SchemaColumn{
-		{ColumnName: "id", DataType: "bigint", IsPrimaryKey: true},
-		{ColumnName: "transaction_state", DataType: "integer"},
+		{ID: idColID, ColumnName: "id", DataType: "bigint", IsPrimaryKey: true},
+		{ID: stateColID, ColumnName: "transaction_state", DataType: "integer"},
 	}
 
 	// LLM response with inferred labels for integer enum values
@@ -1498,7 +1465,7 @@ func TestColumnEnrichmentService_EnrichTable_IntegerEnumInference(t *testing.T) 
 		]
 	}`
 
-	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
+	colMetadataRepo := &testColEnrichmentColumnMetadataRepo{}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"billing_transactions": columns,
@@ -1516,9 +1483,8 @@ func TestColumnEnrichmentService_EnrichTable_IntegerEnumInference(t *testing.T) 
 	llmFactory := &testColEnrichmentLLMFactory{client: llmClient}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:       ontologyRepo,
 		schemaRepo:         schemaRepo,
-		columnMetadataRepo: &testColEnrichmentColumnMetadataRepo{},
+		columnMetadataRepo: colMetadataRepo,
 		dsSvc:              &testColEnrichmentDatasourceService{},
 		llmFactory:         llmFactory,
 		workerPool:         llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
@@ -1538,26 +1504,25 @@ func TestColumnEnrichmentService_EnrichTable_IntegerEnumInference(t *testing.T) 
 	assert.Contains(t, capturedPrompt, "For integer enums")
 	assert.Contains(t, capturedPrompt, "For string enums")
 
-	// Verify column details were saved with proper enum values
-	details := ontologyRepo.columnDetails["billing_transactions"]
-	require.Equal(t, 2, len(details))
+	// Verify column metadata was saved with proper enum values
+	assert.Equal(t, 2, colMetadataRepo.upsertCalls)
 
 	// Find transaction_state column and verify enum values with inferred labels
-	stateCol := findColumnDetail(details, "transaction_state")
-	require.NotNil(t, stateCol, "Should find transaction_state column")
-	assert.Equal(t, "status", stateCol.SemanticType)
-	require.Equal(t, 3, len(stateCol.EnumValues), "Should have 3 enum values")
+	stateMeta := colMetadataRepo.metadataByColumnID[stateColID]
+	require.NotNil(t, stateMeta, "Should find transaction_state column metadata")
+	assert.Equal(t, "status", *stateMeta.SemanticType)
+	require.NotNil(t, stateMeta.Features.EnumFeatures)
+	require.Equal(t, 3, len(stateMeta.Features.EnumFeatures.Values), "Should have 3 enum values")
 
 	// Verify enum values have both value and inferred label
-	assert.Equal(t, "1", stateCol.EnumValues[0].Value)
-	assert.Equal(t, "Started", stateCol.EnumValues[0].Label)
-	assert.Equal(t, "Transaction has been initiated", stateCol.EnumValues[0].Description)
+	assert.Equal(t, "1", stateMeta.Features.EnumFeatures.Values[0].Value)
+	assert.Equal(t, "Started", stateMeta.Features.EnumFeatures.Values[0].Label)
 
-	assert.Equal(t, "2", stateCol.EnumValues[1].Value)
-	assert.Equal(t, "Ended", stateCol.EnumValues[1].Label)
+	assert.Equal(t, "2", stateMeta.Features.EnumFeatures.Values[1].Value)
+	assert.Equal(t, "Ended", stateMeta.Features.EnumFeatures.Values[1].Label)
 
-	assert.Equal(t, "3", stateCol.EnumValues[2].Value)
-	assert.Equal(t, "Waiting", stateCol.EnumValues[2].Label)
+	assert.Equal(t, "3", stateMeta.Features.EnumFeatures.Values[2].Value)
+	assert.Equal(t, "Waiting", stateMeta.Features.EnumFeatures.Values[2].Label)
 }
 
 // TestColumnEnrichmentService_buildColumnEnrichmentPrompt_EnumInstructions verifies
@@ -1865,17 +1830,26 @@ func TestColumnEnrichmentService_toEnumValues(t *testing.T) {
 	}
 }
 
-// TestColumnEnrichmentService_convertToColumnDetails_WithEnumDefinitions tests that
-// enum definitions are properly merged during column detail conversion.
-func TestColumnEnrichmentService_convertToColumnDetails_WithEnumDefinitions(t *testing.T) {
+// TestColumnEnrichmentService_saveEnrichments_WithEnumDefinitions tests that
+// enum definitions are properly merged during saveEnrichments.
+func TestColumnEnrichmentService_saveEnrichments_WithEnumDefinitions(t *testing.T) {
+	projectID := uuid.New()
+
+	idColID := uuid.New()
+	stateColID := uuid.New()
+	statusColID := uuid.New()
+
+	colMetadataRepo := &testColEnrichmentColumnMetadataRepo{}
+
 	service := &columnEnrichmentService{
-		logger: zap.NewNop(),
+		columnMetadataRepo: colMetadataRepo,
+		logger:             zap.NewNop(),
 	}
 
 	columns := []*models.SchemaColumn{
-		{ColumnName: "id", DataType: "bigint", IsPrimaryKey: true},
-		{ColumnName: "transaction_state", DataType: "integer"},
-		{ColumnName: "status", DataType: "varchar"},
+		{ID: idColID, ColumnName: "id", DataType: "bigint", IsPrimaryKey: true},
+		{ID: stateColID, ColumnName: "transaction_state", DataType: "integer"},
+		{ID: statusColID, ColumnName: "status", DataType: "varchar"},
 	}
 
 	// LLM enrichments - transaction_state has inferred but incorrect enum values
@@ -1924,29 +1898,41 @@ func TestColumnEnrichmentService_convertToColumnDetails_WithEnumDefinitions(t *t
 		},
 	}
 
-	fkInfo := map[string]string{}
 	enumDistributions := map[string]*datasource.EnumDistributionResult{}
 
-	details := service.convertToColumnDetails("billing_transactions", enrichments, columns, fkInfo, enumSamples, enumDefs, enumDistributions, make(map[uuid.UUID]*models.ColumnMetadata))
+	savedCount, err := service.saveEnrichments(
+		context.Background(),
+		projectID,
+		"billing_transactions",
+		enrichments,
+		columns,
+		map[string]string{},
+		enumSamples,
+		enumDefs,
+		enumDistributions,
+		make(map[uuid.UUID]*models.ColumnMetadata),
+	)
 
-	require.Equal(t, 3, len(details))
+	require.NoError(t, err)
+	assert.Equal(t, 3, savedCount)
 
 	// Check transaction_state - should have enum definitions merged (overriding LLM inference)
-	stateCol := findColumnDetail(details, "transaction_state")
-	require.NotNil(t, stateCol)
-	require.Equal(t, 2, len(stateCol.EnumValues))
-	assert.Equal(t, "1", stateCol.EnumValues[0].Value)
-	assert.Equal(t, "STARTED", stateCol.EnumValues[0].Label)
-	assert.Equal(t, "Transaction started", stateCol.EnumValues[0].Description)
-	assert.Equal(t, "2", stateCol.EnumValues[1].Value)
-	assert.Equal(t, "ENDED", stateCol.EnumValues[1].Label)
+	stateMeta := colMetadataRepo.metadataByColumnID[stateColID]
+	require.NotNil(t, stateMeta)
+	require.NotNil(t, stateMeta.Features.EnumFeatures)
+	require.Equal(t, 2, len(stateMeta.Features.EnumFeatures.Values))
+	assert.Equal(t, "1", stateMeta.Features.EnumFeatures.Values[0].Value)
+	assert.Equal(t, "STARTED", stateMeta.Features.EnumFeatures.Values[0].Label)
+	assert.Equal(t, "2", stateMeta.Features.EnumFeatures.Values[1].Value)
+	assert.Equal(t, "ENDED", stateMeta.Features.EnumFeatures.Values[1].Label)
 
 	// Check status - should keep LLM values (no enum definition for this column)
-	statusCol := findColumnDetail(details, "status")
-	require.NotNil(t, statusCol)
-	require.Equal(t, 1, len(statusCol.EnumValues))
-	assert.Equal(t, "active", statusCol.EnumValues[0].Value)
-	assert.Equal(t, "Active", statusCol.EnumValues[0].Label)
+	statusMeta := colMetadataRepo.metadataByColumnID[statusColID]
+	require.NotNil(t, statusMeta)
+	require.NotNil(t, statusMeta.Features.EnumFeatures)
+	require.Equal(t, 1, len(statusMeta.Features.EnumFeatures.Values))
+	assert.Equal(t, "active", statusMeta.Features.EnumFeatures.Values[0].Value)
+	assert.Equal(t, "Active", statusMeta.Features.EnumFeatures.Values[0].Label)
 }
 
 func TestColumnEnrichmentResponse_QuestionsDeserialization(t *testing.T) {
@@ -2492,12 +2478,10 @@ func TestFilterColumnsForLLM(t *testing.T) {
 	}
 }
 
-// TestConvertToColumnDetails_ColumnFeaturesMerge tests that ColumnMetadata features are properly
-// merged into ColumnDetail output.
-func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
-	service := &columnEnrichmentService{
-		logger: zap.NewNop(),
-	}
+// TestSaveEnrichments_ColumnFeaturesMerge tests that ColumnMetadata features are properly
+// merged when saving enrichments via saveEnrichments.
+func TestSaveEnrichments_ColumnFeaturesMerge(t *testing.T) {
+	projectID := uuid.New()
 
 	ptrFloat := func(f float64) *float64 { return &f }
 	ptrStr := func(s string) *string { return &s }
@@ -2512,6 +2496,7 @@ func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
 		metadataByColumnID   map[uuid.UUID]*models.ColumnMetadata
 		enrichments          []columnEnrichment
 		fkInfo               map[string]string
+		colID                uuid.UUID
 		expectedDescription  string
 		expectedSemanticType string
 		expectedRole         string
@@ -2547,12 +2532,13 @@ func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
 				},
 			},
 			fkInfo:               make(map[string]string),
-			expectedDescription:  "When the record was deleted", // LLM desc used when Features desc empty
+			colID:                deletedAtColID,
+			expectedDescription:  "When the record was deleted", // LLM desc always applied
 			expectedSemanticType: "soft_delete",                 // ColumnMetadata takes precedence
 			expectedRole:         "attribute",
 		},
 		{
-			name: "EnumFeatures values are copied to EnumValues",
+			name: "EnumFeatures values are preserved when LLM has no enums",
 			columns: []*models.SchemaColumn{
 				{ID: statusColID, ColumnName: "status", DataType: "varchar"},
 			},
@@ -2583,13 +2569,14 @@ func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
 				},
 			},
 			fkInfo:               make(map[string]string),
+			colID:                statusColID,
 			expectedDescription:  "LLM description",
 			expectedSemanticType: "status",
 			expectedRole:         "dimension",
 			expectedEnumCount:    3,
 		},
 		{
-			name: "IdentifierFeatures EntityReferenced becomes FKAssociation",
+			name: "IdentifierFeatures FKAssociation is preserved",
 			columns: []*models.SchemaColumn{
 				{ID: visitorIDColID, ColumnName: "visitor_id", DataType: "uuid"},
 			},
@@ -2618,16 +2605,34 @@ func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
 				},
 			},
 			fkInfo:               make(map[string]string),
+			colID:                visitorIDColID,
 			expectedDescription:  "LLM FK description",
 			expectedSemanticType: "foreign_key", // ColumnMetadata takes precedence
 			expectedRole:         "foreign_key",
-			expectedFKAssoc:      "visitor",
+			expectedFKAssoc:      "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			details := service.convertToColumnDetails(
+			// Create a fresh colMetadataRepo pre-populated with existing metadata
+			// (saveEnrichments reads from metadataByColumnID parameter, and GetBySchemaColumnIDs reads from repo)
+			colMetadataRepo := &testColEnrichmentColumnMetadataRepo{
+				metadataByColumnID: make(map[uuid.UUID]*models.ColumnMetadata),
+			}
+			for id, meta := range tt.metadataByColumnID {
+				copied := *meta
+				colMetadataRepo.metadataByColumnID[id] = &copied
+			}
+
+			service := &columnEnrichmentService{
+				columnMetadataRepo: colMetadataRepo,
+				logger:             zap.NewNop(),
+			}
+
+			savedCount, err := service.saveEnrichments(
+				context.Background(),
+				projectID,
 				"test_table",
 				tt.enrichments,
 				tt.columns,
@@ -2638,19 +2643,33 @@ func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
 				tt.metadataByColumnID,
 			)
 
-			require.Equal(t, 1, len(details))
-			detail := details[0]
+			require.NoError(t, err)
+			require.Equal(t, 1, savedCount)
 
-			assert.Equal(t, tt.expectedDescription, detail.Description, "description")
-			assert.Equal(t, tt.expectedSemanticType, detail.SemanticType, "semantic_type")
-			assert.Equal(t, tt.expectedRole, detail.Role, "role")
+			meta := colMetadataRepo.metadataByColumnID[tt.colID]
+			require.NotNil(t, meta)
+
+			if tt.expectedDescription != "" {
+				require.NotNil(t, meta.Description, "description should be set")
+				assert.Equal(t, tt.expectedDescription, *meta.Description, "description")
+			}
+			if tt.expectedSemanticType != "" {
+				require.NotNil(t, meta.SemanticType, "semantic_type should be set")
+				assert.Equal(t, tt.expectedSemanticType, *meta.SemanticType, "semantic_type")
+			}
+			if tt.expectedRole != "" {
+				require.NotNil(t, meta.Role, "role should be set")
+				assert.Equal(t, tt.expectedRole, *meta.Role, "role")
+			}
 
 			if tt.expectedFKAssoc != "" {
-				assert.Equal(t, tt.expectedFKAssoc, detail.FKAssociation, "fk_association")
+				require.NotNil(t, meta.Features.IdentifierFeatures, "identifier features should be set")
+				assert.Equal(t, tt.expectedFKAssoc, meta.Features.IdentifierFeatures.FKAssociation, "fk_association")
 			}
 
 			if tt.expectedEnumCount > 0 {
-				assert.Equal(t, tt.expectedEnumCount, len(detail.EnumValues), "enum values count")
+				require.NotNil(t, meta.Features.EnumFeatures, "enum features should be set")
+				assert.Equal(t, tt.expectedEnumCount, len(meta.Features.EnumFeatures.Values), "enum values count")
 			}
 		})
 	}
@@ -2708,7 +2727,6 @@ func TestEnrichProject_SkipsLLMForHighConfidenceColumns(t *testing.T) {
 	}`
 
 	// Setup service
-	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"users": columns,
@@ -2721,7 +2739,6 @@ func TestEnrichProject_SkipsLLMForHighConfidenceColumns(t *testing.T) {
 	llmFactory := &testColEnrichmentLLMFactory{client: llmClient}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:       ontologyRepo,
 		schemaRepo:         schemaRepo,
 		columnMetadataRepo: colMetadataRepo,
 		dsSvc:              &testColEnrichmentDatasourceService{},
@@ -2742,32 +2759,24 @@ func TestEnrichProject_SkipsLLMForHighConfidenceColumns(t *testing.T) {
 	// Verify LLM was called once (for email column only)
 	assert.Equal(t, 1, llmClient.callCount)
 
-	// Verify column details were saved for both columns
-	details := ontologyRepo.columnDetails["users"]
-	require.Equal(t, 2, len(details))
+	// Verify column metadata was saved for both columns
+	assert.Equal(t, 2, colMetadataRepo.upsertCalls)
 
-	// Find each column in details
-	var idDetail, emailDetail *models.ColumnDetail
-	for i := range details {
-		if details[i].Name == "id" {
-			idDetail = &details[i]
-		} else if details[i].Name == "email" {
-			emailDetail = &details[i]
-		}
-	}
+	idMeta := colMetadataRepo.metadataByColumnID[idColID]
+	require.NotNil(t, idMeta, "id column should have metadata")
 
-	require.NotNil(t, idDetail, "id column should be in details")
-	require.NotNil(t, emailDetail, "email column should be in details")
+	emailMeta := colMetadataRepo.metadataByColumnID[columns[1].ID]
+	require.NotNil(t, emailMeta, "email column should have metadata")
 
-	// id column should have ColumnFeatures data (from synthetic enrichment)
-	assert.Equal(t, "Unique user identifier", idDetail.Description)
-	assert.Equal(t, "identifier", idDetail.SemanticType)
-	assert.Equal(t, "primary_key", idDetail.Role)
+	// id column should have ColumnMetadata data (from synthetic enrichment)
+	assert.Equal(t, "Unique user identifier", *idMeta.Description)
+	assert.Equal(t, "identifier", *idMeta.SemanticType)
+	assert.Equal(t, "primary_key", *idMeta.Role)
 
 	// email column should have LLM-provided data
-	assert.Equal(t, "User's email address", emailDetail.Description)
-	assert.Equal(t, "email", emailDetail.SemanticType)
-	assert.Equal(t, "attribute", emailDetail.Role)
+	assert.Equal(t, "User's email address", *emailMeta.Description)
+	assert.Equal(t, "email", *emailMeta.SemanticType)
+	assert.Equal(t, "attribute", *emailMeta.Role)
 }
 
 // TestEnrichProject_AllColumnsHighConfidence verifies that no LLM calls are made
@@ -2816,7 +2825,6 @@ func TestEnrichProject_AllColumnsHighConfidence(t *testing.T) {
 	}
 
 	// Setup service
-	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
 	schemaRepo := &testColEnrichmentSchemaRepo{
 		columnsByTable: map[string][]*models.SchemaColumn{
 			"users": columns,
@@ -2829,7 +2837,6 @@ func TestEnrichProject_AllColumnsHighConfidence(t *testing.T) {
 	llmFactory := &testColEnrichmentLLMFactory{client: llmClient}
 
 	service := &columnEnrichmentService{
-		ontologyRepo:       ontologyRepo,
 		schemaRepo:         schemaRepo,
 		columnMetadataRepo: colMetadataRepo,
 		dsSvc:              &testColEnrichmentDatasourceService{},
@@ -2850,7 +2857,6 @@ func TestEnrichProject_AllColumnsHighConfidence(t *testing.T) {
 	// Verify LLM was NOT called (all columns skipped)
 	assert.Equal(t, 0, llmClient.callCount, "LLM should not be called when all columns have high-confidence features")
 
-	// Verify column details were saved
-	details := ontologyRepo.columnDetails["users"]
-	require.Equal(t, 2, len(details))
+	// Verify column metadata was saved
+	assert.Equal(t, 2, colMetadataRepo.upsertCalls)
 }

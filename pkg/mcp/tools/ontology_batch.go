@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
@@ -148,104 +147,34 @@ func registerUpdateColumnsTool(s *server.MCPServer, deps *ColumnToolDeps) {
 			}, nil
 		}
 
-		// Phase 2: Apply all updates in a transaction
-		// Get or create active ontology
-		ontology, err := ensureOntologyExists(tenantCtx, deps.OntologyRepo, projectID)
-		if err != nil {
-			return NewErrorResult("ontology_error", err.Error()), nil
-		}
-
-		// Group updates by table for efficient processing
-		updatesByTable := make(map[string][]ColumnUpdate)
-		for _, update := range updates {
-			updatesByTable[update.Table] = append(updatesByTable[update.Table], update)
-		}
-
-		// Track results
+		// Phase 2: Apply all updates via ColumnMetadataRepo
 		results := make([]ColumnUpdateResult, len(updates))
-		updateIndex := 0
 		updatedCount := 0
 
-		// Process each table's updates
-		for tableName, tableUpdates := range updatesByTable {
-			// Get existing column details for this table
-			existingColumns := ontology.GetColumnDetails(tableName)
-			if existingColumns == nil {
-				existingColumns = []models.ColumnDetail{}
+		for i, update := range updates {
+			results[i] = ColumnUpdateResult{
+				Table:  update.Table,
+				Column: update.Column,
 			}
 
-			// Build column map for quick lookup
-			columnMap := make(map[string]int)
-			for i, col := range existingColumns {
-				columnMap[col.Name] = i
+			// Check if metadata already exists to determine created vs updated
+			schemaTable, _ := deps.SchemaRepo.FindTableByName(tenantCtx, projectID, datasourceID, update.Table)
+			var isNew bool
+			if schemaTable != nil {
+				schemaColumn, _ := deps.SchemaRepo.GetColumnByName(tenantCtx, schemaTable.ID, update.Column)
+				if schemaColumn != nil {
+					existing, _ := deps.ColumnMetadataRepo.GetBySchemaColumnID(tenantCtx, schemaColumn.ID)
+					isNew = existing == nil
+				}
 			}
 
-			// Apply each update
-			for _, update := range tableUpdates {
-				resultIdx := findUpdateIndex(updates, update.Table, update.Column, updateIndex)
-				results[resultIdx] = ColumnUpdateResult{
-					Table:  update.Table,
-					Column: update.Column,
-				}
-
-				idx, exists := columnMap[update.Column]
-				var targetColumn *models.ColumnDetail
-				if exists {
-					targetColumn = &existingColumns[idx]
-				} else {
-					// Create new column detail
-					newCol := models.ColumnDetail{Name: update.Column}
-					existingColumns = append(existingColumns, newCol)
-					columnMap[update.Column] = len(existingColumns) - 1
-					targetColumn = &existingColumns[len(existingColumns)-1]
-				}
-
-				// Apply updates
-				if update.Description != nil {
-					targetColumn.Description = *update.Description
-				}
-				if update.Entity != nil {
-					targetColumn.SemanticType = *update.Entity
-				}
-				if update.Role != nil {
-					targetColumn.Role = *update.Role
-				}
-				if update.EnumValues != nil {
-					targetColumn.EnumValues = parseEnumValues(update.EnumValues)
-				}
-
-				// Update column in slice
-				if exists {
-					existingColumns[idx] = *targetColumn
-				}
-
-				results[resultIdx].Status = "success"
-				results[resultIdx].Created = !exists
+			if err := trackColumnMetadata(tenantCtx, deps, projectID, datasourceID, update); err != nil {
+				results[i].Status = "error"
+				results[i].Error = fmt.Sprintf("failed to save: %v", err)
+			} else {
+				results[i].Status = "success"
+				results[i].Created = isNew
 				updatedCount++
-
-				// Track column metadata with provenance
-				if deps.ColumnMetadataRepo != nil {
-					if err := trackColumnMetadata(tenantCtx, deps, projectID, datasourceID, update); err != nil {
-						// Log but don't fail - ontology update succeeded
-						deps.Logger.Warn("Failed to track column metadata provenance",
-							zap.String("table", update.Table),
-							zap.String("column", update.Column),
-							zap.Error(err))
-					}
-				}
-			}
-
-			// Save updated column details back to ontology
-			if err := deps.OntologyRepo.UpdateColumnDetails(tenantCtx, projectID, tableName, existingColumns); err != nil {
-				// Mark remaining updates for this table as failed
-				for _, update := range tableUpdates {
-					resultIdx := findUpdateIndex(updates, update.Table, update.Column, 0)
-					if results[resultIdx].Status == "success" {
-						results[resultIdx].Status = "error"
-						results[resultIdx].Error = fmt.Sprintf("failed to save: %v", err)
-						updatedCount--
-					}
-				}
 			}
 		}
 

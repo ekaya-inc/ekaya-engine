@@ -21,7 +21,6 @@ import (
 type ProbeToolDeps struct {
 	BaseMCPToolDeps
 	SchemaRepo         repositories.SchemaRepository
-	OntologyRepo       repositories.OntologyRepository
 	ColumnMetadataRepo repositories.ColumnMetadataRepository
 	ProjectService     services.ProjectService
 }
@@ -326,139 +325,92 @@ func probeColumn(ctx context.Context, deps *ProbeToolDeps, projectID uuid.UUID, 
 		response.Joinability = &joinability
 	}
 
-	// Get semantic information from ontology if available
-	ontology, err := deps.OntologyRepo.GetActive(ctx, projectID)
+	// Get semantic information from ColumnMetadataRepo
+	columnMeta, err := deps.ColumnMetadataRepo.GetBySchemaColumnID(ctx, column.ID)
 	if err != nil {
-		deps.Logger.Warn("Failed to get active ontology for semantic enrichment",
+		deps.Logger.Warn("Failed to get column metadata",
 			zap.String("project_id", projectID.String()),
+			zap.String("table", tableName),
+			zap.String("column", columnName),
 			zap.Error(err))
-	}
+	} else if columnMeta != nil {
+		// Build semantic section from column metadata
+		semantic := probeColumnSemantic{}
 
-	if ontology != nil {
-		// Get column details from ontology
-		columnDetails := ontology.GetColumnDetails(tableName)
-		for _, colDetail := range columnDetails {
-			if colDetail.Name == columnName {
-				semantic := probeColumnSemantic{
-					Role:        colDetail.Role,
-					Description: colDetail.Description,
+		if columnMeta.Description != nil && *columnMeta.Description != "" {
+			semantic.Description = *columnMeta.Description
+		}
+		if columnMeta.Role != nil && *columnMeta.Role != "" {
+			semantic.Role = *columnMeta.Role
+		}
+
+		// Extract entity from IdentifierFeatures
+		if idFeatures := columnMeta.GetIdentifierFeatures(); idFeatures != nil && idFeatures.EntityReferenced != "" {
+			semantic.Entity = idFeatures.EntityReferenced
+		}
+
+		// Extract enum labels from EnumFeatures
+		if enumFeatures := columnMeta.GetEnumFeatures(); enumFeatures != nil && len(enumFeatures.Values) > 0 {
+			enumLabels := make(map[string]string)
+			for _, ev := range enumFeatures.Values {
+				if ev.Label != "" {
+					enumLabels[ev.Value] = ev.Label
 				}
-
-				// Extract enum labels and distribution data
-				if len(colDetail.EnumValues) > 0 {
-					enumLabels := make(map[string]string)
-					var enumDist []probeEnumValueDetail
-
-					for _, ev := range colDetail.EnumValues {
-						if ev.Label != "" {
-							enumLabels[ev.Value] = ev.Label
-						} else if ev.Description != "" {
-							enumLabels[ev.Value] = ev.Description
-						}
-
-						// Add distribution data if available
-						if ev.Count != nil || ev.IsLikelyInitialState != nil || ev.IsLikelyTerminalState != nil || ev.IsLikelyErrorState != nil {
-							detail := probeEnumValueDetail{
-								Value:                 ev.Value,
-								Label:                 ev.Label,
-								Count:                 ev.Count,
-								Percentage:            ev.Percentage,
-								IsLikelyInitialState:  ev.IsLikelyInitialState,
-								IsLikelyTerminalState: ev.IsLikelyTerminalState,
-								IsLikelyErrorState:    ev.IsLikelyErrorState,
-							}
-							enumDist = append(enumDist, detail)
-						}
-					}
-
-					if len(enumLabels) > 0 {
-						semantic.EnumLabels = enumLabels
-					}
-					if len(enumDist) > 0 {
-						semantic.EnumDistribution = enumDist
-					}
-				}
-
-				response.Semantic = &semantic
-				break
+			}
+			if len(enumLabels) > 0 {
+				semantic.EnumLabels = enumLabels
 			}
 		}
-	}
 
-	// TODO: Fetch column metadata from ColumnMetadataRepository using column.ID
-	// The new schema uses SchemaColumnID (FK) instead of TableName/ColumnName.
-	// Enum values, descriptions, and features are now in the Features JSONB.
-	// See PLAN-column-schema-refactor.md for details.
-	if deps.ColumnMetadataRepo != nil && column != nil {
-		columnMeta, err := deps.ColumnMetadataRepo.GetBySchemaColumnID(ctx, column.ID)
-		if err != nil {
-			deps.Logger.Warn("Failed to get column metadata",
-				zap.String("project_id", projectID.String()),
-				zap.String("table", tableName),
-				zap.String("column", columnName),
-				zap.Error(err))
-		} else if columnMeta != nil {
-			// Initialize semantic section if not already present
-			if response.Semantic == nil {
-				response.Semantic = &probeColumnSemantic{}
+		if semantic.Description != "" || semantic.Role != "" || semantic.Entity != "" || len(semantic.EnumLabels) > 0 {
+			response.Semantic = &semantic
+		}
+
+		// Extract features from column metadata
+		response.Features = &probeColumnFeatures{
+			Purpose:            ptrStrValue(columnMeta.Purpose),
+			SemanticType:       ptrStrValue(columnMeta.SemanticType),
+			Role:               ptrStrValue(columnMeta.Role),
+			Description:        ptrStrValue(columnMeta.Description),
+			ClassificationPath: ptrStrValue(columnMeta.ClassificationPath),
+			Confidence:         ptrFloat64Value(columnMeta.Confidence),
+		}
+
+		// Add timestamp features if present
+		if tsFeatures := columnMeta.GetTimestampFeatures(); tsFeatures != nil {
+			response.Features.TimestampFeatures = &probeTimestampFeatures{
+				TimestampPurpose: tsFeatures.TimestampPurpose,
+				IsSoftDelete:     tsFeatures.IsSoftDelete,
+				IsAuditField:     tsFeatures.IsAuditField,
 			}
+		}
 
-			// Merge description if present
-			if columnMeta.Description != nil && *columnMeta.Description != "" && response.Semantic.Description == "" {
-				response.Semantic.Description = *columnMeta.Description
+		// Add boolean features if present
+		if boolFeatures := columnMeta.GetBooleanFeatures(); boolFeatures != nil {
+			response.Features.BooleanFeatures = &probeBooleanFeatures{
+				TrueMeaning:  boolFeatures.TrueMeaning,
+				FalseMeaning: boolFeatures.FalseMeaning,
+				BooleanType:  boolFeatures.BooleanType,
 			}
+		}
 
-			// Merge role if present
-			if columnMeta.Role != nil && *columnMeta.Role != "" && response.Semantic.Role == "" {
-				response.Semantic.Role = *columnMeta.Role
+		// Add identifier features if present
+		if idFeatures := columnMeta.GetIdentifierFeatures(); idFeatures != nil {
+			response.Features.IdentifierFeatures = &probeIdentifierFeatures{
+				IdentifierType:  idFeatures.IdentifierType,
+				ExternalService: idFeatures.ExternalService,
+				FKTargetTable:   idFeatures.FKTargetTable,
+				FKTargetColumn:  idFeatures.FKTargetColumn,
+				FKConfidence:    idFeatures.FKConfidence,
 			}
+		}
 
-			// Extract features from column metadata
-			response.Features = &probeColumnFeatures{
-				Purpose:            ptrStrValue(columnMeta.Purpose),
-				SemanticType:       ptrStrValue(columnMeta.SemanticType),
-				Role:               ptrStrValue(columnMeta.Role),
-				Description:        ptrStrValue(columnMeta.Description),
-				ClassificationPath: ptrStrValue(columnMeta.ClassificationPath),
-				Confidence:         ptrFloat64Value(columnMeta.Confidence),
-			}
-
-			// Add timestamp features if present
-			if tsFeatures := columnMeta.GetTimestampFeatures(); tsFeatures != nil {
-				response.Features.TimestampFeatures = &probeTimestampFeatures{
-					TimestampPurpose: tsFeatures.TimestampPurpose,
-					IsSoftDelete:     tsFeatures.IsSoftDelete,
-					IsAuditField:     tsFeatures.IsAuditField,
-				}
-			}
-
-			// Add boolean features if present
-			if boolFeatures := columnMeta.GetBooleanFeatures(); boolFeatures != nil {
-				response.Features.BooleanFeatures = &probeBooleanFeatures{
-					TrueMeaning:  boolFeatures.TrueMeaning,
-					FalseMeaning: boolFeatures.FalseMeaning,
-					BooleanType:  boolFeatures.BooleanType,
-				}
-			}
-
-			// Add identifier features if present
-			if idFeatures := columnMeta.GetIdentifierFeatures(); idFeatures != nil {
-				response.Features.IdentifierFeatures = &probeIdentifierFeatures{
-					IdentifierType:  idFeatures.IdentifierType,
-					ExternalService: idFeatures.ExternalService,
-					FKTargetTable:   idFeatures.FKTargetTable,
-					FKTargetColumn:  idFeatures.FKTargetColumn,
-					FKConfidence:    idFeatures.FKConfidence,
-				}
-			}
-
-			// Add monetary features if present
-			if moneyFeatures := columnMeta.GetMonetaryFeatures(); moneyFeatures != nil {
-				response.Features.MonetaryFeatures = &probeMonetaryFeatures{
-					IsMonetary:           moneyFeatures.IsMonetary,
-					CurrencyUnit:         moneyFeatures.CurrencyUnit,
-					PairedCurrencyColumn: moneyFeatures.PairedCurrencyColumn,
-				}
+		// Add monetary features if present
+		if moneyFeatures := columnMeta.GetMonetaryFeatures(); moneyFeatures != nil {
+			response.Features.MonetaryFeatures = &probeMonetaryFeatures{
+				IsMonetary:           moneyFeatures.IsMonetary,
+				CurrencyUnit:         moneyFeatures.CurrencyUnit,
+				PairedCurrencyColumn: moneyFeatures.PairedCurrencyColumn,
 			}
 		}
 	}

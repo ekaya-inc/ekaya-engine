@@ -53,8 +53,7 @@ func setupParameterizedQueriesTest(t *testing.T) *parameterizedQueriesTestContex
 
 	adapterFactory := datasource.NewDatasourceAdapterFactory(nil)
 	dsRepo := repositories.NewDatasourceRepository()
-	ontologyRepo := repositories.NewOntologyRepository()
-	dsSvc := services.NewDatasourceService(dsRepo, ontologyRepo, encryptor, adapterFactory, nil, zap.NewNop())
+	dsSvc := services.NewDatasourceService(dsRepo, encryptor, adapterFactory, nil, zap.NewNop())
 
 	auditor := audit.NewSecurityAuditor(zap.NewNop())
 	queryRepo := repositories.NewQueryRepository()

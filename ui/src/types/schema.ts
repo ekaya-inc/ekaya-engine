@@ -52,12 +52,22 @@ export interface SchemaRelationship {
 }
 
 /**
+ * Pending change info for a table or column detected during schema refresh
+ */
+export interface PendingChangeInfo {
+  change_id: string;
+  change_type: string;
+  status: string;
+}
+
+/**
  * Complete datasource schema response from /sdap/v1/{project_id}/schema
  */
 export interface DatasourceSchema {
   tables: SchemaTable[];
   total_tables: number;
   relationships: SchemaRelationship[];
+  pending_changes?: Record<string, PendingChangeInfo>;
   error?: string; // Optional error message if schema retrieval partially failed
 }
 
@@ -81,11 +91,13 @@ export interface SaveSelectionsRequest {
 
 /**
  * Response from POST /sdap/v1/{project_id}/schema/selections
- * Confirms successful save of schema selections
+ * Confirms successful save of schema selections with pending change resolution counts
  */
 export interface SaveSelectionsResponse {
   selected_tables_count: number;
   selected_columns_count: number;
+  approved_count?: number;
+  rejected_count?: number;
 }
 
 /**

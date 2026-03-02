@@ -60,6 +60,9 @@ type ColumnMetadataFeatures struct {
 	EnumFeatures       *EnumFeatures       `json:"enum_features,omitempty"`
 	IdentifierFeatures *IdentifierFeatures `json:"identifier_features,omitempty"`
 	MonetaryFeatures   *MonetaryFeatures   `json:"monetary_features,omitempty"`
+
+	// Cross-cutting features (not tied to a specific classification path)
+	Synonyms []string `json:"synonyms,omitempty"` // Alternative names for this column (e.g., "revenue", "sales")
 }
 
 // Scan implements sql.Scanner for reading JSONB from database.

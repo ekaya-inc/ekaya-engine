@@ -862,6 +862,12 @@ func (m *mockSchemaRepoForFeatureExtraction) GetTablesByNames(ctx context.Contex
 func (m *mockSchemaRepoForFeatureExtraction) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 0, nil
 }
+func (m *mockSchemaRepoForFeatureExtraction) GetTableCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return 0, nil
+}
+func (m *mockSchemaRepoForFeatureExtraction) GetSelectedTableNamesByProject(ctx context.Context, projectID uuid.UUID) ([]string, error) {
+	return nil, nil
+}
 func (m *mockSchemaRepoForFeatureExtraction) GetColumnByID(ctx context.Context, projectID, columnID uuid.UUID) (*models.SchemaColumn, error) {
 	return nil, nil
 }
@@ -3600,35 +3606,6 @@ func TestStoreFeatures_SkipsNilFeatures(t *testing.T) {
 // Tests for createQuestionsFromUncertainClassifications
 // ============================================================================
 
-// mockOntologyRepoForFeatureExtraction is a minimal mock for testing question creation
-type mockOntologyRepoForFeatureExtraction struct {
-	ontology *models.TieredOntology
-	getErr   error
-}
-
-func (m *mockOntologyRepoForFeatureExtraction) GetActive(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error) {
-	if m.getErr != nil {
-		return nil, m.getErr
-	}
-	return m.ontology, nil
-}
-
-func (m *mockOntologyRepoForFeatureExtraction) Create(ctx context.Context, ontology *models.TieredOntology) error {
-	return nil
-}
-func (m *mockOntologyRepoForFeatureExtraction) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
-	return nil
-}
-func (m *mockOntologyRepoForFeatureExtraction) UpdateColumnDetails(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error {
-	return nil
-}
-func (m *mockOntologyRepoForFeatureExtraction) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
-	return nil
-}
-func (m *mockOntologyRepoForFeatureExtraction) GetNextVersion(ctx context.Context, projectID uuid.UUID) (int, error) {
-	return 1, nil
-}
-
 // mockQuestionServiceForFeatureExtraction is a minimal mock for testing question creation
 type mockQuestionServiceForFeatureExtraction struct {
 	createdQuestions []*models.OntologyQuestion
@@ -3666,21 +3643,11 @@ func (m *mockQuestionServiceForFeatureExtraction) CreateQuestions(ctx context.Co
 
 func TestCreateQuestionsFromUncertainClassifications_CreatesQuestions(t *testing.T) {
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	columnID := uuid.New()
-
-	ontologyRepo := &mockOntologyRepoForFeatureExtraction{
-		ontology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 
 	questionService := &mockQuestionServiceForFeatureExtraction{}
 
 	svc := &columnFeatureExtractionService{
-		ontologyRepo:    ontologyRepo,
 		questionService: questionService,
 		logger:          zap.NewNop(),
 	}
@@ -3732,22 +3699,12 @@ func TestCreateQuestionsFromUncertainClassifications_CreatesQuestions(t *testing
 
 func TestCreateQuestionsFromUncertainClassifications_SkipsColumnsWithoutClarification(t *testing.T) {
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	col1ID := uuid.New()
 	col2ID := uuid.New()
-
-	ontologyRepo := &mockOntologyRepoForFeatureExtraction{
-		ontology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 
 	questionService := &mockQuestionServiceForFeatureExtraction{}
 
 	svc := &columnFeatureExtractionService{
-		ontologyRepo:    ontologyRepo,
 		questionService: questionService,
 		logger:          zap.NewNop(),
 	}
@@ -3784,18 +3741,15 @@ func TestCreateQuestionsFromUncertainClassifications_SkipsColumnsWithoutClarific
 	}
 }
 
-func TestCreateQuestionsFromUncertainClassifications_ContinuesOnOntologyNotFound(t *testing.T) {
+func TestCreateQuestionsFromUncertainClassifications_CreatesQuestionsWithoutOntology(t *testing.T) {
+	// Ontology is no longer required for question creation.
+	// Questions are created directly from uncertain column classifications.
 	projectID := uuid.New()
 	columnID := uuid.New()
-
-	ontologyRepo := &mockOntologyRepoForFeatureExtraction{
-		ontology: nil, // No active ontology
-	}
 
 	questionService := &mockQuestionServiceForFeatureExtraction{}
 
 	svc := &columnFeatureExtractionService{
-		ontologyRepo:    ontologyRepo,
 		questionService: questionService,
 		logger:          zap.NewNop(),
 	}
@@ -3816,33 +3770,23 @@ func TestCreateQuestionsFromUncertainClassifications_ContinuesOnOntologyNotFound
 		},
 	}
 
-	// Should not panic
+	// Should not panic and should create the question
 	svc.createQuestionsFromUncertainClassifications(context.Background(), projectID, features, profiles)
 
-	if len(questionService.createdQuestions) != 0 {
-		t.Errorf("Expected 0 questions when no ontology, got %d", len(questionService.createdQuestions))
+	if len(questionService.createdQuestions) != 1 {
+		t.Errorf("Expected 1 question, got %d", len(questionService.createdQuestions))
 	}
 }
 
 func TestCreateQuestionsFromUncertainClassifications_ContinuesOnQuestionServiceError(t *testing.T) {
 	projectID := uuid.New()
-	ontologyID := uuid.New()
 	columnID := uuid.New()
-
-	ontologyRepo := &mockOntologyRepoForFeatureExtraction{
-		ontology: &models.TieredOntology{
-			ID:        ontologyID,
-			ProjectID: projectID,
-			IsActive:  true,
-		},
-	}
 
 	questionService := &mockQuestionServiceForFeatureExtraction{
 		createErr: fmt.Errorf("simulated database error"),
 	}
 
 	svc := &columnFeatureExtractionService{
-		ontologyRepo:    ontologyRepo,
 		questionService: questionService,
 		logger:          zap.NewNop(),
 	}
@@ -3872,7 +3816,6 @@ func TestCreateQuestionsFromUncertainClassifications_NilDependencies(t *testing.
 	columnID := uuid.New()
 
 	svc := &columnFeatureExtractionService{
-		ontologyRepo:    nil, // nil dependencies
 		questionService: nil,
 		logger:          zap.NewNop(),
 	}

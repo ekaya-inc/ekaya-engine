@@ -171,11 +171,11 @@ func (s *testGlossaryService) SuggestTerms(ctx context.Context, projectID uuid.U
 	return nil, nil
 }
 
-func (s *testGlossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) (int, error) {
+func (s *testGlossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 0, nil
 }
 
-func (s *testGlossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error {
+func (s *testGlossaryService) EnrichGlossaryTerms(ctx context.Context, projectID uuid.UUID) error {
 	return nil
 }
 

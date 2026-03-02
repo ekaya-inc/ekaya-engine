@@ -40,27 +40,30 @@ type OntologyQuestionService interface {
 }
 
 type ontologyQuestionService struct {
-	questionRepo  repositories.OntologyQuestionRepository
-	ontologyRepo  repositories.OntologyRepository
-	knowledgeRepo repositories.KnowledgeRepository
-	builder       OntologyBuilderService
-	logger        *zap.Logger
+	questionRepo       repositories.OntologyQuestionRepository
+	columnMetadataRepo repositories.ColumnMetadataRepository
+	schemaRepo         repositories.SchemaRepository
+	knowledgeRepo      repositories.KnowledgeRepository
+	builder            OntologyBuilderService
+	logger             *zap.Logger
 }
 
 // NewOntologyQuestionService creates a new ontology question service.
 func NewOntologyQuestionService(
 	questionRepo repositories.OntologyQuestionRepository,
-	ontologyRepo repositories.OntologyRepository,
+	columnMetadataRepo repositories.ColumnMetadataRepository,
+	schemaRepo repositories.SchemaRepository,
 	knowledgeRepo repositories.KnowledgeRepository,
 	builder OntologyBuilderService,
 	logger *zap.Logger,
 ) OntologyQuestionService {
 	return &ontologyQuestionService{
-		questionRepo:  questionRepo,
-		ontologyRepo:  ontologyRepo,
-		knowledgeRepo: knowledgeRepo,
-		builder:       builder,
-		logger:        logger.Named("ontology-question"),
+		questionRepo:       questionRepo,
+		columnMetadataRepo: columnMetadataRepo,
+		schemaRepo:         schemaRepo,
+		knowledgeRepo:      knowledgeRepo,
+		builder:            builder,
+		logger:             logger.Named("ontology-question"),
 	}
 }
 
@@ -168,7 +171,6 @@ func (s *ontologyQuestionService) AnswerQuestion(ctx context.Context, questionID
 	if processingResult.FollowUp != nil && *processingResult.FollowUp != "" {
 		followUp := &models.OntologyQuestion{
 			ProjectID:        question.ProjectID,
-			OntologyID:       question.OntologyID,
 			Text:             *processingResult.FollowUp,
 			Priority:         question.Priority,
 			IsRequired:       false, // Follow-ups are optional
@@ -240,96 +242,79 @@ func (s *ontologyQuestionService) applyEntityUpdates(ctx context.Context, projec
 	return nil
 }
 
-// applyColumnUpdates applies column updates from answer processing to the ontology.
+// applyColumnUpdates applies column updates from answer processing to ColumnMetadata.
 func (s *ontologyQuestionService) applyColumnUpdates(ctx context.Context, projectID uuid.UUID, updates []ColumnUpdate) error {
 	if len(updates) == 0 {
 		return nil
 	}
 
-	// Get the active ontology to merge updates
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err != nil {
-		return fmt.Errorf("get active ontology: %w", err)
-	}
-	if ontology == nil {
-		return fmt.Errorf("no active ontology for project %s", projectID.String())
-	}
-
-	// Group updates by table for efficient batch updates
-	updatesByTable := make(map[string][]ColumnUpdate)
 	for _, update := range updates {
-		updatesByTable[update.TableName] = append(updatesByTable[update.TableName], update)
-	}
-
-	for tableName, tableUpdates := range updatesByTable {
-		// Get existing columns or create new slice
-		columns := ontology.ColumnDetails[tableName]
-		if columns == nil {
-			columns = []models.ColumnDetail{}
+		// Resolve schema table, then column
+		table, err := s.schemaRepo.FindTableByName(ctx, projectID, uuid.Nil, update.TableName)
+		if err != nil || table == nil {
+			s.logger.Warn("Failed to find schema table for update, skipping",
+				zap.String("table", update.TableName),
+				zap.Error(err))
+			continue
+		}
+		schemaCol, err := s.schemaRepo.GetColumnByName(ctx, table.ID, update.ColumnName)
+		if err != nil || schemaCol == nil {
+			s.logger.Warn("Failed to find schema column for update, skipping",
+				zap.String("table", update.TableName),
+				zap.String("column", update.ColumnName),
+				zap.Error(err))
+			continue
 		}
 
-		// Apply each column update
-		for _, update := range tableUpdates {
-			found := false
-			for i := range columns {
-				if columns[i].Name == update.ColumnName {
-					// Update existing column
-					if update.Description != nil {
-						columns[i].Description = *update.Description
-					}
-					if update.SemanticType != nil {
-						columns[i].SemanticType = *update.SemanticType
-					}
-					if update.Role != nil {
-						columns[i].Role = *update.Role
-					}
-					if len(update.Synonyms) > 0 {
-						// Deduplicate synonyms
-						existingSynonyms := make(map[string]bool)
-						for _, syn := range columns[i].Synonyms {
-							existingSynonyms[syn] = true
-						}
-						for _, syn := range update.Synonyms {
-							if !existingSynonyms[syn] {
-								columns[i].Synonyms = append(columns[i].Synonyms, syn)
-							}
-						}
-					}
-					found = true
-					break
-				}
-			}
+		// Get existing metadata or create new
+		existing, err := s.columnMetadataRepo.GetBySchemaColumnID(ctx, schemaCol.ID)
+		if err != nil {
+			s.logger.Warn("Failed to get column metadata, creating new",
+				zap.String("table", update.TableName),
+				zap.String("column", update.ColumnName),
+				zap.Error(err))
+		}
 
-			if !found {
-				// Create new column detail
-				newColumn := models.ColumnDetail{
-					Name: update.ColumnName,
-				}
-				if update.Description != nil {
-					newColumn.Description = *update.Description
-				}
-				if update.SemanticType != nil {
-					newColumn.SemanticType = *update.SemanticType
-				}
-				if update.Role != nil {
-					newColumn.Role = *update.Role
-				}
-				if len(update.Synonyms) > 0 {
-					newColumn.Synonyms = update.Synonyms
-				}
-				columns = append(columns, newColumn)
+		meta := existing
+		if meta == nil {
+			meta = &models.ColumnMetadata{
+				ProjectID:      projectID,
+				SchemaColumnID: schemaCol.ID,
+				Source:         models.ProvenanceMCP,
 			}
 		}
 
-		// Persist the updates for this table
-		if err := s.ontologyRepo.UpdateColumnDetails(ctx, projectID, tableName, columns); err != nil {
-			return fmt.Errorf("update columns for %s: %w", tableName, err)
+		// Apply updates
+		if update.Description != nil {
+			meta.Description = update.Description
+		}
+		if update.SemanticType != nil {
+			meta.SemanticType = update.SemanticType
+		}
+		if update.Role != nil {
+			meta.Role = update.Role
+		}
+		if len(update.Synonyms) > 0 {
+			// Deduplicate synonyms
+			existingSynonyms := make(map[string]bool)
+			for _, syn := range meta.Features.Synonyms {
+				existingSynonyms[syn] = true
+			}
+			for _, syn := range update.Synonyms {
+				if !existingSynonyms[syn] {
+					meta.Features.Synonyms = append(meta.Features.Synonyms, syn)
+				}
+			}
 		}
 
-		s.logger.Info("Applied column updates",
+		if err := s.columnMetadataRepo.Upsert(ctx, meta); err != nil {
+			return fmt.Errorf("upsert column metadata for %s.%s: %w", update.TableName, update.ColumnName, err)
+		}
+
+		s.logger.Info("Applied column update",
 			zap.String("project_id", projectID.String()),
-			zap.String("table_name", tableName),
-			zap.Int("column_count", len(tableUpdates)))
+			zap.String("table", update.TableName),
+			zap.String("column", update.ColumnName))
 	}
 
 	return nil

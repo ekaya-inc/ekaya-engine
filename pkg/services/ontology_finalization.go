@@ -21,7 +21,7 @@ type OntologyFinalizationService interface {
 }
 
 type ontologyFinalizationService struct {
-	ontologyRepo       repositories.OntologyRepository
+	projectRepo        repositories.ProjectRepository
 	schemaRepo         repositories.SchemaRepository
 	columnMetadataRepo repositories.ColumnMetadataRepository
 	conversationRepo   repositories.ConversationRepository
@@ -32,7 +32,7 @@ type ontologyFinalizationService struct {
 
 // NewOntologyFinalizationService creates a new ontology finalization service.
 func NewOntologyFinalizationService(
-	ontologyRepo repositories.OntologyRepository,
+	projectRepo repositories.ProjectRepository,
 	schemaRepo repositories.SchemaRepository,
 	columnMetadataRepo repositories.ColumnMetadataRepository,
 	conversationRepo repositories.ConversationRepository,
@@ -41,7 +41,7 @@ func NewOntologyFinalizationService(
 	logger *zap.Logger,
 ) OntologyFinalizationService {
 	return &ontologyFinalizationService{
-		ontologyRepo:       ontologyRepo,
+		projectRepo:        projectRepo,
 		schemaRepo:         schemaRepo,
 		columnMetadataRepo: columnMetadataRepo,
 		conversationRepo:   conversationRepo,
@@ -55,16 +55,6 @@ var _ OntologyFinalizationService = (*ontologyFinalizationService)(nil)
 
 func (s *ontologyFinalizationService) Finalize(ctx context.Context, projectID uuid.UUID) error {
 	s.logger.Info("Starting ontology finalization", zap.String("project_id", projectID.String()))
-
-	// Get the active ontology to retrieve datasource ID
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err != nil {
-		return fmt.Errorf("get active ontology: %w", err)
-	}
-	if ontology == nil {
-		s.logger.Info("No active ontology found, skipping finalization", zap.String("project_id", projectID.String()))
-		return nil
-	}
 
 	// Get all tables for the project to build conventions
 	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil) // uuid.Nil gets all datasources
@@ -143,7 +133,7 @@ func (s *ontologyFinalizationService) Finalize(ctx context.Context, projectID uu
 		SampleQuestions: nil, // Feature removed, may be reimplemented later
 	}
 
-	if err := s.ontologyRepo.UpdateDomainSummary(ctx, projectID, domainSummary); err != nil {
+	if err := s.projectRepo.UpdateDomainSummary(ctx, projectID, domainSummary); err != nil {
 		return fmt.Errorf("update domain summary: %w", err)
 	}
 

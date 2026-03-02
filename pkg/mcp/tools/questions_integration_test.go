@@ -27,7 +27,6 @@ type questionToolTestContext struct {
 	t            *testing.T
 	engineDB     *testhelpers.EngineDB
 	projectID    uuid.UUID
-	ontologyID   uuid.UUID
 	mcpServer    *server.MCPServer
 	questionRepo repositories.OntologyQuestionRepository
 }
@@ -38,7 +37,6 @@ func setupQuestionToolIntegrationTest(t *testing.T) *questionToolTestContext {
 
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.MustParse("00000000-0000-0000-0000-000000000055")
-	ontologyID := uuid.MustParse("00000000-0000-0000-0000-000000000056")
 
 	// Ensure test project exists
 	ctx := context.Background()
@@ -51,14 +49,6 @@ func setupQuestionToolIntegrationTest(t *testing.T) *questionToolTestContext {
 		VALUES ($1, $2, 'active')
 		ON CONFLICT (id) DO NOTHING
 	`, projectID, "Question Tool Integration Test Project")
-	require.NoError(t, err)
-
-	// Ensure test ontology exists
-	_, err = scope.Conn.Exec(ctx, `
-		INSERT INTO engine_ontologies (id, project_id, is_active, domain_summary)
-		VALUES ($1, $2, true, '{"summary": "Test ontology for question tools"}')
-		ON CONFLICT (id) DO NOTHING
-	`, ontologyID, projectID)
 	require.NoError(t, err)
 
 	// Create MCP server with question tools
@@ -88,7 +78,6 @@ func setupQuestionToolIntegrationTest(t *testing.T) *questionToolTestContext {
 		t:            t,
 		engineDB:     engineDB,
 		projectID:    projectID,
-		ontologyID:   ontologyID,
 		mcpServer:    mcpServer,
 		questionRepo: questionRepo,
 	}
@@ -172,7 +161,6 @@ func (tc *questionToolTestContext) createTestQuestion(ctx context.Context, text 
 	question := &models.OntologyQuestion{
 		ID:         uuid.New(),
 		ProjectID:  tc.projectID,
-		OntologyID: tc.ontologyID,
 		Text:       text,
 		Category:   category,
 		Priority:   priority,

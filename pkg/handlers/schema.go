@@ -27,9 +27,10 @@ type SaveSelectionsRequest struct {
 
 // SchemaResponse wraps the complete schema for a datasource.
 type SchemaResponse struct {
-	Tables        []TableResponse        `json:"tables"`
-	TotalTables   int                    `json:"total_tables"`
-	Relationships []RelationshipResponse `json:"relationships,omitempty"`
+	Tables         []TableResponse              `json:"tables"`
+	TotalTables    int                          `json:"total_tables"`
+	Relationships  []RelationshipResponse       `json:"relationships,omitempty"`
+	PendingChanges map[string]PendingChangeInfo `json:"pending_changes"`
 }
 
 // TableResponse represents a table with its columns.
@@ -76,12 +77,28 @@ type RelationshipResponse struct {
 
 // RefreshSchemaResponse contains statistics from a schema refresh operation.
 type RefreshSchemaResponse struct {
-	TablesUpserted       int   `json:"tables_upserted"`
-	TablesDeleted        int64 `json:"tables_deleted"`
-	ColumnsUpserted      int   `json:"columns_upserted"`
-	ColumnsDeleted       int64 `json:"columns_deleted"`
-	RelationshipsCreated int   `json:"relationships_created"`
-	RelationshipsDeleted int64 `json:"relationships_deleted"`
+	TablesUpserted        int      `json:"tables_upserted"`
+	TablesDeleted         int64    `json:"tables_deleted"`
+	ColumnsUpserted       int      `json:"columns_upserted"`
+	ColumnsDeleted        int64    `json:"columns_deleted"`
+	RelationshipsCreated  int      `json:"relationships_created"`
+	RelationshipsDeleted  int64    `json:"relationships_deleted"`
+	PendingChangesCreated int      `json:"pending_changes_created"`
+	NewTableNames         []string `json:"new_table_names"`
+	RemovedTableNames     []string `json:"removed_table_names"`
+}
+
+// PendingChangeInfo represents a pending change for a table or column in the schema response.
+type PendingChangeInfo struct {
+	ChangeID   string `json:"change_id"`
+	ChangeType string `json:"change_type"`
+	Status     string `json:"status"`
+}
+
+// SaveSelectionsResponse contains the result of saving schema selections.
+type SaveSelectionsResponse struct {
+	ApprovedCount int `json:"approved_count"`
+	RejectedCount int `json:"rejected_count"`
 }
 
 // SchemaPromptResponse contains the schema formatted for LLM context.
@@ -120,15 +137,21 @@ type RelationshipDetailResponse struct {
 
 // SchemaHandler handles schema-related HTTP requests.
 type SchemaHandler struct {
-	schemaService services.SchemaService
-	logger        *zap.Logger
+	schemaService                services.SchemaService
+	schemaChangeDetectionService services.SchemaChangeDetectionService
+	logger                       *zap.Logger
 }
 
 // NewSchemaHandler creates a new schema handler.
-func NewSchemaHandler(schemaService services.SchemaService, logger *zap.Logger) *SchemaHandler {
+func NewSchemaHandler(
+	schemaService services.SchemaService,
+	schemaChangeDetectionService services.SchemaChangeDetectionService,
+	logger *zap.Logger,
+) *SchemaHandler {
 	return &SchemaHandler{
-		schemaService: schemaService,
-		logger:        logger,
+		schemaService:                schemaService,
+		schemaChangeDetectionService: schemaChangeDetectionService,
+		logger:                       logger,
 	}
 }
 
@@ -157,6 +180,9 @@ func (h *SchemaHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.
 	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/schema/selections",
 		authMiddleware.RequireAuthWithPathValidation("pid")(
 			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.SaveSelections))))
+	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/schema/reject-pending-changes",
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.RejectPendingChanges))))
 
 	// Relationship operations (datasource-level)
 	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsid}/schema/relationships",
@@ -174,7 +200,7 @@ func (h *SchemaHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.
 }
 
 // GetSchema handles GET /api/projects/{pid}/datasources/{dsid}/schema
-// Returns the complete schema for a datasource.
+// Returns the complete schema for a datasource, including any pending changes.
 func (h *SchemaHandler) GetSchema(w http.ResponseWriter, r *http.Request) {
 	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
@@ -193,7 +219,34 @@ func (h *SchemaHandler) GetSchema(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data := h.toSchemaResponse(schema)
+	// Query pending changes for this project
+	pendingChangesMap := make(map[string]PendingChangeInfo)
+	if h.schemaChangeDetectionService != nil {
+		changes, err := h.schemaChangeDetectionService.ListPendingChanges(r.Context(), projectID, models.ChangeStatusPending, 0)
+		if err != nil {
+			h.logger.Warn("Failed to list pending changes for schema response",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			// Non-fatal: continue without pending changes
+		} else {
+			for _, change := range changes {
+				info := PendingChangeInfo{
+					ChangeID:   change.ID.String(),
+					ChangeType: change.ChangeType,
+					Status:     change.Status,
+				}
+				if change.ColumnName != "" {
+					// Column-level change: key = "table_name.column_name"
+					pendingChangesMap[change.TableName+"."+change.ColumnName] = info
+				} else {
+					// Table-level change: key = "table_name"
+					pendingChangesMap[change.TableName] = info
+				}
+			}
+		}
+	}
+
+	data := h.toSchemaResponse(schema, pendingChangesMap)
 	response := ApiResponse{Success: true, Data: data}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
@@ -220,7 +273,7 @@ func (h *SchemaHandler) GetSelectedSchema(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	data := h.toSchemaResponse(schema)
+	data := h.toSchemaResponse(schema, nil)
 	response := ApiResponse{Success: true, Data: data}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
@@ -261,15 +314,23 @@ func (h *SchemaHandler) GetSchemaPrompt(w http.ResponseWriter, r *http.Request) 
 }
 
 // RefreshSchema handles POST /api/projects/{pid}/datasources/{dsid}/schema/refresh
-// Syncs tables, columns, and relationships from the datasource.
+// Syncs tables, columns, and relationships from the datasource, then runs change detection.
 func (h *SchemaHandler) RefreshSchema(w http.ResponseWriter, r *http.Request) {
 	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
 
-	// UI-initiated refresh does not auto-select new tables (users can manually select what they need)
-	result, err := h.schemaService.RefreshDatasourceSchema(r.Context(), projectID, datasourceID, false)
+	autoSelect := r.URL.Query().Get("auto_select") == "true"
+
+	result, err := services.RefreshSchemaWithChangeDetection(
+		r.Context(),
+		h.schemaService,
+		h.schemaChangeDetectionService,
+		h.logger,
+		projectID, datasourceID,
+		autoSelect,
+	)
 	if err != nil {
 		h.logger.Error("Failed to refresh schema",
 			zap.String("project_id", projectID.String()),
@@ -282,12 +343,15 @@ func (h *SchemaHandler) RefreshSchema(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := RefreshSchemaResponse{
-		TablesUpserted:       result.TablesUpserted,
-		TablesDeleted:        result.TablesDeleted,
-		ColumnsUpserted:      result.ColumnsUpserted,
-		ColumnsDeleted:       result.ColumnsDeleted,
-		RelationshipsCreated: result.RelationshipsCreated,
-		RelationshipsDeleted: result.RelationshipsDeleted,
+		TablesUpserted:        result.TablesUpserted,
+		TablesDeleted:         result.TablesDeleted,
+		ColumnsUpserted:       result.ColumnsUpserted,
+		ColumnsDeleted:        result.ColumnsDeleted,
+		RelationshipsCreated:  result.RelationshipsCreated,
+		RelationshipsDeleted:  result.RelationshipsDeleted,
+		PendingChangesCreated: result.PendingChangesCreated,
+		NewTableNames:         result.NewTableNames,
+		RemovedTableNames:     result.RemovedTableNames,
 	}
 	response := ApiResponse{Success: true, Data: data}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
@@ -339,7 +403,7 @@ func (h *SchemaHandler) GetTable(w http.ResponseWriter, r *http.Request) {
 }
 
 // SaveSelections handles POST /api/projects/{pid}/datasources/{dsid}/schema/selections
-// Bulk updates is_selected flags for tables and columns.
+// Bulk updates is_selected flags for tables and columns, then resolves pending changes.
 func (h *SchemaHandler) SaveSelections(w http.ResponseWriter, r *http.Request) {
 	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
@@ -365,7 +429,88 @@ func (h *SchemaHandler) SaveSelections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := ApiResponse{Success: true}
+	// Resolve pending changes based on the selections
+	var resolvedResult SaveSelectionsResponse
+	if h.schemaChangeDetectionService != nil {
+		// Get schema to build name-based selection maps from UUID-based selections
+		schema, err := h.schemaService.GetDatasourceSchema(r.Context(), projectID, datasourceID)
+		if err != nil {
+			h.logger.Warn("Failed to get schema for pending change resolution",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		} else {
+			// Build name-based maps: table_name -> selected, "table_name.column_name" -> selected
+			selectedTableNames := make(map[string]bool)
+			selectedColumnNames := make(map[string]bool)
+
+			for _, table := range schema.Tables {
+				qualifiedName := table.SchemaName + "." + table.TableName
+				if isSelected, ok := req.TableSelections[table.ID]; ok {
+					selectedTableNames[qualifiedName] = isSelected
+				}
+				if colIDs, ok := req.ColumnSelections[table.ID]; ok {
+					selectedColSet := make(map[uuid.UUID]bool)
+					for _, colID := range colIDs {
+						selectedColSet[colID] = true
+					}
+					for _, col := range table.Columns {
+						colKey := qualifiedName + "." + col.ColumnName
+						selectedColumnNames[colKey] = selectedColSet[col.ID]
+					}
+				}
+			}
+
+			result, err := h.schemaChangeDetectionService.ResolvePendingChanges(r.Context(), projectID, selectedTableNames, selectedColumnNames)
+			if err != nil {
+				h.logger.Warn("Failed to resolve pending changes",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err))
+			} else if result != nil {
+				resolvedResult.ApprovedCount = result.ApprovedCount
+				resolvedResult.RejectedCount = result.RejectedCount
+			}
+		}
+	}
+
+	response := ApiResponse{Success: true, Data: resolvedResult}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// RejectPendingChanges handles POST /api/projects/{pid}/datasources/{dsid}/schema/reject-pending-changes
+// Rejects all pending schema changes for a project.
+func (h *SchemaHandler) RejectPendingChanges(w http.ResponseWriter, r *http.Request) {
+	projectID, _, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	if h.schemaChangeDetectionService == nil {
+		response := ApiResponse{Success: true, Data: map[string]int{"rejected_count": 0}}
+		if err := WriteJSON(w, http.StatusOK, response); err != nil {
+			h.logger.Error("Failed to write response", zap.Error(err))
+		}
+		return
+	}
+
+	result, err := h.schemaChangeDetectionService.RejectAllPendingChanges(r.Context(), projectID)
+	if err != nil {
+		h.logger.Error("Failed to reject pending changes",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "reject_failed", "Failed to reject pending changes"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	rejectedCount := 0
+	if result != nil {
+		rejectedCount = result.RejectedCount
+	}
+
+	response := ApiResponse{Success: true, Data: map[string]int{"rejected_count": rejectedCount}}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
@@ -544,7 +689,8 @@ func (h *SchemaHandler) RemoveRelationship(w http.ResponseWriter, r *http.Reques
 // --- Model to Response Converters ---
 
 // toSchemaResponse converts a DatasourceSchema model to a SchemaResponse.
-func (h *SchemaHandler) toSchemaResponse(schema *models.DatasourceSchema) SchemaResponse {
+// pendingChanges may be nil, in which case an empty map is used.
+func (h *SchemaHandler) toSchemaResponse(schema *models.DatasourceSchema, pendingChanges map[string]PendingChangeInfo) SchemaResponse {
 	tables := make([]TableResponse, len(schema.Tables))
 	for i, t := range schema.Tables {
 		tables[i] = h.toTableResponse(t)
@@ -555,10 +701,15 @@ func (h *SchemaHandler) toSchemaResponse(schema *models.DatasourceSchema) Schema
 		relationships[i] = h.toDatasourceRelationshipResponse(r)
 	}
 
+	if pendingChanges == nil {
+		pendingChanges = make(map[string]PendingChangeInfo)
+	}
+
 	return SchemaResponse{
-		Tables:        tables,
-		TotalTables:   len(tables),
-		Relationships: relationships,
+		Tables:         tables,
+		TotalTables:    len(tables),
+		Relationships:  relationships,
+		PendingChanges: pendingChanges,
 	}
 }
 

@@ -2,15 +2,12 @@ package models
 
 import (
 	"encoding/json"
-	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/jsonutil"
 )
 
 // ============================================================================
-// Tiered Ontology - Domain Layer (Tier 0)
+// Ontology - Domain Layer
 // ============================================================================
 
 // DomainSummary represents the top-level business context (~500 tokens).
@@ -60,24 +57,6 @@ type CurrencyConvention struct {
 type AuditColumnInfo struct {
 	Column   string  `json:"column"`
 	Coverage float64 `json:"coverage"` // 0.0-1.0, percentage of tables with this column
-}
-
-// ============================================================================
-// Tiered Ontology - Column Layer (Tier 2)
-// ============================================================================
-
-// ColumnDetail represents detailed semantic information for a column.
-type ColumnDetail struct {
-	Name          string      `json:"name"`
-	Description   string      `json:"description,omitempty"`
-	Synonyms      []string    `json:"synonyms,omitempty"`
-	SemanticType  string      `json:"semantic_type,omitempty"`
-	Role          string      `json:"role,omitempty"`           // dimension, measure, identifier, attribute
-	FKAssociation string      `json:"fk_association,omitempty"` // payer, payee, host, visitor, etc.
-	EnumValues    []EnumValue `json:"enum_values,omitempty"`
-	IsPrimaryKey  bool        `json:"is_primary_key"`
-	IsForeignKey  bool        `json:"is_foreign_key"`
-	ForeignTable  string      `json:"foreign_table,omitempty"`
 }
 
 // EnumValue represents a known value in an enumeration column.
@@ -172,56 +151,6 @@ var ValidDomains = []string{
 	DomainInventory,
 	DomainMarketing,
 	DomainUnknown,
-}
-
-// ============================================================================
-// Tiered Ontology - Complete Structure
-// ============================================================================
-
-// TieredOntology represents the complete hierarchical ontology structure.
-type TieredOntology struct {
-	ID            uuid.UUID                 `json:"id"`
-	ProjectID     uuid.UUID                 `json:"project_id"`
-	Version       int                       `json:"version"`
-	IsActive      bool                      `json:"is_active"`
-	DomainSummary *DomainSummary            `json:"domain_summary,omitempty"`
-	ColumnDetails map[string][]ColumnDetail `json:"column_details,omitempty"` // table_name -> columns
-	Metadata      map[string]any            `json:"metadata,omitempty"`
-	CreatedAt     time.Time                 `json:"created_at"`
-	UpdatedAt     time.Time                 `json:"updated_at"`
-}
-
-// GetColumnDetails returns the column details for a specific table, or nil if not found.
-func (o *TieredOntology) GetColumnDetails(tableName string) []ColumnDetail {
-	if o.ColumnDetails == nil {
-		return nil
-	}
-	return o.ColumnDetails[tableName]
-}
-
-// TableCount returns the number of tables in the ontology.
-func (o *TieredOntology) TableCount() int {
-	if o.ColumnDetails == nil {
-		return 0
-	}
-	return len(o.ColumnDetails)
-}
-
-// ColumnCount returns the total number of columns across all tables.
-func (o *TieredOntology) ColumnCount() int {
-	if o.ColumnDetails == nil {
-		return 0
-	}
-	count := 0
-	for _, columns := range o.ColumnDetails {
-		count += len(columns)
-	}
-	return count
-}
-
-// TotalEntityCount returns the total number of entities: 1 (global) + tables + columns.
-func (o *TieredOntology) TotalEntityCount() int {
-	return 1 + o.TableCount() + o.ColumnCount()
 }
 
 // ============================================================================

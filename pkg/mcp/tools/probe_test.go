@@ -233,34 +233,6 @@ func TestProbeColumn_BuildJoinability(t *testing.T) {
 	assert.Equal(t, "high_cardinality", *column.JoinabilityReason)
 }
 
-func TestProbeColumn_SemanticFromOntology(t *testing.T) {
-	// Test semantic information extraction from ontology
-	ontology := &models.TieredOntology{
-		ID:        uuid.New(),
-		ProjectID: uuid.New(),
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"users": {
-				{
-					Name:        "status",
-					Description: "User account status",
-					Role:        "attribute",
-					EnumValues: []models.EnumValue{
-						{Value: "ACTIVE", Label: "Active account"},
-						{Value: "SUSPENDED", Label: "Temporarily suspended"},
-					},
-				},
-			},
-		},
-	}
-
-	// Get column details
-	columnDetails := ontology.GetColumnDetails("users")
-	assert.Len(t, columnDetails, 1)
-	assert.Equal(t, "status", columnDetails[0].Name)
-	assert.Equal(t, "User account status", columnDetails[0].Description)
-	assert.Len(t, columnDetails[0].EnumValues, 2)
-}
-
 func TestProbeColumn_MissingStatistics(t *testing.T) {
 	// Test handling of missing statistics
 	column := &models.SchemaColumn{
@@ -542,7 +514,7 @@ func TestProbeColumn_ErrorCodeExtraction(t *testing.T) {
 // ============================================================================
 
 func TestProbeColumn_ColumnMetadataFallback_EnumValues(t *testing.T) {
-	// Test that enum values from column_metadata are used when ontology has none
+	// Test that enum values from column_metadata are available
 	projectID := uuid.New()
 	schemaColumnID := uuid.New()
 
@@ -561,27 +533,6 @@ func TestProbeColumn_ColumnMetadataFallback_EnumValues(t *testing.T) {
 			},
 		},
 	}
-
-	// Create an ontology with column details but NO enum values
-	ontology := &models.TieredOntology{
-		ID:        uuid.New(),
-		ProjectID: projectID,
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"users": {
-				{
-					Name:        "status",
-					Description: "User account status",
-					Role:        "attribute",
-					EnumValues:  nil, // No enum values in ontology
-				},
-			},
-		},
-	}
-
-	// Verify ontology has no enum values
-	columnDetails := ontology.GetColumnDetails("users")
-	assert.Len(t, columnDetails, 1)
-	assert.Nil(t, columnDetails[0].EnumValues)
 
 	// Verify mock repo has enum values (via Features.EnumFeatures)
 	meta, err := mockColMetaRepo.GetBySchemaColumnID(nil, schemaColumnID)

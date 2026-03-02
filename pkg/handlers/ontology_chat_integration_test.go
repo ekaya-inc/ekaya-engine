@@ -29,7 +29,6 @@ type chatIntegrationTestContext struct {
 	engineDB         *testhelpers.EngineDB
 	handler          *OntologyChatHandler
 	chatRepo         repositories.OntologyChatRepository
-	ontologyRepo     repositories.OntologyRepository
 	knowledgeRepo    repositories.KnowledgeRepository
 	projectID        uuid.UUID
 	mockChatService  *mockChatService
@@ -177,7 +176,6 @@ func setupChatIntegrationTest(t *testing.T) *chatIntegrationTestContext {
 		engineDB:         engineDB,
 		handler:          handler,
 		chatRepo:         repositories.NewOntologyChatRepository(),
-		ontologyRepo:     repositories.NewOntologyRepository(),
 		knowledgeRepo:    repositories.NewKnowledgeRepository(),
 		projectID:        projectID,
 		mockChatService:  mockChatSvc,
@@ -196,12 +194,11 @@ func setupChatIntegrationTestWithRealServices(t *testing.T) *chatIntegrationTest
 
 	// Create real repositories
 	chatRepo := repositories.NewOntologyChatRepository()
-	ontologyRepo := repositories.NewOntologyRepository()
 	knowledgeRepo := repositories.NewKnowledgeRepository()
 	projectRepo := repositories.NewProjectRepository()
 
 	// Create real services
-	knowledgeSvc := services.NewKnowledgeService(knowledgeRepo, projectRepo, ontologyRepo, zap.NewNop())
+	knowledgeSvc := services.NewKnowledgeService(knowledgeRepo, projectRepo, zap.NewNop())
 
 	// Use a unique project ID for chat tests
 	projectID := uuid.MustParse("00000000-0000-0000-0000-000000000045")
@@ -210,7 +207,6 @@ func setupChatIntegrationTestWithRealServices(t *testing.T) *chatIntegrationTest
 		t:             t,
 		engineDB:      engineDB,
 		chatRepo:      chatRepo,
-		ontologyRepo:  ontologyRepo,
 		knowledgeRepo: knowledgeRepo,
 		projectID:     projectID,
 	}
@@ -277,7 +273,6 @@ func (tc *chatIntegrationTestContext) cleanup() {
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontology_chat_messages WHERE project_id = $1", tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_project_knowledge WHERE project_id = $1", tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontology_questions WHERE project_id = $1", tc.projectID)
-	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontologies WHERE project_id = $1", tc.projectID)
 }
 
 // makeRequest creates an HTTP request with proper context (tenant scope + auth claims).

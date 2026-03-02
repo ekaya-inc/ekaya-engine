@@ -18,7 +18,6 @@ import (
 // ColumnToolDeps contains dependencies for column metadata tools.
 type ColumnToolDeps struct {
 	BaseMCPToolDeps
-	OntologyRepo       repositories.OntologyRepository
 	SchemaRepo         repositories.SchemaRepository
 	ColumnMetadataRepo repositories.ColumnMetadataRepository
 	ProjectService     services.ProjectService
@@ -127,48 +126,15 @@ func registerGetColumnMetadataTool(s *server.MCPServer, deps *ColumnToolDeps) {
 			},
 		}
 
-		// Primary source: read typed columns from engine_ontology_column_metadata
-		// This is the authoritative source for column semantic enrichment
-		if deps.ColumnMetadataRepo != nil {
-			columnMeta, err := deps.ColumnMetadataRepo.GetBySchemaColumnID(tenantCtx, schemaColumn.ID)
-			if err != nil {
-				deps.Logger.Warn("Failed to get column metadata",
-					zap.String("project_id", projectID.String()),
-					zap.String("schema_column_id", schemaColumn.ID.String()),
-					zap.Error(err))
-			} else if columnMeta != nil {
-				response.Metadata = buildColumnMetadataInfo(columnMeta)
-			}
-		}
-
-		// Fallback: check ontology JSONB for legacy data (if no metadata found)
-		// This provides backwards compatibility during migration
-		if response.Metadata == nil {
-			ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)
-			if err != nil {
-				deps.Logger.Warn("Failed to get active ontology for column metadata",
-					zap.String("project_id", projectID.String()),
-					zap.Error(err))
-			}
-
-			if ontology != nil {
-				columnDetails := ontology.GetColumnDetails(table)
-				for _, colDetail := range columnDetails {
-					if colDetail.Name == column {
-						response.Metadata = &columnMetadataInfo{
-							Description:  colDetail.Description,
-							SemanticType: colDetail.SemanticType,
-							Entity:       colDetail.SemanticType,
-							Role:         colDetail.Role,
-						}
-
-						if len(colDetail.EnumValues) > 0 {
-							response.Metadata.EnumValues = formatEnumValues(colDetail.EnumValues)
-						}
-						break
-					}
-				}
-			}
+		// Read column metadata from engine_ontology_column_metadata
+		columnMeta, err := deps.ColumnMetadataRepo.GetBySchemaColumnID(tenantCtx, schemaColumn.ID)
+		if err != nil {
+			deps.Logger.Warn("Failed to get column metadata",
+				zap.String("project_id", projectID.String()),
+				zap.String("schema_column_id", schemaColumn.ID.String()),
+				zap.Error(err))
+		} else if columnMeta != nil {
+			response.Metadata = buildColumnMetadataInfo(columnMeta)
 		}
 
 		jsonResult, err := json.Marshal(response)
@@ -362,7 +328,6 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 		}
 
 		// Extract optional sensitive flag
-		// Use getOptionalBoolPointer to distinguish between false and not provided
 		var isSensitive *bool
 		if args, ok := req.Params.Arguments.(map[string]any); ok {
 			if val, exists := args["sensitive"]; exists {
@@ -404,7 +369,6 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 			return nil, fmt.Errorf("failed to get datasource: %w", err)
 		}
 
-		// Validate table exists in schema registry
 		schemaTable, err := deps.SchemaRepo.FindTableByName(tenantCtx, projectID, datasourceID, table)
 		if err != nil {
 			return nil, fmt.Errorf("failed to lookup table: %w", err)
@@ -418,7 +382,6 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 				fmt.Sprintf("table %q is not selected for MCP access", table)), nil
 		}
 
-		// Validate column exists in table
 		schemaColumn, err := deps.SchemaRepo.GetColumnByName(tenantCtx, schemaTable.ID, column)
 		if err != nil {
 			return nil, fmt.Errorf("failed to lookup column: %w", err)
@@ -428,140 +391,75 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 				fmt.Sprintf("column %q not found in table %q", column, table)), nil
 		}
 
-		// Get or create active ontology (enables immediate use without extraction)
-		ontology, err := ensureOntologyExists(tenantCtx, deps.OntologyRepo, projectID)
+		// Check if existing metadata exists and verify precedence
+		existing, err := deps.ColumnMetadataRepo.GetBySchemaColumnID(tenantCtx, schemaColumn.ID)
 		if err != nil {
-			return NewErrorResult("ontology_error", err.Error()), nil
+			return HandleServiceError(err, "check_column_metadata_failed")
 		}
 
-		// Get existing column details for this table
-		existingColumns := ontology.GetColumnDetails(table)
-		if existingColumns == nil {
-			existingColumns = []models.ColumnDetail{}
-		}
+		isNew := existing == nil
 
-		// Find existing column or create new one
-		var targetColumn *models.ColumnDetail
-		columnIndex := -1
-		for i := range existingColumns {
-			if existingColumns[i].Name == column {
-				targetColumn = &existingColumns[i]
-				columnIndex = i
-				break
+		// If metadata exists, check precedence before updating
+		if existing != nil {
+			if !canModify(existing.Source, existing.LastEditSource, models.ProvenanceMCP) {
+				effectiveSource := existing.Source
+				if existing.LastEditSource != nil && *existing.LastEditSource != "" {
+					effectiveSource = *existing.LastEditSource
+				}
+				return NewErrorResult("precedence_blocked",
+					fmt.Sprintf("Cannot modify column metadata: precedence blocked (existing: %s, modifier: %s). "+
+						"Admin changes cannot be overridden by MCP. Use the UI to modify or delete this metadata.",
+						effectiveSource, models.ProvenanceMCP)), nil
 			}
 		}
 
-		isNew := targetColumn == nil
-		if isNew {
-			// Create new column detail
-			targetColumn = &models.ColumnDetail{
-				Name: column,
-			}
+		// Build column metadata for upsert
+		lastEditSource := models.ProvenanceMCP
+		colMeta := &models.ColumnMetadata{
+			ProjectID:      projectID,
+			SchemaColumnID: schemaColumn.ID,
+			Source:         models.ProvenanceMCP,
+			LastEditSource: &lastEditSource,
 		}
-
-		// Update fields if provided
 		if description != "" {
-			targetColumn.Description = description
+			colMeta.Description = &description
 		}
-
 		if entity != "" {
-			// Store entity as semantic type (this field is used for entity associations)
-			targetColumn.SemanticType = entity
+			if colMeta.Features.IdentifierFeatures == nil {
+				colMeta.Features.IdentifierFeatures = &models.IdentifierFeatures{}
+			}
+			colMeta.Features.IdentifierFeatures.EntityReferenced = entity
 		}
-
 		if role != "" {
-			targetColumn.Role = role
+			colMeta.Role = &role
 		}
-
-		// Process enum values if provided
 		if enumValues != nil {
-			targetColumn.EnumValues = parseEnumValues(enumValues)
+			parsedEnums := parseEnumValues(enumValues)
+			colMeta.Features.EnumFeatures = &models.EnumFeatures{
+				Values: make([]models.ColumnEnumValue, len(parsedEnums)),
+			}
+			for i, ev := range parsedEnums {
+				colMeta.Features.EnumFeatures.Values[i] = models.ColumnEnumValue{
+					Value: ev.Value,
+					Label: ev.Description,
+				}
+			}
 		}
-
-		// Update or append column
-		if isNew {
-			existingColumns = append(existingColumns, *targetColumn)
-		} else {
-			existingColumns[columnIndex] = *targetColumn
+		if isSensitive != nil {
+			colMeta.IsSensitive = isSensitive
 		}
-
-		// Save updated column details back to ontology
-		if err := deps.OntologyRepo.UpdateColumnDetails(tenantCtx, projectID, table, existingColumns); err != nil {
-			return HandleServiceError(err, "update_column_details_failed")
-		}
-
-		// Also track provenance in column_metadata table if available
-		// Column metadata is now keyed by schema_column_id (FK to engine_schema_columns)
-		if deps.ColumnMetadataRepo != nil && schemaColumn != nil {
-			// Check if existing metadata exists and verify precedence
-			existing, err := deps.ColumnMetadataRepo.GetBySchemaColumnID(tenantCtx, schemaColumn.ID)
-			if err != nil {
-				return HandleServiceError(err, "check_column_metadata_failed")
-			}
-
-			// If metadata exists, check precedence before updating
-			if existing != nil {
-				if !canModify(existing.Source, existing.LastEditSource, models.ProvenanceMCP) {
-					effectiveSource := existing.Source
-					if existing.LastEditSource != nil && *existing.LastEditSource != "" {
-						effectiveSource = *existing.LastEditSource
-					}
-					return NewErrorResult("precedence_blocked",
-						fmt.Sprintf("Cannot modify column metadata: precedence blocked (existing: %s, modifier: %s). "+
-							"Admin changes cannot be overridden by MCP. Use the UI to modify or delete this metadata.",
-							effectiveSource, models.ProvenanceMCP)), nil
-				}
-			}
-
-			lastEditSource := models.ProvenanceMCP
-			colMeta := &models.ColumnMetadata{
-				ProjectID:      projectID,
-				SchemaColumnID: schemaColumn.ID,
-				Source:         models.ProvenanceMCP,
-				LastEditSource: &lastEditSource,
-			}
-			if description != "" {
-				colMeta.Description = &description
-			}
-			// Entity is stored in Features.IdentifierFeatures.EntityReferenced
-			if entity != "" {
-				if colMeta.Features.IdentifierFeatures == nil {
-					colMeta.Features.IdentifierFeatures = &models.IdentifierFeatures{}
-				}
-				colMeta.Features.IdentifierFeatures.EntityReferenced = entity
-			}
-			if role != "" {
-				colMeta.Role = &role
-			}
-			// Enum values are stored in Features.EnumFeatures with Value/Label separation
-			if enumValues != nil {
-				parsedEnums := parseEnumValues(enumValues)
-				colMeta.Features.EnumFeatures = &models.EnumFeatures{
-					Values: make([]models.ColumnEnumValue, len(parsedEnums)),
-				}
-				for i, ev := range parsedEnums {
-					colMeta.Features.EnumFeatures.Values[i] = models.ColumnEnumValue{
-						Value: ev.Value,
-						Label: ev.Description, // EnumValue.Description maps to ColumnEnumValue.Label
-					}
-				}
-			}
-			if isSensitive != nil {
-				colMeta.IsSensitive = isSensitive
-			}
-			if err := deps.ColumnMetadataRepo.Upsert(tenantCtx, colMeta); err != nil {
-				return HandleServiceError(err, "update_column_metadata_failed")
-			}
+		if err := deps.ColumnMetadataRepo.Upsert(tenantCtx, colMeta); err != nil {
+			return HandleServiceError(err, "update_column_metadata_failed")
 		}
 
 		// Build response
 		response := updateColumnResponse{
 			Table:       table,
 			Column:      column,
-			Description: targetColumn.Description,
-			EnumValues:  formatEnumValues(targetColumn.EnumValues),
-			Entity:      targetColumn.SemanticType,
-			Role:        targetColumn.Role,
+			Description: description,
+			EnumValues:  enumValues,
+			Entity:      entity,
+			Role:        role,
 			IsSensitive: isSensitive,
 			Created:     isNew,
 		}
@@ -649,63 +547,35 @@ func registerDeleteColumnMetadataTool(s *server.MCPServer, deps *ColumnToolDeps)
 				fmt.Sprintf("table %q is not selected for MCP access", table)), nil
 		}
 
-		// Get or create active ontology (enables immediate use without extraction)
-		ontology, err := ensureOntologyExists(tenantCtx, deps.OntologyRepo, projectID)
+		// Validate column exists in table
+		schemaColumn, err := deps.SchemaRepo.GetColumnByName(tenantCtx, schemaTable.ID, column)
 		if err != nil {
-			return NewErrorResult("ontology_error", err.Error()), nil
+			return nil, fmt.Errorf("failed to lookup column: %w", err)
+		}
+		if schemaColumn == nil {
+			return NewErrorResult("COLUMN_NOT_FOUND",
+				fmt.Sprintf("column %q not found in table %q", column, table)), nil
 		}
 
-		// Get existing column details for this table
-		existingColumns := ontology.GetColumnDetails(table)
-		if existingColumns == nil {
-			// No columns for this table, nothing to delete
-			result := deleteColumnMetadataResponse{
-				Table:   table,
-				Column:  column,
-				Deleted: false,
-			}
-			jsonResult, err := json.Marshal(result)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal result: %w", err)
-			}
-			return mcp.NewToolResultText(string(jsonResult)), nil
+		// Check if metadata exists
+		existing, err := deps.ColumnMetadataRepo.GetBySchemaColumnID(tenantCtx, schemaColumn.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check column metadata: %w", err)
 		}
 
-		// Find and remove the column
-		found := false
-		newColumns := make([]models.ColumnDetail, 0, len(existingColumns))
-		for i := range existingColumns {
-			if existingColumns[i].Name != column {
-				newColumns = append(newColumns, existingColumns[i])
-			} else {
-				found = true
+		deleted := false
+		if existing != nil {
+			if err := deps.ColumnMetadataRepo.DeleteBySchemaColumnID(tenantCtx, schemaColumn.ID); err != nil {
+				return HandleServiceError(err, "delete_column_metadata_failed")
 			}
-		}
-
-		if !found {
-			// Column not found in metadata, nothing to delete
-			result := deleteColumnMetadataResponse{
-				Table:   table,
-				Column:  column,
-				Deleted: false,
-			}
-			jsonResult, err := json.Marshal(result)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal result: %w", err)
-			}
-			return mcp.NewToolResultText(string(jsonResult)), nil
-		}
-
-		// Save updated column details back to ontology
-		if err := deps.OntologyRepo.UpdateColumnDetails(tenantCtx, projectID, table, newColumns); err != nil {
-			return HandleServiceError(err, "update_column_details_failed")
+			deleted = true
 		}
 
 		// Build response
 		result := deleteColumnMetadataResponse{
 			Table:   table,
 			Column:  column,
-			Deleted: true,
+			Deleted: deleted,
 		}
 
 		jsonResult, err := json.Marshal(result)
