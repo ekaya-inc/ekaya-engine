@@ -374,6 +374,11 @@ func (s *columnFeatureExtractionService) buildColumnProfile(
 		profile.MaxLength = col.MaxLength
 	}
 
+	// Populate schema-defined enum values (from Postgres pg_enum)
+	if len(col.EnumValues) > 0 {
+		profile.SchemaEnumValues = col.EnumValues
+	}
+
 	return profile
 }
 
@@ -438,6 +443,10 @@ func (s *columnFeatureExtractionService) routeToClassificationPath(profile *mode
 		return models.ClassificationPathJSON
 
 	default:
+		// USER-DEFINED columns with schema enum values are Postgres enum types
+		if len(profile.SchemaEnumValues) > 0 {
+			return models.ClassificationPathEnum
+		}
 		return models.ClassificationPathUnknown
 	}
 }
@@ -1188,6 +1197,12 @@ func (c *enumClassifier) Classify(
 	llmFactory llm.LLMClientFactory,
 	getTenantCtx TenantContextFunc,
 ) (*models.ColumnFeatures, error) {
+	// When schema-defined enum values are available (Postgres enum types), build features
+	// directly without LLM — the values are definitive from the database schema.
+	if len(profile.SchemaEnumValues) > 0 {
+		return c.classifyFromSchemaEnum(profile), nil
+	}
+
 	// Acquire fresh connection for this classification to avoid "conn busy" errors
 	// when multiple classifiers run in parallel
 	workCtx := ctx
@@ -1215,6 +1230,36 @@ func (c *enumClassifier) Classify(
 	}
 
 	return c.parseResponse(profile, result.Content, llmClient.GetModel())
+}
+
+// classifyFromSchemaEnum builds ColumnFeatures directly from Postgres enum type values.
+// No LLM call needed — the enum values are definitive from the database schema.
+func (c *enumClassifier) classifyFromSchemaEnum(profile *models.ColumnDataProfile) *models.ColumnFeatures {
+	values := make([]models.ColumnEnumValue, len(profile.SchemaEnumValues))
+	for i, v := range profile.SchemaEnumValues {
+		values[i] = models.ColumnEnumValue{
+			Value: v,
+			Label: v, // Use the enum value as its own label
+		}
+	}
+
+	features := &models.ColumnFeatures{
+		ColumnID:           profile.ColumnID,
+		ClassificationPath: models.ClassificationPathEnum,
+		Purpose:            models.PurposeEnum,
+		SemanticType:       "enum",
+		Role:               models.RoleAttribute,
+		Description:        fmt.Sprintf("Postgres enum type with %d values", len(profile.SchemaEnumValues)),
+		Confidence:         1.0, // Schema-defined enums have maximum confidence
+		EnumFeatures: &models.EnumFeatures{
+			Values: values,
+		},
+		NeedsEnumAnalysis: true, // Still flag for Phase 3 detailed analysis (state machine detection)
+		AnalyzedAt:        time.Now(),
+		LLMModelUsed:      "schema", // Indicates values came from schema, not LLM
+	}
+
+	return features
 }
 
 func (c *enumClassifier) systemMessage() string {
@@ -2111,6 +2156,14 @@ func (s *columnFeatureExtractionService) analyzeEnumColumn(
 	projectID uuid.UUID,
 	profile *models.ColumnDataProfile,
 ) (*EnumAnalysisResult, error) {
+	// When schema-defined enum values are available (Postgres enum types),
+	// populate SampleValues so the LLM prompt has values to work with.
+	// The LLM still runs to generate meaningful descriptions and labels.
+	if len(profile.SchemaEnumValues) > 0 && len(profile.SampleValues) == 0 {
+		profile.SampleValues = profile.SchemaEnumValues
+		profile.DistinctCount = int64(len(profile.SchemaEnumValues))
+	}
+
 	// Acquire fresh connection to avoid concurrent map access crashes
 	// when multiple workers call CreateForProject simultaneously
 	workCtx := ctx
@@ -2158,7 +2211,12 @@ func (s *columnFeatureExtractionService) buildEnumAnalysisPrompt(profile *models
 	sb.WriteString(fmt.Sprintf("**Data type:** %s\n", profile.DataType))
 	sb.WriteString(fmt.Sprintf("**Distinct values:** %d\n", profile.DistinctCount))
 
-	if len(profile.SampleValues) > 0 {
+	if len(profile.SchemaEnumValues) > 0 {
+		sb.WriteString("\n**Values (definitive — Postgres enum type, this is the complete list):**\n")
+		for _, val := range profile.SchemaEnumValues {
+			sb.WriteString(fmt.Sprintf("- `%s`\n", val))
+		}
+	} else if len(profile.SampleValues) > 0 {
 		sb.WriteString("\n**Values found in data:**\n")
 		for _, val := range profile.SampleValues {
 			sb.WriteString(fmt.Sprintf("- `%s`\n", val))
