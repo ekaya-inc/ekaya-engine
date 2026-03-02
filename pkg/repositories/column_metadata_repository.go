@@ -164,7 +164,10 @@ func (r *columnMetadataRepository) UpsertFromExtraction(ctx context.Context, met
 	}
 
 	// Extraction inserts/updates all fields.
-	// On conflict, replace all inferred fields except user overrides (is_sensitive with provenance).
+	// On conflict, replace inferred fields but PRESERVE user-curated values.
+	// User-curated = last_edit_source IN ('mcp', 'manual') OR source IN ('mcp', 'manual') when never edited.
+	// Protected fields: description, role, semantic_type, features (contain enum values, etc.)
+	// Always updated: classification_path, purpose, confidence, processing flags, analysis metadata
 	query := `
 		INSERT INTO engine_ontology_column_metadata (
 			project_id, schema_column_id,
@@ -179,11 +182,35 @@ func (r *columnMetadataRepository) UpsertFromExtraction(ctx context.Context, met
 		DO UPDATE SET
 			classification_path = EXCLUDED.classification_path,
 			purpose = EXCLUDED.purpose,
-			semantic_type = EXCLUDED.semantic_type,
-			role = EXCLUDED.role,
-			description = EXCLUDED.description,
+			semantic_type = CASE
+				WHEN engine_ontology_column_metadata.last_edit_source IN ('mcp', 'manual')
+				  OR (engine_ontology_column_metadata.last_edit_source IS NULL
+				      AND engine_ontology_column_metadata.source IN ('mcp', 'manual'))
+				THEN engine_ontology_column_metadata.semantic_type
+				ELSE EXCLUDED.semantic_type
+			END,
+			role = CASE
+				WHEN engine_ontology_column_metadata.last_edit_source IN ('mcp', 'manual')
+				  OR (engine_ontology_column_metadata.last_edit_source IS NULL
+				      AND engine_ontology_column_metadata.source IN ('mcp', 'manual'))
+				THEN engine_ontology_column_metadata.role
+				ELSE EXCLUDED.role
+			END,
+			description = CASE
+				WHEN engine_ontology_column_metadata.last_edit_source IN ('mcp', 'manual')
+				  OR (engine_ontology_column_metadata.last_edit_source IS NULL
+				      AND engine_ontology_column_metadata.source IN ('mcp', 'manual'))
+				THEN engine_ontology_column_metadata.description
+				ELSE EXCLUDED.description
+			END,
 			confidence = EXCLUDED.confidence,
-			features = EXCLUDED.features,
+			features = CASE
+				WHEN engine_ontology_column_metadata.last_edit_source IN ('mcp', 'manual')
+				  OR (engine_ontology_column_metadata.last_edit_source IS NULL
+				      AND engine_ontology_column_metadata.source IN ('mcp', 'manual'))
+				THEN engine_ontology_column_metadata.features
+				ELSE EXCLUDED.features
+			END,
 			needs_enum_analysis = EXCLUDED.needs_enum_analysis,
 			needs_fk_resolution = EXCLUDED.needs_fk_resolution,
 			needs_cross_column_check = EXCLUDED.needs_cross_column_check,
