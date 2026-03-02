@@ -93,6 +93,14 @@ fmt: ## Format Go code
 	@echo "$(GREEN)✓ Code formatted$(NC)"
 
 lint: ## Run linter
+	@echo "$(YELLOW)Checking formatting...$(NC)"
+	@if gofmt -l . | grep -q .; then \
+		echo "$(RED)❌ Formatting issues found:$(NC)"; \
+		gofmt -l .; \
+		exit 1; \
+	else \
+		echo "$(GREEN)✓ Code properly formatted$(NC)"; \
+	fi
 	@echo "$(YELLOW)Running linter...$(NC)"
 	@if which golangci-lint > /dev/null 2>&1; then \
 		golangci-lint run --timeout=5m; \

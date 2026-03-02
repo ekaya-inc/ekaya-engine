@@ -38,11 +38,14 @@ scripts/              Build and utility scripts
 ```bash
 make lint             # Go + frontend linting + typecheck
 make test             # Go + frontend tests
+make check            # Full validation (lint + test + build) — run before committing
 make dev-server       # Run Go backend with hot reload (air)
 make dev-ui           # Run frontend dev server (vite)
 make build            # Build Go binary
 make build-ui         # Build frontend (output to ui/dist/)
 ```
+
+Use `make lint` and `make test` for quick feedback during development. Run `make check` for major changes that are ready for commit.
 
 ## Key Architecture Concepts
 
