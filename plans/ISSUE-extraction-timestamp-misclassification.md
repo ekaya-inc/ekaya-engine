@@ -1,7 +1,7 @@
 # ISSUE: Ontology extraction misclassifies timestamp columns
 
 **Date:** 2026-03-02
-**Status:** TODO
+**Status:** FIXED
 **Priority:** HIGH
 **Observed on:** ekaya_marketing datasource (project 21bfc3bf)
 

@@ -999,6 +999,62 @@ func (c *timestampClassifier) buildPrompt(profile *models.ColumnDataProfile) str
 	return sb.String()
 }
 
+// Name patterns that gate specific timestamp purposes. If the LLM classifies
+// a column with a guarded purpose but the column name doesn't match, the
+// classification is corrected to a safe default (event_time or scheduled_time).
+var (
+	softDeleteNamePattern   = regexp.MustCompile(`(?i)(^|_)(deleted|removed|archived|purged|discarded)(_at|_on|_date|_time)?$`)
+	auditCreatedNamePattern = regexp.MustCompile(`(?i)(^|_)(created|inserted|added)(_at|_on|_date|_time)?$|^date_created$|^creation_(time|date)$`)
+	auditUpdatedNamePattern = regexp.MustCompile(`(?i)(^|_)(updated|modified)(_at|_on|_date|_time)?$|^last_(modified|updated)(_at|_on)?$`)
+	dateColumnNamePattern   = regexp.MustCompile(`(?i)(^|_)date($|_)`)
+	completionNamePattern   = regexp.MustCompile(`(?i)(^|_)(completed|finished)(_at|_on|_date|_time)?$`)
+)
+
+// guardTimestampPurpose validates the LLM's timestamp purpose classification
+// against column name patterns. Certain purposes (soft_delete, audit_created,
+// audit_updated) have high impact on query generation and require matching
+// column names. If the name doesn't match, the purpose is corrected to a
+// safe default.
+func guardTimestampPurpose(columnName, llmPurpose string, isSoftDelete, isAuditField bool) (purpose string, softDelete, auditField bool) {
+	switch llmPurpose {
+	case models.TimestampPurposeSoftDelete:
+		if softDeleteNamePattern.MatchString(columnName) {
+			return llmPurpose, isSoftDelete, isAuditField
+		}
+		// Column name doesn't match deletion patterns — correct to safe default
+		return timestampFallbackPurpose(columnName), false, false
+
+	case models.TimestampPurposeAuditCreated:
+		if auditCreatedNamePattern.MatchString(columnName) {
+			return llmPurpose, isSoftDelete, isAuditField
+		}
+		return timestampFallbackPurpose(columnName), false, false
+
+	case models.TimestampPurposeAuditUpdated:
+		if auditUpdatedNamePattern.MatchString(columnName) {
+			return llmPurpose, isSoftDelete, isAuditField
+		}
+		return timestampFallbackPurpose(columnName), false, false
+
+	default:
+		// event_time, scheduled_time, expiration, cursor, completion — accept as-is
+		return llmPurpose, isSoftDelete, isAuditField
+	}
+}
+
+// timestampFallbackPurpose returns the appropriate fallback purpose when an
+// LLM classification is rejected. Date-named columns get scheduled_time;
+// completion-named columns get completion; everything else gets event_time.
+func timestampFallbackPurpose(columnName string) string {
+	if dateColumnNamePattern.MatchString(columnName) {
+		return models.TimestampPurposeScheduled
+	}
+	if completionNamePattern.MatchString(columnName) {
+		return models.TimestampPurposeCompletion
+	}
+	return models.TimestampPurposeEventTime
+}
+
 // timestampClassificationResponse is the expected JSON response from the LLM.
 type timestampClassificationResponse struct {
 	Purpose               string  `json:"purpose"`
@@ -1015,6 +1071,11 @@ func (c *timestampClassifier) parseResponse(profile *models.ColumnDataProfile, c
 	if err != nil {
 		return nil, fmt.Errorf("parse timestamp classification response: %w", err)
 	}
+
+	// Guard against LLM misclassifications using column name patterns
+	guardedPurpose, guardedSoftDelete, guardedAuditField := guardTimestampPurpose(
+		profile.ColumnName, response.Purpose, response.IsSoftDelete, response.IsAuditField,
+	)
 
 	// Determine timestamp scale from detected patterns
 	timestampScale := ""
@@ -1035,15 +1096,15 @@ func (c *timestampClassifier) parseResponse(profile *models.ColumnDataProfile, c
 		ColumnID:           profile.ColumnID,
 		ClassificationPath: models.ClassificationPathTimestamp,
 		Purpose:            models.PurposeTimestamp,
-		SemanticType:       response.Purpose,
+		SemanticType:       guardedPurpose,
 		Role:               models.RoleAttribute,
 		Description:        response.Description,
 		Confidence:         response.Confidence,
 		TimestampFeatures: &models.TimestampFeatures{
-			TimestampPurpose: response.Purpose,
+			TimestampPurpose: guardedPurpose,
 			TimestampScale:   timestampScale,
-			IsSoftDelete:     response.IsSoftDelete,
-			IsAuditField:     response.IsAuditField,
+			IsSoftDelete:     guardedSoftDelete,
+			IsAuditField:     guardedAuditField,
 		},
 		AnalyzedAt:   time.Now(),
 		LLMModelUsed: model,
