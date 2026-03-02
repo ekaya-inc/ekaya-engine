@@ -172,6 +172,10 @@ type OntologyDAG struct {
 	OwnerID       *uuid.UUID `json:"owner_id,omitempty"`
 	LastHeartbeat *time.Time `json:"last_heartbeat,omitempty"`
 
+	// Incremental extraction
+	IsIncremental bool           `json:"is_incremental"`
+	ChangeSummary *ChangeSummary `json:"change_summary,omitempty"`
+
 	// Timing
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
@@ -267,4 +271,16 @@ func (n *DAGNode) HasFailed() bool {
 // IsSkipped returns true if the node was skipped.
 func (n *DAGNode) IsSkipped() bool {
 	return n.Status == DAGNodeStatusSkipped
+}
+
+// ============================================================================
+// Ontology Status Response
+// ============================================================================
+
+// OntologyStatusResponse represents the ontology status with change detection.
+type OntologyStatusResponse struct {
+	HasOntology             bool           `json:"has_ontology"`
+	LastBuiltAt             *time.Time     `json:"last_built_at,omitempty"`
+	SchemaChangedSinceBuild bool           `json:"schema_changed_since_build"`
+	ChangeSummary           *ChangeSummary `json:"change_summary,omitempty"`
 }
