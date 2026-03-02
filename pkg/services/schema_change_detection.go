@@ -182,7 +182,7 @@ func (s *schemaChangeDetectionService) ResolvePendingChanges(
 	selectedTableNames map[string]bool,
 	selectedColumnNames map[string]bool,
 ) (*ResolvedChangesResult, error) {
-	pendingChanges, err := s.pendingChangeRepo.List(ctx, projectID, models.ChangeStatusPending, 1000)
+	pendingChanges, err := s.pendingChangeRepo.List(ctx, projectID, models.ChangeStatusPending, 0)
 	if err != nil {
 		return nil, fmt.Errorf("list pending changes: %w", err)
 	}
@@ -243,7 +243,7 @@ func (s *schemaChangeDetectionService) RejectAllPendingChanges(
 	ctx context.Context,
 	projectID uuid.UUID,
 ) (*RejectAllResult, error) {
-	pendingChanges, err := s.pendingChangeRepo.List(ctx, projectID, models.ChangeStatusPending, 1000)
+	pendingChanges, err := s.pendingChangeRepo.List(ctx, projectID, models.ChangeStatusPending, 0)
 	if err != nil {
 		return nil, fmt.Errorf("list pending changes: %w", err)
 	}

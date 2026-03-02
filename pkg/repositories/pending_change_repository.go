@@ -138,8 +138,8 @@ func (r *pendingChangeRepository) List(ctx context.Context, projectID uuid.UUID,
 		return nil, fmt.Errorf("no tenant scope in context")
 	}
 
-	if limit <= 0 || limit > 500 {
-		limit = 50
+	if limit <= 0 {
+		limit = 10000
 	}
 
 	query := `
@@ -166,8 +166,8 @@ func (r *pendingChangeRepository) ListByType(ctx context.Context, projectID uuid
 		return nil, fmt.Errorf("no tenant scope in context")
 	}
 
-	if limit <= 0 || limit > 500 {
-		limit = 50
+	if limit <= 0 {
+		limit = 10000
 	}
 
 	query := `

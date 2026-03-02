@@ -222,7 +222,7 @@ func (h *SchemaHandler) GetSchema(w http.ResponseWriter, r *http.Request) {
 	// Query pending changes for this project
 	pendingChangesMap := make(map[string]PendingChangeInfo)
 	if h.schemaChangeDetectionService != nil {
-		changes, err := h.schemaChangeDetectionService.ListPendingChanges(r.Context(), projectID, models.ChangeStatusPending, 1000)
+		changes, err := h.schemaChangeDetectionService.ListPendingChanges(r.Context(), projectID, models.ChangeStatusPending, 0)
 		if err != nil {
 			h.logger.Warn("Failed to list pending changes for schema response",
 				zap.String("project_id", projectID.String()),
