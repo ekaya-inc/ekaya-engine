@@ -1,7 +1,7 @@
 # ISSUE: update_column MCP tool doesn't expose semantic_type parameter
 
 **Date:** 2026-03-02
-**Status:** TODO
+**Status:** FIXED
 **Priority:** MEDIUM
 **Observed on:** ekaya_marketing datasource (project 21bfc3bf)
 
