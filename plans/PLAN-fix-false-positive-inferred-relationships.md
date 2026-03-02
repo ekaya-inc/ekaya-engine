@@ -1,6 +1,6 @@
 # PLAN: Fix False-Positive Inferred FK Relationships
 
-**Status:** TODO
+**Status:** DONE
 **Branch:** TBD
 **Created:** 2026-03-01
 
@@ -159,14 +159,14 @@ if candidate.SourceDistinctCount > 0 && candidate.SourceDistinctCount <= 20 {
 
 ## Checklist
 
-- [ ] Add `ordinal` numeric classification type to the LLM prompt in `column_feature_extraction.go`
-- [ ] Update numeric classifier response handling to NOT flag ordinals as FK candidates
-- [ ] Add `filterMultiTargetCandidates` method to `relationship_candidate_collector.go`
-- [ ] Update LLM system prompt in `relationship_validator.go` with coincidental-match guidance
-- [ ] Add warning signals section to `buildValidationPrompt` for small-integer patterns
-- [ ] Add tests for multi-target filtering in `relationship_candidate_collector_test.go`
-- [ ] Add tests for ordinal classification in `column_feature_extraction_test.go`
-- [ ] Run full test suite: `go test ./pkg/services/... -run "Relationship|Candidate|ColumnFeature"`
+- [x] Add `ordinal` numeric classification type to the LLM prompt in `column_feature_extraction.go`
+- [x] Update numeric classifier response handling to NOT flag ordinals as FK candidates
+- [x] Add `filterMultiTargetCandidates` method to `relationship_candidate_collector.go`
+- [x] Update LLM system prompt in `relationship_validator.go` with coincidental-match guidance
+- [x] Add warning signals section to `buildValidationPrompt` for small-integer patterns
+- [x] Add tests for multi-target filtering in `relationship_candidate_collector_test.go`
+- [x] Add tests for ordinal classification in `column_feature_extraction_test.go`
+- [x] Run full test suite: `go test ./pkg/services/... -run "Relationship|Candidate|ColumnFeature"`
 
 ## Notes
 
