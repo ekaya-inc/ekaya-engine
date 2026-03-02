@@ -253,7 +253,7 @@ func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID 
 			s.logger.Info("No schema changes since last extraction",
 				zap.String("project_id", projectID.String()),
 				zap.String("datasource_id", datasourceID.String()))
-			return nil, fmt.Errorf("no schema changes since last extraction")
+			return nil, fmt.Errorf("No schema changes since last extraction")
 		}
 
 		isIncremental = true

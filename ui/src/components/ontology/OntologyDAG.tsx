@@ -647,7 +647,7 @@ export const OntologyDAG = ({
               Delete Ontology
             </Button>
           )}
-          {isComplete && (
+          {isComplete && ontologyStatus?.schema_changed_since_build && (
             <Button
               onClick={() => void handleStart()}
               disabled={isStarting}
