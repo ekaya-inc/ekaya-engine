@@ -253,13 +253,14 @@ func (r *schemaRepository) UpsertTable(ctx context.Context, table *models.Schema
 	}
 
 	now := time.Now()
-	table.UpdatedAt = now
 	if table.ID == uuid.Nil {
 		table.ID = uuid.New()
 		table.CreatedAt = now
+		table.UpdatedAt = now
 	}
 
-	// First, try to reactivate a soft-deleted record
+	// First, try to reactivate a soft-deleted record.
+	// Reactivation IS ontology-relevant, so we explicitly set updated_at.
 	reactivateQuery := `
 		UPDATE engine_schema_tables
 		SET deleted_at = NULL,
@@ -290,7 +291,9 @@ func (r *schemaRepository) UpsertTable(ctx context.Context, table *models.Schema
 		return fmt.Errorf("failed to reactivate table: %w", err)
 	}
 
-	// No soft-deleted record, do standard upsert on active records
+	// No soft-deleted record, do standard upsert on active records.
+	// Note: updated_at is NOT in DO UPDATE SET — the conditional trigger controls it,
+	// only bumping it when ontology-relevant fields (is_selected, deleted_at) change.
 	upsertQuery := `
 		INSERT INTO engine_schema_tables (
 			id, project_id, datasource_id, schema_name, table_name,
@@ -299,8 +302,7 @@ func (r *schemaRepository) UpsertTable(ctx context.Context, table *models.Schema
 		ON CONFLICT (project_id, datasource_id, schema_name, table_name)
 			WHERE deleted_at IS NULL
 		DO UPDATE SET
-			row_count = EXCLUDED.row_count,
-			updated_at = EXCLUDED.updated_at
+			row_count = EXCLUDED.row_count
 		RETURNING id, created_at, is_selected`
 
 	err = scope.Conn.QueryRow(ctx, upsertQuery,
@@ -720,13 +722,14 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 	}
 
 	now := time.Now()
-	column.UpdatedAt = now
 	if column.ID == uuid.Nil {
 		column.ID = uuid.New()
 		column.CreatedAt = now
+		column.UpdatedAt = now
 	}
 
-	// First, try to reactivate a soft-deleted record
+	// First, try to reactivate a soft-deleted record.
+	// Reactivation IS ontology-relevant, so we explicitly set updated_at.
 	reactivateQuery := `
 		UPDATE engine_schema_columns
 		SET deleted_at = NULL,
@@ -766,7 +769,9 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 		return fmt.Errorf("failed to reactivate column: %w", err)
 	}
 
-	// No soft-deleted record, do standard upsert on active records
+	// No soft-deleted record, do standard upsert on active records.
+	// Note: updated_at is NOT in DO UPDATE SET — the conditional trigger controls it,
+	// only bumping it when ontology-relevant fields change (data_type, is_nullable, etc.).
 	upsertQuery := `
 		INSERT INTO engine_schema_columns (
 			id, project_id, schema_table_id, column_name, data_type,
@@ -782,8 +787,7 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 			is_primary_key = EXCLUDED.is_primary_key,
 			is_unique = EXCLUDED.is_unique,
 			ordinal_position = EXCLUDED.ordinal_position,
-			default_value = EXCLUDED.default_value,
-			updated_at = EXCLUDED.updated_at
+			default_value = EXCLUDED.default_value
 		RETURNING id, created_at, is_selected, distinct_count, null_count`
 
 	err = scope.Conn.QueryRow(ctx, upsertQuery,

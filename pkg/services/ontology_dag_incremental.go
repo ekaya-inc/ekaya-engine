@@ -42,6 +42,11 @@ func (s *ontologyDAGService) ComputeChangeSet(ctx context.Context, projectID uui
 		return nil, err
 	}
 
+	// Query deselected tables (is_selected changed to false after last build)
+	if err := s.queryDeselectedTables(ctx, scope, cs, projectID, builtAt); err != nil {
+		return nil, err
+	}
+
 	// Query added columns
 	if err := s.queryAddedColumns(ctx, scope, cs, projectID, builtAt); err != nil {
 		return nil, err
@@ -54,6 +59,11 @@ func (s *ontologyDAGService) ComputeChangeSet(ctx context.Context, projectID uui
 
 	// Query deleted columns
 	if err := s.queryDeletedColumns(ctx, scope, cs, projectID, builtAt); err != nil {
+		return nil, err
+	}
+
+	// Query deselected columns (is_selected changed to false after last build)
+	if err := s.queryDeselectedColumns(ctx, scope, cs, projectID, builtAt); err != nil {
 		return nil, err
 	}
 
@@ -303,6 +313,31 @@ func (s *ontologyDAGService) queryDeletedTables(ctx context.Context, scope *data
 	return rows.Err()
 }
 
+func (s *ontologyDAGService) queryDeselectedTables(ctx context.Context, scope *database.TenantScope, cs *models.ChangeSet, projectID uuid.UUID, builtAt time.Time) error {
+	// Tables that were previously selected (part of the ontology) but have been deselected.
+	// From the ontology's perspective, deselection = deletion.
+	query := `
+		SELECT id, project_id, datasource_id, schema_name, table_name, is_selected, row_count, created_at, updated_at
+		FROM engine_schema_tables
+		WHERE project_id = $1 AND updated_at > $2 AND created_at <= $2 AND deleted_at IS NULL AND is_selected = false`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID, builtAt)
+	if err != nil {
+		return fmt.Errorf("query deselected tables: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var t models.SchemaTable
+		if err := rows.Scan(&t.ID, &t.ProjectID, &t.DatasourceID, &t.SchemaName, &t.TableName,
+			&t.IsSelected, &t.RowCount, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			return fmt.Errorf("scan deselected table: %w", err)
+		}
+		cs.DeletedTables = append(cs.DeletedTables, t)
+	}
+	return rows.Err()
+}
+
 func (s *ontologyDAGService) queryAddedColumns(ctx context.Context, scope *database.TenantScope, cs *models.ChangeSet, projectID uuid.UUID, builtAt time.Time) error {
 	query := `
 		SELECT c.id, c.project_id, c.schema_table_id, c.column_name, c.data_type,
@@ -378,6 +413,34 @@ func (s *ontologyDAGService) queryDeletedColumns(ctx context.Context, scope *dat
 		col, err := scanChangeSetColumn(rows)
 		if err != nil {
 			return fmt.Errorf("scan deleted column: %w", err)
+		}
+		cs.DeletedColumns = append(cs.DeletedColumns, *col)
+	}
+	return rows.Err()
+}
+
+func (s *ontologyDAGService) queryDeselectedColumns(ctx context.Context, scope *database.TenantScope, cs *models.ChangeSet, projectID uuid.UUID, builtAt time.Time) error {
+	// Columns that were previously selected but have been deselected by the user.
+	// From the ontology's perspective, deselection = deletion.
+	// Also catches columns on deselected tables (t.is_selected = false).
+	query := `
+		SELECT c.id, c.project_id, c.schema_table_id, c.column_name, c.data_type,
+		       c.is_nullable, c.is_primary_key, c.is_unique, c.is_selected, c.ordinal_position,
+		       c.default_value, c.distinct_count, c.null_count, c.min_length, c.max_length,
+		       c.created_at, c.updated_at
+		FROM engine_schema_columns c
+		WHERE c.project_id = $1 AND c.updated_at > $2 AND c.created_at <= $2 AND c.deleted_at IS NULL AND c.is_selected = false`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID, builtAt)
+	if err != nil {
+		return fmt.Errorf("query deselected columns: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		col, err := scanChangeSetColumn(rows)
+		if err != nil {
+			return fmt.Errorf("scan deselected column: %w", err)
 		}
 		cs.DeletedColumns = append(cs.DeletedColumns, *col)
 	}
