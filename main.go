@@ -163,7 +163,7 @@ func main() {
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, adapterFactory, projectService, logger)
 	schemaService := services.NewSchemaService(schemaRepo, columnMetadataRepo, datasourceService, adapterFactory, logger)
-	schemaChangeDetectionService := services.NewSchemaChangeDetectionService(pendingChangeRepo, logger)
+	schemaChangeDetectionService := services.NewSchemaChangeDetectionService(pendingChangeRepo, schemaRepo, logger)
 	dataChangeDetectionService := services.NewDataChangeDetectionService(schemaRepo, columnMetadataRepo, pendingChangeRepo, datasourceService, projectService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, securityAuditor, logger)
 	queryHistoryRepo := repositories.NewQueryHistoryRepository()

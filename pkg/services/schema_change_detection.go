@@ -46,16 +46,19 @@ type SchemaChangeDetectionService interface {
 
 type schemaChangeDetectionService struct {
 	pendingChangeRepo repositories.PendingChangeRepository
+	schemaRepo        repositories.SchemaRepository
 	logger            *zap.Logger
 }
 
 // NewSchemaChangeDetectionService creates a new SchemaChangeDetectionService.
 func NewSchemaChangeDetectionService(
 	pendingChangeRepo repositories.PendingChangeRepository,
+	schemaRepo repositories.SchemaRepository,
 	logger *zap.Logger,
 ) SchemaChangeDetectionService {
 	return &schemaChangeDetectionService{
 		pendingChangeRepo: pendingChangeRepo,
+		schemaRepo:        schemaRepo,
 		logger:            logger,
 	}
 }
@@ -239,6 +242,8 @@ func (s *schemaChangeDetectionService) ResolvePendingChanges(
 }
 
 // RejectAllPendingChanges rejects all pending changes for a project.
+// For new_table and new_column changes, this also deselects the corresponding
+// table or column so that rejection means "do not include in schema."
 func (s *schemaChangeDetectionService) RejectAllPendingChanges(
 	ctx context.Context,
 	projectID uuid.UUID,
@@ -250,6 +255,11 @@ func (s *schemaChangeDetectionService) RejectAllPendingChanges(
 
 	if len(pendingChanges) == 0 {
 		return &RejectAllResult{}, nil
+	}
+
+	// Deselect auto-selected tables and columns before marking as rejected
+	if s.schemaRepo != nil {
+		s.deselectRejectedChanges(ctx, projectID, pendingChanges)
 	}
 
 	result := &RejectAllResult{}
@@ -273,6 +283,81 @@ func (s *schemaChangeDetectionService) RejectAllPendingChanges(
 	}
 
 	return result, nil
+}
+
+// deselectRejectedChanges deselects tables and columns that were auto-selected
+// during schema refresh. Only applies to new_table and new_column change types.
+func (s *schemaChangeDetectionService) deselectRejectedChanges(
+	ctx context.Context,
+	projectID uuid.UUID,
+	changes []*models.PendingChange,
+) {
+	// Collect unique table names referenced by pending changes.
+	// Pending changes store qualified names ("public.orders") but the DB
+	// stores schema_name and table_name separately, so strip the prefix.
+	tableNames := make(map[string]bool)
+	for _, change := range changes {
+		if change.TableName != "" {
+			tableNames[stripSchemaPrefix(change.TableName)] = true
+		}
+	}
+
+	// Look up tables by bare name to get their IDs
+	nameList := make([]string, 0, len(tableNames))
+	for name := range tableNames {
+		nameList = append(nameList, name)
+	}
+	tables, err := s.schemaRepo.GetTablesByNames(ctx, projectID, nameList)
+	if err != nil {
+		s.logger.Warn("Failed to look up tables for deselection", zap.Error(err))
+		return
+	}
+
+	for _, change := range changes {
+		bareName := stripSchemaPrefix(change.TableName)
+
+		switch change.ChangeType {
+		case models.ChangeTypeNewTable:
+			table, ok := tables[bareName]
+			if !ok {
+				continue
+			}
+			if err := s.schemaRepo.UpdateTableSelection(ctx, projectID, table.ID, false); err != nil {
+				s.logger.Warn("Failed to deselect rejected table",
+					zap.String("table", change.TableName),
+					zap.Error(err))
+			}
+
+		case models.ChangeTypeNewColumn:
+			table, ok := tables[bareName]
+			if !ok {
+				continue
+			}
+			col, err := s.schemaRepo.GetColumnByName(ctx, table.ID, change.ColumnName)
+			if err != nil || col == nil {
+				s.logger.Warn("Failed to look up column for deselection",
+					zap.String("table", change.TableName),
+					zap.String("column", change.ColumnName),
+					zap.Error(err))
+				continue
+			}
+			if err := s.schemaRepo.UpdateColumnSelection(ctx, projectID, col.ID, false); err != nil {
+				s.logger.Warn("Failed to deselect rejected column",
+					zap.String("table", change.TableName),
+					zap.String("column", change.ColumnName),
+					zap.Error(err))
+			}
+		}
+	}
+}
+
+// stripSchemaPrefix removes the "schema." prefix from a qualified table name.
+// e.g. "public.orders" -> "orders", "orders" -> "orders"
+func stripSchemaPrefix(tableName string) string {
+	if idx := strings.LastIndex(tableName, "."); idx >= 0 {
+		return tableName[idx+1:]
+	}
+	return tableName
 }
 
 // toEntityName converts a table name to an entity name.
