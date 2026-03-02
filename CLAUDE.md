@@ -49,6 +49,29 @@ Use `make lint` and `make test` for quick feedback during development.
 
 **IMPORTANT:** Always run `make check` before considering any implementation task complete. Do not skip this step.
 
+## Running Integration Tests
+
+Integration tests use Docker via testcontainers-go. The `DOCKER_HOST` env var must be set (auto-detected by `make` targets but not by raw `go test`).
+
+```bash
+# Run ALL integration tests (preferred — uses make)
+make test-integration
+
+# Run specific integration tests directly
+go test -tags="integration,all_adapters" \
+  -run 'TestName' ./pkg/path/to/package/ -v -count=1 -timeout 2m
+
+# Postgres adapter tests need the postgres build tag too
+go test -tags="integration,all_adapters,postgres" \
+  -run 'TestName' ./pkg/adapters/datasource/postgres/ -v -count=1 -timeout 2m
+```
+
+Key points:
+- Build tags required: `integration,all_adapters` (add `postgres` for postgres adapter tests)
+- If Docker detection fails (e.g. OrbStack), set `DOCKER_HOST` first: `export DOCKER_HOST=$(docker context inspect --format '{{.Endpoints.docker.Host}}')`
+- Tests spin up a fresh container per test run via the `ghcr.io/ekaya-inc/ekaya-engine-test-image:latest` image
+- Use `-run 'TestPattern'` to target specific tests for fast feedback during TDD
+
 ## Key Architecture Concepts
 
 - **Ontology DAG**: 7-node sequential pipeline that extracts semantic metadata from database schemas. Nodes: KnowledgeSeeding → ColumnFeatureExtraction → FKDiscovery → TableFeatureExtraction → RelationshipDiscovery → ColumnEnrichment → OntologyFinalization.
