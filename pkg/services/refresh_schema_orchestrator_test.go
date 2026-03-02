@@ -54,6 +54,10 @@ func (s *stubChangeDetectionService) ResolvePendingChanges(ctx context.Context, 
 	return &ResolvedChangesResult{}, nil
 }
 
+func (s *stubChangeDetectionService) RejectAllPendingChanges(ctx context.Context, projectID uuid.UUID) (*RejectAllResult, error) {
+	return &RejectAllResult{}, nil
+}
+
 // ============================================================================
 // Tests
 // ============================================================================

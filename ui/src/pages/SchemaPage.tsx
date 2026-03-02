@@ -274,6 +274,33 @@ const SchemaPage = () => {
     return removals;
   }, [pendingChanges]);
 
+  // Whether there are actionable pending changes (not auto_applied)
+  const hasPendingChanges = useMemo(() => {
+    return Object.values(pendingChanges).some(change => change.status === 'pending');
+  }, [pendingChanges]);
+
+  // Handle reject all pending changes and navigate away
+  const handleRejectChanges = useCallback(async (): Promise<void> => {
+    if (!pid || !selectedDatasource?.datasourceId) return;
+
+    try {
+      await engineApi.rejectPendingChanges(pid, selectedDatasource.datasourceId);
+      toast({
+        title: "Changes Rejected",
+        description: "All pending schema changes have been rejected.",
+        variant: "default",
+      });
+      navigate(`/projects/${pid}`);
+    } catch (err) {
+      console.error('Failed to reject pending changes:', err);
+      toast({
+        title: "Error",
+        description: "Failed to reject pending changes. Please try again.",
+        variant: "destructive",
+      });
+    }
+  }, [pid, selectedDatasource?.datasourceId, toast, navigate]);
+
   // Handle save schema
   const handleSaveSchema = useCallback(async (): Promise<void> => {
     if (!schemaData || !pid || !selectedDatasource?.datasourceId) return;
@@ -524,17 +551,17 @@ const SchemaPage = () => {
           <div className="flex gap-2">
             <Button
               variant="outline"
-              onClick={() => navigate(`/projects/${pid}`)}
-              disabled={!(isFirstTimeSetup || isDirty)}
+              onClick={hasPendingChanges ? handleRejectChanges : () => navigate(`/projects/${pid}`)}
+              disabled={!(isFirstTimeSetup || isDirty || hasPendingChanges)}
             >
-              Cancel
+              {hasPendingChanges ? 'Reject Changes' : 'Cancel'}
             </Button>
             <Button
               onClick={handleSaveSchema}
-              disabled={isStartingExtraction || !(isFirstTimeSetup || isDirty)}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-medium"
+              disabled={isStartingExtraction || !(isFirstTimeSetup || isDirty || hasPendingChanges)}
+              className={hasPendingChanges ? "bg-green-600 hover:bg-green-700 text-white font-medium" : "bg-blue-600 hover:bg-blue-700 text-white font-medium"}
             >
-              {isStartingExtraction ? 'Saving...' : 'Save Schema'}
+              {isStartingExtraction ? 'Saving...' : (hasPendingChanges ? 'Approve Changes' : 'Save Schema')}
             </Button>
           </div>
         </div>

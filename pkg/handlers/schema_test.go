@@ -846,3 +846,77 @@ func TestSchemaHandler_SaveSelections_NoPendingChanges_BackwardCompatible(t *tes
 		t.Errorf("expected rejected_count 0, got %v", dataMap["rejected_count"])
 	}
 }
+
+func TestSchemaHandler_RejectPendingChanges_RejectsAll(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	changeDetectionSvc := &mockSchemaChangeDetectionService{
+		rejectAllResult: &services.RejectAllResult{RejectedCount: 3},
+	}
+	handler := NewSchemaHandler(&mockSchemaService{}, changeDetectionSvc, zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/reject-pending-changes", nil)
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("dsid", datasourceID.String())
+
+	rec := httptest.NewRecorder()
+	handler.RejectPendingChanges(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp ApiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Error("expected success to be true")
+	}
+
+	dataMap, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be a map, got %T", resp.Data)
+	}
+
+	if dataMap["rejected_count"] != float64(3) {
+		t.Errorf("expected rejected_count 3, got %v", dataMap["rejected_count"])
+	}
+}
+
+func TestSchemaHandler_RejectPendingChanges_NoPending(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	changeDetectionSvc := &mockSchemaChangeDetectionService{
+		rejectAllResult: &services.RejectAllResult{RejectedCount: 0},
+	}
+	handler := NewSchemaHandler(&mockSchemaService{}, changeDetectionSvc, zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/reject-pending-changes", nil)
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("dsid", datasourceID.String())
+
+	rec := httptest.NewRecorder()
+	handler.RejectPendingChanges(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp ApiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	dataMap, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be a map, got %T", resp.Data)
+	}
+
+	if dataMap["rejected_count"] != float64(0) {
+		t.Errorf("expected rejected_count 0, got %v", dataMap["rejected_count"])
+	}
+}

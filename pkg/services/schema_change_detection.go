@@ -19,6 +19,11 @@ type ResolvedChangesResult struct {
 	RejectedCount int
 }
 
+// RejectAllResult contains the count of rejected changes.
+type RejectAllResult struct {
+	RejectedCount int
+}
+
 // SchemaChangeDetectionService detects schema changes and creates pending changes for review.
 type SchemaChangeDetectionService interface {
 	// DetectChanges analyzes a RefreshResult and creates pending changes for review.
@@ -33,6 +38,10 @@ type SchemaChangeDetectionService interface {
 	// selectedColumnNames: "table_name.column_name" -> selected (e.g. "public.users.id" -> true)
 	// Auto-applied changes are skipped.
 	ResolvePendingChanges(ctx context.Context, projectID uuid.UUID, selectedTableNames map[string]bool, selectedColumnNames map[string]bool) (*ResolvedChangesResult, error)
+
+	// RejectAllPendingChanges rejects all pending changes for a project.
+	// Auto-applied changes are skipped.
+	RejectAllPendingChanges(ctx context.Context, projectID uuid.UUID) (*RejectAllResult, error)
 }
 
 type schemaChangeDetectionService struct {
@@ -222,6 +231,43 @@ func (s *schemaChangeDetectionService) ResolvePendingChanges(
 		s.logger.Info("Resolved pending changes from schema selection",
 			zap.String("project_id", projectID.String()),
 			zap.Int("approved", result.ApprovedCount),
+			zap.Int("rejected", result.RejectedCount),
+		)
+	}
+
+	return result, nil
+}
+
+// RejectAllPendingChanges rejects all pending changes for a project.
+func (s *schemaChangeDetectionService) RejectAllPendingChanges(
+	ctx context.Context,
+	projectID uuid.UUID,
+) (*RejectAllResult, error) {
+	pendingChanges, err := s.pendingChangeRepo.List(ctx, projectID, models.ChangeStatusPending, 1000)
+	if err != nil {
+		return nil, fmt.Errorf("list pending changes: %w", err)
+	}
+
+	if len(pendingChanges) == 0 {
+		return &RejectAllResult{}, nil
+	}
+
+	result := &RejectAllResult{}
+	reviewedBy := "schema_selection_reject_all"
+
+	for _, change := range pendingChanges {
+		if err := s.pendingChangeRepo.UpdateStatus(ctx, change.ID, models.ChangeStatusRejected, reviewedBy); err != nil {
+			s.logger.Warn("Failed to reject pending change",
+				zap.String("change_id", change.ID.String()),
+				zap.Error(err))
+			continue
+		}
+		result.RejectedCount++
+	}
+
+	if result.RejectedCount > 0 {
+		s.logger.Info("Rejected all pending changes",
+			zap.String("project_id", projectID.String()),
 			zap.Int("rejected", result.RejectedCount),
 		)
 	}

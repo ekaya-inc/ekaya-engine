@@ -402,10 +402,11 @@ func (m *mockSchemaService) GetColumnMetadataByProject(ctx context.Context, proj
 
 // mockSchemaChangeDetectionService is a configurable mock for change detection in handler tests.
 type mockSchemaChangeDetectionService struct {
-	changes        []*models.PendingChange
-	pendingChanges []*models.PendingChange // for ListPendingChanges
-	resolvedResult *services.ResolvedChangesResult
-	err            error
+	changes         []*models.PendingChange
+	pendingChanges  []*models.PendingChange // for ListPendingChanges
+	resolvedResult  *services.ResolvedChangesResult
+	rejectAllResult *services.RejectAllResult
+	err             error
 }
 
 func (m *mockSchemaChangeDetectionService) DetectChanges(ctx context.Context, projectID uuid.UUID, refreshResult *models.RefreshResult) ([]*models.PendingChange, error) {
@@ -433,4 +434,14 @@ func (m *mockSchemaChangeDetectionService) ResolvePendingChanges(ctx context.Con
 		return m.resolvedResult, nil
 	}
 	return &services.ResolvedChangesResult{}, nil
+}
+
+func (m *mockSchemaChangeDetectionService) RejectAllPendingChanges(ctx context.Context, projectID uuid.UUID) (*services.RejectAllResult, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.rejectAllResult != nil {
+		return m.rejectAllResult, nil
+	}
+	return &services.RejectAllResult{}, nil
 }

@@ -180,6 +180,9 @@ func (h *SchemaHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.
 	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/schema/selections",
 		authMiddleware.RequireAuthWithPathValidation("pid")(
 			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.SaveSelections))))
+	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/schema/reject-pending-changes",
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.RejectPendingChanges))))
 
 	// Relationship operations (datasource-level)
 	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsid}/schema/relationships",
@@ -470,6 +473,44 @@ func (h *SchemaHandler) SaveSelections(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := ApiResponse{Success: true, Data: resolvedResult}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// RejectPendingChanges handles POST /api/projects/{pid}/datasources/{dsid}/schema/reject-pending-changes
+// Rejects all pending schema changes for a project.
+func (h *SchemaHandler) RejectPendingChanges(w http.ResponseWriter, r *http.Request) {
+	projectID, _, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	if h.schemaChangeDetectionService == nil {
+		response := ApiResponse{Success: true, Data: map[string]int{"rejected_count": 0}}
+		if err := WriteJSON(w, http.StatusOK, response); err != nil {
+			h.logger.Error("Failed to write response", zap.Error(err))
+		}
+		return
+	}
+
+	result, err := h.schemaChangeDetectionService.RejectAllPendingChanges(r.Context(), projectID)
+	if err != nil {
+		h.logger.Error("Failed to reject pending changes",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "reject_failed", "Failed to reject pending changes"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	rejectedCount := 0
+	if result != nil {
+		rejectedCount = result.RejectedCount
+	}
+
+	response := ApiResponse{Success: true, Data: map[string]int{"rejected_count": rejectedCount}}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
