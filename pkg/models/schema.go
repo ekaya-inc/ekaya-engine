@@ -40,6 +40,9 @@ type SchemaColumn struct {
 	MaxLength       *int64    `json:"max_length,omitempty"` // For text columns: max string length
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
+	// Schema-defined enum values (from Postgres pg_enum, nil for non-enum columns)
+	EnumValues []string `json:"enum_values,omitempty"`
+
 	// Discovery-related fields (populated by discovery process)
 	RowCount          *int64     `json:"row_count,omitempty"`          // Denormalized table row count
 	NonNullCount      *int64     `json:"non_null_count,omitempty"`     // Non-null values in column

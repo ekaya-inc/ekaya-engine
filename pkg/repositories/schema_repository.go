@@ -459,6 +459,7 @@ func (r *schemaRepository) listColumnsByTableInternal(ctx context.Context, proje
 		SELECT id, project_id, schema_table_id, column_name, data_type,
 		       is_nullable, is_primary_key, is_unique, is_selected, ordinal_position,
 		       default_value, distinct_count, null_count, min_length, max_length,
+		       enum_values,
 		       created_at, updated_at
 		FROM engine_schema_columns
 		WHERE project_id = $1 AND schema_table_id = $2 AND deleted_at IS NULL`
@@ -499,6 +500,7 @@ func (r *schemaRepository) ListColumnsByDatasource(ctx context.Context, projectI
 		SELECT c.id, c.project_id, c.schema_table_id, c.column_name, c.data_type,
 		       c.is_nullable, c.is_primary_key, c.is_unique, c.is_selected, c.ordinal_position,
 		       c.default_value, c.distinct_count, c.null_count, c.min_length, c.max_length,
+		       c.enum_values,
 		       c.created_at, c.updated_at,
 		       c.row_count, c.non_null_count, c.is_joinable, c.joinability_reason, c.stats_updated_at
 		FROM engine_schema_columns c
@@ -542,6 +544,7 @@ func (r *schemaRepository) GetColumnsByTables(ctx context.Context, projectID uui
 		SELECT c.id, c.project_id, c.schema_table_id, c.column_name, c.data_type,
 		       c.is_nullable, c.is_primary_key, c.is_unique, c.is_selected, c.ordinal_position,
 		       c.default_value, c.distinct_count, c.null_count, c.min_length, c.max_length,
+		       c.enum_values,
 		       c.created_at, c.updated_at,
 		       t.table_name
 		FROM engine_schema_columns c
@@ -564,15 +567,22 @@ func (r *schemaRepository) GetColumnsByTables(ctx context.Context, projectID uui
 	for rows.Next() {
 		var c models.SchemaColumn
 		var tableName string
+		var enumValuesJSON []byte
 		err := rows.Scan(
 			&c.ID, &c.ProjectID, &c.SchemaTableID, &c.ColumnName, &c.DataType,
 			&c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.IsSelected, &c.OrdinalPosition,
 			&c.DefaultValue, &c.DistinctCount, &c.NullCount, &c.MinLength, &c.MaxLength,
+			&enumValuesJSON,
 			&c.CreatedAt, &c.UpdatedAt,
 			&tableName,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan column: %w", err)
+		}
+		if len(enumValuesJSON) > 0 {
+			if err := json.Unmarshal(enumValuesJSON, &c.EnumValues); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal enum_values: %w", err)
+			}
 		}
 		result[tableName] = append(result[tableName], &c)
 	}
@@ -673,6 +683,7 @@ func (r *schemaRepository) GetColumnByID(ctx context.Context, projectID, columnI
 		SELECT id, project_id, schema_table_id, column_name, data_type,
 		       is_nullable, is_primary_key, is_unique, is_selected, ordinal_position,
 		       default_value, distinct_count, null_count, min_length, max_length,
+		       enum_values,
 		       created_at, updated_at
 		FROM engine_schema_columns
 		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
@@ -699,6 +710,7 @@ func (r *schemaRepository) GetColumnByName(ctx context.Context, tableID uuid.UUI
 		SELECT id, project_id, schema_table_id, column_name, data_type,
 		       is_nullable, is_primary_key, is_unique, is_selected, ordinal_position,
 		       default_value, distinct_count, null_count, min_length, max_length,
+		       enum_values,
 		       created_at, updated_at
 		FROM engine_schema_columns
 		WHERE schema_table_id = $1 AND column_name = $2 AND deleted_at IS NULL`
@@ -728,6 +740,16 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 		column.UpdatedAt = now
 	}
 
+	// Marshal enum values to JSONB
+	var enumValuesJSON []byte
+	if column.EnumValues != nil {
+		var marshalErr error
+		enumValuesJSON, marshalErr = json.Marshal(column.EnumValues)
+		if marshalErr != nil {
+			return fmt.Errorf("marshal enum_values: %w", marshalErr)
+		}
+	}
+
 	// First, try to reactivate a soft-deleted record.
 	// Reactivation IS ontology-relevant, so we explicitly set updated_at.
 	reactivateQuery := `
@@ -740,7 +762,8 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 		    ordinal_position = $8,
 		    default_value = $9,
 		    is_selected = $10,
-		    updated_at = $11
+		    updated_at = $11,
+		    enum_values = $12
 		WHERE schema_table_id = $1
 		  AND column_name = $2
 		  AND project_id = $3
@@ -753,7 +776,7 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 	err := scope.Conn.QueryRow(ctx, reactivateQuery,
 		column.SchemaTableID, column.ColumnName, column.ProjectID,
 		column.DataType, column.IsNullable, column.IsPrimaryKey, column.IsUnique, column.OrdinalPosition,
-		column.DefaultValue, column.IsSelected, now,
+		column.DefaultValue, column.IsSelected, now, enumValuesJSON,
 	).Scan(&existingID, &existingCreatedAt,
 		&existingDistinctCount, &existingNullCount)
 
@@ -776,9 +799,9 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 		INSERT INTO engine_schema_columns (
 			id, project_id, schema_table_id, column_name, data_type,
 			is_nullable, is_primary_key, is_unique, is_selected, ordinal_position,
-			default_value, distinct_count, null_count,
+			default_value, distinct_count, null_count, enum_values,
 			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		ON CONFLICT (schema_table_id, column_name)
 			WHERE deleted_at IS NULL
 		DO UPDATE SET
@@ -787,13 +810,14 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 			is_primary_key = EXCLUDED.is_primary_key,
 			is_unique = EXCLUDED.is_unique,
 			ordinal_position = EXCLUDED.ordinal_position,
-			default_value = EXCLUDED.default_value
+			default_value = EXCLUDED.default_value,
+			enum_values = EXCLUDED.enum_values
 		RETURNING id, created_at, is_selected, distinct_count, null_count`
 
 	err = scope.Conn.QueryRow(ctx, upsertQuery,
 		column.ID, column.ProjectID, column.SchemaTableID, column.ColumnName, column.DataType,
 		column.IsNullable, column.IsPrimaryKey, column.IsUnique, column.IsSelected, column.OrdinalPosition,
-		column.DefaultValue, column.DistinctCount, column.NullCount,
+		column.DefaultValue, column.DistinctCount, column.NullCount, enumValuesJSON,
 		column.CreatedAt, column.UpdatedAt,
 	).Scan(&column.ID, &column.CreatedAt, &column.IsSelected,
 		&column.DistinctCount, &column.NullCount)
@@ -1544,6 +1568,7 @@ func (r *schemaRepository) GetPrimaryKeyColumns(ctx context.Context, projectID, 
 		SELECT c.id, c.project_id, c.schema_table_id, c.column_name, c.data_type,
 		       c.is_nullable, c.is_primary_key, c.is_unique, c.is_selected, c.ordinal_position,
 		       c.default_value, c.distinct_count, c.null_count, c.min_length, c.max_length,
+		       c.enum_values,
 		       c.created_at, c.updated_at,
 		       c.row_count, c.non_null_count, c.is_joinable, c.joinability_reason, c.stats_updated_at
 		FROM engine_schema_columns c
@@ -1588,6 +1613,7 @@ func (r *schemaRepository) GetNonPKColumnsByExactType(ctx context.Context, proje
 		SELECT c.id, c.project_id, c.schema_table_id, c.column_name, c.data_type,
 		       c.is_nullable, c.is_primary_key, c.is_unique, c.is_selected, c.ordinal_position,
 		       c.default_value, c.distinct_count, c.null_count, c.min_length, c.max_length,
+		       c.enum_values,
 		       c.created_at, c.updated_at,
 		       c.row_count, c.non_null_count, c.is_joinable, c.joinability_reason, c.stats_updated_at
 		FROM engine_schema_columns c
@@ -1651,28 +1677,42 @@ func scanSchemaTableRow(row pgx.Row) (*models.SchemaTable, error) {
 
 func scanSchemaColumn(rows pgx.Rows) (*models.SchemaColumn, error) {
 	var c models.SchemaColumn
+	var enumValuesJSON []byte
 	err := rows.Scan(
 		&c.ID, &c.ProjectID, &c.SchemaTableID, &c.ColumnName, &c.DataType,
 		&c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.IsSelected, &c.OrdinalPosition,
 		&c.DefaultValue, &c.DistinctCount, &c.NullCount, &c.MinLength, &c.MaxLength,
+		&enumValuesJSON,
 		&c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan column: %w", err)
+	}
+	if len(enumValuesJSON) > 0 {
+		if err := json.Unmarshal(enumValuesJSON, &c.EnumValues); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal enum_values: %w", err)
+		}
 	}
 	return &c, nil
 }
 
 func scanSchemaColumnRow(row pgx.Row) (*models.SchemaColumn, error) {
 	var c models.SchemaColumn
+	var enumValuesJSON []byte
 	err := row.Scan(
 		&c.ID, &c.ProjectID, &c.SchemaTableID, &c.ColumnName, &c.DataType,
 		&c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.IsSelected, &c.OrdinalPosition,
 		&c.DefaultValue, &c.DistinctCount, &c.NullCount, &c.MinLength, &c.MaxLength,
+		&enumValuesJSON,
 		&c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
+	}
+	if len(enumValuesJSON) > 0 {
+		if err := json.Unmarshal(enumValuesJSON, &c.EnumValues); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal enum_values: %w", err)
+		}
 	}
 	return &c, nil
 }
@@ -1768,15 +1808,22 @@ func scanSchemaRelationshipRowWithDiscovery(row pgx.Row) (*models.SchemaRelation
 // scanSchemaColumnWithDiscovery scans a column row including discovery fields.
 func scanSchemaColumnWithDiscovery(rows pgx.Rows) (*models.SchemaColumn, error) {
 	var c models.SchemaColumn
+	var enumValuesJSON []byte
 	err := rows.Scan(
 		&c.ID, &c.ProjectID, &c.SchemaTableID, &c.ColumnName, &c.DataType,
 		&c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.IsSelected, &c.OrdinalPosition,
 		&c.DefaultValue, &c.DistinctCount, &c.NullCount, &c.MinLength, &c.MaxLength,
+		&enumValuesJSON,
 		&c.CreatedAt, &c.UpdatedAt,
 		&c.RowCount, &c.NonNullCount, &c.IsJoinable, &c.JoinabilityReason, &c.StatsUpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan column with discovery: %w", err)
+	}
+	if len(enumValuesJSON) > 0 {
+		if err := json.Unmarshal(enumValuesJSON, &c.EnumValues); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal enum_values: %w", err)
+		}
 	}
 	return &c, nil
 }

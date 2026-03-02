@@ -154,10 +154,51 @@ func (d *SchemaDiscoverer) DiscoverTables(ctx context.Context) ([]datasource.Tab
 	return tables, nil
 }
 
+// discoverEnumTypes queries pg_enum to build a map of enum type names to their ordered values.
+// Only discovers enums in the specified schema.
+func (d *SchemaDiscoverer) discoverEnumTypes(ctx context.Context, schemaName string) (map[string][]string, error) {
+	const query = `
+		SELECT t.typname, e.enumlabel
+		FROM pg_enum e
+		JOIN pg_type t ON e.enumtypid = t.oid
+		JOIN pg_namespace n ON t.typnamespace = n.oid
+		WHERE n.nspname = $1
+		ORDER BY t.typname, e.enumsortorder
+	`
+
+	rows, err := d.pool.Query(ctx, query, schemaName)
+	if err != nil {
+		return nil, fmt.Errorf("query enum types: %w", err)
+	}
+	defer rows.Close()
+
+	enumTypes := make(map[string][]string)
+	for rows.Next() {
+		var typeName, enumLabel string
+		if err := rows.Scan(&typeName, &enumLabel); err != nil {
+			return nil, fmt.Errorf("scan enum type: %w", err)
+		}
+		enumTypes[typeName] = append(enumTypes[typeName], enumLabel)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate enum types: %w", err)
+	}
+
+	return enumTypes, nil
+}
+
 // DiscoverColumns returns columns for a specific table.
 // Uses pg_index for primary key and unique detection, which correctly identifies
 // primary keys even when created as unique indexes (common with GORM/ORMs).
+// For USER-DEFINED columns, queries pg_enum to populate EnumValues with actual Postgres enum values.
 func (d *SchemaDiscoverer) DiscoverColumns(ctx context.Context, schemaName, tableName string) ([]datasource.ColumnMetadata, error) {
+	// Discover enum types for this schema
+	enumTypes, err := d.discoverEnumTypes(ctx, schemaName)
+	if err != nil {
+		return nil, fmt.Errorf("discover enum types: %w", err)
+	}
+
 	const query = `
 		SELECT
 			c.column_name,
@@ -166,7 +207,8 @@ func (d *SchemaDiscoverer) DiscoverColumns(ctx context.Context, schemaName, tabl
 			COALESCE(pk.is_pk, false) as is_primary_key,
 			COALESCE(uq.is_unique, false) as is_unique,
 			c.ordinal_position,
-			c.column_default
+			c.column_default,
+			c.udt_name
 		FROM information_schema.columns c
 		LEFT JOIN (
 			-- Use pg_index.indisprimary which correctly detects PKs even when
@@ -209,8 +251,15 @@ func (d *SchemaDiscoverer) DiscoverColumns(ctx context.Context, schemaName, tabl
 	var columns []datasource.ColumnMetadata
 	for rows.Next() {
 		var c datasource.ColumnMetadata
-		if err := rows.Scan(&c.ColumnName, &c.DataType, &c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.OrdinalPosition, &c.DefaultValue); err != nil {
+		var udtName string
+		if err := rows.Scan(&c.ColumnName, &c.DataType, &c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.OrdinalPosition, &c.DefaultValue, &udtName); err != nil {
 			return nil, fmt.Errorf("scan column: %w", err)
+		}
+		// For USER-DEFINED columns, check if the udt_name matches a known Postgres enum type
+		if c.DataType == "USER-DEFINED" {
+			if values, ok := enumTypes[udtName]; ok {
+				c.EnumValues = values
+			}
 		}
 		columns = append(columns, c)
 	}

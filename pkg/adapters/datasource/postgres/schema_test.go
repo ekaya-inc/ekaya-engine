@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
 )
 
@@ -1414,6 +1415,76 @@ func TestSchemaDiscoverer_AnalyzeColumnStats_DebugLogging(t *testing.T) {
 		if s.DistinctCount == 0 && s.NonNullCount > 0 {
 			t.Errorf("Column %s has non_null_count=%d but distinct_count=0 - this indicates a bug!",
 				s.ColumnName, s.NonNullCount)
+		}
+	}
+}
+
+func TestSchemaDiscoverer_DiscoverColumns_DetectsEnumValues(t *testing.T) {
+	tc := setupSchemaDiscovererTest(t)
+	ctx := context.Background()
+
+	// Create a Postgres enum type and a table that uses it
+	_, err := tc.discoverer.pool.Exec(ctx, `
+		DROP TABLE IF EXISTS test_enum_table;
+		DROP TYPE IF EXISTS test_status_enum;
+		CREATE TYPE test_status_enum AS ENUM ('not_submitted', 'submitted', 'approved', 'listed', 'rejected', 'blocked');
+		CREATE TABLE test_enum_table (
+			id serial PRIMARY KEY,
+			status test_status_enum NOT NULL,
+			name text
+		);
+	`)
+	if err != nil {
+		t.Fatalf("failed to create test enum type and table: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = tc.discoverer.pool.Exec(context.Background(), `
+			DROP TABLE IF EXISTS test_enum_table;
+			DROP TYPE IF EXISTS test_status_enum;
+		`)
+	})
+
+	columns, err := tc.discoverer.DiscoverColumns(ctx, "public", "test_enum_table")
+	if err != nil {
+		t.Fatalf("DiscoverColumns failed: %v", err)
+	}
+
+	if len(columns) != 3 {
+		t.Fatalf("expected 3 columns, got %d", len(columns))
+	}
+
+	// Find the status column
+	var statusCol *datasource.ColumnMetadata
+	for i := range columns {
+		if columns[i].ColumnName == "status" {
+			statusCol = &columns[i]
+			break
+		}
+	}
+	if statusCol == nil {
+		t.Fatal("status column not found")
+	}
+
+	// Verify data type is USER-DEFINED
+	if statusCol.DataType != "USER-DEFINED" {
+		t.Errorf("expected data_type 'USER-DEFINED', got %q", statusCol.DataType)
+	}
+
+	// Verify EnumValues is populated with correct values in correct order
+	expectedValues := []string{"not_submitted", "submitted", "approved", "listed", "rejected", "blocked"}
+	if len(statusCol.EnumValues) != len(expectedValues) {
+		t.Fatalf("expected %d enum values, got %d: %v", len(expectedValues), len(statusCol.EnumValues), statusCol.EnumValues)
+	}
+	for i, expected := range expectedValues {
+		if statusCol.EnumValues[i] != expected {
+			t.Errorf("enum value[%d]: expected %q, got %q", i, expected, statusCol.EnumValues[i])
+		}
+	}
+
+	// Verify non-enum columns have nil EnumValues
+	for _, col := range columns {
+		if col.ColumnName != "status" && col.EnumValues != nil {
+			t.Errorf("non-enum column %q should have nil EnumValues, got %v", col.ColumnName, col.EnumValues)
 		}
 	}
 }

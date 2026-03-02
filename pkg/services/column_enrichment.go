@@ -399,6 +399,12 @@ func (s *columnEnrichmentService) sampleEnumValues(
 
 	// Sample each enum candidate
 	for _, col := range enumCandidates {
+		// Use schema-defined enum values if available (Postgres enum types)
+		if len(col.EnumValues) > 0 {
+			result[col.ColumnName] = col.EnumValues
+			continue
+		}
+
 		values, err := adapter.GetDistinctValues(ctx, tableCtx.SchemaName, tableCtx.TableName, col.ColumnName, 50)
 		if err != nil {
 			s.logger.Debug("Failed to sample values for column, skipping",
@@ -499,6 +505,13 @@ func (s *columnEnrichmentService) identifyEnumCandidates(columns []*models.Schem
 
 	for _, col := range columns {
 		if seen[col.ID] {
+			continue
+		}
+
+		// Schema-defined enum values (Postgres enum types) are always candidates
+		if len(col.EnumValues) > 0 {
+			candidates = append(candidates, col)
+			seen[col.ID] = true
 			continue
 		}
 
