@@ -325,11 +325,11 @@ func TestToEntityName(t *testing.T) {
 
 type mockSchemaRepoForReject struct {
 	repositories.SchemaRepository
-	tables                    map[string]*models.SchemaTable   // tableName -> table
-	columns                   map[uuid.UUID]*models.SchemaColumn // keyed by column ID
-	columnsByTable            map[uuid.UUID]map[string]*models.SchemaColumn // tableID -> columnName -> column
-	tableSelectionUpdates     map[uuid.UUID]bool               // tableID -> isSelected (last value)
-	columnSelectionUpdates    map[uuid.UUID]bool               // columnID -> isSelected (last value)
+	tables                 map[string]*models.SchemaTable                // tableName -> table
+	columns                map[uuid.UUID]*models.SchemaColumn            // keyed by column ID
+	columnsByTable         map[uuid.UUID]map[string]*models.SchemaColumn // tableID -> columnName -> column
+	tableSelectionUpdates  map[uuid.UUID]bool                            // tableID -> isSelected (last value)
+	columnSelectionUpdates map[uuid.UUID]bool                            // columnID -> isSelected (last value)
 }
 
 func newMockSchemaRepoForReject() *mockSchemaRepoForReject {
@@ -356,8 +356,8 @@ func (m *mockSchemaRepoForReject) addColumn(tableID uuid.UUID, tableName, colNam
 	c := &models.SchemaColumn{
 		ID:            uuid.New(),
 		SchemaTableID: tableID,
-		ColumnName: colName,
-		IsSelected: isSelected,
+		ColumnName:    colName,
+		IsSelected:    isSelected,
 	}
 	m.columns[c.ID] = c
 	if m.columnsByTable[tableID] == nil {

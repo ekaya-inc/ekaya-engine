@@ -178,6 +178,7 @@ func TestRefreshSchema_AutoSelectApplied_ReflectsNewTables_Integration(t *testin
 					TablesUpserted:       len(tt.newTableNames),
 					ColumnsUpserted:      5,
 					RelationshipsCreated: 0,
+					AutoSelectApplied:    tt.expectedAutoSelectApplied,
 				},
 			}
 
