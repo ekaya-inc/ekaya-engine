@@ -263,28 +263,27 @@ func (r *schemaRepository) UpsertTable(ctx context.Context, table *models.Schema
 	reactivateQuery := `
 		UPDATE engine_schema_tables
 		SET deleted_at = NULL,
-		    row_count = $5,
-		    updated_at = $6
+		    is_selected = $5,
+		    row_count = $6,
+		    updated_at = $7
 		WHERE project_id = $1
 		  AND datasource_id = $2
 		  AND schema_name = $3
 		  AND table_name = $4
 		  AND deleted_at IS NOT NULL
-		RETURNING id, created_at, is_selected`
+		RETURNING id, created_at`
 
 	var existingID uuid.UUID
 	var existingCreatedAt time.Time
-	var existingIsSelected bool
 	err := scope.Conn.QueryRow(ctx, reactivateQuery,
 		table.ProjectID, table.DatasourceID, table.SchemaName, table.TableName,
-		table.RowCount, now,
-	).Scan(&existingID, &existingCreatedAt, &existingIsSelected)
+		table.IsSelected, table.RowCount, now,
+	).Scan(&existingID, &existingCreatedAt)
 
 	if err == nil {
 		// Reactivated soft-deleted record
 		table.ID = existingID
 		table.CreatedAt = existingCreatedAt
-		table.IsSelected = existingIsSelected
 		return nil
 	}
 	if err != pgx.ErrNoRows {
@@ -737,29 +736,28 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 		    is_unique = $7,
 		    ordinal_position = $8,
 		    default_value = $9,
-		    updated_at = $10
+		    is_selected = $10,
+		    updated_at = $11
 		WHERE schema_table_id = $1
 		  AND column_name = $2
 		  AND project_id = $3
 		  AND deleted_at IS NOT NULL
-		RETURNING id, created_at, is_selected, distinct_count, null_count`
+		RETURNING id, created_at, distinct_count, null_count`
 
 	var existingID uuid.UUID
 	var existingCreatedAt time.Time
-	var existingIsSelected bool
 	var existingDistinctCount, existingNullCount *int64
 	err := scope.Conn.QueryRow(ctx, reactivateQuery,
 		column.SchemaTableID, column.ColumnName, column.ProjectID,
 		column.DataType, column.IsNullable, column.IsPrimaryKey, column.IsUnique, column.OrdinalPosition,
-		column.DefaultValue, now,
-	).Scan(&existingID, &existingCreatedAt, &existingIsSelected,
+		column.DefaultValue, column.IsSelected, now,
+	).Scan(&existingID, &existingCreatedAt,
 		&existingDistinctCount, &existingNullCount)
 
 	if err == nil {
 		// Reactivated soft-deleted record - preserve stats
 		column.ID = existingID
 		column.CreatedAt = existingCreatedAt
-		column.IsSelected = existingIsSelected
 		column.DistinctCount = existingDistinctCount
 		column.NullCount = existingNullCount
 		return nil

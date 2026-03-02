@@ -160,6 +160,14 @@ const SchemaPage = () => {
           tableState.columns[column.name] = apiColumn?.is_selected ?? false;
         }
       });
+
+      // Derive table selection from columns: if any column is selected, table should be selected
+      if (!isFirstTime) {
+        const anyColumnSelected = Object.values(tableState.columns).some((col) => col);
+        if (anyColumnSelected && !tableState.selected) {
+          tableState.selected = true;
+        }
+      }
     });
 
     setSelectionState(state);

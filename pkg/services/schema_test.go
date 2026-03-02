@@ -2361,3 +2361,246 @@ func TestSchemaService_RefreshDatasourceSchema_AutoSelectFalse(t *testing.T) {
 		}
 	}
 }
+
+func TestSchemaService_RefreshDatasourceSchema_AutoSelectNewColumnsOnExistingSelectedTable(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	existingTableID := uuid.New()
+
+	// Simulate an existing selected table with one existing column
+	repo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{
+			{
+				ID:           existingTableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "users",
+				IsSelected:   true,
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            uuid.New(),
+				SchemaTableID: existingTableID,
+				ColumnName:    "id",
+				DataType:      "uuid",
+				IsPrimaryKey:  true,
+				IsSelected:    true,
+			},
+		},
+	}
+	dsSvc := &mockDatasourceService{
+		datasource: &models.Datasource{
+			ID:             datasourceID,
+			ProjectID:      projectID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{"host": "localhost"},
+		},
+	}
+	// Discoverer returns the existing column plus a NEW column "email"
+	discoverer := &mockSchemaDiscoverer{
+		tables: []datasource.TableMetadata{
+			{SchemaName: "public", TableName: "users", RowCount: 100},
+		},
+		columns: map[string][]datasource.ColumnMetadata{
+			"public.users": {
+				{ColumnName: "id", DataType: "uuid", IsPrimaryKey: true, OrdinalPosition: 1},
+				{ColumnName: "email", DataType: "text", IsNullable: false, OrdinalPosition: 2},
+			},
+		},
+		supportsFKs: false,
+	}
+	factory := &mockSchemaAdapterFactory{discoverer: discoverer}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	ctx := testContextWithAuth(projectID.String(), "test-user-id")
+	result, err := service.RefreshDatasourceSchema(ctx, projectID, datasourceID, true) // autoSelect = true
+	if err != nil {
+		t.Fatalf("RefreshDatasourceSchema failed: %v", err)
+	}
+
+	if result.ColumnsUpserted != 2 {
+		t.Errorf("expected 2 columns upserted, got %d", result.ColumnsUpserted)
+	}
+
+	// Find the new "email" column in upserted columns
+	var emailColumn *models.SchemaColumn
+	for _, col := range repo.upsertedColumns {
+		if col.ColumnName == "email" {
+			emailColumn = col
+			break
+		}
+	}
+	if emailColumn == nil {
+		t.Fatal("email column should have been upserted")
+	}
+
+	// With autoSelect=true, new columns on existing selected tables should be auto-selected
+	if !emailColumn.IsSelected {
+		t.Errorf("new column 'email' on existing selected table should be auto-selected when autoSelect=true, got IsSelected=false")
+	}
+
+	// AutoSelectApplied should be true when new columns were auto-selected
+	if !result.AutoSelectApplied {
+		t.Errorf("AutoSelectApplied should be true when new columns were auto-selected on existing tables")
+	}
+}
+
+func TestSchemaService_RefreshDatasourceSchema_AutoSelectNewColumnsOnExistingUnselectedTable(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	existingTableID := uuid.New()
+
+	// Simulate an existing UNSELECTED table with one existing unselected column
+	repo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{
+			{
+				ID:           existingTableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "users",
+				IsSelected:   false,
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            uuid.New(),
+				SchemaTableID: existingTableID,
+				ColumnName:    "id",
+				DataType:      "uuid",
+				IsPrimaryKey:  true,
+				IsSelected:    false,
+			},
+		},
+	}
+	dsSvc := &mockDatasourceService{
+		datasource: &models.Datasource{
+			ID:             datasourceID,
+			ProjectID:      projectID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{"host": "localhost"},
+		},
+	}
+	// Discoverer returns the existing column plus a NEW column "email"
+	discoverer := &mockSchemaDiscoverer{
+		tables: []datasource.TableMetadata{
+			{SchemaName: "public", TableName: "users", RowCount: 100},
+		},
+		columns: map[string][]datasource.ColumnMetadata{
+			"public.users": {
+				{ColumnName: "id", DataType: "uuid", IsPrimaryKey: true, OrdinalPosition: 1},
+				{ColumnName: "email", DataType: "text", IsNullable: false, OrdinalPosition: 2},
+			},
+		},
+		supportsFKs: false,
+	}
+	factory := &mockSchemaAdapterFactory{discoverer: discoverer}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	ctx := testContextWithAuth(projectID.String(), "test-user-id")
+	result, err := service.RefreshDatasourceSchema(ctx, projectID, datasourceID, true) // autoSelect = true
+	if err != nil {
+		t.Fatalf("RefreshDatasourceSchema failed: %v", err)
+	}
+
+	// Find the new "email" column in upserted columns
+	var emailColumn *models.SchemaColumn
+	for _, col := range repo.upsertedColumns {
+		if col.ColumnName == "email" {
+			emailColumn = col
+			break
+		}
+	}
+	if emailColumn == nil {
+		t.Fatal("email column should have been upserted")
+	}
+
+	// With autoSelect=true, new columns should be auto-selected even on unselected tables
+	// (the table becomes partially selected — the MCP client added the column intentionally)
+	if !emailColumn.IsSelected {
+		t.Errorf("new column 'email' on existing unselected table should be auto-selected when autoSelect=true, got IsSelected=false")
+	}
+
+	// AutoSelectApplied should be true
+	if !result.AutoSelectApplied {
+		t.Errorf("AutoSelectApplied should be true when new columns were auto-selected")
+	}
+}
+
+func TestSchemaService_RefreshDatasourceSchema_AutoSelectFalse_NewColumnsOnExistingTable(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	existingTableID := uuid.New()
+
+	// Simulate an existing selected table with one existing column
+	repo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{
+			{
+				ID:           existingTableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "users",
+				IsSelected:   true,
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            uuid.New(),
+				SchemaTableID: existingTableID,
+				ColumnName:    "id",
+				DataType:      "uuid",
+				IsPrimaryKey:  true,
+				IsSelected:    true,
+			},
+		},
+	}
+	dsSvc := &mockDatasourceService{
+		datasource: &models.Datasource{
+			ID:             datasourceID,
+			ProjectID:      projectID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{"host": "localhost"},
+		},
+	}
+	discoverer := &mockSchemaDiscoverer{
+		tables: []datasource.TableMetadata{
+			{SchemaName: "public", TableName: "users", RowCount: 100},
+		},
+		columns: map[string][]datasource.ColumnMetadata{
+			"public.users": {
+				{ColumnName: "id", DataType: "uuid", IsPrimaryKey: true, OrdinalPosition: 1},
+				{ColumnName: "email", DataType: "text", IsNullable: false, OrdinalPosition: 2},
+			},
+		},
+		supportsFKs: false,
+	}
+	factory := &mockSchemaAdapterFactory{discoverer: discoverer}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	ctx := testContextWithAuth(projectID.String(), "test-user-id")
+	_, err := service.RefreshDatasourceSchema(ctx, projectID, datasourceID, false) // autoSelect = false
+	if err != nil {
+		t.Fatalf("RefreshDatasourceSchema failed: %v", err)
+	}
+
+	// With autoSelect=false, new columns should NOT be selected
+	var emailColumn *models.SchemaColumn
+	for _, col := range repo.upsertedColumns {
+		if col.ColumnName == "email" {
+			emailColumn = col
+			break
+		}
+	}
+	if emailColumn == nil {
+		t.Fatal("email column should have been upserted")
+	}
+	if emailColumn.IsSelected {
+		t.Errorf("new column 'email' should NOT be auto-selected when autoSelect=false")
+	}
+}

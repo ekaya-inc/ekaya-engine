@@ -1120,8 +1120,7 @@ func registerRefreshSchemaTool(s *server.MCPServer, deps *MCPToolDeps) {
 			return nil, fmt.Errorf("schema refresh failed: %w", err)
 		}
 
-		// Auto-select was applied if new tables were discovered and autoSelect was true
-		autoSelectApplied := autoSelect && len(result.NewTableNames) > 0
+		autoSelectApplied := result.AutoSelectApplied
 
 		// Get relationships for response (uses enriched response with table/column names)
 		relsResp, _ := deps.SchemaService.GetRelationshipsResponse(tenantCtx, projectID, dsID)

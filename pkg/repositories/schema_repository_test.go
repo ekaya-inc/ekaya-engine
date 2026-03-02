@@ -331,6 +331,103 @@ func TestSchemaRepository_UpsertTable_ReactivateSoftDeleted(t *testing.T) {
 	}
 }
 
+func TestSchemaRepository_UpsertTable_ReactivateSoftDeleted_ResetsIsSelected(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create a table, select it, then soft-delete it
+	table := tc.createTestTable(ctx, "public", "reselect_table")
+	originalID := table.ID
+
+	// Select the table (simulating user approval)
+	err := tc.repo.UpdateTableSelection(ctx, tc.projectID, table.ID, true)
+	if err != nil {
+		t.Fatalf("UpdateTableSelection failed: %v", err)
+	}
+
+	// Soft-delete the table
+	_, err = tc.repo.SoftDeleteRemovedTables(ctx, tc.projectID, tc.dsID, []TableKey{})
+	if err != nil {
+		t.Fatalf("SoftDeleteRemovedTables failed: %v", err)
+	}
+
+	// Reactivate with IsSelected=false (e.g., autoSelect=false on refresh)
+	newTable := &models.SchemaTable{
+		ProjectID:    tc.projectID,
+		DatasourceID: tc.dsID,
+		SchemaName:   "public",
+		TableName:    "reselect_table",
+		IsSelected:   false,
+		RowCount:     ptr(int64(100)),
+	}
+
+	err = tc.repo.UpsertTable(ctx, newTable)
+	if err != nil {
+		t.Fatalf("UpsertTable (reactivate) failed: %v", err)
+	}
+
+	if newTable.ID != originalID {
+		t.Errorf("expected ID preserved (%s), got %s", originalID, newTable.ID)
+	}
+
+	// IsSelected should respect the caller's value, not the old soft-deleted state
+	if newTable.IsSelected {
+		t.Errorf("reactivated table should have IsSelected=false as requested, but got true (old state leaked through)")
+	}
+}
+
+func TestSchemaRepository_UpsertColumn_ReactivateSoftDeleted_ResetsIsSelected(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	table := tc.createTestTable(ctx, "public", "reselect_cols")
+	column := tc.createTestColumn(ctx, table.ID, "status", 1)
+	originalID := column.ID
+
+	// Select the column (simulating user approval)
+	err := tc.repo.UpdateColumnSelection(ctx, tc.projectID, column.ID, true)
+	if err != nil {
+		t.Fatalf("UpdateColumnSelection failed: %v", err)
+	}
+
+	// Soft-delete the column
+	_, err = tc.repo.SoftDeleteRemovedColumns(ctx, table.ID, []string{})
+	if err != nil {
+		t.Fatalf("SoftDeleteRemovedColumns failed: %v", err)
+	}
+
+	// Reactivate with IsSelected=false (e.g., autoSelect=false on refresh)
+	newColumn := &models.SchemaColumn{
+		ProjectID:       tc.projectID,
+		SchemaTableID:   table.ID,
+		ColumnName:      "status",
+		DataType:        "text",
+		IsNullable:      true,
+		IsSelected:      false,
+		OrdinalPosition: 1,
+	}
+
+	err = tc.repo.UpsertColumn(ctx, newColumn)
+	if err != nil {
+		t.Fatalf("UpsertColumn (reactivate) failed: %v", err)
+	}
+
+	if newColumn.ID != originalID {
+		t.Errorf("expected ID preserved (%s), got %s", originalID, newColumn.ID)
+	}
+
+	// IsSelected should respect the caller's value, not the old soft-deleted state
+	if newColumn.IsSelected {
+		t.Errorf("reactivated column should have IsSelected=false as requested, but got true (old state leaked through)")
+	}
+}
+
 func TestSchemaRepository_ListTablesByDatasource(t *testing.T) {
 	tc := setupSchemaTest(t)
 	tc.cleanup()

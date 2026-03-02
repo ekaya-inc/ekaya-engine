@@ -208,8 +208,13 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 		result.TablesUpserted++
 
 		// Discover and sync columns for this table
-		// Auto-select columns only if the table is auto-selected
+		// Auto-select new columns when autoSelect is true:
+		// - New tables: select columns if the table itself was auto-selected
+		// - Existing tables: select new columns (table becomes partially selected)
 		autoSelectColumns := tableAutoSelect
+		if !isNewTable && autoSelect {
+			autoSelectColumns = true
+		}
 		colResult, err := s.syncColumnsForTable(ctx, discoverer, projectID, table, autoSelectColumns)
 		if err != nil {
 			return nil, fmt.Errorf("failed to sync columns for table %s.%s: %w", dt.SchemaName, dt.TableName, err)
@@ -219,6 +224,11 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 		result.NewColumns = append(result.NewColumns, colResult.NewColumns...)
 		result.RemovedColumns = append(result.RemovedColumns, colResult.RemovedColumns...)
 		result.ModifiedColumns = append(result.ModifiedColumns, colResult.ModifiedColumns...)
+
+		// Track if auto-selection was applied (new tables selected or new columns on existing tables)
+		if autoSelect && (tableAutoSelect || (!isNewTable && len(colResult.NewColumns) > 0)) {
+			result.AutoSelectApplied = true
+		}
 	}
 
 	// Identify removed tables (existed before but not discovered now)
