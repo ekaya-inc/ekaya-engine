@@ -1603,7 +1603,7 @@ func (c *numericClassifier) Classify(
 
 func (c *numericClassifier) systemMessage() string {
 	return `You are a database schema analyst. Your task is to classify numeric columns.
-Determine if the column represents a measure (amount, count, quantity) or an identifier.
+Determine if the column represents a measure (amount, count, quantity), an identifier that references another entity, or an ordinal/sequence number.
 Respond with valid JSON only.`
 }
 
@@ -1632,11 +1632,13 @@ func (c *numericClassifier) buildPrompt(profile *models.ColumnDataProfile) strin
 	sb.WriteString("Classify this numeric column:\n\n")
 
 	sb.WriteString("**Numeric types:**\n")
-	sb.WriteString("- `identifier`: Numeric ID (auto-increment, serial)\n")
+	sb.WriteString("- `identifier`: Numeric ID that references another entity (e.g., user_id, app_id, parent_id). The column value points to a specific row in another table.\n")
+	sb.WriteString("- `ordinal`: Sequential or positional number (e.g., week_number, step_number, day_offset, sort_order, position, rank). The value represents order or sequence within the current table's context, NOT a reference to another table.\n")
 	sb.WriteString("- `measure`: Quantitative value (amount, cost, rate, score, duration). Includes columns with aggregation prefixes (avg_, total_, sum_, min_, max_, mean_) and business KPI abbreviations (cpa, cpc, cpm, roi, roa, ltv, arpu, mrr, arr)\n")
 	sb.WriteString("- `monetary`: Money amount (may need currency pairing)\n")
 	sb.WriteString("- `percentage`: Percentage or ratio\n")
 	sb.WriteString("- `count`: Integer count of items\n")
+	sb.WriteString("\n**Distinguishing identifiers from ordinals:** Columns named *_number, *_week, *_offset, *_order, *_position, *_step, *_rank, *_index, *_day, *_month, *_year are typically ordinals. An identifier references a specific row in another table (e.g., user_id references users). An ordinal represents a position or sequence within the current table's context (e.g., week_number is the week of the year, not a reference to a weeks table).\n")
 
 	sb.WriteString("\n## Response Format\n\n")
 	sb.WriteString("```json\n")
@@ -1673,6 +1675,12 @@ func (c *numericClassifier) parseResponse(profile *models.ColumnDataProfile, con
 			role = models.RolePrimaryKey
 		}
 		// Non-PK identifiers keep role: "attribute" and get flagged for FK resolution below
+	} else if response.NumericType == "ordinal" {
+		// Ordinals are positional/sequential numbers (week_number, step_number, etc.)
+		// They get purpose: identifier (they are numeric identifiers) but NOT role: foreign_key
+		// and NOT NeedsFKResolution — they don't reference other tables
+		purpose = models.PurposeIdentifier
+		role = models.RoleAttribute
 	}
 	if response.NumericType == "measure" || response.NumericType == "monetary" || response.NumericType == "percentage" || response.NumericType == "count" {
 		role = models.RoleMeasure

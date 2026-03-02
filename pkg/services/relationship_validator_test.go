@@ -1214,3 +1214,102 @@ func TestValidateCandidates_ResultsMatchCandidates(t *testing.T) {
 	assert.Equal(t, "buyer", ordersResult.Result.SourceRole)
 	assert.True(t, ordersResult.Validated)
 }
+
+// ============================================================================
+// Warning Signals Tests
+// ============================================================================
+
+func TestBuildValidationPrompt_IncludesWarningSignalsForSmallIntegers(t *testing.T) {
+	validator := &relationshipValidator{
+		logger: zap.NewNop(),
+	}
+
+	// Small distinct count + low target coverage = warning signals should appear
+	candidate := &RelationshipCandidate{
+		SourceTable:         "content_posts",
+		SourceColumn:        "week_number",
+		SourceDataType:      "integer",
+		SourceDistinctCount: 10,
+		TargetTable:         "post_channel_steps",
+		TargetColumn:        "id",
+		TargetDataType:      "integer",
+		TargetIsPK:          true,
+		TargetDistinctCount: 50,
+		SourceMatched:       10,
+		TargetMatched:       10, // 20% coverage
+		ReverseOrphans:      40,
+		JoinCount:           100,
+	}
+
+	prompt := validator.buildValidationPrompt(candidate)
+
+	assert.Contains(t, prompt, "Warning Signals")
+	assert.Contains(t, prompt, "small-integer overlap")
+	assert.Contains(t, prompt, "20.0%")
+}
+
+func TestBuildValidationPrompt_NoWarningSignalsForLargeDistinctCount(t *testing.T) {
+	validator := &relationshipValidator{
+		logger: zap.NewNop(),
+	}
+
+	// Large distinct count = no warning signals
+	candidate := &RelationshipCandidate{
+		SourceTable:         "orders",
+		SourceColumn:        "customer_id",
+		SourceDataType:      "integer",
+		SourceDistinctCount: 1000,
+		TargetTable:         "customers",
+		TargetColumn:        "id",
+		TargetDataType:      "integer",
+		TargetIsPK:          true,
+		TargetDistinctCount: 500,
+		SourceMatched:       1000,
+		TargetMatched:       400,
+		ReverseOrphans:      100,
+		JoinCount:           5000,
+	}
+
+	prompt := validator.buildValidationPrompt(candidate)
+
+	assert.NotContains(t, prompt, "Warning Signals")
+}
+
+func TestBuildValidationPrompt_NoWarningSignalsForHighCoverage(t *testing.T) {
+	validator := &relationshipValidator{
+		logger: zap.NewNop(),
+	}
+
+	// Small distinct count but high coverage = no warning signals
+	candidate := &RelationshipCandidate{
+		SourceTable:         "orders",
+		SourceColumn:        "status_id",
+		SourceDataType:      "integer",
+		SourceDistinctCount: 5,
+		TargetTable:         "statuses",
+		TargetColumn:        "id",
+		TargetDataType:      "integer",
+		TargetIsPK:          true,
+		TargetDistinctCount: 6,
+		SourceMatched:       5,
+		TargetMatched:       5, // 83% coverage
+		ReverseOrphans:      1,
+		JoinCount:           1000,
+	}
+
+	prompt := validator.buildValidationPrompt(candidate)
+
+	assert.NotContains(t, prompt, "Warning Signals")
+}
+
+func TestSystemMessage_IncludesCoincidentalMatchGuidance(t *testing.T) {
+	validator := &relationshipValidator{
+		logger: zap.NewNop(),
+	}
+
+	msg := validator.systemMessage()
+
+	assert.Contains(t, msg, "Common false positive patterns")
+	assert.Contains(t, msg, "Small sequential integers")
+	assert.Contains(t, msg, "week_number")
+}

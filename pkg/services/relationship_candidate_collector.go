@@ -738,6 +738,10 @@ func (c *relationshipCandidateCollector) CollectCandidates(
 		}
 	}
 
+	// Filter: If a source column matches >2 targets, the overlap is likely
+	// coincidental (small integers matching auto-increment PKs everywhere).
+	validCandidates = c.filterMultiTargetCandidates(validCandidates)
+
 	if progressCallback != nil {
 		progressCallback(5, 5, fmt.Sprintf("Found %d valid candidates", len(validCandidates)))
 	}
@@ -754,4 +758,44 @@ func (c *relationshipCandidateCollector) CollectCandidates(
 	)
 
 	return validCandidates, nil
+}
+
+// filterMultiTargetCandidates removes candidates where a single source column
+// matches more than 2 target tables. This pattern indicates coincidental overlap
+// (e.g., small integers like {1,2,3} matching auto-increment PKs in many tables)
+// rather than true FK relationships.
+func (c *relationshipCandidateCollector) filterMultiTargetCandidates(candidates []*RelationshipCandidate) []*RelationshipCandidate {
+	const maxTargetsPerSource = 2
+
+	// Group candidates by source column
+	type sourceKey struct {
+		table  string
+		column string
+	}
+	groups := make(map[sourceKey][]*RelationshipCandidate)
+	for _, candidate := range candidates {
+		key := sourceKey{table: candidate.SourceTable, column: candidate.SourceColumn}
+		groups[key] = append(groups[key], candidate)
+	}
+
+	var filtered []*RelationshipCandidate
+	for key, group := range groups {
+		if len(group) > maxTargetsPerSource {
+			c.logger.Warn("rejecting multi-target candidates (likely coincidental small-integer overlap)",
+				zap.String("source", key.table+"."+key.column),
+				zap.Int("target_count", len(group)),
+			)
+			continue
+		}
+		filtered = append(filtered, group...)
+	}
+
+	if removed := len(candidates) - len(filtered); removed > 0 {
+		c.logger.Info("multi-target filter removed candidates",
+			zap.Int("removed", removed),
+			zap.Int("remaining", len(filtered)),
+		)
+	}
+
+	return filtered
 }

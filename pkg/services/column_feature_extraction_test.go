@@ -3839,3 +3839,149 @@ func TestCreateQuestionsFromUncertainClassifications_NilDependencies(t *testing.
 	// Should not panic
 	svc.createQuestionsFromUncertainClassifications(context.Background(), projectID, features, profiles)
 }
+
+// ============================================================================
+// Ordinal Classification Tests
+// ============================================================================
+
+func TestNumericClassifier_OrdinalGetsAttributeRoleNotFK(t *testing.T) {
+	// Columns like week_number, day_offset classified as ordinal should NOT
+	// get role: foreign_key or NeedsFKResolution
+	classifier := &numericClassifier{logger: zap.NewNop()}
+
+	profile := &models.ColumnDataProfile{
+		ColumnID:     uuid.New(),
+		ColumnName:   "week_number",
+		TableName:    "content_posts",
+		DataType:     "integer",
+		IsPrimaryKey: false,
+	}
+
+	mockResponse := `{
+		"numeric_type": "ordinal",
+		"may_be_monetary": false,
+		"confidence": 0.85,
+		"description": "Week number within the year."
+	}`
+
+	features, err := classifier.parseResponse(profile, mockResponse, "test-model")
+	if err != nil {
+		t.Fatalf("parseResponse error: %v", err)
+	}
+
+	if features.Role != models.RoleAttribute {
+		t.Errorf("Role = %q, want %q for ordinal column", features.Role, models.RoleAttribute)
+	}
+	if features.Purpose != models.PurposeIdentifier {
+		t.Errorf("Purpose = %q, want %q for ordinal column", features.Purpose, models.PurposeIdentifier)
+	}
+	if features.NeedsFKResolution {
+		t.Error("NeedsFKResolution should be false for ordinal columns")
+	}
+	if features.IdentifierFeatures != nil {
+		t.Error("IdentifierFeatures should be nil for ordinal columns (no FK inference)")
+	}
+}
+
+func TestNumericClassifier_OrdinalVsIdentifier(t *testing.T) {
+	// Verify the distinction: ordinal does NOT get FK resolution, identifier DOES
+	classifier := &numericClassifier{logger: zap.NewNop()}
+
+	tests := []struct {
+		name             string
+		columnName       string
+		numericType      string
+		wantFKResolution bool
+		wantRole         string
+	}{
+		{
+			name:             "week_number is ordinal, no FK",
+			columnName:       "week_number",
+			numericType:      "ordinal",
+			wantFKResolution: false,
+			wantRole:         models.RoleAttribute,
+		},
+		{
+			name:             "day_offset is ordinal, no FK",
+			columnName:       "day_offset",
+			numericType:      "ordinal",
+			wantFKResolution: false,
+			wantRole:         models.RoleAttribute,
+		},
+		{
+			name:             "step_number is ordinal, no FK",
+			columnName:       "step_number",
+			numericType:      "ordinal",
+			wantFKResolution: false,
+			wantRole:         models.RoleAttribute,
+		},
+		{
+			name:             "app_id is identifier, gets FK",
+			columnName:       "app_id",
+			numericType:      "identifier",
+			wantFKResolution: true,
+			wantRole:         models.RoleAttribute,
+		},
+		{
+			name:             "channel_id is identifier, gets FK",
+			columnName:       "channel_id",
+			numericType:      "identifier",
+			wantFKResolution: true,
+			wantRole:         models.RoleAttribute,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			profile := &models.ColumnDataProfile{
+				ColumnID:     uuid.New(),
+				ColumnName:   tt.columnName,
+				TableName:    "test_table",
+				DataType:     "integer",
+				IsPrimaryKey: false,
+			}
+
+			mockResponse := fmt.Sprintf(`{
+				"numeric_type": %q,
+				"may_be_monetary": false,
+				"confidence": 0.85,
+				"description": "Test column."
+			}`, tt.numericType)
+
+			features, err := classifier.parseResponse(profile, mockResponse, "test-model")
+			if err != nil {
+				t.Fatalf("parseResponse error: %v", err)
+			}
+
+			if features.NeedsFKResolution != tt.wantFKResolution {
+				t.Errorf("NeedsFKResolution = %v, want %v", features.NeedsFKResolution, tt.wantFKResolution)
+			}
+			if features.Role != tt.wantRole {
+				t.Errorf("Role = %q, want %q", features.Role, tt.wantRole)
+			}
+		})
+	}
+}
+
+func TestNumericClassifier_PromptIncludesOrdinalType(t *testing.T) {
+	classifier := &numericClassifier{logger: zap.NewNop()}
+
+	profile := &models.ColumnDataProfile{
+		ColumnID:   uuid.New(),
+		ColumnName: "week_number",
+		TableName:  "content_posts",
+		DataType:   "integer",
+	}
+
+	prompt := classifier.buildPrompt(profile)
+
+	if !strings.Contains(prompt, "ordinal") {
+		t.Error("prompt should include ordinal as a numeric type")
+	}
+	if !strings.Contains(prompt, "week_number") {
+		t.Error("prompt should mention week_number as an ordinal example")
+	}
+	if !strings.Contains(prompt, "step_number") {
+		t.Error("prompt should mention step_number as an ordinal example")
+	}
+}
