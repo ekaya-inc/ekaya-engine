@@ -72,6 +72,16 @@ Key points:
 - Tests spin up a fresh container per test run via the `ghcr.io/ekaya-inc/ekaya-engine-test-image:latest` image
 - Use `-run 'TestPattern'` to target specific tests for fast feedback during TDD
 
+## Development Approach: TDD (Red-Green-Refactor)
+
+Always follow test-driven development. For every change:
+
+1. **RED** — Write a failing test first that captures the expected behavior or reproduces the bug
+2. **GREEN** — Write the minimal implementation to make the test pass
+3. **REFACTOR** — Clean up if needed, verify tests still pass
+
+Do NOT leave tests until the end. Tests come first, implementation follows. This applies to bug fixes (write a test that reproduces the bug before fixing it), new features (write tests for the expected behavior before implementing), and refactors (ensure test coverage exists before changing code).
+
 ## Key Architecture Concepts
 
 - **Ontology DAG**: 7-node sequential pipeline that extracts semantic metadata from database schemas. Nodes: KnowledgeSeeding → ColumnFeatureExtraction → FKDiscovery → TableFeatureExtraction → RelationshipDiscovery → ColumnEnrichment → OntologyFinalization.
