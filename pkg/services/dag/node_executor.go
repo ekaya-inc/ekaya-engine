@@ -17,7 +17,8 @@ type NodeExecutor interface {
 	Name() models.DAGNodeName
 
 	// Execute runs the node's work. Returns an error if the node fails.
-	Execute(ctx context.Context, dag *models.OntologyDAG) error
+	// changeSet is nil for full extraction, non-nil for incremental extraction.
+	Execute(ctx context.Context, dag *models.OntologyDAG, changeSet *models.ChangeSet) error
 }
 
 // ProgressReporter provides a way for nodes to report execution progress.

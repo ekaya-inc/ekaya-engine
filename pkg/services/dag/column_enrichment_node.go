@@ -47,9 +47,19 @@ func NewColumnEnrichmentNode(
 // Note: This node does not require dag.OntologyID. Column enrichment generates LLM-based
 // descriptions and semantic types for columns, storing results in engine_ontology_column_metadata
 // which is linked via schema_column_id, not ontology_id.
-func (n *ColumnEnrichmentNode) Execute(ctx context.Context, dag *models.OntologyDAG) error {
+func (n *ColumnEnrichmentNode) Execute(ctx context.Context, dag *models.OntologyDAG, changeSet *models.ChangeSet) error {
 	n.Logger().Info("Starting column enrichment",
 		zap.String("project_id", dag.ProjectID.String()))
+
+	// During incremental extraction, skip if no columns changed
+	if changeSet != nil && !changeSet.HasChangedColumns() && !changeSet.HasChangedTables() {
+		n.Logger().Info("Skipping column enrichment (no changed columns or tables)",
+			zap.String("project_id", dag.ProjectID.String()))
+		if err := n.ReportProgress(ctx, 1, 1, "Skipped (no changed columns)"); err != nil {
+			n.Logger().Warn("Failed to report progress", zap.Error(err))
+		}
+		return nil
+	}
 
 	// Report initial progress (total=0 hides the progress bar until the service reports real counts)
 	if err := n.ReportProgress(ctx, 0, 0, "Enriching column metadata..."); err != nil {
@@ -63,8 +73,17 @@ func (n *ColumnEnrichmentNode) Execute(ctx context.Context, dag *models.Ontology
 		}
 	}
 
+	// During incremental extraction, only enrich affected tables
+	var tableNames []string
+	if changeSet != nil {
+		tableNames = changeSet.AffectedTableNames()
+		n.Logger().Info("Incremental column enrichment — processing affected tables only",
+			zap.String("project_id", dag.ProjectID.String()),
+			zap.Strings("tables", tableNames))
+	}
+
 	// Call the underlying service method (nil means enrich all tables)
-	result, err := n.columnEnrichmentSvc.EnrichProject(ctx, dag.ProjectID, nil, progressCallback)
+	result, err := n.columnEnrichmentSvc.EnrichProject(ctx, dag.ProjectID, tableNames, progressCallback)
 	if err != nil {
 		return fmt.Errorf("enrich columns: %w", err)
 	}

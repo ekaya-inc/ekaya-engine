@@ -175,7 +175,7 @@ func TestGlossaryDiscoveryNode_Execute_Success(t *testing.T) {
 		ProjectID: projectID,
 	}
 
-	err := node.Execute(ctx, dag)
+	err := node.Execute(ctx, dag, nil)
 	require.NoError(t, err)
 
 	// Verify progress was reported
@@ -217,7 +217,7 @@ func TestGlossaryDiscoveryNode_Execute_DiscoveryError(t *testing.T) {
 	}
 
 	// Should succeed despite discovery error (warning logged)
-	err := node.Execute(ctx, dag)
+	err := node.Execute(ctx, dag, nil)
 	require.NoError(t, err)
 
 	// Verify progress was reported with 0 terms
@@ -252,7 +252,7 @@ func TestGlossaryDiscoveryNode_Execute_ProgressReportingError(t *testing.T) {
 	}
 
 	// Should succeed despite progress reporting errors
-	err := node.Execute(ctx, dag)
+	err := node.Execute(ctx, dag, nil)
 	require.NoError(t, err)
 }
 

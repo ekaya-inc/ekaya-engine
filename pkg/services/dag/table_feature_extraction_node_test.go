@@ -132,7 +132,7 @@ func TestTableFeatureExtractionNode_Execute_NoOp(t *testing.T) {
 		DatasourceID: uuid.New(),
 	}
 
-	err := node.Execute(context.Background(), dag)
+	err := node.Execute(context.Background(), dag, nil)
 	assert.NoError(t, err)
 
 	// Verify progress message indicates no-op behavior
@@ -164,7 +164,7 @@ func TestTableFeatureExtractionNode_Execute_WithExtraction(t *testing.T) {
 		DatasourceID: uuid.New(),
 	}
 
-	err := node.Execute(context.Background(), dag)
+	err := node.Execute(context.Background(), dag, nil)
 	assert.NoError(t, err)
 
 	// Verify initial and final progress messages
@@ -199,7 +199,7 @@ func TestTableFeatureExtractionNode_Execute_ProgressCallback(t *testing.T) {
 		DatasourceID: uuid.New(),
 	}
 
-	err := node.Execute(context.Background(), dag)
+	err := node.Execute(context.Background(), dag, nil)
 	assert.NoError(t, err)
 
 	// Verify granular progress messages were reported (per-table updates)
@@ -234,7 +234,7 @@ func TestTableFeatureExtractionNode_Execute_ExtractionError(t *testing.T) {
 	}
 
 	// Should fail - table feature extraction errors should propagate
-	err := node.Execute(context.Background(), dag)
+	err := node.Execute(context.Background(), dag, nil)
 	assert.Error(t, err)
 	assert.Equal(t, "LLM unavailable", err.Error())
 }
@@ -264,7 +264,7 @@ func TestTableFeatureExtractionNode_Execute_NoTablesProcessed(t *testing.T) {
 		DatasourceID: uuid.New(),
 	}
 
-	err := node.Execute(context.Background(), dag)
+	err := node.Execute(context.Background(), dag, nil)
 	assert.NoError(t, err)
 
 	// Should still complete successfully

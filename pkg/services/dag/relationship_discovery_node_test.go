@@ -134,7 +134,7 @@ func TestRelationshipDiscoveryNode_Execute_Success(t *testing.T) {
 		DatasourceID: datasourceID,
 	}
 
-	err := node.Execute(ctx, dag)
+	err := node.Execute(ctx, dag, nil)
 	require.NoError(t, err)
 
 	// Only initial progress — the node doesn't report completion (service does)
@@ -162,7 +162,7 @@ func TestRelationshipDiscoveryNode_Execute_ServiceError(t *testing.T) {
 		DatasourceID: uuid.New(),
 	}
 
-	err := node.Execute(ctx, dag)
+	err := node.Execute(ctx, dag, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "LLM relationship discovery failed")
 	assert.Contains(t, err.Error(), "LLM rate limited")
@@ -197,7 +197,7 @@ func TestRelationshipDiscoveryNode_Execute_ProgressCallback(t *testing.T) {
 		DatasourceID: uuid.New(),
 	}
 
-	err := node.Execute(context.Background(), dag)
+	err := node.Execute(context.Background(), dag, nil)
 	require.NoError(t, err)
 
 	assert.Contains(t, progressReports, "Evaluating candidate 3/10")

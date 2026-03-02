@@ -47,10 +47,21 @@ func NewKnowledgeSeedingNode(
 // Note: This node does not require dag.OntologyID. Knowledge seeding operates at
 // the project/datasource level, extracting domain facts from the project overview
 // before any ontology-specific processing occurs.
-func (n *KnowledgeSeedingNode) Execute(ctx context.Context, dag *models.OntologyDAG) error {
+func (n *KnowledgeSeedingNode) Execute(ctx context.Context, dag *models.OntologyDAG, changeSet *models.ChangeSet) error {
 	n.Logger().Info("Starting knowledge seeding",
 		zap.String("project_id", dag.ProjectID.String()),
 		zap.String("datasource_id", dag.DatasourceID.String()))
+
+	// Skip knowledge seeding during incremental extraction.
+	// Knowledge has project-lifecycle scope and persists across extractions.
+	if changeSet != nil {
+		n.Logger().Info("Skipping knowledge seeding (incremental extraction)",
+			zap.String("project_id", dag.ProjectID.String()))
+		if err := n.ReportProgress(ctx, 1, 1, "Skipped (incremental — knowledge persists)"); err != nil {
+			n.Logger().Warn("Failed to report progress", zap.Error(err))
+		}
+		return nil
+	}
 
 	// Report initial progress
 	if err := n.ReportProgress(ctx, 0, 1, "Extracting domain knowledge from overview..."); err != nil {

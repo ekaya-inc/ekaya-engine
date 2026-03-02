@@ -127,7 +127,7 @@ func TestPKMatchDiscoveryNode_Execute_Success(t *testing.T) {
 		DatasourceID: datasourceID,
 	}
 
-	err := node.Execute(ctx, dag)
+	err := node.Execute(ctx, dag, nil)
 	require.NoError(t, err)
 
 	require.Len(t, progressReports, 2)
@@ -155,7 +155,7 @@ func TestPKMatchDiscoveryNode_Execute_ServiceError(t *testing.T) {
 		DatasourceID: uuid.New(),
 	}
 
-	err := node.Execute(ctx, dag)
+	err := node.Execute(ctx, dag, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "discover pk_match relationships")
 	assert.Contains(t, err.Error(), "query timeout")
@@ -186,7 +186,7 @@ func TestPKMatchDiscoveryNode_Execute_ProgressCallback(t *testing.T) {
 		DatasourceID: uuid.New(),
 	}
 
-	err := node.Execute(context.Background(), dag)
+	err := node.Execute(context.Background(), dag, nil)
 	require.NoError(t, err)
 
 	assert.Contains(t, progressReports, "Analyzing pair 5/20")

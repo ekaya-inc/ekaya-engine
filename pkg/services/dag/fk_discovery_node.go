@@ -44,7 +44,7 @@ func NewFKDiscoveryNode(
 // Note: This node does not require dag.OntologyID. FK discovery reads foreign key
 // constraints directly from the database schema and stores them in engine metadata
 // tables, operating independently of the ontology.
-func (n *FKDiscoveryNode) Execute(ctx context.Context, dag *models.OntologyDAG) error {
+func (n *FKDiscoveryNode) Execute(ctx context.Context, dag *models.OntologyDAG, changeSet *models.ChangeSet) error {
 	n.Logger().Info("Starting FK relationship discovery",
 		zap.String("project_id", dag.ProjectID.String()),
 		zap.String("datasource_id", dag.DatasourceID.String()))

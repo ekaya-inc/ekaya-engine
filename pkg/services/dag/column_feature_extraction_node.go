@@ -54,10 +54,20 @@ func NewColumnFeatureExtractionNode(
 // Note: This node does not require dag.OntologyID. Column feature extraction operates
 // on raw schema data from the datasource, extracting deterministic features (data types,
 // sample values, patterns) before any ontology-specific processing.
-func (n *ColumnFeatureExtractionNode) Execute(ctx context.Context, dag *models.OntologyDAG) error {
+func (n *ColumnFeatureExtractionNode) Execute(ctx context.Context, dag *models.OntologyDAG, changeSet *models.ChangeSet) error {
 	n.Logger().Info("Starting column feature extraction",
 		zap.String("project_id", dag.ProjectID.String()),
 		zap.String("datasource_id", dag.DatasourceID.String()))
+
+	// During incremental extraction, skip if no columns changed
+	if changeSet != nil && !changeSet.HasChangedColumns() {
+		n.Logger().Info("Skipping column feature extraction (no changed columns)",
+			zap.String("project_id", dag.ProjectID.String()))
+		if err := n.ReportProgress(ctx, 1, 1, "Skipped (no changed columns)"); err != nil {
+			n.Logger().Warn("Failed to report progress", zap.Error(err))
+		}
+		return nil
+	}
 
 	// Report initial progress
 	if err := n.ReportProgress(ctx, 0, 1, "Extracting column features..."); err != nil {
