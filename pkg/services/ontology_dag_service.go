@@ -29,6 +29,11 @@ type OntologyDAGService interface {
 	// GetStatus returns the current DAG status with all node states.
 	GetStatus(ctx context.Context, datasourceID uuid.UUID) (*models.OntologyDAG, error)
 
+	// GetOntologyStatus returns the ontology status with change detection.
+	// Indicates whether the ontology exists, when it was last built, and whether
+	// the schema has changed since the last build.
+	GetOntologyStatus(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.OntologyStatusResponse, error)
+
 	// Cancel cancels a running DAG.
 	Cancel(ctx context.Context, dagID uuid.UUID) error
 
@@ -228,13 +233,66 @@ func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID 
 		return existing, nil
 	}
 
+	// Determine if this is an incremental extraction
+	var changeSet *models.ChangeSet
+	var isIncremental bool
+
+	lastDAG, err := s.GetLastCompletedDAG(ctx, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("get last completed DAG: %w", err)
+	}
+
+	if lastDAG != nil && lastDAG.CompletedAt != nil {
+		// Previous extraction exists — compute what changed
+		changeSet, err = s.ComputeChangeSet(ctx, projectID, *lastDAG.CompletedAt)
+		if err != nil {
+			return nil, fmt.Errorf("compute change set: %w", err)
+		}
+
+		if changeSet.IsEmpty() {
+			s.logger.Info("No schema changes since last extraction",
+				zap.String("project_id", projectID.String()),
+				zap.String("datasource_id", datasourceID.String()))
+			return nil, fmt.Errorf("no schema changes since last extraction")
+		}
+
+		isIncremental = true
+
+		// Cleanup deleted items before creating the DAG
+		if changeSet.HasDeletedItems() {
+			if err := s.CleanupDeletedItems(ctx, projectID, changeSet); err != nil {
+				s.logger.Error("Failed to cleanup deleted items",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err))
+				// Continue with extraction even if cleanup partially fails
+			}
+		}
+
+		s.logger.Info("Starting incremental extraction",
+			zap.String("project_id", projectID.String()),
+			zap.Int("added_tables", len(changeSet.AddedTables)),
+			zap.Int("modified_tables", len(changeSet.ModifiedTables)),
+			zap.Int("deleted_tables", len(changeSet.DeletedTables)),
+			zap.Int("added_columns", len(changeSet.AddedColumns)),
+			zap.Int("modified_columns", len(changeSet.ModifiedColumns)),
+			zap.Int("deleted_columns", len(changeSet.DeletedColumns)))
+	} else {
+		s.logger.Info("No previous extraction found, performing full extraction",
+			zap.String("project_id", projectID.String()))
+	}
+
 	// Create new DAG
 	now := time.Now()
 	dagRecord := &models.OntologyDAG{
-		ID:           uuid.New(),
-		ProjectID:    projectID,
-		DatasourceID: datasourceID,
-		Status:       models.DAGStatusPending,
+		ID:            uuid.New(),
+		ProjectID:     projectID,
+		DatasourceID:  datasourceID,
+		Status:        models.DAGStatusPending,
+		IsIncremental: isIncremental,
+	}
+
+	if changeSet != nil {
+		dagRecord.ChangeSummary = changeSet.ToSummary()
 	}
 
 	if err := s.dagRepo.Create(ctx, dagRecord); err != nil {
@@ -269,7 +327,7 @@ func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID 
 	// Run DAG execution in background
 	// Pass userID for provenance tracking - all inference-created objects will record this user as created_by
 	// Note: heartbeat is started inside executeDAG after defer is established
-	go s.executeDAG(projectID, dagRecord.ID, userID)
+	go s.executeDAG(projectID, dagRecord.ID, userID, changeSet)
 
 	// Return DAG with nodes
 	dagRecord.Nodes = nodes
@@ -455,7 +513,8 @@ func (s *ontologyDAGService) createNodes(dagID uuid.UUID) []models.DAGNode {
 
 // executeDAG runs the DAG execution in a background goroutine.
 // userID is the user who triggered the extraction - used for provenance tracking on all created objects.
-func (s *ontologyDAGService) executeDAG(projectID, dagID, userID uuid.UUID) {
+// changeSet is nil for full extraction, non-nil for incremental extraction.
+func (s *ontologyDAGService) executeDAG(projectID, dagID, userID uuid.UUID, changeSet *models.ChangeSet) {
 	// Create cancellable context
 	ctx, cancel := context.WithCancel(context.Background())
 	s.activeDAGs.Store(dagID, cancel)
@@ -526,7 +585,7 @@ func (s *ontologyDAGService) executeDAG(projectID, dagID, userID uuid.UUID) {
 		}
 
 		// Execute node
-		if err := s.executeNode(tenantCtx, dagRecord, &node); err != nil {
+		if err := s.executeNode(tenantCtx, dagRecord, &node, changeSet); err != nil {
 			// If the context was cancelled (user-initiated), log at INFO and let
 			// the Cancel() method handle status updates — don't treat as failure.
 			if errors.Is(err, context.Canceled) {
@@ -552,7 +611,8 @@ func (s *ontologyDAGService) executeDAG(projectID, dagID, userID uuid.UUID) {
 }
 
 // executeNode runs a single node with retry logic.
-func (s *ontologyDAGService) executeNode(ctx context.Context, dagRecord *models.OntologyDAG, node *models.DAGNode) error {
+// changeSet is nil for full extraction, non-nil for incremental extraction.
+func (s *ontologyDAGService) executeNode(ctx context.Context, dagRecord *models.OntologyDAG, node *models.DAGNode, changeSet *models.ChangeSet) error {
 	s.logger.Info("Executing node",
 		zap.String("dag_id", dagRecord.ID.String()),
 		zap.String("node_name", node.NodeName))
@@ -577,7 +637,7 @@ func (s *ontologyDAGService) executeNode(ctx context.Context, dagRecord *models.
 	// Execute with retry
 	retryCfg := retry.DefaultConfig()
 	err = retry.DoIfRetryable(ctx, retryCfg, func() error {
-		return executor.Execute(ctx, dagRecord)
+		return executor.Execute(ctx, dagRecord, changeSet)
 	})
 
 	if err != nil {

@@ -998,7 +998,7 @@ func TestExecuteDAG_PanicRecovery(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		service.executeDAG(projectID, dagID, testUserID)
+		service.executeDAG(projectID, dagID, testUserID, nil)
 	}()
 
 	// Wait for goroutine to complete with timeout
@@ -1074,7 +1074,7 @@ func TestExecuteDAG_HeartbeatCleanupOrder(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		service.executeDAG(projectID, dagID, testUserID)
+		service.executeDAG(projectID, dagID, testUserID, nil)
 	}()
 
 	// Wait for goroutine to complete with timeout
@@ -1207,7 +1207,7 @@ func TestExecuteDAG_SetsInferenceProvenance(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		service.executeDAG(projectID, dagID, userID)
+		service.executeDAG(projectID, dagID, userID, nil)
 	}()
 
 	// Wait for goroutine to complete
