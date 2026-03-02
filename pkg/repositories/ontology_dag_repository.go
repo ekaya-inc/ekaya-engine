@@ -68,18 +68,29 @@ func (r *ontologyDAGRepository) Create(ctx context.Context, dag *models.Ontology
 		dag.ID = uuid.New()
 	}
 
+	var changeSummaryJSON []byte
+	if dag.ChangeSummary != nil {
+		var jsonErr error
+		changeSummaryJSON, jsonErr = json.Marshal(dag.ChangeSummary)
+		if jsonErr != nil {
+			return fmt.Errorf("failed to marshal change summary: %w", jsonErr)
+		}
+	}
+
 	query := `
 		INSERT INTO engine_ontology_dag (
 			id, project_id, datasource_id,
 			status, current_node, schema_fingerprint,
 			owner_id, last_heartbeat,
+			is_incremental, change_summary,
 			started_at, completed_at, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
 
 	_, err := scope.Conn.Exec(ctx, query,
 		dag.ID, dag.ProjectID, dag.DatasourceID,
 		dag.Status, dag.CurrentNode, dag.SchemaFingerprint,
 		dag.OwnerID, dag.LastHeartbeat,
+		dag.IsIncremental, changeSummaryJSON,
 		dag.StartedAt, dag.CompletedAt, dag.CreatedAt, dag.UpdatedAt,
 	)
 	if err != nil {
@@ -99,6 +110,7 @@ func (r *ontologyDAGRepository) GetByID(ctx context.Context, id uuid.UUID) (*mod
 		SELECT id, project_id, datasource_id,
 		       status, current_node, schema_fingerprint,
 		       owner_id, last_heartbeat,
+		       is_incremental, change_summary,
 		       started_at, completed_at, created_at, updated_at
 		FROM engine_ontology_dag
 		WHERE id = $1`
@@ -135,6 +147,7 @@ func (r *ontologyDAGRepository) GetLatestByDatasource(ctx context.Context, datas
 		SELECT id, project_id, datasource_id,
 		       status, current_node, schema_fingerprint,
 		       owner_id, last_heartbeat,
+		       is_incremental, change_summary,
 		       started_at, completed_at, created_at, updated_at
 		FROM engine_ontology_dag
 		WHERE datasource_id = $1
@@ -162,6 +175,7 @@ func (r *ontologyDAGRepository) GetLatestByProject(ctx context.Context, projectI
 		SELECT id, project_id, datasource_id,
 		       status, current_node, schema_fingerprint,
 		       owner_id, last_heartbeat,
+		       is_incremental, change_summary,
 		       started_at, completed_at, created_at, updated_at
 		FROM engine_ontology_dag
 		WHERE project_id = $1
@@ -189,6 +203,7 @@ func (r *ontologyDAGRepository) GetActiveByDatasource(ctx context.Context, datas
 		SELECT id, project_id, datasource_id,
 		       status, current_node, schema_fingerprint,
 		       owner_id, last_heartbeat,
+		       is_incremental, change_summary,
 		       started_at, completed_at, created_at, updated_at
 		FROM engine_ontology_dag
 		WHERE datasource_id = $1 AND status IN ('pending', 'running')
@@ -216,6 +231,7 @@ func (r *ontologyDAGRepository) GetActiveByProject(ctx context.Context, projectI
 		SELECT id, project_id, datasource_id,
 		       status, current_node, schema_fingerprint,
 		       owner_id, last_heartbeat,
+		       is_incremental, change_summary,
 		       started_at, completed_at, created_at, updated_at
 		FROM engine_ontology_dag
 		WHERE project_id = $1 AND status IN ('pending', 'running')
@@ -241,6 +257,15 @@ func (r *ontologyDAGRepository) Update(ctx context.Context, dag *models.Ontology
 
 	dag.UpdatedAt = time.Now()
 
+	var changeSummaryJSON []byte
+	if dag.ChangeSummary != nil {
+		var jsonErr error
+		changeSummaryJSON, jsonErr = json.Marshal(dag.ChangeSummary)
+		if jsonErr != nil {
+			return fmt.Errorf("failed to marshal change summary: %w", jsonErr)
+		}
+	}
+
 	query := `
 		UPDATE engine_ontology_dag
 		SET status = $2,
@@ -248,14 +273,18 @@ func (r *ontologyDAGRepository) Update(ctx context.Context, dag *models.Ontology
 		    schema_fingerprint = $4,
 		    owner_id = $5,
 		    last_heartbeat = $6,
-		    started_at = $7,
-		    completed_at = $8,
-		    updated_at = $9
+		    is_incremental = $7,
+		    change_summary = $8,
+		    started_at = $9,
+		    completed_at = $10,
+		    updated_at = $11
 		WHERE id = $1`
 
 	result, err := scope.Conn.Exec(ctx, query,
 		dag.ID, dag.Status, dag.CurrentNode, dag.SchemaFingerprint,
-		dag.OwnerID, dag.LastHeartbeat, dag.StartedAt, dag.CompletedAt, dag.UpdatedAt,
+		dag.OwnerID, dag.LastHeartbeat,
+		dag.IsIncremental, changeSummaryJSON,
+		dag.StartedAt, dag.CompletedAt, dag.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update DAG: %w", err)
@@ -649,11 +678,13 @@ func (r *ontologyDAGRepository) GetNextPendingNode(ctx context.Context, dagID uu
 
 func scanDAGRow(row pgx.Row) (*models.OntologyDAG, error) {
 	var dag models.OntologyDAG
+	var changeSummaryJSON []byte
 
 	err := row.Scan(
 		&dag.ID, &dag.ProjectID, &dag.DatasourceID,
 		&dag.Status, &dag.CurrentNode, &dag.SchemaFingerprint,
 		&dag.OwnerID, &dag.LastHeartbeat,
+		&dag.IsIncremental, &changeSummaryJSON,
 		&dag.StartedAt, &dag.CompletedAt, &dag.CreatedAt, &dag.UpdatedAt,
 	)
 	if err != nil {
@@ -661,6 +692,13 @@ func scanDAGRow(row pgx.Row) (*models.OntologyDAG, error) {
 			return nil, err
 		}
 		return nil, fmt.Errorf("failed to scan DAG: %w", err)
+	}
+
+	if len(changeSummaryJSON) > 0 {
+		dag.ChangeSummary = &models.ChangeSummary{}
+		if err := json.Unmarshal(changeSummaryJSON, dag.ChangeSummary); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal change summary: %w", err)
+		}
 	}
 
 	return &dag, nil

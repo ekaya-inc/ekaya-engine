@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services/dag"
@@ -93,6 +94,17 @@ func (v *relationshipValidator) ValidateCandidate(ctx context.Context, projectID
 		return nil, fmt.Errorf("parse validation response: %w", err)
 	}
 
+	// Override LLM cardinality with deterministic computation.
+	// The LLM frequently gets cardinality wrong because it's a data property,
+	// not a semantic judgment. Schema constraints and join stats are authoritative.
+	if validationResult.IsValidFK {
+		validationResult.Cardinality = InferCardinality(candidate.SourceIsPK, candidate.SourceIsUnique,
+			&datasource.JoinAnalysis{
+				SourceMatched: candidate.SourceMatched,
+				TargetMatched: candidate.TargetMatched,
+			})
+	}
+
 	// If confidence is below threshold, treat as rejection regardless of is_valid_fk
 	if validationResult.IsValidFK && validationResult.Confidence < minConfidenceThreshold {
 		v.logger.Debug("rejecting low-confidence validation",
@@ -121,6 +133,13 @@ func (v *relationshipValidator) systemMessage() string {
 	return `You are a database schema analyst. Your task is to determine if a candidate foreign key relationship is valid.
 Analyze the column metadata, sample values, and join statistics to make your decision.
 Be conservative - only confirm relationships where there is strong evidence the columns represent a true FK-PK relationship.
+
+IMPORTANT - Common false positive patterns to reject:
+- Small sequential integers (1, 2, 3, ...) will coincidentally match auto-increment PKs in many tables. This is NOT evidence of a relationship. A column with values {1,2,3,4,5} matching a target with IDs {1..25} is almost certainly coincidental.
+- Columns named with ordinal/temporal patterns (week_number, day_offset, step_number, sort_order, position) are counters, not foreign keys.
+- Low target coverage (source references <30% of target values) combined with small source distinct count (<20) is weak evidence.
+- Column names should semantically relate: app_id -> applications.id makes sense; week_number -> post_channel_steps.id does NOT.
+
 Respond with valid JSON only.`
 }
 
@@ -192,6 +211,17 @@ func (v *relationshipValidator) buildValidationPrompt(candidate *RelationshipCan
 	}
 
 	sb.WriteString(fmt.Sprintf("- **%d** total rows matched when joining\n", candidate.JoinCount))
+
+	// Add warning signals for small-integer overlap patterns
+	if candidate.SourceDistinctCount > 0 && candidate.SourceDistinctCount <= 20 && candidate.TargetDistinctCount > 0 {
+		coverageRate := float64(candidate.TargetMatched) / float64(candidate.TargetDistinctCount) * 100
+		if coverageRate < 50 {
+			sb.WriteString("\n## Warning Signals\n\n")
+			sb.WriteString("- Source has very few distinct values (possible small-integer overlap)\n")
+			sb.WriteString(fmt.Sprintf("- Source only covers %.1f%% of target values\n", coverageRate))
+			sb.WriteString("- This pattern is common for coincidental matches with auto-increment PKs\n")
+		}
+	}
 
 	// Task description
 	sb.WriteString("\n## Task\n\n")

@@ -105,8 +105,8 @@ const OntologyPage = () => {
 
         {/* Error banner */}
         {error && (
-          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 flex items-center justify-between">
-            <p className="text-red-800 text-sm">{error}</p>
+          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20 p-4 flex items-center justify-between">
+            <p className="text-red-800 dark:text-red-200 text-sm">{error}</p>
             <Button
               variant="ghost"
               size="sm"

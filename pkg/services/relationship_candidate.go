@@ -11,6 +11,7 @@ type RelationshipCandidate struct {
 	SourceColumn        string   `json:"source_column"`
 	SourceDataType      string   `json:"source_data_type"`
 	SourceIsPK          bool     `json:"source_is_pk"`
+	SourceIsUnique      bool     `json:"source_is_unique"`
 	SourceDistinctCount int64    `json:"source_distinct_count"`
 	SourceNullRate      float64  `json:"source_null_rate"`
 	SourceSamples       []string `json:"source_samples"` // Up to 10 sample values

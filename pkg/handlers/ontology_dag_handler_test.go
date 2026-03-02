@@ -53,6 +53,10 @@ func (m *mockOntologyDAGService) Delete(ctx context.Context, projectID uuid.UUID
 	return nil
 }
 
+func (m *mockOntologyDAGService) GetOntologyStatus(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.OntologyStatusResponse, error) {
+	return &models.OntologyStatusResponse{}, nil
+}
+
 func (m *mockOntologyDAGService) Shutdown(ctx context.Context) error {
 	return nil
 }

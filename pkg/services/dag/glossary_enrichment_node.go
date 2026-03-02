@@ -39,7 +39,7 @@ func NewGlossaryEnrichmentNode(
 }
 
 // Execute runs the glossary enrichment phase.
-func (n *GlossaryEnrichmentNode) Execute(ctx context.Context, dag *models.OntologyDAG) error {
+func (n *GlossaryEnrichmentNode) Execute(ctx context.Context, dag *models.OntologyDAG, changeSet *models.ChangeSet) error {
 	n.Logger().Info("Starting glossary enrichment",
 		zap.String("project_id", dag.ProjectID.String()))
 

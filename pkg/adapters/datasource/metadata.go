@@ -16,6 +16,7 @@ type ColumnMetadata struct {
 	IsUnique        bool
 	OrdinalPosition int
 	DefaultValue    *string
+	EnumValues      []string // Postgres enum type values from pg_enum (nil for non-enum columns)
 }
 
 // ForeignKeyMetadata represents a discovered foreign key constraint.

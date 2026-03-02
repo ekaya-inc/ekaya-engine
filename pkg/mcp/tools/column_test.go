@@ -189,6 +189,7 @@ func TestUpdateColumnTool_Structure(t *testing.T) {
 
 	// Verify optional parameters exist
 	assert.Contains(t, updateColumnTool.InputSchema.Properties, "description", "should have description parameter")
+	assert.Contains(t, updateColumnTool.InputSchema.Properties, "semantic_type", "should have semantic_type parameter")
 	assert.Contains(t, updateColumnTool.InputSchema.Properties, "enum_values", "should have enum_values parameter")
 	assert.Contains(t, updateColumnTool.InputSchema.Properties, "entity", "should have entity parameter")
 	assert.Contains(t, updateColumnTool.InputSchema.Properties, "role", "should have role parameter")
@@ -384,19 +385,21 @@ func TestGetColumnMetadata_JSONSerialization_OmitsEmptyMetadata(t *testing.T) {
 
 func TestUpdateColumn_ResponseStructure(t *testing.T) {
 	response := updateColumnResponse{
-		Table:       "users",
-		Column:      "status",
-		Description: "User account status",
-		EnumValues:  []string{"ACTIVE - Normal account", "SUSPENDED - Temporarily disabled"},
-		Entity:      "User",
-		Role:        "attribute",
-		Created:     true,
+		Table:        "users",
+		Column:       "status",
+		Description:  "User account status",
+		SemanticType: "event_time",
+		EnumValues:   []string{"ACTIVE - Normal account", "SUSPENDED - Temporarily disabled"},
+		Entity:       "User",
+		Role:         "attribute",
+		Created:      true,
 	}
 
 	// Verify response has required fields
 	assert.NotEmpty(t, response.Table, "response should have table field")
 	assert.NotEmpty(t, response.Column, "response should have column field")
 	assert.True(t, response.Created, "response should have created field set")
+	assert.Equal(t, "event_time", response.SemanticType, "response should have semantic_type field")
 }
 
 func TestDeleteColumnMetadata_ResponseStructure(t *testing.T) {
@@ -984,6 +987,17 @@ func TestUpdateColumn_TypedColumnMetadata(t *testing.T) {
 		assert.Equal(t, "User account status indicator", *colMeta.Description)
 	})
 
+	t.Run("semantic_type is stored in typed column", func(t *testing.T) {
+		semanticType := "event_time"
+
+		colMeta := &models.ColumnMetadata{}
+		colMeta.SemanticType = &semanticType
+
+		// Verify semantic_type is stored correctly
+		require.NotNil(t, colMeta.SemanticType)
+		assert.Equal(t, "event_time", *colMeta.SemanticType)
+	})
+
 	t.Run("is_sensitive is stored in typed column", func(t *testing.T) {
 		sensitive := true
 
@@ -998,6 +1012,7 @@ func TestUpdateColumn_TypedColumnMetadata(t *testing.T) {
 	t.Run("all fields combined", func(t *testing.T) {
 		// Simulate all parameters being set
 		description := "User account status"
+		semanticType := "status_enum"
 		entity := "User"
 		role := "attribute"
 		sensitive := false
@@ -1011,6 +1026,10 @@ func TestUpdateColumn_TypedColumnMetadata(t *testing.T) {
 
 		if description != "" {
 			colMeta.Description = &description
+		}
+
+		if semanticType != "" {
+			colMeta.SemanticType = &semanticType
 		}
 
 		if entity != "" {
@@ -1038,6 +1057,7 @@ func TestUpdateColumn_TypedColumnMetadata(t *testing.T) {
 
 		// Verify all fields
 		assert.Equal(t, "User account status", *colMeta.Description)
+		assert.Equal(t, "status_enum", *colMeta.SemanticType)
 		assert.Equal(t, "User", colMeta.Features.IdentifierFeatures.EntityReferenced)
 		assert.Equal(t, "attribute", *colMeta.Role)
 		assert.False(t, *colMeta.IsSensitive)

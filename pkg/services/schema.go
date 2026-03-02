@@ -340,6 +340,7 @@ func (s *schemaService) syncColumnsForTable(
 			IsUnique:        dc.IsUnique,
 			OrdinalPosition: dc.OrdinalPosition,
 			DefaultValue:    dc.DefaultValue,
+			EnumValues:      dc.EnumValues,
 			IsSelected:      isNewColumn && autoSelect, // Auto-select new columns if requested
 		}
 

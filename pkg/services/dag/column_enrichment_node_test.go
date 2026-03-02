@@ -127,7 +127,7 @@ func TestColumnEnrichmentNode_Execute_Success(t *testing.T) {
 		ProjectID: projectID,
 	}
 
-	err := node.Execute(ctx, dag)
+	err := node.Execute(ctx, dag, nil)
 	require.NoError(t, err)
 
 	// Verify progress was reported
@@ -167,7 +167,7 @@ func TestColumnEnrichmentNode_Execute_WithFailedTables(t *testing.T) {
 		ProjectID: projectID,
 	}
 
-	err := node.Execute(ctx, dag)
+	err := node.Execute(ctx, dag, nil)
 	require.NoError(t, err)
 
 	// Verify completion message includes failure count
@@ -195,7 +195,7 @@ func TestColumnEnrichmentNode_Execute_ServiceError(t *testing.T) {
 		ProjectID: projectID,
 	}
 
-	err := node.Execute(ctx, dag)
+	err := node.Execute(ctx, dag, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "enrich columns")
 	assert.Contains(t, err.Error(), "LLM unavailable")
@@ -235,7 +235,7 @@ func TestColumnEnrichmentNode_Execute_ProgressCallback(t *testing.T) {
 		ProjectID: projectID,
 	}
 
-	err := node.Execute(ctx, dag)
+	err := node.Execute(ctx, dag, nil)
 	require.NoError(t, err)
 
 	// Verify granular progress messages were reported

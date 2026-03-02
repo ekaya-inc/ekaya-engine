@@ -112,7 +112,7 @@ func TestColumnFeatureExtractionNode_Execute_NilMethods(t *testing.T) {
 		DatasourceID: uuid.New(),
 	}
 
-	err := node.Execute(context.Background(), dag)
+	err := node.Execute(context.Background(), dag, nil)
 	require.NoError(t, err)
 
 	assert.Contains(t, progressReports, "Column feature extraction skipped (not configured)")
@@ -150,7 +150,7 @@ func TestColumnFeatureExtractionNode_Execute_Success(t *testing.T) {
 		DatasourceID: datasourceID,
 	}
 
-	err := node.Execute(ctx, dag)
+	err := node.Execute(ctx, dag, nil)
 	require.NoError(t, err)
 
 	assert.Contains(t, progressReports, "Extracting column features...")
@@ -177,7 +177,7 @@ func TestColumnFeatureExtractionNode_Execute_ServiceError(t *testing.T) {
 		DatasourceID: uuid.New(),
 	}
 
-	err := node.Execute(ctx, dag)
+	err := node.Execute(ctx, dag, nil)
 	require.Error(t, err)
 	assert.Equal(t, "query execution failed", err.Error())
 }
@@ -208,7 +208,7 @@ func TestColumnFeatureExtractionNode_Execute_ProgressCallback(t *testing.T) {
 		DatasourceID: uuid.New(),
 	}
 
-	err := node.Execute(context.Background(), dag)
+	err := node.Execute(context.Background(), dag, nil)
 	require.NoError(t, err)
 
 	assert.Contains(t, progressReports, "Processing column 1/5")

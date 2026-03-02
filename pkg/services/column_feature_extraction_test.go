@@ -1850,6 +1850,310 @@ func TestTimestampClassifier_PromptIncludesClarificationFields(t *testing.T) {
 	}
 }
 
+func TestTimestampClassifier_NameGuard_SoftDeleteRequiresDeletionName(t *testing.T) {
+	// Bug: LLM classifies nullable event timestamps as soft_delete.
+	// The guard should only allow soft_delete for columns whose names match
+	// deletion patterns (deleted_at, removed_at, archived_at, purged_at).
+	classifier := &timestampClassifier{logger: zap.NewNop()}
+
+	tests := []struct {
+		name       string
+		columnName string
+		wantType   string
+	}{
+		// These should be corrected from soft_delete → event_time
+		{"submitted_at_not_soft_delete", "submitted_at", models.TimestampPurposeEventTime},
+		{"approved_at_not_soft_delete", "approved_at", models.TimestampPurposeEventTime},
+		{"completed_at_not_soft_delete", "completed_at", models.TimestampPurposeCompletion},
+		{"published_at_not_soft_delete", "published_at", models.TimestampPurposeEventTime},
+		{"verified_at_not_soft_delete", "verified_at", models.TimestampPurposeEventTime},
+		{"sent_at_not_soft_delete", "sent_at", models.TimestampPurposeEventTime},
+		// These should remain soft_delete
+		{"deleted_at_stays_soft_delete", "deleted_at", models.TimestampPurposeSoftDelete},
+		{"removed_at_stays_soft_delete", "removed_at", models.TimestampPurposeSoftDelete},
+		{"archived_at_stays_soft_delete", "archived_at", models.TimestampPurposeSoftDelete},
+		{"purged_at_stays_soft_delete", "purged_at", models.TimestampPurposeSoftDelete},
+		{"discarded_at_stays_soft_delete", "discarded_at", models.TimestampPurposeSoftDelete},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			profile := &models.ColumnDataProfile{
+				ColumnID:   uuid.New(),
+				ColumnName: tt.columnName,
+				TableName:  "test_table",
+				DataType:   "timestamp with time zone",
+				IsNullable: true,
+				NullRate:   0.7,
+				RowCount:   10000,
+			}
+
+			// LLM incorrectly classifies as soft_delete
+			mockResponse := `{
+				"purpose": "soft_delete",
+				"confidence": 0.8,
+				"is_soft_delete": true,
+				"is_audit_field": false,
+				"description": "Records when the row was logically deleted."
+			}`
+
+			features, err := classifier.parseResponse(profile, mockResponse, "test-model")
+			if err != nil {
+				t.Fatalf("parseResponse error: %v", err)
+			}
+
+			if features.SemanticType != tt.wantType {
+				t.Errorf("SemanticType = %q, want %q for column %q",
+					features.SemanticType, tt.wantType, tt.columnName)
+			}
+
+			if features.TimestampFeatures.TimestampPurpose != tt.wantType {
+				t.Errorf("TimestampPurpose = %q, want %q for column %q",
+					features.TimestampFeatures.TimestampPurpose, tt.wantType, tt.columnName)
+			}
+
+			// IsSoftDelete flag should also be corrected
+			wantSoftDelete := tt.wantType == models.TimestampPurposeSoftDelete
+			if features.TimestampFeatures.IsSoftDelete != wantSoftDelete {
+				t.Errorf("IsSoftDelete = %v, want %v for column %q",
+					features.TimestampFeatures.IsSoftDelete, wantSoftDelete, tt.columnName)
+			}
+		})
+	}
+}
+
+func TestTimestampClassifier_NameGuard_AuditCreatedRequiresCreationName(t *testing.T) {
+	// Bug: LLM classifies date columns (start_date, target_date) and event
+	// timestamps (followed_up_at, converted_at) as audit_created.
+	// The guard should only allow audit_created for columns whose names match
+	// creation patterns (created_at, created_on, date_created, etc.).
+	classifier := &timestampClassifier{logger: zap.NewNop()}
+
+	tests := []struct {
+		name       string
+		columnName string
+		wantType   string
+	}{
+		// These should be corrected from audit_created → event_time or scheduled_time
+		{"start_date_not_audit", "start_date", models.TimestampPurposeScheduled},
+		{"target_date_not_audit", "target_date", models.TimestampPurposeScheduled},
+		{"end_date_not_audit", "end_date", models.TimestampPurposeScheduled},
+		{"followed_up_at_not_audit", "followed_up_at", models.TimestampPurposeEventTime},
+		{"converted_at_not_audit", "converted_at", models.TimestampPurposeEventTime},
+		{"commented_at_not_audit", "commented_at", models.TimestampPurposeEventTime},
+		{"published_at_not_audit", "published_at", models.TimestampPurposeEventTime},
+		// These should remain audit_created
+		{"created_at_stays_audit", "created_at", models.TimestampPurposeAuditCreated},
+		{"created_on_stays_audit", "created_on", models.TimestampPurposeAuditCreated},
+		{"date_created_stays_audit", "date_created", models.TimestampPurposeAuditCreated},
+		{"creation_time_stays_audit", "creation_time", models.TimestampPurposeAuditCreated},
+		{"inserted_at_stays_audit", "inserted_at", models.TimestampPurposeAuditCreated},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			profile := &models.ColumnDataProfile{
+				ColumnID:   uuid.New(),
+				ColumnName: tt.columnName,
+				TableName:  "test_table",
+				DataType:   "timestamp with time zone",
+				IsNullable: false,
+				NullRate:   0.0,
+				RowCount:   10000,
+			}
+
+			// LLM incorrectly classifies as audit_created
+			mockResponse := `{
+				"purpose": "audit_created",
+				"confidence": 0.8,
+				"is_soft_delete": false,
+				"is_audit_field": true,
+				"description": "Records when the record was created."
+			}`
+
+			features, err := classifier.parseResponse(profile, mockResponse, "test-model")
+			if err != nil {
+				t.Fatalf("parseResponse error: %v", err)
+			}
+
+			if features.SemanticType != tt.wantType {
+				t.Errorf("SemanticType = %q, want %q for column %q",
+					features.SemanticType, tt.wantType, tt.columnName)
+			}
+
+			if features.TimestampFeatures.TimestampPurpose != tt.wantType {
+				t.Errorf("TimestampPurpose = %q, want %q for column %q",
+					features.TimestampFeatures.TimestampPurpose, tt.wantType, tt.columnName)
+			}
+
+			// IsAuditField should be corrected when reclassified
+			wantAudit := tt.wantType == models.TimestampPurposeAuditCreated
+			if features.TimestampFeatures.IsAuditField != wantAudit {
+				t.Errorf("IsAuditField = %v, want %v for column %q",
+					features.TimestampFeatures.IsAuditField, wantAudit, tt.columnName)
+			}
+		})
+	}
+}
+
+func TestTimestampClassifier_NameGuard_AuditUpdatedRequiresUpdateName(t *testing.T) {
+	// Guard should only allow audit_updated for columns matching update patterns.
+	classifier := &timestampClassifier{logger: zap.NewNop()}
+
+	tests := []struct {
+		name       string
+		columnName string
+		wantType   string
+	}{
+		// Should remain audit_updated
+		{"updated_at_stays", "updated_at", models.TimestampPurposeAuditUpdated},
+		{"modified_at_stays", "modified_at", models.TimestampPurposeAuditUpdated},
+		{"last_modified_stays", "last_modified", models.TimestampPurposeAuditUpdated},
+		{"last_updated_at_stays", "last_updated_at", models.TimestampPurposeAuditUpdated},
+		// Should be corrected
+		{"refreshed_at_corrected", "refreshed_at", models.TimestampPurposeEventTime},
+		{"synced_at_corrected", "synced_at", models.TimestampPurposeEventTime},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			profile := &models.ColumnDataProfile{
+				ColumnID:   uuid.New(),
+				ColumnName: tt.columnName,
+				TableName:  "test_table",
+				DataType:   "timestamp with time zone",
+				IsNullable: false,
+				NullRate:   0.0,
+				RowCount:   10000,
+			}
+
+			mockResponse := `{
+				"purpose": "audit_updated",
+				"confidence": 0.8,
+				"is_soft_delete": false,
+				"is_audit_field": true,
+				"description": "Records when the record was last modified."
+			}`
+
+			features, err := classifier.parseResponse(profile, mockResponse, "test-model")
+			if err != nil {
+				t.Fatalf("parseResponse error: %v", err)
+			}
+
+			if features.SemanticType != tt.wantType {
+				t.Errorf("SemanticType = %q, want %q for column %q",
+					features.SemanticType, tt.wantType, tt.columnName)
+			}
+		})
+	}
+}
+
+func TestTimestampClassifier_NameGuard_DateColumnsGetScheduledTime(t *testing.T) {
+	// Date columns (containing "date" in the name) that are misclassified
+	// should default to scheduled_time, not event_time.
+	classifier := &timestampClassifier{logger: zap.NewNop()}
+
+	tests := []struct {
+		name       string
+		columnName string
+		llmPurpose string
+		wantType   string
+	}{
+		{"start_date_from_audit", "start_date", "audit_created", models.TimestampPurposeScheduled},
+		{"end_date_from_audit", "end_date", "audit_created", models.TimestampPurposeScheduled},
+		{"due_date_from_audit", "due_date", "audit_created", models.TimestampPurposeScheduled},
+		{"target_date_from_soft_delete", "target_date", "soft_delete", models.TimestampPurposeScheduled},
+		{"launch_date_from_audit", "launch_date", "audit_created", models.TimestampPurposeScheduled},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			profile := &models.ColumnDataProfile{
+				ColumnID:   uuid.New(),
+				ColumnName: tt.columnName,
+				TableName:  "test_table",
+				DataType:   "date",
+				IsNullable: true,
+				NullRate:   0.3,
+				RowCount:   10000,
+			}
+
+			mockResponse := fmt.Sprintf(`{
+				"purpose": %q,
+				"confidence": 0.8,
+				"is_soft_delete": false,
+				"is_audit_field": true,
+				"description": "Some LLM description."
+			}`, tt.llmPurpose)
+
+			features, err := classifier.parseResponse(profile, mockResponse, "test-model")
+			if err != nil {
+				t.Fatalf("parseResponse error: %v", err)
+			}
+
+			if features.SemanticType != tt.wantType {
+				t.Errorf("SemanticType = %q, want %q for column %q (LLM said %q)",
+					features.SemanticType, tt.wantType, tt.columnName, tt.llmPurpose)
+			}
+		})
+	}
+}
+
+func TestTimestampClassifier_NameGuard_LegitimateClassificationsUntouched(t *testing.T) {
+	// Verify that correct LLM classifications are not overridden by the guard.
+	classifier := &timestampClassifier{logger: zap.NewNop()}
+
+	tests := []struct {
+		name       string
+		columnName string
+		purpose    string
+		wantType   string
+	}{
+		// event_time is never overridden
+		{"event_time_stays", "happened_at", "event_time", models.TimestampPurposeEventTime},
+		// scheduled_time is never overridden
+		{"scheduled_stays", "scheduled_for", "scheduled_time", models.TimestampPurposeScheduled},
+		// expiration is never overridden
+		{"expiration_stays", "expires_at", "expiration", models.TimestampPurposeExpiration},
+		// completion is never overridden
+		{"completion_stays", "finished_at", "completion", models.TimestampPurposeCompletion},
+		// cursor is never overridden
+		{"cursor_stays", "sort_key", "cursor", models.TimestampPurposeCursor},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			profile := &models.ColumnDataProfile{
+				ColumnID:   uuid.New(),
+				ColumnName: tt.columnName,
+				TableName:  "test_table",
+				DataType:   "timestamp with time zone",
+				IsNullable: true,
+				NullRate:   0.5,
+				RowCount:   10000,
+			}
+
+			mockResponse := fmt.Sprintf(`{
+				"purpose": %q,
+				"confidence": 0.8,
+				"is_soft_delete": false,
+				"is_audit_field": false,
+				"description": "Some description."
+			}`, tt.purpose)
+
+			features, err := classifier.parseResponse(profile, mockResponse, "test-model")
+			if err != nil {
+				t.Fatalf("parseResponse error: %v", err)
+			}
+
+			if features.SemanticType != tt.wantType {
+				t.Errorf("SemanticType = %q, want %q for column %q",
+					features.SemanticType, tt.wantType, tt.columnName)
+			}
+		})
+	}
+}
+
 // containsStr is a local helper since strings.Contains is the right function to use
 // This is just to avoid name collision with datasource_test.go's contains function
 func containsStr(s, substr string) bool {
@@ -3838,4 +4142,150 @@ func TestCreateQuestionsFromUncertainClassifications_NilDependencies(t *testing.
 
 	// Should not panic
 	svc.createQuestionsFromUncertainClassifications(context.Background(), projectID, features, profiles)
+}
+
+// ============================================================================
+// Ordinal Classification Tests
+// ============================================================================
+
+func TestNumericClassifier_OrdinalGetsAttributeRoleNotFK(t *testing.T) {
+	// Columns like week_number, day_offset classified as ordinal should NOT
+	// get role: foreign_key or NeedsFKResolution
+	classifier := &numericClassifier{logger: zap.NewNop()}
+
+	profile := &models.ColumnDataProfile{
+		ColumnID:     uuid.New(),
+		ColumnName:   "week_number",
+		TableName:    "content_posts",
+		DataType:     "integer",
+		IsPrimaryKey: false,
+	}
+
+	mockResponse := `{
+		"numeric_type": "ordinal",
+		"may_be_monetary": false,
+		"confidence": 0.85,
+		"description": "Week number within the year."
+	}`
+
+	features, err := classifier.parseResponse(profile, mockResponse, "test-model")
+	if err != nil {
+		t.Fatalf("parseResponse error: %v", err)
+	}
+
+	if features.Role != models.RoleAttribute {
+		t.Errorf("Role = %q, want %q for ordinal column", features.Role, models.RoleAttribute)
+	}
+	if features.Purpose != models.PurposeIdentifier {
+		t.Errorf("Purpose = %q, want %q for ordinal column", features.Purpose, models.PurposeIdentifier)
+	}
+	if features.NeedsFKResolution {
+		t.Error("NeedsFKResolution should be false for ordinal columns")
+	}
+	if features.IdentifierFeatures != nil {
+		t.Error("IdentifierFeatures should be nil for ordinal columns (no FK inference)")
+	}
+}
+
+func TestNumericClassifier_OrdinalVsIdentifier(t *testing.T) {
+	// Verify the distinction: ordinal does NOT get FK resolution, identifier DOES
+	classifier := &numericClassifier{logger: zap.NewNop()}
+
+	tests := []struct {
+		name             string
+		columnName       string
+		numericType      string
+		wantFKResolution bool
+		wantRole         string
+	}{
+		{
+			name:             "week_number is ordinal, no FK",
+			columnName:       "week_number",
+			numericType:      "ordinal",
+			wantFKResolution: false,
+			wantRole:         models.RoleAttribute,
+		},
+		{
+			name:             "day_offset is ordinal, no FK",
+			columnName:       "day_offset",
+			numericType:      "ordinal",
+			wantFKResolution: false,
+			wantRole:         models.RoleAttribute,
+		},
+		{
+			name:             "step_number is ordinal, no FK",
+			columnName:       "step_number",
+			numericType:      "ordinal",
+			wantFKResolution: false,
+			wantRole:         models.RoleAttribute,
+		},
+		{
+			name:             "app_id is identifier, gets FK",
+			columnName:       "app_id",
+			numericType:      "identifier",
+			wantFKResolution: true,
+			wantRole:         models.RoleAttribute,
+		},
+		{
+			name:             "channel_id is identifier, gets FK",
+			columnName:       "channel_id",
+			numericType:      "identifier",
+			wantFKResolution: true,
+			wantRole:         models.RoleAttribute,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			profile := &models.ColumnDataProfile{
+				ColumnID:     uuid.New(),
+				ColumnName:   tt.columnName,
+				TableName:    "test_table",
+				DataType:     "integer",
+				IsPrimaryKey: false,
+			}
+
+			mockResponse := fmt.Sprintf(`{
+				"numeric_type": %q,
+				"may_be_monetary": false,
+				"confidence": 0.85,
+				"description": "Test column."
+			}`, tt.numericType)
+
+			features, err := classifier.parseResponse(profile, mockResponse, "test-model")
+			if err != nil {
+				t.Fatalf("parseResponse error: %v", err)
+			}
+
+			if features.NeedsFKResolution != tt.wantFKResolution {
+				t.Errorf("NeedsFKResolution = %v, want %v", features.NeedsFKResolution, tt.wantFKResolution)
+			}
+			if features.Role != tt.wantRole {
+				t.Errorf("Role = %q, want %q", features.Role, tt.wantRole)
+			}
+		})
+	}
+}
+
+func TestNumericClassifier_PromptIncludesOrdinalType(t *testing.T) {
+	classifier := &numericClassifier{logger: zap.NewNop()}
+
+	profile := &models.ColumnDataProfile{
+		ColumnID:   uuid.New(),
+		ColumnName: "week_number",
+		TableName:  "content_posts",
+		DataType:   "integer",
+	}
+
+	prompt := classifier.buildPrompt(profile)
+
+	if !strings.Contains(prompt, "ordinal") {
+		t.Error("prompt should include ordinal as a numeric type")
+	}
+	if !strings.Contains(prompt, "week_number") {
+		t.Error("prompt should mention week_number as an ordinal example")
+	}
+	if !strings.Contains(prompt, "step_number") {
+		t.Error("prompt should mention step_number as an ordinal example")
+	}
 }

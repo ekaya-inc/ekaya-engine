@@ -40,7 +40,7 @@ func NewGlossaryDiscoveryNode(
 }
 
 // Execute runs the glossary discovery phase.
-func (n *GlossaryDiscoveryNode) Execute(ctx context.Context, dag *models.OntologyDAG) error {
+func (n *GlossaryDiscoveryNode) Execute(ctx context.Context, dag *models.OntologyDAG, changeSet *models.ChangeSet) error {
 	n.Logger().Info("Starting glossary discovery",
 		zap.String("project_id", dag.ProjectID.String()))
 

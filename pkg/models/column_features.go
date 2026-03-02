@@ -82,6 +82,9 @@ type ColumnDataProfile struct {
 	// Sample values (up to 50 distinct values)
 	SampleValues []string `json:"sample_values,omitempty"`
 
+	// Schema-defined enum values from Postgres pg_enum (definitive, not sampled)
+	SchemaEnumValues []string `json:"schema_enum_values,omitempty"`
+
 	// Pattern detection results (from sample analysis)
 	DetectedPatterns []DetectedPattern `json:"detected_patterns,omitempty"`
 

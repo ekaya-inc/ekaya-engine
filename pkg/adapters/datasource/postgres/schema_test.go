@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
 )
 
@@ -110,6 +111,84 @@ func TestSchemaDiscoverer_DiscoverTables(t *testing.T) {
 	if !foundUsers {
 		t.Error("expected to find 'users' table")
 	}
+}
+
+func TestSchemaDiscoverer_DiscoverTables_NoNegativeRowCounts(t *testing.T) {
+	tc := setupSchemaDiscovererTest(t)
+	ctx := context.Background()
+
+	// Create a table without running ANALYZE, so pg_class.reltuples = -1
+	_, err := tc.discoverer.pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS test_unanalyzed_table (id serial PRIMARY KEY, name text)
+	`)
+	if err != nil {
+		t.Fatalf("failed to create test table: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = tc.discoverer.pool.Exec(context.Background(), `DROP TABLE IF EXISTS test_unanalyzed_table`)
+	})
+
+	tables, err := tc.discoverer.DiscoverTables(ctx)
+	if err != nil {
+		t.Fatalf("DiscoverTables failed: %v", err)
+	}
+
+	for _, table := range tables {
+		if table.RowCount < 0 {
+			t.Errorf("DiscoverTables returned negative row count %d for %s.%s — should use COUNT(*) fallback",
+				table.RowCount, table.SchemaName, table.TableName)
+		}
+	}
+}
+
+func TestSchemaDiscoverer_DiscoverTables_AccurateCountForUnanalyzedTables(t *testing.T) {
+	tc := setupSchemaDiscovererTest(t)
+	ctx := context.Background()
+
+	// Create a fresh table (no ANALYZE) and insert rows.
+	// pg_class.reltuples will be -1, so DiscoverTables must fall back to COUNT(*).
+	_, err := tc.discoverer.pool.Exec(ctx, `
+		DROP TABLE IF EXISTS test_count_fallback;
+		CREATE TABLE test_count_fallback (id serial PRIMARY KEY, name text);
+		INSERT INTO test_count_fallback (name) VALUES ('a'), ('b'), ('c'), ('d'), ('e');
+	`)
+	if err != nil {
+		t.Fatalf("failed to create test table: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = tc.discoverer.pool.Exec(context.Background(), `DROP TABLE IF EXISTS test_count_fallback`)
+	})
+
+	// Verify reltuples is indeed -1 (unanalyzed)
+	var reltuples float64
+	err = tc.discoverer.pool.QueryRow(ctx, `
+		SELECT COALESCE(c.reltuples, 0)
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE c.relname = 'test_count_fallback' AND n.nspname = 'public'
+	`).Scan(&reltuples)
+	if err != nil {
+		t.Fatalf("failed to check reltuples: %v", err)
+	}
+	if reltuples >= 0 {
+		t.Skipf("reltuples is %.0f (already analyzed), cannot test fallback", reltuples)
+	}
+
+	tables, err := tc.discoverer.DiscoverTables(ctx)
+	if err != nil {
+		t.Fatalf("DiscoverTables failed: %v", err)
+	}
+
+	for _, table := range tables {
+		if table.TableName == "test_count_fallback" {
+			if table.RowCount != 5 {
+				t.Errorf("expected row_count = 5 for unanalyzed table with 5 rows, got %d (COUNT(*) fallback not working)",
+					table.RowCount)
+			}
+			return
+		}
+	}
+	t.Error("test_count_fallback table not found in DiscoverTables results")
 }
 
 func TestSchemaDiscoverer_DiscoverTables_ExcludesSystemSchemas(t *testing.T) {
@@ -1336,6 +1415,76 @@ func TestSchemaDiscoverer_AnalyzeColumnStats_DebugLogging(t *testing.T) {
 		if s.DistinctCount == 0 && s.NonNullCount > 0 {
 			t.Errorf("Column %s has non_null_count=%d but distinct_count=0 - this indicates a bug!",
 				s.ColumnName, s.NonNullCount)
+		}
+	}
+}
+
+func TestSchemaDiscoverer_DiscoverColumns_DetectsEnumValues(t *testing.T) {
+	tc := setupSchemaDiscovererTest(t)
+	ctx := context.Background()
+
+	// Create a Postgres enum type and a table that uses it
+	_, err := tc.discoverer.pool.Exec(ctx, `
+		DROP TABLE IF EXISTS test_enum_table;
+		DROP TYPE IF EXISTS test_status_enum;
+		CREATE TYPE test_status_enum AS ENUM ('not_submitted', 'submitted', 'approved', 'listed', 'rejected', 'blocked');
+		CREATE TABLE test_enum_table (
+			id serial PRIMARY KEY,
+			status test_status_enum NOT NULL,
+			name text
+		);
+	`)
+	if err != nil {
+		t.Fatalf("failed to create test enum type and table: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = tc.discoverer.pool.Exec(context.Background(), `
+			DROP TABLE IF EXISTS test_enum_table;
+			DROP TYPE IF EXISTS test_status_enum;
+		`)
+	})
+
+	columns, err := tc.discoverer.DiscoverColumns(ctx, "public", "test_enum_table")
+	if err != nil {
+		t.Fatalf("DiscoverColumns failed: %v", err)
+	}
+
+	if len(columns) != 3 {
+		t.Fatalf("expected 3 columns, got %d", len(columns))
+	}
+
+	// Find the status column
+	var statusCol *datasource.ColumnMetadata
+	for i := range columns {
+		if columns[i].ColumnName == "status" {
+			statusCol = &columns[i]
+			break
+		}
+	}
+	if statusCol == nil {
+		t.Fatal("status column not found")
+	}
+
+	// Verify data type is USER-DEFINED
+	if statusCol.DataType != "USER-DEFINED" {
+		t.Errorf("expected data_type 'USER-DEFINED', got %q", statusCol.DataType)
+	}
+
+	// Verify EnumValues is populated with correct values in correct order
+	expectedValues := []string{"not_submitted", "submitted", "approved", "listed", "rejected", "blocked"}
+	if len(statusCol.EnumValues) != len(expectedValues) {
+		t.Fatalf("expected %d enum values, got %d: %v", len(expectedValues), len(statusCol.EnumValues), statusCol.EnumValues)
+	}
+	for i, expected := range expectedValues {
+		if statusCol.EnumValues[i] != expected {
+			t.Errorf("enum value[%d]: expected %q, got %q", i, expected, statusCol.EnumValues[i])
+		}
+	}
+
+	// Verify non-enum columns have nil EnumValues
+	for _, col := range columns {
+		if col.ColumnName != "status" && col.EnumValues != nil {
+			t.Errorf("non-enum column %q should have nil EnumValues, got %v", col.ColumnName, col.EnumValues)
 		}
 	}
 }

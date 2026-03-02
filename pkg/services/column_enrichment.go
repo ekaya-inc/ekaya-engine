@@ -399,6 +399,12 @@ func (s *columnEnrichmentService) sampleEnumValues(
 
 	// Sample each enum candidate
 	for _, col := range enumCandidates {
+		// Use schema-defined enum values if available (Postgres enum types)
+		if len(col.EnumValues) > 0 {
+			result[col.ColumnName] = col.EnumValues
+			continue
+		}
+
 		values, err := adapter.GetDistinctValues(ctx, tableCtx.SchemaName, tableCtx.TableName, col.ColumnName, 50)
 		if err != nil {
 			s.logger.Debug("Failed to sample values for column, skipping",
@@ -499,6 +505,13 @@ func (s *columnEnrichmentService) identifyEnumCandidates(columns []*models.Schem
 
 	for _, col := range columns {
 		if seen[col.ID] {
+			continue
+		}
+
+		// Schema-defined enum values (Postgres enum types) are always candidates
+		if len(col.EnumValues) > 0 {
+			candidates = append(candidates, col)
+			seen[col.ID] = true
 			continue
 		}
 
@@ -1189,25 +1202,36 @@ func (s *columnEnrichmentService) saveEnrichments(
 			}
 		}
 
+		// Check if this column's metadata was curated by MCP/manual — if so, preserve
+		// user-curated fields (description, role, semantic_type, enum values) and only
+		// apply additive enrichments (synonyms, FK associations).
+		effectiveSource := meta.Source
+		if meta.LastEditSource != nil && *meta.LastEditSource != "" {
+			effectiveSource = *meta.LastEditSource
+		}
+		isCurated := effectiveSource == models.ProvenanceMCP || effectiveSource == models.ProvenanceManual
+
 		// Apply LLM enrichment data
 		if enrichment, ok := enrichmentByName[col.ColumnName]; ok {
-			// Description: LLM-generated description is the primary enrichment contribution
-			if enrichment.Description != "" {
-				meta.Description = &enrichment.Description
+			if !isCurated {
+				// Description: LLM-generated description is the primary enrichment contribution
+				if enrichment.Description != "" {
+					meta.Description = &enrichment.Description
+				}
+				// SemanticType: only set from LLM if not already populated by feature extraction
+				if enrichment.SemanticType != "" && (meta.SemanticType == nil || *meta.SemanticType == "") {
+					meta.SemanticType = &enrichment.SemanticType
+				}
+				// Role: only set from LLM if not already populated
+				if enrichment.Role != "" && (meta.Role == nil || *meta.Role == "") {
+					meta.Role = &enrichment.Role
+				}
 			}
-			// SemanticType: only set from LLM if not already populated by feature extraction
-			if enrichment.SemanticType != "" && (meta.SemanticType == nil || *meta.SemanticType == "") {
-				meta.SemanticType = &enrichment.SemanticType
-			}
-			// Role: only set from LLM if not already populated
-			if enrichment.Role != "" && (meta.Role == nil || *meta.Role == "") {
-				meta.Role = &enrichment.Role
-			}
-			// Synonyms: always apply from LLM
+			// Synonyms: always apply from LLM (additive, doesn't overwrite user curation)
 			if len(enrichment.Synonyms) > 0 {
 				meta.Features.Synonyms = enrichment.Synonyms
 			}
-			// FKAssociation: set on IdentifierFeatures if not already set
+			// FKAssociation: set on IdentifierFeatures if not already set (additive)
 			if enrichment.FKAssociation != nil && *enrichment.FKAssociation != "" {
 				if meta.Features.IdentifierFeatures == nil {
 					meta.Features.IdentifierFeatures = &models.IdentifierFeatures{}
@@ -1217,7 +1241,8 @@ func (s *columnEnrichmentService) saveEnrichments(
 				}
 			}
 			// EnumValues: convert and apply if metadata doesn't already have Phase 3 values
-			if len(enrichment.EnumValues) > 0 {
+			// Skip for curated metadata to preserve MCP/manual enum corrections
+			if !isCurated && len(enrichment.EnumValues) > 0 {
 				if meta.Features.EnumFeatures == nil || len(meta.Features.EnumFeatures.Values) == 0 {
 					if meta.Features.EnumFeatures == nil {
 						meta.Features.EnumFeatures = &models.EnumFeatures{}
@@ -1239,7 +1264,8 @@ func (s *columnEnrichmentService) saveEnrichments(
 
 		// Merge project-level enum definitions if available
 		// This overrides LLM-inferred enum values with explicit definitions
-		if sampledValues, hasSamples := enumSamples[col.ColumnName]; hasSamples && len(enumDefs) > 0 {
+		// Skip for curated metadata to preserve MCP/manual enum corrections
+		if sampledValues, hasSamples := enumSamples[col.ColumnName]; hasSamples && !isCurated && len(enumDefs) > 0 {
 			if mergedEnums := s.mergeEnumDefinitions(tableName, col.ColumnName, sampledValues, enumDefs); len(mergedEnums) > 0 {
 				hasDescriptions := false
 				for _, ev := range mergedEnums {

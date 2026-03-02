@@ -136,7 +136,7 @@ const setupMocks = (options: {
   if (hasOntology) {
     vi.mocked(engineApi.getOntologyDAGStatus).mockResolvedValue({
       success: true,
-      data: { dag_id: 'dag-1', status: 'completed', nodes: [] },
+      data: { dag_id: 'dag-1', status: 'completed', is_incremental: false, nodes: [] },
     });
   } else {
     vi.mocked(engineApi.getOntologyDAGStatus).mockResolvedValue({

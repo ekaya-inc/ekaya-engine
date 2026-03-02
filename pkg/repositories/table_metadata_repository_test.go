@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
@@ -706,6 +708,142 @@ func TestTableMetadataRepository_UpsertFromExtraction(t *testing.T) {
 	if retrieved.TableType == nil || *retrieved.TableType != tableType {
 		t.Errorf("expected table_type %q, got %v", tableType, retrieved.TableType)
 	}
+}
+
+// ============================================================================
+// UpsertFromExtraction: Provenance Protection Tests
+// ============================================================================
+
+func TestTableMetadataRepository_UpsertFromExtraction_PreservesMCPTableType(t *testing.T) {
+	tc := setupTableMetadataTest(t)
+	tc.cleanup()
+
+	// Step 1: Simulate MCP correcting table_type
+	ctx, cleanup := tc.createTestContextWithSource(models.SourceMCP)
+	defer cleanup()
+
+	schemaTable := tc.createTestSchemaTable(ctx, "public", "mcp_type_test")
+
+	mcpType := "reference"
+	mcpDesc := "Static reference table with 5 products"
+	mcpMeta := &models.TableMetadata{
+		ProjectID:     tc.projectID,
+		SchemaTableID: schemaTable.ID,
+		TableType:     &mcpType,
+		Description:   &mcpDesc,
+	}
+	err := tc.repo.Upsert(ctx, mcpMeta)
+	require.NoError(t, err)
+
+	// Verify MCP values are saved with source = 'mcp'
+	retrieved, err := tc.repo.GetBySchemaTableID(ctx, schemaTable.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retrieved)
+	assert.Equal(t, "mcp", retrieved.Source)
+
+	// Step 2: Simulate re-extraction trying to overwrite
+	inferredType := "transactional"
+	inferredDesc := "Table storing application data"
+	extractionMeta := &models.TableMetadata{
+		ProjectID:     tc.projectID,
+		SchemaTableID: schemaTable.ID,
+		TableType:     &inferredType,
+		Description:   &inferredDesc,
+	}
+	err = tc.repo.UpsertFromExtraction(ctx, extractionMeta)
+	require.NoError(t, err)
+
+	// Step 3: Verify MCP values are PRESERVED
+	retrieved, err = tc.repo.GetBySchemaTableID(ctx, schemaTable.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retrieved)
+	assert.Equal(t, mcpType, *retrieved.TableType, "MCP table_type should be preserved after re-extraction")
+	assert.Equal(t, mcpDesc, *retrieved.Description, "MCP description should be preserved after re-extraction")
+}
+
+func TestTableMetadataRepository_UpsertFromExtraction_PreservesManualValues(t *testing.T) {
+	tc := setupTableMetadataTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContextWithSource(models.SourceManual)
+	defer cleanup()
+
+	schemaTable := tc.createTestSchemaTable(ctx, "public", "manual_type_test")
+
+	manualType := "reference"
+	manualNotes := "Do not use for analytics, use billing table instead"
+	alt := "billing_transactions"
+	manualMeta := &models.TableMetadata{
+		ProjectID:            tc.projectID,
+		SchemaTableID:        schemaTable.ID,
+		TableType:            &manualType,
+		UsageNotes:           &manualNotes,
+		IsEphemeral:          true,
+		PreferredAlternative: &alt,
+	}
+	err := tc.repo.Upsert(ctx, manualMeta)
+	require.NoError(t, err)
+
+	// Re-extraction
+	inferredType := "transactional"
+	extractionMeta := &models.TableMetadata{
+		ProjectID:     tc.projectID,
+		SchemaTableID: schemaTable.ID,
+		TableType:     &inferredType,
+		IsEphemeral:   false,
+	}
+	err = tc.repo.UpsertFromExtraction(ctx, extractionMeta)
+	require.NoError(t, err)
+
+	// Verify manual values are preserved
+	retrieved, err := tc.repo.GetBySchemaTableID(ctx, schemaTable.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retrieved)
+	assert.Equal(t, manualType, *retrieved.TableType, "Manual table_type should be preserved")
+	assert.Equal(t, manualNotes, *retrieved.UsageNotes, "Manual usage_notes should be preserved")
+	assert.True(t, retrieved.IsEphemeral, "Manual is_ephemeral should be preserved")
+	assert.Equal(t, alt, *retrieved.PreferredAlternative, "Manual preferred_alternative should be preserved")
+}
+
+func TestTableMetadataRepository_UpsertFromExtraction_OverwritesInferredValues(t *testing.T) {
+	tc := setupTableMetadataTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	schemaTable := tc.createTestSchemaTable(ctx, "public", "inferred_type_test")
+
+	// Initial extraction
+	oldType := "logging"
+	oldDesc := "Log table"
+	initial := &models.TableMetadata{
+		ProjectID:     tc.projectID,
+		SchemaTableID: schemaTable.ID,
+		TableType:     &oldType,
+		Description:   &oldDesc,
+	}
+	err := tc.repo.UpsertFromExtraction(ctx, initial)
+	require.NoError(t, err)
+
+	// Re-extraction with better values
+	newType := "transactional"
+	newDesc := "Transaction events table"
+	updated := &models.TableMetadata{
+		ProjectID:     tc.projectID,
+		SchemaTableID: schemaTable.ID,
+		TableType:     &newType,
+		Description:   &newDesc,
+	}
+	err = tc.repo.UpsertFromExtraction(ctx, updated)
+	require.NoError(t, err)
+
+	// Inferred values SHOULD be overwritten
+	retrieved, err := tc.repo.GetBySchemaTableID(ctx, schemaTable.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retrieved)
+	assert.Equal(t, newType, *retrieved.TableType, "Inferred table_type should be overwritten")
+	assert.Equal(t, newDesc, *retrieved.Description, "Inferred description should be overwritten")
 }
 
 // ============================================================================

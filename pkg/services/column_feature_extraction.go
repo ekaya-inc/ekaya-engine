@@ -374,6 +374,11 @@ func (s *columnFeatureExtractionService) buildColumnProfile(
 		profile.MaxLength = col.MaxLength
 	}
 
+	// Populate schema-defined enum values (from Postgres pg_enum)
+	if len(col.EnumValues) > 0 {
+		profile.SchemaEnumValues = col.EnumValues
+	}
+
 	return profile
 }
 
@@ -438,6 +443,10 @@ func (s *columnFeatureExtractionService) routeToClassificationPath(profile *mode
 		return models.ClassificationPathJSON
 
 	default:
+		// USER-DEFINED columns with schema enum values are Postgres enum types
+		if len(profile.SchemaEnumValues) > 0 {
+			return models.ClassificationPathEnum
+		}
 		return models.ClassificationPathUnknown
 	}
 }
@@ -990,6 +999,62 @@ func (c *timestampClassifier) buildPrompt(profile *models.ColumnDataProfile) str
 	return sb.String()
 }
 
+// Name patterns that gate specific timestamp purposes. If the LLM classifies
+// a column with a guarded purpose but the column name doesn't match, the
+// classification is corrected to a safe default (event_time or scheduled_time).
+var (
+	softDeleteNamePattern   = regexp.MustCompile(`(?i)(^|_)(deleted|removed|archived|purged|discarded)(_at|_on|_date|_time)?$`)
+	auditCreatedNamePattern = regexp.MustCompile(`(?i)(^|_)(created|inserted|added)(_at|_on|_date|_time)?$|^date_created$|^creation_(time|date)$`)
+	auditUpdatedNamePattern = regexp.MustCompile(`(?i)(^|_)(updated|modified)(_at|_on|_date|_time)?$|^last_(modified|updated)(_at|_on)?$`)
+	dateColumnNamePattern   = regexp.MustCompile(`(?i)(^|_)date($|_)`)
+	completionNamePattern   = regexp.MustCompile(`(?i)(^|_)(completed|finished)(_at|_on|_date|_time)?$`)
+)
+
+// guardTimestampPurpose validates the LLM's timestamp purpose classification
+// against column name patterns. Certain purposes (soft_delete, audit_created,
+// audit_updated) have high impact on query generation and require matching
+// column names. If the name doesn't match, the purpose is corrected to a
+// safe default.
+func guardTimestampPurpose(columnName, llmPurpose string, isSoftDelete, isAuditField bool) (purpose string, softDelete, auditField bool) {
+	switch llmPurpose {
+	case models.TimestampPurposeSoftDelete:
+		if softDeleteNamePattern.MatchString(columnName) {
+			return llmPurpose, isSoftDelete, isAuditField
+		}
+		// Column name doesn't match deletion patterns — correct to safe default
+		return timestampFallbackPurpose(columnName), false, false
+
+	case models.TimestampPurposeAuditCreated:
+		if auditCreatedNamePattern.MatchString(columnName) {
+			return llmPurpose, isSoftDelete, isAuditField
+		}
+		return timestampFallbackPurpose(columnName), false, false
+
+	case models.TimestampPurposeAuditUpdated:
+		if auditUpdatedNamePattern.MatchString(columnName) {
+			return llmPurpose, isSoftDelete, isAuditField
+		}
+		return timestampFallbackPurpose(columnName), false, false
+
+	default:
+		// event_time, scheduled_time, expiration, cursor, completion — accept as-is
+		return llmPurpose, isSoftDelete, isAuditField
+	}
+}
+
+// timestampFallbackPurpose returns the appropriate fallback purpose when an
+// LLM classification is rejected. Date-named columns get scheduled_time;
+// completion-named columns get completion; everything else gets event_time.
+func timestampFallbackPurpose(columnName string) string {
+	if dateColumnNamePattern.MatchString(columnName) {
+		return models.TimestampPurposeScheduled
+	}
+	if completionNamePattern.MatchString(columnName) {
+		return models.TimestampPurposeCompletion
+	}
+	return models.TimestampPurposeEventTime
+}
+
 // timestampClassificationResponse is the expected JSON response from the LLM.
 type timestampClassificationResponse struct {
 	Purpose               string  `json:"purpose"`
@@ -1006,6 +1071,11 @@ func (c *timestampClassifier) parseResponse(profile *models.ColumnDataProfile, c
 	if err != nil {
 		return nil, fmt.Errorf("parse timestamp classification response: %w", err)
 	}
+
+	// Guard against LLM misclassifications using column name patterns
+	guardedPurpose, guardedSoftDelete, guardedAuditField := guardTimestampPurpose(
+		profile.ColumnName, response.Purpose, response.IsSoftDelete, response.IsAuditField,
+	)
 
 	// Determine timestamp scale from detected patterns
 	timestampScale := ""
@@ -1026,15 +1096,15 @@ func (c *timestampClassifier) parseResponse(profile *models.ColumnDataProfile, c
 		ColumnID:           profile.ColumnID,
 		ClassificationPath: models.ClassificationPathTimestamp,
 		Purpose:            models.PurposeTimestamp,
-		SemanticType:       response.Purpose,
+		SemanticType:       guardedPurpose,
 		Role:               models.RoleAttribute,
 		Description:        response.Description,
 		Confidence:         response.Confidence,
 		TimestampFeatures: &models.TimestampFeatures{
-			TimestampPurpose: response.Purpose,
+			TimestampPurpose: guardedPurpose,
 			TimestampScale:   timestampScale,
-			IsSoftDelete:     response.IsSoftDelete,
-			IsAuditField:     response.IsAuditField,
+			IsSoftDelete:     guardedSoftDelete,
+			IsAuditField:     guardedAuditField,
 		},
 		AnalyzedAt:   time.Now(),
 		LLMModelUsed: model,
@@ -1188,6 +1258,12 @@ func (c *enumClassifier) Classify(
 	llmFactory llm.LLMClientFactory,
 	getTenantCtx TenantContextFunc,
 ) (*models.ColumnFeatures, error) {
+	// When schema-defined enum values are available (Postgres enum types), build features
+	// directly without LLM — the values are definitive from the database schema.
+	if len(profile.SchemaEnumValues) > 0 {
+		return c.classifyFromSchemaEnum(profile), nil
+	}
+
 	// Acquire fresh connection for this classification to avoid "conn busy" errors
 	// when multiple classifiers run in parallel
 	workCtx := ctx
@@ -1215,6 +1291,36 @@ func (c *enumClassifier) Classify(
 	}
 
 	return c.parseResponse(profile, result.Content, llmClient.GetModel())
+}
+
+// classifyFromSchemaEnum builds ColumnFeatures directly from Postgres enum type values.
+// No LLM call needed — the enum values are definitive from the database schema.
+func (c *enumClassifier) classifyFromSchemaEnum(profile *models.ColumnDataProfile) *models.ColumnFeatures {
+	values := make([]models.ColumnEnumValue, len(profile.SchemaEnumValues))
+	for i, v := range profile.SchemaEnumValues {
+		values[i] = models.ColumnEnumValue{
+			Value: v,
+			Label: v, // Use the enum value as its own label
+		}
+	}
+
+	features := &models.ColumnFeatures{
+		ColumnID:           profile.ColumnID,
+		ClassificationPath: models.ClassificationPathEnum,
+		Purpose:            models.PurposeEnum,
+		SemanticType:       "enum",
+		Role:               models.RoleAttribute,
+		Description:        fmt.Sprintf("Postgres enum type with %d values", len(profile.SchemaEnumValues)),
+		Confidence:         1.0, // Schema-defined enums have maximum confidence
+		EnumFeatures: &models.EnumFeatures{
+			Values: values,
+		},
+		NeedsEnumAnalysis: true, // Still flag for Phase 3 detailed analysis (state machine detection)
+		AnalyzedAt:        time.Now(),
+		LLMModelUsed:      "schema", // Indicates values came from schema, not LLM
+	}
+
+	return features
 }
 
 func (c *enumClassifier) systemMessage() string {
@@ -1603,7 +1709,7 @@ func (c *numericClassifier) Classify(
 
 func (c *numericClassifier) systemMessage() string {
 	return `You are a database schema analyst. Your task is to classify numeric columns.
-Determine if the column represents a measure (amount, count, quantity) or an identifier.
+Determine if the column represents a measure (amount, count, quantity), an identifier that references another entity, or an ordinal/sequence number.
 Respond with valid JSON only.`
 }
 
@@ -1632,11 +1738,13 @@ func (c *numericClassifier) buildPrompt(profile *models.ColumnDataProfile) strin
 	sb.WriteString("Classify this numeric column:\n\n")
 
 	sb.WriteString("**Numeric types:**\n")
-	sb.WriteString("- `identifier`: Numeric ID (auto-increment, serial)\n")
+	sb.WriteString("- `identifier`: Numeric ID that references another entity (e.g., user_id, app_id, parent_id). The column value points to a specific row in another table.\n")
+	sb.WriteString("- `ordinal`: Sequential or positional number (e.g., week_number, step_number, day_offset, sort_order, position, rank). The value represents order or sequence within the current table's context, NOT a reference to another table.\n")
 	sb.WriteString("- `measure`: Quantitative value (amount, cost, rate, score, duration). Includes columns with aggregation prefixes (avg_, total_, sum_, min_, max_, mean_) and business KPI abbreviations (cpa, cpc, cpm, roi, roa, ltv, arpu, mrr, arr)\n")
 	sb.WriteString("- `monetary`: Money amount (may need currency pairing)\n")
 	sb.WriteString("- `percentage`: Percentage or ratio\n")
 	sb.WriteString("- `count`: Integer count of items\n")
+	sb.WriteString("\n**Distinguishing identifiers from ordinals:** Columns named *_number, *_week, *_offset, *_order, *_position, *_step, *_rank, *_index, *_day, *_month, *_year are typically ordinals. An identifier references a specific row in another table (e.g., user_id references users). An ordinal represents a position or sequence within the current table's context (e.g., week_number is the week of the year, not a reference to a weeks table).\n")
 
 	sb.WriteString("\n## Response Format\n\n")
 	sb.WriteString("```json\n")
@@ -1673,6 +1781,12 @@ func (c *numericClassifier) parseResponse(profile *models.ColumnDataProfile, con
 			role = models.RolePrimaryKey
 		}
 		// Non-PK identifiers keep role: "attribute" and get flagged for FK resolution below
+	} else if response.NumericType == "ordinal" {
+		// Ordinals are positional/sequential numbers (week_number, step_number, etc.)
+		// They get purpose: identifier (they are numeric identifiers) but NOT role: foreign_key
+		// and NOT NeedsFKResolution — they don't reference other tables
+		purpose = models.PurposeIdentifier
+		role = models.RoleAttribute
 	}
 	if response.NumericType == "measure" || response.NumericType == "monetary" || response.NumericType == "percentage" || response.NumericType == "count" {
 		role = models.RoleMeasure
@@ -2103,6 +2217,14 @@ func (s *columnFeatureExtractionService) analyzeEnumColumn(
 	projectID uuid.UUID,
 	profile *models.ColumnDataProfile,
 ) (*EnumAnalysisResult, error) {
+	// When schema-defined enum values are available (Postgres enum types),
+	// populate SampleValues so the LLM prompt has values to work with.
+	// The LLM still runs to generate meaningful descriptions and labels.
+	if len(profile.SchemaEnumValues) > 0 && len(profile.SampleValues) == 0 {
+		profile.SampleValues = profile.SchemaEnumValues
+		profile.DistinctCount = int64(len(profile.SchemaEnumValues))
+	}
+
 	// Acquire fresh connection to avoid concurrent map access crashes
 	// when multiple workers call CreateForProject simultaneously
 	workCtx := ctx
@@ -2150,7 +2272,12 @@ func (s *columnFeatureExtractionService) buildEnumAnalysisPrompt(profile *models
 	sb.WriteString(fmt.Sprintf("**Data type:** %s\n", profile.DataType))
 	sb.WriteString(fmt.Sprintf("**Distinct values:** %d\n", profile.DistinctCount))
 
-	if len(profile.SampleValues) > 0 {
+	if len(profile.SchemaEnumValues) > 0 {
+		sb.WriteString("\n**Values (definitive — Postgres enum type, this is the complete list):**\n")
+		for _, val := range profile.SchemaEnumValues {
+			sb.WriteString(fmt.Sprintf("- `%s`\n", val))
+		}
+	} else if len(profile.SampleValues) > 0 {
 		sb.WriteString("\n**Values found in data:**\n")
 		for _, val := range profile.SampleValues {
 			sb.WriteString(fmt.Sprintf("- `%s`\n", val))

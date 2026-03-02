@@ -2594,3 +2594,64 @@ func TestCollectCandidates_ContinuesOnNonFatalErrors(t *testing.T) {
 	assert.Zero(t, candidate.SourceDistinctCount)
 	assert.Empty(t, candidate.SourceSamples)
 }
+
+// ============================================================================
+// Multi-Target Filter Tests
+// ============================================================================
+
+func TestFilterMultiTargetCandidates_RejectsThreeOrMoreTargets(t *testing.T) {
+	collector := newTestCandidateCollector(&mockSchemaRepoForCandidateCollector{})
+
+	// week_number matches 3 different target tables (coincidental small-integer overlap)
+	candidates := []*RelationshipCandidate{
+		{SourceTable: "content_posts", SourceColumn: "week_number", TargetTable: "post_channel_steps", TargetColumn: "id"},
+		{SourceTable: "content_posts", SourceColumn: "week_number", TargetTable: "marketing_tasks", TargetColumn: "id"},
+		{SourceTable: "content_posts", SourceColumn: "week_number", TargetTable: "directory_submissions", TargetColumn: "id"},
+	}
+
+	filtered := collector.filterMultiTargetCandidates(candidates)
+	assert.Empty(t, filtered, "source column matching 3+ targets should be rejected entirely")
+}
+
+func TestFilterMultiTargetCandidates_KeepsOneOrTwoTargets(t *testing.T) {
+	collector := newTestCandidateCollector(&mockSchemaRepoForCandidateCollector{})
+
+	candidates := []*RelationshipCandidate{
+		// app_id matches 1 target (legitimate FK)
+		{SourceTable: "content_posts", SourceColumn: "app_id", TargetTable: "applications", TargetColumn: "id"},
+		// user_id matches 2 targets (possibly legitimate)
+		{SourceTable: "orders", SourceColumn: "user_id", TargetTable: "users", TargetColumn: "id"},
+		{SourceTable: "orders", SourceColumn: "user_id", TargetTable: "user_profiles", TargetColumn: "user_id"},
+	}
+
+	filtered := collector.filterMultiTargetCandidates(candidates)
+	assert.Len(t, filtered, 3, "source columns with 1-2 targets should be kept")
+}
+
+func TestFilterMultiTargetCandidates_MixedColumns(t *testing.T) {
+	collector := newTestCandidateCollector(&mockSchemaRepoForCandidateCollector{})
+
+	candidates := []*RelationshipCandidate{
+		// Legitimate FK: app_id -> applications.id (1 target)
+		{SourceTable: "content_posts", SourceColumn: "app_id", TargetTable: "applications", TargetColumn: "id"},
+		// Suspicious: week_number matches 4 targets
+		{SourceTable: "content_posts", SourceColumn: "week_number", TargetTable: "table_a", TargetColumn: "id"},
+		{SourceTable: "content_posts", SourceColumn: "week_number", TargetTable: "table_b", TargetColumn: "id"},
+		{SourceTable: "content_posts", SourceColumn: "week_number", TargetTable: "table_c", TargetColumn: "id"},
+		{SourceTable: "content_posts", SourceColumn: "week_number", TargetTable: "table_d", TargetColumn: "id"},
+	}
+
+	filtered := collector.filterMultiTargetCandidates(candidates)
+	assert.Len(t, filtered, 1, "only the legitimate FK should remain")
+	assert.Equal(t, "app_id", filtered[0].SourceColumn)
+}
+
+func TestFilterMultiTargetCandidates_EmptyInput(t *testing.T) {
+	collector := newTestCandidateCollector(&mockSchemaRepoForCandidateCollector{})
+
+	filtered := collector.filterMultiTargetCandidates(nil)
+	assert.Empty(t, filtered)
+
+	filtered = collector.filterMultiTargetCandidates([]*RelationshipCandidate{})
+	assert.Empty(t, filtered)
+}

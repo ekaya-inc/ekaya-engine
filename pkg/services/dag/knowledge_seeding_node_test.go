@@ -111,7 +111,7 @@ func TestKnowledgeSeedingNode_Execute_NoOp(t *testing.T) {
 		ProjectID: uuid.New(),
 	}
 
-	err := node.Execute(context.Background(), dag)
+	err := node.Execute(context.Background(), dag, nil)
 	assert.NoError(t, err)
 
 	// Verify progress message indicates no-op behavior
@@ -143,7 +143,7 @@ func TestKnowledgeSeedingNode_Execute_WithExtraction(t *testing.T) {
 		DatasourceID: uuid.New(),
 	}
 
-	err := node.Execute(context.Background(), dag)
+	err := node.Execute(context.Background(), dag, nil)
 	assert.NoError(t, err)
 
 	// Verify progress message indicates facts were extracted
@@ -175,7 +175,7 @@ func TestKnowledgeSeedingNode_Execute_NoFactsExtracted(t *testing.T) {
 		DatasourceID: uuid.New(),
 	}
 
-	err := node.Execute(context.Background(), dag)
+	err := node.Execute(context.Background(), dag, nil)
 	assert.NoError(t, err)
 
 	// Verify progress message indicates no facts
@@ -208,7 +208,7 @@ func TestKnowledgeSeedingNode_Execute_ExtractionError(t *testing.T) {
 	}
 
 	// Should NOT fail - knowledge seeding errors are logged but don't block the pipeline
-	err := node.Execute(context.Background(), dag)
+	err := node.Execute(context.Background(), dag, nil)
 	assert.NoError(t, err)
 
 	// Verify progress message indicates no facts (graceful degradation)
@@ -242,7 +242,7 @@ func TestKnowledgeSeedingNode_Execute_EndpointError_Propagates(t *testing.T) {
 	}
 
 	// Should FAIL - endpoint errors must propagate to show user the configuration problem
-	err := node.Execute(context.Background(), dag)
+	err := node.Execute(context.Background(), dag, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "LLM configuration error")
 }
@@ -274,7 +274,7 @@ func TestKnowledgeSeedingNode_Execute_AuthError_Propagates(t *testing.T) {
 	}
 
 	// Should FAIL - auth errors must propagate
-	err := node.Execute(context.Background(), dag)
+	err := node.Execute(context.Background(), dag, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "LLM configuration error")
 }

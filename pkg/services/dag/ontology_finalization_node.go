@@ -40,7 +40,7 @@ func NewOntologyFinalizationNode(
 // Note: This node does not require dag.OntologyID as input. The finalization service
 // looks up the ontology by projectID internally. The node aggregates table/column
 // metadata into the final ontology structure (domain summary, conventions).
-func (n *OntologyFinalizationNode) Execute(ctx context.Context, dag *models.OntologyDAG) error {
+func (n *OntologyFinalizationNode) Execute(ctx context.Context, dag *models.OntologyDAG, changeSet *models.ChangeSet) error {
 	n.Logger().Info("Starting ontology finalization",
 		zap.String("project_id", dag.ProjectID.String()))
 

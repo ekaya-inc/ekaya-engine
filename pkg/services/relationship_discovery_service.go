@@ -369,13 +369,13 @@ func (s *llmRelationshipDiscoveryService) preserveColumnFeaturesFKs(
 			continue
 		}
 
-		// Compute cardinality from actual data
-		cardinality := models.CardinalityNTo1 // Default
+		// Compute cardinality from schema constraints + join statistics
+		cardinality := models.CardinalityNTo1
 		joinResult, err := discoverer.AnalyzeJoin(ctx,
 			sourceTable.SchemaName, sourceTable.TableName, col.ColumnName,
 			targetTable.SchemaName, targetTable.TableName, targetCol.ColumnName)
 		if err == nil {
-			cardinality = InferCardinality(joinResult)
+			cardinality = InferCardinality(col.IsPrimaryKey, col.IsUnique, joinResult)
 		}
 
 		inferenceMethod := models.InferenceMethodColumnFeatures
@@ -440,16 +440,12 @@ func (s *llmRelationshipDiscoveryService) createSchemaRelationshipFromValidation
 			candidate.TargetTable, targetTable != nil)
 	}
 
-	// Compute cardinality from actual join data, not LLM response.
-	// The LLM tends to default to "N:1" without analyzing join statistics.
-	// InferCardinality uses the ratio of JoinCount to matched values to determine
-	// the actual relationship cardinality (1:1, N:1, 1:N, or N:M).
-	joinAnalysis := &datasource.JoinAnalysis{
-		JoinCount:     candidate.JoinCount,
-		SourceMatched: candidate.SourceMatched,
-		TargetMatched: candidate.TargetMatched,
-	}
-	cardinality := InferCardinality(joinAnalysis)
+	// Use the validator's deterministically computed cardinality.
+	// The validator computes cardinality from schema constraints (PK/unique)
+	// which is authoritative for FK relationships:
+	// - Non-unique, non-PK source → always N:1 (the standard FK pattern)
+	// - Unique/PK source with 1:1 mapping → 1:1
+	cardinality := result.Cardinality
 
 	inferenceMethod := models.InferenceMethodPKMatch
 	rel := &models.SchemaRelationship{

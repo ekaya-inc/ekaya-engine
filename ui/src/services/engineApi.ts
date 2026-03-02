@@ -42,6 +42,7 @@ import type {
   MCPAuditEvent,
   MCPConfigResponse,
   OntologyChange,
+  OntologyStatusResponse,
   PaginatedResponse,
   ParseProjectKnowledgeResponse,
   ProjectKnowledge,
@@ -1123,6 +1124,19 @@ class EngineApiService {
   ): Promise<ApiResponse<DAGStatusResponse | null>> {
     return this.makeRequest<DAGStatusResponse | null>(
       `/${projectId}/datasources/${datasourceId}/ontology/dag`
+    );
+  }
+
+  /**
+   * Get ontology status with change detection
+   * GET /api/projects/{projectId}/datasources/{datasourceId}/ontology/status
+   */
+  async getOntologyStatus(
+    projectId: string,
+    datasourceId: string
+  ): Promise<ApiResponse<OntologyStatusResponse>> {
+    return this.makeRequest<OntologyStatusResponse>(
+      `/${projectId}/datasources/${datasourceId}/ontology/status`
     );
   }
 

@@ -227,7 +227,7 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 		mcp.WithDescription(
 			"Add or update semantic information about a column in the ontology. "+
 				"The table and column name form the upsert key - if metadata exists for this column, it will be updated; otherwise, new metadata is created. "+
-				"Optional parameters (description, enum_values, entity, role) are merged with existing data when provided. "+
+				"Optional parameters (description, semantic_type, enum_values, entity, role) are merged with existing data when provided. "+
 				"Omitted parameters preserve existing values. "+
 				"Example: update_column(table='users', column='status', description='User account status', enum_values=['ACTIVE - Normal active account', 'SUSPENDED - Temporarily disabled'], entity='User', role='attribute')",
 		),
@@ -244,6 +244,10 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 		mcp.WithString(
 			"description",
 			mcp.Description("Optional - Business description of what this column represents"),
+		),
+		mcp.WithString(
+			"semantic_type",
+			mcp.Description("Optional - Semantic type override (e.g., 'event_time', 'scheduled_time', 'soft_delete_timestamp', 'currency_cents', 'status_enum'). Overrides the inferred semantic_type."),
 		),
 		mcp.WithArray(
 			"enum_values",
@@ -301,6 +305,7 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 
 		// Get optional parameters
 		description := getOptionalString(req, "description")
+		semanticType := getOptionalString(req, "semantic_type")
 		entity := getOptionalString(req, "entity")
 		role := getOptionalString(req, "role")
 
@@ -424,6 +429,9 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 		if description != "" {
 			colMeta.Description = &description
 		}
+		if semanticType != "" {
+			colMeta.SemanticType = &semanticType
+		}
 		if entity != "" {
 			if colMeta.Features.IdentifierFeatures == nil {
 				colMeta.Features.IdentifierFeatures = &models.IdentifierFeatures{}
@@ -454,14 +462,15 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 
 		// Build response
 		response := updateColumnResponse{
-			Table:       table,
-			Column:      column,
-			Description: description,
-			EnumValues:  enumValues,
-			Entity:      entity,
-			Role:        role,
-			IsSensitive: isSensitive,
-			Created:     isNew,
+			Table:        table,
+			Column:       column,
+			Description:  description,
+			SemanticType: semanticType,
+			EnumValues:   enumValues,
+			Entity:       entity,
+			Role:         role,
+			IsSensitive:  isSensitive,
+			Created:      isNew,
 		}
 
 		jsonResult, err := json.Marshal(response)
@@ -740,14 +749,15 @@ func formatEnumValues(enumValues []models.EnumValue) []string {
 
 // updateColumnResponse is the response format for update_column tool.
 type updateColumnResponse struct {
-	Table       string   `json:"table"`
-	Column      string   `json:"column"`
-	Description string   `json:"description,omitempty"`
-	EnumValues  []string `json:"enum_values,omitempty"`
-	Entity      string   `json:"entity,omitempty"`
-	Role        string   `json:"role,omitempty"`
-	IsSensitive *bool    `json:"is_sensitive,omitempty"` // nil=auto-detect, true=always sensitive, false=never sensitive
-	Created     bool     `json:"created"`                // true if column was newly added, false if updated
+	Table        string   `json:"table"`
+	Column       string   `json:"column"`
+	Description  string   `json:"description,omitempty"`
+	SemanticType string   `json:"semantic_type,omitempty"`
+	EnumValues   []string `json:"enum_values,omitempty"`
+	Entity       string   `json:"entity,omitempty"`
+	Role         string   `json:"role,omitempty"`
+	IsSensitive  *bool    `json:"is_sensitive,omitempty"` // nil=auto-detect, true=always sensitive, false=never sensitive
+	Created      bool     `json:"created"`                // true if column was newly added, false if updated
 }
 
 // deleteColumnMetadataResponse is the response format for delete_column_metadata tool.

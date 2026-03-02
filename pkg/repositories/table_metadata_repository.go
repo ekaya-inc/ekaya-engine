@@ -73,6 +73,10 @@ func (r *tableMetadataRepository) UpsertFromExtraction(ctx context.Context, meta
 	now := time.Now()
 	meta.Source = "inferred"
 
+	// On conflict, preserve user-curated values (MCP/manual) for content fields.
+	// User-curated = last_edit_source IN ('mcp', 'manual') OR source IN ('mcp', 'manual') when never edited.
+	// Protected fields: table_type, description, usage_notes, is_ephemeral, preferred_alternative
+	// Always updated: features, confidence, analysis metadata
 	query := `
 		INSERT INTO engine_ontology_table_metadata (
 			project_id, schema_table_id,
@@ -82,11 +86,41 @@ func (r *tableMetadataRepository) UpsertFromExtraction(ctx context.Context, meta
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		ON CONFLICT (project_id, schema_table_id)
 		DO UPDATE SET
-			table_type = COALESCE(EXCLUDED.table_type, engine_ontology_table_metadata.table_type),
-			description = COALESCE(EXCLUDED.description, engine_ontology_table_metadata.description),
-			usage_notes = COALESCE(EXCLUDED.usage_notes, engine_ontology_table_metadata.usage_notes),
-			is_ephemeral = EXCLUDED.is_ephemeral,
-			preferred_alternative = COALESCE(EXCLUDED.preferred_alternative, engine_ontology_table_metadata.preferred_alternative),
+			table_type = CASE
+				WHEN engine_ontology_table_metadata.last_edit_source IN ('mcp', 'manual')
+				  OR (engine_ontology_table_metadata.last_edit_source IS NULL
+				      AND engine_ontology_table_metadata.source IN ('mcp', 'manual'))
+				THEN engine_ontology_table_metadata.table_type
+				ELSE COALESCE(EXCLUDED.table_type, engine_ontology_table_metadata.table_type)
+			END,
+			description = CASE
+				WHEN engine_ontology_table_metadata.last_edit_source IN ('mcp', 'manual')
+				  OR (engine_ontology_table_metadata.last_edit_source IS NULL
+				      AND engine_ontology_table_metadata.source IN ('mcp', 'manual'))
+				THEN engine_ontology_table_metadata.description
+				ELSE COALESCE(EXCLUDED.description, engine_ontology_table_metadata.description)
+			END,
+			usage_notes = CASE
+				WHEN engine_ontology_table_metadata.last_edit_source IN ('mcp', 'manual')
+				  OR (engine_ontology_table_metadata.last_edit_source IS NULL
+				      AND engine_ontology_table_metadata.source IN ('mcp', 'manual'))
+				THEN engine_ontology_table_metadata.usage_notes
+				ELSE COALESCE(EXCLUDED.usage_notes, engine_ontology_table_metadata.usage_notes)
+			END,
+			is_ephemeral = CASE
+				WHEN engine_ontology_table_metadata.last_edit_source IN ('mcp', 'manual')
+				  OR (engine_ontology_table_metadata.last_edit_source IS NULL
+				      AND engine_ontology_table_metadata.source IN ('mcp', 'manual'))
+				THEN engine_ontology_table_metadata.is_ephemeral
+				ELSE EXCLUDED.is_ephemeral
+			END,
+			preferred_alternative = CASE
+				WHEN engine_ontology_table_metadata.last_edit_source IN ('mcp', 'manual')
+				  OR (engine_ontology_table_metadata.last_edit_source IS NULL
+				      AND engine_ontology_table_metadata.source IN ('mcp', 'manual'))
+				THEN engine_ontology_table_metadata.preferred_alternative
+				ELSE COALESCE(EXCLUDED.preferred_alternative, engine_ontology_table_metadata.preferred_alternative)
+			END,
 			confidence = COALESCE(EXCLUDED.confidence, engine_ontology_table_metadata.confidence),
 			features = EXCLUDED.features,
 			analyzed_at = EXCLUDED.analyzed_at,

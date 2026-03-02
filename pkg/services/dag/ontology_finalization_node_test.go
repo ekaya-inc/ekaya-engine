@@ -124,7 +124,7 @@ func TestOntologyFinalizationNode_Execute_Success(t *testing.T) {
 		ProjectID: projectID,
 	}
 
-	err := node.Execute(ctx, dag)
+	err := node.Execute(ctx, dag, nil)
 	require.NoError(t, err)
 
 	require.Len(t, progressReports, 2)
@@ -151,7 +151,7 @@ func TestOntologyFinalizationNode_Execute_ServiceError(t *testing.T) {
 		ProjectID: uuid.New(),
 	}
 
-	err := node.Execute(ctx, dag)
+	err := node.Execute(ctx, dag, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "finalize ontology")
 	assert.Contains(t, err.Error(), "finalization failed")
@@ -181,7 +181,7 @@ func TestOntologyFinalizationNode_Execute_ProgressReportingError(t *testing.T) {
 	}
 
 	// Should succeed despite progress reporting errors
-	err := node.Execute(ctx, dag)
+	err := node.Execute(ctx, dag, nil)
 	require.NoError(t, err)
 }
 

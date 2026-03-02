@@ -48,10 +48,20 @@ func NewTableFeatureExtractionNode(
 // Note: This node does not require dag.OntologyID. Table feature extraction generates
 // table-level descriptions based on column features and schema structure, storing
 // results in engine metadata tables independently of the ontology.
-func (n *TableFeatureExtractionNode) Execute(ctx context.Context, dag *models.OntologyDAG) error {
+func (n *TableFeatureExtractionNode) Execute(ctx context.Context, dag *models.OntologyDAG, changeSet *models.ChangeSet) error {
 	n.Logger().Info("Starting table feature extraction",
 		zap.String("project_id", dag.ProjectID.String()),
 		zap.String("datasource_id", dag.DatasourceID.String()))
+
+	// During incremental extraction, skip if no tables were affected
+	if changeSet != nil && !changeSet.HasChangedTables() {
+		n.Logger().Info("Skipping table feature extraction (no affected tables)",
+			zap.String("project_id", dag.ProjectID.String()))
+		if err := n.ReportProgress(ctx, 1, 1, "Skipped (no affected tables)"); err != nil {
+			n.Logger().Warn("Failed to report progress", zap.Error(err))
+		}
+		return nil
+	}
 
 	// Report initial progress
 	if err := n.ReportProgress(ctx, 0, 1, "Analyzing tables..."); err != nil {
