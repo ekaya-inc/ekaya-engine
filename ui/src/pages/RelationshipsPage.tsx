@@ -53,6 +53,7 @@ const RelationshipsPage = () => {
 
   // Dialog state
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [addDialogDefaultTable, setAddDialogDefaultTable] = useState<string | undefined>(undefined);
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
   const [relationshipToRemove, setRelationshipToRemove] = useState<RelationshipDetail | null>(null);
 
@@ -76,6 +77,12 @@ const RelationshipsPage = () => {
   // Parameter is ignored since we refetch the full list
   const handleRelationshipAdded = (_newRelationship: RelationshipDetail): void => {
     refetchRelationships();
+  };
+
+  // Handler to open add relationship dialog, optionally pre-filling the source table
+  const openAddDialog = (defaultTable?: string): void => {
+    setAddDialogDefaultTable(defaultTable);
+    setAddDialogOpen(true);
   };
 
   // Handler to open remove confirmation dialog
@@ -290,7 +297,7 @@ const RelationshipsPage = () => {
                 Go to Ontology
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
-              <Button variant="outline" onClick={() => setAddDialogOpen(true)}>
+              <Button variant="outline" onClick={() => openAddDialog()}>
                 <Plus className="mr-2 h-4 w-4" />
                 Add Relationship
               </Button>
@@ -356,21 +363,34 @@ const RelationshipsPage = () => {
                   <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
                     {tablesWithoutRelationships} table{tablesWithoutRelationships !== 1 ? 's' : ''} without relationships
                   </p>
-                  <p className="text-xs text-amber-600 dark:text-amber-400">
-                    {emptyTableCount > 0 && `${emptyTableCount} empty`}
-                    {emptyTableCount > 0 && orphanTableCount > 0 && ', '}
-                    {orphanTableCount > 0 && `${orphanTableCount} with no relationships`}
-                  </p>
+                  {emptyTableCount > 0 && orphanTableCount > 0 && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                      {emptyTableCount} empty, {orphanTableCount} with data
+                    </p>
+                  )}
                 </div>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => navigate(`/projects/${pid}/ontology`)}
-              >
-                Go to Ontology
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
+              {orphanTableCount > 0 || emptyTableCount > 0 ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    document.getElementById('no-relationships-section')?.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                >
+                  View Tables
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate(`/projects/${pid}/ontology`)}
+                >
+                  Go to Ontology
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              )}
             </div>
           )}
 
@@ -468,7 +488,7 @@ const RelationshipsPage = () => {
                 </span>
               )}
             </div>
-            <Button variant="outline" size="sm" onClick={() => setAddDialogOpen(true)}>
+            <Button variant="outline" size="sm" onClick={() => openAddDialog()}>
               <Plus className="mr-2 h-4 w-4" />
               Add Relationship
             </Button>
@@ -637,6 +657,77 @@ const RelationshipsPage = () => {
         </CardContent>
       </Card>
 
+      {/* No Relationships Section */}
+      {(orphanTables.length > 0 || emptyTables.length > 0) && (
+        <Card id="no-relationships-section" className="mt-6">
+          <CardHeader>
+            <CardTitle>
+              No Relationships ({orphanTables.length + emptyTables.length})
+            </CardTitle>
+            <CardDescription>
+              {orphanTableCount > 0 && emptyTableCount > 0
+                ? `${orphanTableCount} table${orphanTableCount !== 1 ? 's' : ''} with data but no relationships, ${emptyTableCount} empty table${emptyTableCount !== 1 ? 's' : ''}`
+                : orphanTableCount > 0
+                ? `${orphanTableCount} table${orphanTableCount !== 1 ? 's' : ''} with data but no relationships`
+                : `${emptyTableCount} empty table${emptyTableCount !== 1 ? 's' : ''}`}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {/* Orphan tables - have data but no relationships */}
+              {orphanTables.map(tableName => (
+                <div
+                  key={tableName}
+                  className="flex items-center justify-between p-3 border border-border-light rounded-lg hover:bg-surface-secondary/30"
+                >
+                  <div className="flex items-center gap-3">
+                    <AlertTriangle className="h-4 w-4 text-amber-500" />
+                    <span className="font-medium text-text-primary">{tableName}</span>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openAddDialog(tableName)}
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Relationship
+                  </Button>
+                </div>
+              ))}
+
+              {/* Empty tables - no data */}
+              {emptyTables.map(tableName => (
+                <div
+                  key={tableName}
+                  className="flex items-center justify-between p-3 border border-border-light rounded-lg"
+                >
+                  <div className="flex items-center gap-3">
+                    <Circle className="h-4 w-4 text-gray-400" />
+                    <span className="font-medium text-text-primary">{tableName}</span>
+                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                      Empty
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-muted-foreground">
+                      Can&apos;t be inferred without data
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => openAddDialog(tableName)}
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add Relationship
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Add Relationship Dialog */}
       <AddRelationshipDialog
         open={addDialogOpen}
@@ -645,6 +736,7 @@ const RelationshipsPage = () => {
         datasourceId={selectedDatasource?.datasourceId ?? ''}
         schema={schema}
         onRelationshipAdded={handleRelationshipAdded}
+        defaultSourceTable={addDialogDefaultTable}
       />
 
       {/* Remove Relationship Confirmation */}

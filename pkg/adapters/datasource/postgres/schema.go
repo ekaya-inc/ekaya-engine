@@ -99,12 +99,14 @@ func (d *SchemaDiscoverer) SupportsForeignKeys() bool {
 }
 
 // DiscoverTables returns all user tables (excludes system schemas).
+// For tables where pg_class.reltuples is unavailable or stale (e.g. never ANALYZEd),
+// falls back to SELECT COUNT(*) to get accurate row counts.
 func (d *SchemaDiscoverer) DiscoverTables(ctx context.Context) ([]datasource.TableMetadata, error) {
 	const query = `
 		SELECT
 			t.table_schema,
 			t.table_name,
-			COALESCE(c.reltuples::bigint, 0) as row_count
+			COALESCE(c.reltuples::bigint, -1) as row_count
 		FROM information_schema.tables t
 		LEFT JOIN pg_class c ON c.relname = t.table_name
 		LEFT JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = t.table_schema
@@ -130,6 +132,23 @@ func (d *SchemaDiscoverer) DiscoverTables(ctx context.Context) ([]datasource.Tab
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate tables: %w", err)
+	}
+
+	// Fall back to COUNT(*) for tables where reltuples is unavailable (never ANALYZEd).
+	// This only fires for small/new tables — large tables will already have valid reltuples
+	// from autovacuum. Using fmt.Sprintf is safe here since schema/table names come from
+	// information_schema (system catalog), not user input.
+	for i := range tables {
+		if tables[i].RowCount < 0 {
+			var count int64
+			countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM %q.%q`, tables[i].SchemaName, tables[i].TableName)
+			if err := d.pool.QueryRow(ctx, countQuery).Scan(&count); err != nil {
+				// Non-fatal: fall back to 0 if COUNT(*) fails (e.g. permissions)
+				tables[i].RowCount = 0
+			} else {
+				tables[i].RowCount = count
+			}
+		}
 	}
 
 	return tables, nil

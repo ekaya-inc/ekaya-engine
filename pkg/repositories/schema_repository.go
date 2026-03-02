@@ -1265,23 +1265,31 @@ func (r *schemaRepository) GetEmptyTables(ctx context.Context, projectID, dataso
 	}
 
 	// Build query - uuid.Nil means "all datasources"
+	// Empty tables with no relationships. Excludes tables that have manually-added
+	// relationships, mirroring the NOT EXISTS check in GetOrphanTables.
 	query := `
-		SELECT table_name
-		FROM engine_schema_tables
-		WHERE project_id = $1
-		  AND deleted_at IS NULL
-		  AND (row_count IS NULL OR row_count = 0)`
+		SELECT t.table_name
+		FROM engine_schema_tables t
+		WHERE t.project_id = $1
+		  AND t.deleted_at IS NULL
+		  AND (t.row_count IS NULL OR t.row_count <= 0)
+		  AND NOT EXISTS (
+			  SELECT 1 FROM engine_schema_relationships r
+			  WHERE r.deleted_at IS NULL
+			    AND r.rejection_reason IS NULL
+			    AND (r.source_table_id = t.id OR r.target_table_id = t.id)
+		  )`
 
 	var args []any
 	args = append(args, projectID)
 
 	// Filter by datasource unless uuid.Nil (which means all datasources)
 	if datasourceID != uuid.Nil {
-		query += " AND datasource_id = $2"
+		query += " AND t.datasource_id = $2"
 		args = append(args, datasourceID)
 	}
 
-	query += " ORDER BY table_name"
+	query += " ORDER BY t.table_name"
 
 	rows, err := scope.Conn.Query(ctx, query, args...)
 	if err != nil {
@@ -1311,13 +1319,14 @@ func (r *schemaRepository) GetOrphanTables(ctx context.Context, projectID, datas
 	}
 
 	// Build query - uuid.Nil means "all datasources"
-	// Tables with data (row_count > 0) but no active relationships
+	// Tables with data but no active relationships.
+	// Only includes tables with row_count > 0 (confirmed non-empty).
+	// Tables with NULL, 0, or negative row_count are classified as empty, not orphan.
 	query := `
 		SELECT t.table_name
 		FROM engine_schema_tables t
 		WHERE t.project_id = $1
 		  AND t.deleted_at IS NULL
-		  AND t.row_count IS NOT NULL
 		  AND t.row_count > 0
 		  AND NOT EXISTS (
 			  SELECT 1 FROM engine_schema_relationships r

@@ -112,6 +112,84 @@ func TestSchemaDiscoverer_DiscoverTables(t *testing.T) {
 	}
 }
 
+func TestSchemaDiscoverer_DiscoverTables_NoNegativeRowCounts(t *testing.T) {
+	tc := setupSchemaDiscovererTest(t)
+	ctx := context.Background()
+
+	// Create a table without running ANALYZE, so pg_class.reltuples = -1
+	_, err := tc.discoverer.pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS test_unanalyzed_table (id serial PRIMARY KEY, name text)
+	`)
+	if err != nil {
+		t.Fatalf("failed to create test table: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = tc.discoverer.pool.Exec(context.Background(), `DROP TABLE IF EXISTS test_unanalyzed_table`)
+	})
+
+	tables, err := tc.discoverer.DiscoverTables(ctx)
+	if err != nil {
+		t.Fatalf("DiscoverTables failed: %v", err)
+	}
+
+	for _, table := range tables {
+		if table.RowCount < 0 {
+			t.Errorf("DiscoverTables returned negative row count %d for %s.%s — should use COUNT(*) fallback",
+				table.RowCount, table.SchemaName, table.TableName)
+		}
+	}
+}
+
+func TestSchemaDiscoverer_DiscoverTables_AccurateCountForUnanalyzedTables(t *testing.T) {
+	tc := setupSchemaDiscovererTest(t)
+	ctx := context.Background()
+
+	// Create a fresh table (no ANALYZE) and insert rows.
+	// pg_class.reltuples will be -1, so DiscoverTables must fall back to COUNT(*).
+	_, err := tc.discoverer.pool.Exec(ctx, `
+		DROP TABLE IF EXISTS test_count_fallback;
+		CREATE TABLE test_count_fallback (id serial PRIMARY KEY, name text);
+		INSERT INTO test_count_fallback (name) VALUES ('a'), ('b'), ('c'), ('d'), ('e');
+	`)
+	if err != nil {
+		t.Fatalf("failed to create test table: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = tc.discoverer.pool.Exec(context.Background(), `DROP TABLE IF EXISTS test_count_fallback`)
+	})
+
+	// Verify reltuples is indeed -1 (unanalyzed)
+	var reltuples float64
+	err = tc.discoverer.pool.QueryRow(ctx, `
+		SELECT COALESCE(c.reltuples, 0)
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE c.relname = 'test_count_fallback' AND n.nspname = 'public'
+	`).Scan(&reltuples)
+	if err != nil {
+		t.Fatalf("failed to check reltuples: %v", err)
+	}
+	if reltuples >= 0 {
+		t.Skipf("reltuples is %.0f (already analyzed), cannot test fallback", reltuples)
+	}
+
+	tables, err := tc.discoverer.DiscoverTables(ctx)
+	if err != nil {
+		t.Fatalf("DiscoverTables failed: %v", err)
+	}
+
+	for _, table := range tables {
+		if table.TableName == "test_count_fallback" {
+			if table.RowCount != 5 {
+				t.Errorf("expected row_count = 5 for unanalyzed table with 5 rows, got %d (COUNT(*) fallback not working)",
+					table.RowCount)
+			}
+			return
+		}
+	}
+	t.Error("test_count_fallback table not found in DiscoverTables results")
+}
+
 func TestSchemaDiscoverer_DiscoverTables_ExcludesSystemSchemas(t *testing.T) {
 	tc := setupSchemaDiscovererTest(t)
 	ctx := context.Background()

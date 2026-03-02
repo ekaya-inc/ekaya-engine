@@ -1551,6 +1551,225 @@ func ptr[T any](v T) *T {
 	return &v
 }
 
+// ============================================================================
+// GetEmptyTables / GetOrphanTables Tests
+// ============================================================================
+
+// createTestTableWithRowCount creates a table then directly sets row_count via SQL.
+// This bypasses the normal discovery flow to simulate edge cases like row_count = -1.
+func (tc *schemaTestContext) createTestTableWithRowCount(ctx context.Context, schemaName, tableName string, rowCount *int64) *models.SchemaTable {
+	tc.t.Helper()
+
+	table := tc.createTestTable(ctx, schemaName, tableName)
+
+	// Directly update row_count via SQL to simulate values that come from pg_class
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		tc.t.Fatal("no tenant scope in context")
+	}
+	_, err := scope.Conn.Exec(ctx,
+		`UPDATE engine_schema_tables SET row_count = $1 WHERE id = $2`,
+		rowCount, table.ID)
+	if err != nil {
+		tc.t.Fatalf("Failed to set row_count: %v", err)
+	}
+
+	table.RowCount = rowCount
+	return table
+}
+
+func TestSchemaRepository_GetEmptyTables_IncludesNegativeOneRowCount(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create tables with different row_count values:
+	// row_count = -1 (unanalyzed PG table) — should be classified as empty
+	// row_count = 0  (known empty) — should be classified as empty
+	// row_count = 100 (has data) — should NOT be classified as empty
+	// row_count = NULL (unknown) — should be classified as empty
+	tc.createTestTableWithRowCount(ctx, "public", "unanalyzed", ptr(int64(-1)))
+	tc.createTestTableWithRowCount(ctx, "public", "known_empty", ptr(int64(0)))
+	tc.createTestTableWithRowCount(ctx, "public", "has_data", ptr(int64(100)))
+	tc.createTestTableWithRowCount(ctx, "public", "null_count", nil)
+
+	emptyTables, err := tc.repo.GetEmptyTables(ctx, tc.projectID, tc.dsID)
+	if err != nil {
+		t.Fatalf("GetEmptyTables failed: %v", err)
+	}
+
+	// Should include: unanalyzed (-1), known_empty (0), null_count (NULL)
+	// Should NOT include: has_data (100)
+	emptySet := make(map[string]bool)
+	for _, name := range emptyTables {
+		emptySet[name] = true
+	}
+
+	if !emptySet["unanalyzed"] {
+		t.Error("GetEmptyTables should include table with row_count = -1 (unanalyzed)")
+	}
+	if !emptySet["known_empty"] {
+		t.Error("GetEmptyTables should include table with row_count = 0")
+	}
+	if !emptySet["null_count"] {
+		t.Error("GetEmptyTables should include table with row_count = NULL")
+	}
+	if emptySet["has_data"] {
+		t.Error("GetEmptyTables should NOT include table with row_count = 100")
+	}
+}
+
+func TestSchemaRepository_GetOrphanTables_ExcludesNegativeOneRowCount(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create tables with different row_count values (none have relationships):
+	// row_count = -1 — should be classified as empty, NOT orphan
+	// row_count = 0  — should be classified as empty, NOT orphan
+	// row_count = 100 — should be classified as orphan (has data, no relationships)
+	// row_count = NULL — should be classified as empty, NOT orphan
+	tc.createTestTableWithRowCount(ctx, "public", "unanalyzed", ptr(int64(-1)))
+	tc.createTestTableWithRowCount(ctx, "public", "known_empty", ptr(int64(0)))
+	tc.createTestTableWithRowCount(ctx, "public", "has_data", ptr(int64(100)))
+	tc.createTestTableWithRowCount(ctx, "public", "null_count", nil)
+
+	orphanTables, err := tc.repo.GetOrphanTables(ctx, tc.projectID, tc.dsID)
+	if err != nil {
+		t.Fatalf("GetOrphanTables failed: %v", err)
+	}
+
+	orphanSet := make(map[string]bool)
+	for _, name := range orphanTables {
+		orphanSet[name] = true
+	}
+
+	// Only has_data should be an orphan (has data, no relationships)
+	if !orphanSet["has_data"] {
+		t.Error("GetOrphanTables should include table with row_count = 100 (has data, no relationships)")
+	}
+
+	// Tables with no data should NOT be orphans (they're empty)
+	if orphanSet["unanalyzed"] {
+		t.Error("GetOrphanTables should NOT include table with row_count = -1 (it's empty, not orphan)")
+	}
+	if orphanSet["known_empty"] {
+		t.Error("GetOrphanTables should NOT include table with row_count = 0")
+	}
+	if orphanSet["null_count"] {
+		t.Error("GetOrphanTables should NOT include table with row_count = NULL")
+	}
+}
+
+func TestSchemaRepository_TableClassification_MutuallyExclusive(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create one table of each type
+	tc.createTestTableWithRowCount(ctx, "public", "neg_one", ptr(int64(-1)))
+	tc.createTestTableWithRowCount(ctx, "public", "zero", ptr(int64(0)))
+	tc.createTestTableWithRowCount(ctx, "public", "hundred", ptr(int64(100)))
+	tc.createTestTableWithRowCount(ctx, "public", "null_rc", nil)
+
+	emptyTables, err := tc.repo.GetEmptyTables(ctx, tc.projectID, tc.dsID)
+	if err != nil {
+		t.Fatalf("GetEmptyTables failed: %v", err)
+	}
+
+	orphanTables, err := tc.repo.GetOrphanTables(ctx, tc.projectID, tc.dsID)
+	if err != nil {
+		t.Fatalf("GetOrphanTables failed: %v", err)
+	}
+
+	// Every table without relationships should appear in exactly one of: empty or orphan
+	emptySet := make(map[string]bool)
+	for _, name := range emptyTables {
+		emptySet[name] = true
+	}
+	orphanSet := make(map[string]bool)
+	for _, name := range orphanTables {
+		orphanSet[name] = true
+	}
+
+	allTables := []string{"neg_one", "zero", "hundred", "null_rc"}
+	for _, name := range allTables {
+		inEmpty := emptySet[name]
+		inOrphan := orphanSet[name]
+		if inEmpty && inOrphan {
+			t.Errorf("table %q appears in BOTH empty and orphan — classification must be mutually exclusive", name)
+		}
+		if !inEmpty && !inOrphan {
+			t.Errorf("table %q appears in NEITHER empty nor orphan — every unrelated table must be classified", name)
+		}
+	}
+}
+
+func TestSchemaRepository_GetEmptyTables_ExcludesTablesWithRelationships(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create two empty tables (row_count = 0)
+	emptyNoRel := tc.createTestTableWithRowCount(ctx, "public", "empty_no_rel", ptr(int64(0)))
+	emptyWithRel := tc.createTestTableWithRowCount(ctx, "public", "empty_with_rel", ptr(int64(0)))
+
+	// Create a target table for the relationship
+	targetTable := tc.createTestTableWithRowCount(ctx, "public", "target_table", ptr(int64(100)))
+	targetCol := tc.createTestColumn(ctx, targetTable.ID, "id", 1)
+
+	// Add a manual relationship to empty_with_rel
+	srcCol := tc.createTestColumn(ctx, emptyWithRel.ID, "target_id", 1)
+	rel := &models.SchemaRelationship{
+		ProjectID:        tc.projectID,
+		SourceTableID:    emptyWithRel.ID,
+		SourceColumnID:   srcCol.ID,
+		TargetTableID:    targetTable.ID,
+		TargetColumnID:   targetCol.ID,
+		RelationshipType: models.RelationshipTypeFK,
+		Cardinality:      models.CardinalityNTo1,
+		Confidence:       1.0,
+	}
+	if err := tc.repo.UpsertRelationship(ctx, rel); err != nil {
+		t.Fatalf("UpsertRelationship failed: %v", err)
+	}
+
+	emptyTables, err := tc.repo.GetEmptyTables(ctx, tc.projectID, tc.dsID)
+	if err != nil {
+		t.Fatalf("GetEmptyTables failed: %v", err)
+	}
+
+	emptySet := make(map[string]bool)
+	for _, name := range emptyTables {
+		emptySet[name] = true
+	}
+
+	// empty_no_rel has no relationships — should be in empty list
+	if !emptySet["empty_no_rel"] {
+		t.Error("GetEmptyTables should include empty table without relationships")
+	}
+
+	// empty_with_rel has a relationship — should NOT be in empty list
+	if emptySet["empty_with_rel"] {
+		t.Error("GetEmptyTables should NOT include empty table that has a relationship")
+	}
+
+	// Sanity: target_table has data, should not be empty
+	if emptySet["target_table"] {
+		t.Error("GetEmptyTables should NOT include table with row_count = 100")
+	}
+
+	_ = emptyNoRel // used above via createTestTableWithRowCount
+}
+
 // Verify tests completed within reasonable time
 func TestSchemaRepository_PerformanceBaseline(t *testing.T) {
 	tc := setupSchemaTest(t)

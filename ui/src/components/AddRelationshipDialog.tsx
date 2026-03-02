@@ -21,6 +21,7 @@ interface AddRelationshipDialogProps {
   datasourceId: string;
   schema: DatasourceSchema | null;
   onRelationshipAdded: (relationship: RelationshipDetail) => void;
+  defaultSourceTable?: string | undefined;
 }
 
 interface ColumnOption {
@@ -40,6 +41,7 @@ export const AddRelationshipDialog = ({
   datasourceId,
   schema,
   onRelationshipAdded,
+  defaultSourceTable,
 }: AddRelationshipDialogProps) => {
   // Form state
   const [sourceTable, setSourceTable] = useState<string>('');
@@ -53,14 +55,20 @@ export const AddRelationshipDialog = ({
 
   // Reset form when dialog opens/closes
   useEffect(() => {
-    if (!open) {
+    if (open) {
+      setSourceTable(defaultSourceTable ?? '');
+      setSourceColumn('');
+      setTargetTable('');
+      setTargetColumn('');
+      setError(null);
+    } else {
       setSourceTable('');
       setSourceColumn('');
       setTargetTable('');
       setTargetColumn('');
       setError(null);
     }
-  }, [open]);
+  }, [open, defaultSourceTable]);
 
   // Reset column selection when table changes
   useEffect(() => {
