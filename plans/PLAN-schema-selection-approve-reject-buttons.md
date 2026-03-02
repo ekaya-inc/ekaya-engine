@@ -1,6 +1,6 @@
 # PLAN: Schema Selection Approve/Reject Button Behavior
 
-**Status:** TODO
+**Status:** DONE
 **Created:** 2026-03-01
 **Depends on:** PLAN-schema-selection-pending-changes-ui.md
 
