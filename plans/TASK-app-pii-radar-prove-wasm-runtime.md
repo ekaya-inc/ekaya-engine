@@ -1,6 +1,6 @@
 # TASK: Prove WASM Runtime in Ekaya Engine
 
-**Status:** PENDING
+**Status:** DONE
 **Created:** 2026-03-03
 **Parent:** PLAN-app-pii-radar.md (Task 1)
 **Branch:** wt-ekaya-engine-wasm
@@ -38,19 +38,19 @@ By the end of this task:
 
 ## Steps
 
-- [ ] **Research and validate WASM runtime choice.** Evaluate Extism/wazero (proposed in brainstorm) and any credible alternatives. Criteria: pure Go (no CGO), active maintenance, host function support, resource limiting capability, production use. The BRAINSTORM file has prior research on Extism, wazero, and IronClaw — review it as input but verify claims independently. Document findings and recommendation in a new `plans/DESIGN-wasm-application-platform.md`. This DESIGN file contains only vetted decisions and open questions — not speculative content from the brainstorm.
+- [x] **Research and validate WASM runtime choice.** Evaluate Extism/wazero (proposed in brainstorm) and any credible alternatives. Criteria: pure Go (no CGO), active maintenance, host function support, resource limiting capability, production use. The BRAINSTORM file has prior research on Extism, wazero, and IronClaw — review it as input but verify claims independently. Document findings and recommendation in a new `plans/DESIGN-wasm-application-platform.md`. This DESIGN file contains only vetted decisions and open questions — not speculative content from the brainstorm.
 
-- [ ] **Add runtime dependency.** Add the selected WASM runtime library to `go.mod`.
+- [x] **Add runtime dependency.** Add the selected WASM runtime library to `go.mod`.
 
-- [ ] **Create a minimal WASM guest module.** Write a trivial WASM module (use TinyGo, Rust, or hand-written WAT — whatever is simplest for a proof). The module should: export a function (e.g., `run`), call an imported host function (e.g., `host_echo(input) → output`), and return the host function's response. Place the guest module source and compiled `.wasm` binary in a location that makes sense for test fixtures (e.g., `pkg/wasm/testdata/`). Check in the compiled `.wasm` binary so tests don't require a WASM toolchain to run.
+- [x] **Create a minimal WASM guest module.** Write a trivial WASM module (use TinyGo, Rust, or hand-written WAT — whatever is simplest for a proof). The module should: export a function (e.g., `run`), call an imported host function (e.g., `host_echo(input) → output`), and return the host function's response. Place the guest module source and compiled `.wasm` binary in a location that makes sense for test fixtures (e.g., `pkg/wasm/testdata/`). Check in the compiled `.wasm` binary so tests don't require a WASM toolchain to run.
 
-- [ ] **Implement the host side.** In `pkg/wasm/` (or similar), write Go code that: loads the `.wasm` file, registers a host function (`host_echo`), invokes the module's exported function, and returns the result. This code is foundational — structure it for future extension (additional host functions, module lifecycle management), but don't build those capabilities yet.
+- [x] **Implement the host side.** In `pkg/wasm/` (or similar), write Go code that: loads the `.wasm` file, registers a host function (`host_echo`), invokes the module's exported function, and returns the result. This code is foundational — structure it for future extension (additional host functions, module lifecycle management), but don't build those capabilities yet.
 
-- [ ] **Write a test.** Test that: module loads successfully, exported function can be called, host function is invoked by the module, the response round-trips correctly. Use standard `go test` (no Docker/testcontainers needed for this task).
+- [x] **Write a test.** Test that: module loads successfully, exported function can be called, host function is invoked by the module, the response round-trips correctly. Use standard `go test` (no Docker/testcontainers needed for this task).
 
-- [ ] **Run `make check`.** Ensure linting, existing tests, and build all pass with the new code.
+- [x] **Run `make check`.** Ensure linting, existing tests, and build all pass with the new code.
 
-- [ ] **Document any surprises or constraints** discovered during implementation (add to DESIGN file or as notes in this TASK file).
+- [x] **Document any surprises or constraints** discovered during implementation (add to DESIGN file or as notes in this TASK file).
 
 ## Out of Scope
 
