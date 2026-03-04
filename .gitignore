@@ -73,3 +73,6 @@ certs/*
 
 ekaya/
 
+# Rust build artifacts
+**/target/
+
