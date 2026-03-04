@@ -29,10 +29,15 @@ Each task below becomes a TASK-*.md file when it's the next one to implement. On
   - Runtime: Extism Go SDK v1.7.1 + wazero. Guest: Rust + extism-pdk.
   - Code: `pkg/wasm/runtime.go`, `pkg/wasm/runtime_test.go`, `pkg/wasm/testdata/`
 
-- [ ] **Task 2: Host-managed state storage** — Implement the JSON blob storage interface. WASM module can read/write state. Host persists with CAS versioning.
-  - TASK file: `TASK-app-pii-radar-state-storage.md`
+- [x] **Task 2: Host-managed state storage** — Implement the JSON blob storage interface. WASM module can read/write state. Host persists with CAS versioning.
+  - TASK file: `TASK-app-pii-radar-state-storage.md` — **DONE**
+  - Interface: `StateStore` with `Get`/`Set` + CAS versioning (`ErrVersionMismatch`).
+  - Implementation: `MemoryStateStore` (in-memory, thread-safe). DB-backed is future.
+  - Host functions: `state_get`/`state_set` via `StateHostFuncs(store, appID)`.
+  - Code: `pkg/wasm/state.go`, `pkg/wasm/state_test.go`
 
-- [ ] **Task 3: MCP tool access from WASM** — WASM module can invoke an MCP tool via a host function. Start with an existing tool (e.g., `list_tables`). Prove the round-trip: module calls host function → host invokes MCP tool → result returns to module.
+- [ ] **Task 3: MCP tool access from WASM** — WASM module can invoke an MCP tool via a host function. Start with an existing tool (e.g., `health`). Prove the round-trip: module calls host function → host invokes MCP tool handler → result returns to module.
+  - TASK file: `TASK-app-pii-radar-mcp-tool-access.md`
 
 - [ ] **Task 4: Data access tooling** — Create or extend MCP tool(s) for reading column data / rows from a table with high-watermark support. Generic tools usable by any MCP client.
 

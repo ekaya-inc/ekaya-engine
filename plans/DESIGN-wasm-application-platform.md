@@ -45,6 +45,21 @@
 
 **Future user-generated apps:** JavaScript via QuickJS-in-WASM (no compilation step required).
 
+## Auth Context for Tool Invocation
+
+When WASM apps invoke MCP tools via `tool_invoke`, the host must provide auth context so that `AcquireToolAccess` can authorize the call. The WASM module itself has no auth credentials — the host is responsible for injecting identity.
+
+**Strategy:** The host injects auth claims into the `context.Context` passed to `ToolInvoker.InvokeTool()`. The production `ToolInvoker` implementation receives a pre-configured context containing:
+- Project ID (which tenant the app belongs to)
+- Role claims (what tools the app is allowed to call)
+- Provenance markers (identifying the call as originating from a WASM app)
+
+This matches how MCP tool handlers already receive auth context — via `auth.GetClaims(ctx)` in `AcquireToolAccess`. The WASM host simply sets up the context the same way the HTTP/JSON-RPC transport does.
+
+**App-level permissions:** Each WASM app will have a declared set of tools it requires (part of the app manifest, future work). The host validates that the app is authorized to call the requested tool before forwarding to the `ToolInvoker`. This provides defense-in-depth beyond the role-based checks in `AcquireToolAccess`.
+
+**Current state:** The `ToolInvoker` interface accepts a `context.Context`, so auth injection requires no interface changes. The mock `MapToolInvoker` used in tests bypasses auth entirely, which is correct for unit tests.
+
 ## Open Questions
 
 1. **Fuel metering** — Is wall-clock timeout sufficient for production, or will we need instruction-level metering? (Impacts CGO decision.)
