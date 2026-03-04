@@ -60,6 +60,29 @@ This matches how MCP tool handlers already receive auth context — via `auth.Ge
 
 **Current state:** The `ToolInvoker` interface accepts a `context.Context`, so auth injection requires no interface changes. The mock `MapToolInvoker` used in tests bypasses auth entirely, which is correct for unit tests.
 
+## Data Access Strategy for WASM Apps
+
+WASM apps access customer data through generic MCP tools, not app-specific code. This keeps the tool surface reusable across all MCP clients.
+
+**Schema discovery:** The `get_schema` tool returns structured JSON with all selected tables and their columns (name, data type, primary key, nullability) plus relationships. The response is structured JSON usable by both LLM clients and programmatic callers.
+
+**Incremental data reading:** The `query` tool executes read-only SQL SELECT statements (hard cap: 1000 rows per call). Apps construct their own queries for incremental scanning using a high-watermark pattern:
+```
+SELECT col1, col2, ... FROM schema.table
+WHERE pk_column > $high_watermark
+ORDER BY pk_column
+LIMIT 1000
+```
+
+The app discovers the primary key column from `get_schema` response (`is_primary_key: true`), then tracks the high-watermark in state via `state_get`/`state_set`.
+
+**Security model:** The `query` tool validates that only SELECT/WITH statements are accepted. The WASM sandbox provides defense-in-depth — even if an app constructs malicious SQL, the query tool rejects non-SELECT statements. Tool access is further controlled by the auth context injected by the host (see Auth Context section above).
+
+**Limitations:**
+- Tables without a usable primary key require alternative scanning strategies (e.g., OFFSET/LIMIT or CTID). This can be refined in future iterations.
+- Maximum 1000 rows per query call. Apps must batch their scanning across multiple `tool_invoke` calls.
+- The `query` tool operates on the customer's datasource, not the engine's internal database.
+
 ## Open Questions
 
 1. **Fuel metering** — Is wall-clock timeout sufficient for production, or will we need instruction-level metering? (Impacts CGO decision.)

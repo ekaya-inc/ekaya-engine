@@ -36,10 +36,16 @@ Each task below becomes a TASK-*.md file when it's the next one to implement. On
   - Host functions: `state_get`/`state_set` via `StateHostFuncs(store, appID)`.
   - Code: `pkg/wasm/state.go`, `pkg/wasm/state_test.go`
 
-- [ ] **Task 3: MCP tool access from WASM** — WASM module can invoke an MCP tool via a host function. Start with an existing tool (e.g., `health`). Prove the round-trip: module calls host function → host invokes MCP tool handler → result returns to module.
-  - TASK file: `TASK-app-pii-radar-mcp-tool-access.md`
+- [x] **Task 3: MCP tool access from WASM** — WASM module can invoke an MCP tool via a host function. Proved round-trip with mock tools.
+  - TASK file: `TASK-app-pii-radar-mcp-tool-access.md` — **DONE**
+  - Interface: `ToolInvoker` with `InvokeTool(ctx, toolName, arguments) → (result, isError, err)`.
+  - Host function: `tool_invoke` via `ToolInvokeHostFunc(invoker)`.
+  - Test mock: `MapToolInvoker` (map of handler functions).
+  - Auth strategy documented in DESIGN (host injects claims into context).
+  - Code: `pkg/wasm/tools.go`, `pkg/wasm/tools_test.go`
 
-- [ ] **Task 4: Data access tooling** — Create or extend MCP tool(s) for reading column data / rows from a table with high-watermark support. Generic tools usable by any MCP client.
+- [x] **Task 4: Data access tooling** — Create or extend MCP tool(s) for reading column data / rows from a table with high-watermark support. Generic tools usable by any MCP client. Existing tools to evaluate: `sample` (row preview), `probe_column` (column stats), `query` (arbitrary SQL), `get_schema` (schema context).
+  - TASK file: `TASK-app-pii-radar-data-access-tooling.md` — **DONE**
 
 - [ ] **Task 5: PII detection logic** — Implement PII detection in the WASM module. Regex patterns for column names, content scanning for data patterns (SSN, email, credit card, API keys, JWT tokens, etc.). Uses state storage for high-watermarks and scan progress.
 
