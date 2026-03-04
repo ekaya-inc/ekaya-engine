@@ -47,7 +47,11 @@ Each task below becomes a TASK-*.md file when it's the next one to implement. On
 - [x] **Task 4: Data access tooling** — Create or extend MCP tool(s) for reading column data / rows from a table with high-watermark support. Generic tools usable by any MCP client. Existing tools to evaluate: `sample` (row preview), `probe_column` (column stats), `query` (arbitrary SQL), `get_schema` (schema context).
   - TASK file: `TASK-app-pii-radar-data-access-tooling.md` — **DONE**
 
-- [ ] **Task 5: PII detection logic** — Implement PII detection in the WASM module. Regex patterns for column names, content scanning for data patterns (SSN, email, credit card, API keys, JWT tokens, etc.). Uses state storage for high-watermarks and scan progress.
+- [x] **Task 5: PII detection logic** — Implement PII detection in the WASM module. Regex patterns for column names, content scanning for data patterns (SSN, email, credit card, API keys, JWT tokens, etc.). Uses state storage for high-watermarks and scan progress.
+  - Detection library: `pkg/wasm/guests/pii_detector/` — Rust crate with column scanner, content scanner, validators (Luhn, SSN), and category-aware redaction.
+  - Guest module: `pkg/wasm/guests/pii_radar_guest/` — Extism plugin that orchestrates get_schema + query + state management.
+  - Compiled WASM: `pkg/wasm/testdata/pii_radar_guest.wasm` (~300KB)
+  - Go tests: `pkg/wasm/pii_radar_test.go` — 9 integration tests covering column detection, content detection, Luhn validation, high-watermarks, incremental scanning, redaction, and edge cases.
 
 - [ ] **Task 6: Periodic and on-demand execution** — Host can schedule a WASM app on a cron schedule. Host can trigger a WASM app on-demand (manual, startup, schema refresh).
 
