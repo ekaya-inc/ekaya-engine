@@ -2,7 +2,7 @@
 
 **Status:** IN PROGRESS
 **Created:** 2026-03-03
-**Parent:** DESIGN-wasm-application-platform.md (to be created — validated decisions only)
+**Parent:** DESIGN-wasm-application-platform.md
 **Branch:** wt-ekaya-engine-wasm
 
 ## Purpose
@@ -24,10 +24,13 @@ These decisions were made during planning and apply to this feature and the broa
 
 Each task below becomes a TASK-*.md file when it's the next one to implement. Only the current task has concrete implementation details.
 
-- [ ] **Task 1: Prove WASM runtime** — Validate runtime choice, load a WASM module in ekaya-engine, invoke it, have it call a host function, get a response back. Pure round-trip proof.
-  - TASK file: `TASK-app-pii-radar-prove-wasm-runtime.md`
+- [x] **Task 1: Prove WASM runtime** — Validate runtime choice, load a WASM module in ekaya-engine, invoke it, have it call a host function, get a response back. Pure round-trip proof.
+  - TASK file: `TASK-app-pii-radar-prove-wasm-runtime.md` — **DONE**
+  - Runtime: Extism Go SDK v1.7.1 + wazero. Guest: Rust + extism-pdk.
+  - Code: `pkg/wasm/runtime.go`, `pkg/wasm/runtime_test.go`, `pkg/wasm/testdata/`
 
 - [ ] **Task 2: Host-managed state storage** — Implement the JSON blob storage interface. WASM module can read/write state. Host persists with CAS versioning.
+  - TASK file: `TASK-app-pii-radar-state-storage.md`
 
 - [ ] **Task 3: MCP tool access from WASM** — WASM module can invoke an MCP tool via a host function. Start with an existing tool (e.g., `list_tables`). Prove the round-trip: module calls host function → host invokes MCP tool → result returns to module.
 
