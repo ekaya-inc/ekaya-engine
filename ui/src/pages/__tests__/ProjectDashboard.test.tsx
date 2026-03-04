@@ -59,13 +59,14 @@ vi.mock('../../services/ontologyService', () => ({
 }));
 
 // Mock AIConfigWidget — must call onConfigChange in useEffect to avoid infinite re-render
+function MockAIConfigWidget({ onConfigChange }: { onConfigChange: (val: unknown) => void }) {
+  useEffect(() => {
+    onConfigChange({ provider: 'openai' });
+  }, [onConfigChange]);
+  return <div data-testid="ai-config-widget" />;
+}
 vi.mock('../../components/AIConfigWidget', () => ({
-  default: ({ onConfigChange }: { onConfigChange: (val: unknown) => void }) => {
-    useEffect(() => {
-      onConfigChange({ provider: 'openai' });
-    }, [onConfigChange]);
-    return <div data-testid="ai-config-widget" />;
-  },
+  default: MockAIConfigWidget,
 }));
 
 const renderDashboard = () => {
