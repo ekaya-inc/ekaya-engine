@@ -50,10 +50,11 @@ Each task below becomes a TASK-*.md file when it's the next one to implement. On
   - Incremental reading: `query` tool with high-watermark SQL pattern (`WHERE pk > $hwm ORDER BY pk LIMIT 1000`).
   - Strategy documented in DESIGN-wasm-application-platform.md.
 
-- [ ] **Task 5: PII detection logic** — Implement PII detection in the WASM module. Regex patterns for column names, content scanning for data patterns (SSN, email, credit card, API keys, JWT tokens, etc.). Uses state storage for high-watermarks and scan progress.
-  - TASK file: `TASK-app-pii-radar-pii-detection.md`
+- [x] **Task 5: PII detection logic** — Implement PII detection in the WASM module. Regex patterns sourced from Presidio/PIISA, content scanning, high-watermark tracking.
+  - TASK file: `TASK-app-pii-radar-pii-detection.md` — **DONE**
 
 - [ ] **Task 6: Periodic and on-demand execution** — Host can schedule a WASM app on a cron schedule. Host can trigger a WASM app on-demand (manual, startup, schema refresh).
+  - TASK file: `TASK-app-pii-radar-execution.md`
 
 - [ ] **Task 7: Engine notification system** — Engine-level capability to notify admins (email via ekaya-central). WASM apps call a host function; engine routes the notification.
 
