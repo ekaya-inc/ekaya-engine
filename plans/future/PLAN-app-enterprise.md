@@ -52,6 +52,9 @@ engine_mcp_config                            -- Tool enablement pattern
 | Session Tracking | Group activity by session/conversation | "Understand full AI interactions" |
 | Export to CSV/JSON | Compliance-ready exports | "SOC2 auditors love us" |
 | Retention Policy | Configure how long query history is retained | "Control storage costs & compliance" |
+| Data Minimization Alerts | Flag AI queries that fetch more columns/rows than necessary for their purpose | "Prove you're only accessing what you need" |
+| Regulatory Report Templates | GDPR Article 30, EU AI Act, SOC 2 formatted exports on demand | "One click to auditor-ready reports" |
+| AI System Registry | Fingerprint and catalog every AI system/service querying the database | "Know every AI touching your data" |
 
 **Data Model:**
 
@@ -116,6 +119,7 @@ CREATE TABLE engine_audit_events (
 | Query-Level Permissions | Control who can execute which queries | "Self-service without chaos" |
 | Data Classification | Tag queries with sensitivity levels | "Know where your PII flows" |
 | Column Masking | Hide sensitive columns from certain roles | "SSN visible to admins only" |
+| Consent Boundary Enforcement | Cross-reference AI data access against user consent records; flag access outside consented scope | "AI respects what users agreed to" |
 
 **Data Model Extensions:**
 
@@ -184,6 +188,8 @@ CREATE TABLE engine_column_masks (
 | Change Audit Trail | Who modified what query, when | "Full change history" |
 | Version History | Previous versions of queries preserved | "Roll back mistakes" |
 | Data Lineage | Track query → report → dashboard | "Impact analysis" |
+| DPIA Trigger Workflow | Auto-detect when AI access patterns change enough to require a Data Protection Impact Assessment; pre-populate with observed data | "Never miss a required impact assessment" |
+| Human Override Tracking | Log when AI-driven decisions are reviewed by humans vs. auto-approved; verify oversight is actually happening | "Prove humans are in the loop" |
 
 **Data Model:**
 
@@ -259,6 +265,8 @@ CREATE TABLE engine_query_lineage (
 | Rate Limiting | Per-user, per-query limits | "Prevent runaway costs" |
 | Anomaly Detection | Flag unusual access patterns | "Know before breach" |
 | API Key Management | Rotation, scoping, expiration | "Zero trust API access" |
+| Risk Scoring | Real-time risk score per AI query based on data sensitivity, volume, identity, and human oversight presence | "Quantify your AI data risk" |
+| Regulatory Incident Drafts | Pre-draft incident reports when AI access patterns trigger policy violations; formatted for supervisory authorities | "Ready for regulators in minutes, not weeks" |
 
 **Data Model:**
 

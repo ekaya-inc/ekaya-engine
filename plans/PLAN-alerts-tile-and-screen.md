@@ -42,6 +42,10 @@ The alert system backend is **nearly complete**. The frontend exists but is **em
 5. `after_hours_access` — Access outside business hours (trigger: implemented)
 6. `new_user_high_volume` — New user runs > query_threshold queries in first 24h (trigger: implemented)
 7. `repeated_errors` — Same error repeats > error_count times in window_minutes (trigger: implemented)
+8. `unknown_ai_system` — Unrecognized application/service starts querying the database (trigger: **NOT implemented**)
+9. `consent_boundary_violation` — AI query accesses data outside the user's consented scope (trigger: **NOT implemented**)
+10. `data_minimization_violation` — AI query fetches significantly more columns/rows than necessary (trigger: **NOT implemented**)
+11. `dpia_threshold_exceeded` — AI access patterns change enough to warrant a Data Protection Impact Assessment (trigger: **NOT implemented**)
 
 **Alert config is stored as JSONB** in `engine_mcp_config.alert_config` column. This means alert config currently requires an `engine_mcp_config` row to exist for the project — which is created when MCP Server is configured. If MCP Server hasn't been configured, the `GET alert-config` call fails because there's no row in `engine_mcp_config`.
 
