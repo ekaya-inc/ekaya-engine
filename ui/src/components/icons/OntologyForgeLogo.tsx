@@ -7,9 +7,8 @@ interface OntologyForgeLogoProps extends SVGProps<SVGSVGElement> {
 /**
  * Ontology Forge Logo
  *
- * A diamond-shaped knowledge graph (four connected nodes with cross connections)
- * standing on a forge/anvil base, representing the forging of a semantic layer
- * from raw data.
+ * A hammer icon representing forging/shaping a semantic layer from raw data.
+ * Line-style to match other icons in the UI.
  *
  * Uses currentColor for stroke, so it adapts to light/dark themes automatically.
  */
@@ -18,45 +17,28 @@ export default function OntologyForgeLogo({ size = 24, className, ...props }: On
     <svg
       width={size}
       height={size}
-      viewBox="0 0 195 195"
+      viewBox="0 0 24 24"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
       {...props}
     >
-      {/* Diamond outline: four nodes connected */}
-      <path
-        d="M97.5 20L35 85L97.5 150L160 85Z"
+      {/* Hammer head */}
+      <rect
+        x="4"
+        y="2"
+        width="16"
+        height="6"
+        rx="1.5"
         stroke="currentColor"
-        strokeWidth="12"
-        strokeLinecap="round"
+        strokeWidth="2"
         strokeLinejoin="round"
       />
-      {/* Internal cross connections */}
+      {/* Handle — open-bottom U shape */}
       <path
-        d="M97.5 20L97.5 150"
+        d="M10.5 8V20C10.5 21.1 11.17 22 12 22C12.83 22 13.5 21.1 13.5 20V8"
         stroke="currentColor"
-        strokeWidth="12"
-        strokeLinecap="round"
-      />
-      <path
-        d="M35 85L160 85"
-        stroke="currentColor"
-        strokeWidth="12"
-        strokeLinecap="round"
-      />
-      {/* Pillar from diamond to forge base */}
-      <path
-        d="M97.5 150V175"
-        stroke="currentColor"
-        strokeWidth="12"
-        strokeLinecap="round"
-      />
-      {/* Forge/anvil base */}
-      <path
-        d="M25 175H170"
-        stroke="currentColor"
-        strokeWidth="14"
+        strokeWidth="2"
         strokeLinecap="round"
       />
     </svg>
