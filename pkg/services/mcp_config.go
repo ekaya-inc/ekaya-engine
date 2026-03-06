@@ -26,6 +26,7 @@ const ToolGroupUser = "user"
 var validToolGroups = map[string]bool{
 	ToolGroupUser:            true,
 	"developer":              true,
+	"tools":                  true,
 	ToolGroupApprovedQueries: true, // Legacy - kept for backward compatibility
 	ToolGroupAgentTools:      true,
 }
@@ -34,6 +35,7 @@ var validToolGroups = map[string]bool{
 type EnabledToolInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	AppID       string `json:"appId"`
 }
 
 // MCPConfigResponse is the API response format for MCP configuration.
@@ -44,17 +46,24 @@ type MCPConfigResponse struct {
 	UserTools      []EnabledToolInfo                  `json:"userTools"`      // Tools for business users (role: user)
 	DeveloperTools []EnabledToolInfo                  `json:"developerTools"` // Tools for admin/data/developer roles
 	AgentTools     []EnabledToolInfo                  `json:"agentTools"`     // Tools for AI agents (API key auth)
+	AppNames       map[string]string                  `json:"appNames"`       // App ID to display name mapping
 	EnabledTools   []EnabledToolInfo                  `json:"enabledTools"`   // Deprecated: kept for backward compatibility
 }
 
 // UpdateMCPConfigRequest is the API request format for updating MCP configuration.
 // Uses optional pointers to distinguish "not sent" from "sent as false".
 type UpdateMCPConfigRequest struct {
-	// User Tools sub-option: allow MCP clients with user role to update ontology
+	// New per-app toggles
+	AddDirectDatabaseAccess     *bool `json:"addDirectDatabaseAccess,omitempty"`
+	AddOntologyMaintenanceTools *bool `json:"addOntologyMaintenanceTools,omitempty"`
+	AddOntologySuggestions      *bool `json:"addOntologySuggestions,omitempty"`
+	AddApprovalTools            *bool `json:"addApprovalTools,omitempty"`
+	AddRequestTools             *bool `json:"addRequestTools,omitempty"`
+
+	// Legacy fields (backward compat)
 	AllowOntologyMaintenance *bool `json:"allowOntologyMaintenance,omitempty"`
-	// Developer Tools sub-options
-	AddQueryTools          *bool `json:"addQueryTools,omitempty"`          // adds Query loadout
-	AddOntologyMaintenance *bool `json:"addOntologyMaintenance,omitempty"` // adds Ontology Maintenance tools
+	AddQueryTools            *bool `json:"addQueryTools,omitempty"`
+	AddOntologyMaintenance   *bool `json:"addOntologyMaintenance,omitempty"`
 }
 
 // MCPConfigService orchestrates MCP configuration management.
@@ -156,7 +165,7 @@ func (s *mcpConfigService) Update(ctx context.Context, projectID uuid.UUID, req 
 		}
 	}
 
-	// Apply Developer Tools sub-options if provided
+	// Apply Developer Tools sub-options if provided (legacy)
 	devNeedsUpdate := req.AddQueryTools != nil || req.AddOntologyMaintenance != nil
 	if devNeedsUpdate {
 		devConfig := config.ToolGroups["developer"]
@@ -177,6 +186,45 @@ func (s *mcpConfigService) Update(ctx context.Context, projectID uuid.UUID, req 
 			newDevConfig.AddOntologyMaintenance = *req.AddOntologyMaintenance
 		}
 		toolGroupsUpdate["developer"] = newDevConfig
+	}
+
+	// Apply new per-app toggle updates to "tools" key
+	toolsNeedsUpdate := req.AddDirectDatabaseAccess != nil || req.AddOntologyMaintenanceTools != nil ||
+		req.AddOntologySuggestions != nil || req.AddApprovalTools != nil || req.AddRequestTools != nil
+	if toolsNeedsUpdate {
+		toolsCfg := config.ToolGroups["tools"]
+		if toolsCfg == nil {
+			toolsCfg = &models.ToolGroupConfig{
+				AddDirectDatabaseAccess:     true,
+				AddOntologyMaintenanceTools: true,
+				AddOntologySuggestions:      true,
+				AddApprovalTools:            true,
+				AddRequestTools:             true,
+			}
+		}
+		newToolsCfg := &models.ToolGroupConfig{
+			AddDirectDatabaseAccess:     toolsCfg.AddDirectDatabaseAccess,
+			AddOntologyMaintenanceTools: toolsCfg.AddOntologyMaintenanceTools,
+			AddOntologySuggestions:      toolsCfg.AddOntologySuggestions,
+			AddApprovalTools:            toolsCfg.AddApprovalTools,
+			AddRequestTools:             toolsCfg.AddRequestTools,
+		}
+		if req.AddDirectDatabaseAccess != nil {
+			newToolsCfg.AddDirectDatabaseAccess = *req.AddDirectDatabaseAccess
+		}
+		if req.AddOntologyMaintenanceTools != nil {
+			newToolsCfg.AddOntologyMaintenanceTools = *req.AddOntologyMaintenanceTools
+		}
+		if req.AddOntologySuggestions != nil {
+			newToolsCfg.AddOntologySuggestions = *req.AddOntologySuggestions
+		}
+		if req.AddApprovalTools != nil {
+			newToolsCfg.AddApprovalTools = *req.AddApprovalTools
+		}
+		if req.AddRequestTools != nil {
+			newToolsCfg.AddRequestTools = *req.AddRequestTools
+		}
+		toolGroupsUpdate["tools"] = newToolsCfg
 	}
 
 	// Build state context for validation
@@ -349,17 +397,22 @@ func (s *mcpConfigService) buildResponse(ctx context.Context, projectID uuid.UUI
 		serverURL = s.baseURL + "/mcp/" + projectID.String()
 	}
 
-	// Check if AI Data Liaison app is installed for filtering
-	dataLiaisonInstalled := false
+	// Check which apps are installed for filtering
+	installedApps := map[string]bool{
+		models.AppIDMCPServer: true, // always available
+	}
 	if s.installedAppService != nil {
-		installed, err := s.installedAppService.IsInstalled(ctx, projectID, models.AppIDAIDataLiaison)
-		if err != nil {
-			s.logger.Warn("failed to check AI Data Liaison app installation, assuming not installed",
-				zap.String("project_id", projectID.String()),
-				zap.Error(err),
-			)
-		} else {
-			dataLiaisonInstalled = installed
+		for _, appID := range []string{models.AppIDOntologyForge, models.AppIDAIDataLiaison} {
+			installed, err := s.installedAppService.IsInstalled(ctx, projectID, appID)
+			if err != nil {
+				s.logger.Warn("failed to check app installation",
+					zap.String("project_id", projectID.String()),
+					zap.String("app_id", appID),
+					zap.Error(err),
+				)
+			} else if installed {
+				installedApps[appID] = true
+			}
 		}
 	}
 
@@ -368,13 +421,13 @@ func (s *mcpConfigService) buildResponse(ctx context.Context, projectID uuid.UUI
 	developerToolSpecs := ComputeDeveloperTools(result.State)
 	agentToolSpecs := ComputeAgentTools(result.State)
 
-	// Convert ToolSpec to EnabledToolInfo with data liaison filtering
-	userTools := s.filterAndConvertToolSpecs(userToolSpecs, dataLiaisonInstalled)
-	developerTools := s.filterAndConvertToolSpecs(developerToolSpecs, dataLiaisonInstalled)
-	agentTools := s.filterAndConvertToolSpecs(agentToolSpecs, dataLiaisonInstalled)
+	// Convert ToolSpec to EnabledToolInfo with app installation filtering
+	userTools := filterAndConvertToolSpecs(userToolSpecs, "user", installedApps)
+	developerTools := filterAndConvertToolSpecs(developerToolSpecs, "developer", installedApps)
+	agentTools := filterAndConvertToolSpecs(agentToolSpecs, "agent", installedApps)
 
 	// EnabledTools (deprecated) - uses the old computation for backward compatibility
-	enabledTools := s.filterAndConvertToolDefs(result.EnabledTools, dataLiaisonInstalled)
+	enabledTools := filterAndConvertToolDefs(result.EnabledTools, installedApps)
 
 	return &MCPConfigResponse{
 		ServerURL:      serverURL,
@@ -382,39 +435,43 @@ func (s *mcpConfigService) buildResponse(ctx context.Context, projectID uuid.UUI
 		UserTools:      userTools,
 		DeveloperTools: developerTools,
 		AgentTools:     agentTools,
+		AppNames:       AppDisplayNames,
 		EnabledTools:   enabledTools,
 	}
 }
 
 // filterAndConvertToolSpecs converts ToolSpec slice to EnabledToolInfo slice,
-// filtering out data liaison tools if the app is not installed.
-func (s *mcpConfigService) filterAndConvertToolSpecs(tools []ToolSpec, dataLiaisonInstalled bool) []EnabledToolInfo {
+// filtering out tools from apps that are not installed.
+func filterAndConvertToolSpecs(tools []ToolSpec, role string, installedApps map[string]bool) []EnabledToolInfo {
 	result := make([]EnabledToolInfo, 0, len(tools))
 	for _, tool := range tools {
-		// Skip data liaison tools if app is not installed
-		if !dataLiaisonInstalled && DataLiaisonTools[tool.Name] {
+		appID := GetToolAppID(tool.Name, role)
+		if !installedApps[appID] {
 			continue
 		}
 		result = append(result, EnabledToolInfo{
 			Name:        tool.Name,
 			Description: tool.Description,
+			AppID:       appID,
 		})
 	}
 	return result
 }
 
 // filterAndConvertToolDefs converts ToolDefinition slice to EnabledToolInfo slice,
-// filtering out data liaison tools if the app is not installed.
-func (s *mcpConfigService) filterAndConvertToolDefs(tools []ToolDefinition, dataLiaisonInstalled bool) []EnabledToolInfo {
+// filtering out tools from apps that are not installed.
+func filterAndConvertToolDefs(tools []ToolDefinition, installedApps map[string]bool) []EnabledToolInfo {
 	result := make([]EnabledToolInfo, 0, len(tools))
 	for _, tool := range tools {
-		// Skip data liaison tools if app is not installed
-		if !dataLiaisonInstalled && DataLiaisonTools[tool.Name] {
+		// For deprecated EnabledTools, use "developer" role for lookup
+		appID := GetToolAppID(tool.Name, "developer")
+		if !installedApps[appID] {
 			continue
 		}
 		result = append(result, EnabledToolInfo{
 			Name:        tool.Name,
 			Description: tool.Description,
+			AppID:       appID,
 		})
 	}
 	return result

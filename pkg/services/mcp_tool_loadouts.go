@@ -55,6 +55,7 @@ var AllToolsOrdered = []ToolSpec{
 	{Name: "get_glossary_sql", Description: "Get SQL definition for a business term"},
 	{Name: "get_ontology", Description: "Get business ontology for query generation"},
 	{Name: "get_query_history", Description: "Get recent query execution history to avoid rewriting queries"},
+	{Name: "record_query_feedback", Description: "Record whether a generated query was helpful"},
 	{Name: "list_glossary", Description: "List all business glossary terms"},
 	{Name: "probe_column", Description: "Deep-dive into specific column with statistics, joinability, and semantic information"},
 	{Name: "probe_columns", Description: "Batch variant of probe_column for analyzing multiple columns at once"},
@@ -70,6 +71,7 @@ var AllToolsOrdered = []ToolSpec{
 	// Ontology Maintenance
 	{Name: "create_glossary_term", Description: "Create a new business glossary term with SQL definition"},
 	{Name: "update_column", Description: "Add or update semantic information about a column (description, enum_values, role)"},
+	{Name: "update_columns", Description: "Batch update metadata for multiple columns (up to 50) in a single transaction"},
 	{Name: "update_glossary_term", Description: "Create or update a business glossary term with upsert semantics (definition, sql, aliases)"},
 	{Name: "update_project_knowledge", Description: "Create or update domain facts (terminology, business rules, enumerations, conventions)"},
 	{Name: "update_table", Description: "Add or update table-level metadata (description, usage notes, ephemeral status, alternatives)"},
@@ -166,30 +168,6 @@ var Loadouts = map[string][]string{
 	},
 }
 
-// UILoadoutMapping defines which loadouts are activated by UI selections.
-// The key describes the UI state, the value is the list of loadouts to merge.
-//
-// UI States:
-//   - All loadouts include: Default
-//   - Business Tools selected: +Query
-//   - Business Tools + Allow Usage to Improve Ontology: +Query +Ontology Maintenance
-//   - Agent Tools selected: +Limited Query
-//   - Developer Tools selected: +Developer Core
-//   - Developer Tools + Add Query Tools: +Developer Core +Query
-//   - Developer Tools + Add Ontology Maintenance: +Developer Core +Ontology Maintenance +Ontology Questions
-//   - Developer Tools + Add Query Tools + Add Ontology Maintenance: +Developer Core +Query +Ontology Maintenance +Ontology Questions
-//   - Custom Tools selected: All tools available (individual selection)
-var UILoadoutMapping = map[string][]string{
-	"business":                             {LoadoutDefault, LoadoutQuery},
-	"business_with_ontology":               {LoadoutDefault, LoadoutQuery, LoadoutOntologyMaintenance},
-	"agent":                                {LoadoutDefault, LoadoutLimitedQuery},
-	"developer":                            {LoadoutDefault, LoadoutDeveloperCore},
-	"developer_with_query":                 {LoadoutDefault, LoadoutDeveloperCore, LoadoutQuery},
-	"developer_with_ontology_maintenance":  {LoadoutDefault, LoadoutDeveloperCore, LoadoutOntologyMaintenance, LoadoutOntologyQuestions},
-	"developer_with_query_and_maintenance": {LoadoutDefault, LoadoutDeveloperCore, LoadoutQuery, LoadoutOntologyMaintenance, LoadoutOntologyQuestions},
-	"custom":                               {}, // Custom mode uses individual tool selection
-}
-
 // allToolsIndex is a lookup map for tool order, built at init time.
 var allToolsIndex map[string]int
 
@@ -251,7 +229,6 @@ func GetAllTools() []ToolSpec {
 // For agent authentication (isAgent=true): Limited query tools only.
 func ComputeEnabledToolsFromConfig(state map[string]*models.ToolGroupConfig, isAgent bool) []ToolSpec {
 	if state == nil {
-		// Only default loadout (health) when no state
 		return MergeLoadouts(LoadoutDefault)
 	}
 
@@ -261,35 +238,29 @@ func ComputeEnabledToolsFromConfig(state map[string]*models.ToolGroupConfig, isA
 		if agentConfig != nil && agentConfig.Enabled {
 			return MergeLoadouts(LoadoutDefault, LoadoutLimitedQuery)
 		}
-		// Agent auth but agent_tools not enabled - only health
 		return MergeLoadouts(LoadoutDefault)
 	}
 
-	// User authentication from here on
-	// For users, tools are always enabled - sub-options control loadout selection.
-	// The Enabled flag is deprecated and not checked.
-
-	// Custom tools mode: use individually selected tools
+	// Custom tools mode
 	customConfig := state[ToolGroupCustom]
 	if customConfig != nil && customConfig.Enabled {
 		return computeCustomTools(customConfig.CustomTools)
 	}
 
-	// Build loadout list based on config sub-options
-	loadouts := []string{LoadoutDefault, LoadoutDeveloperCore}
+	// Merge developer + user tools (union)
+	devTools := ComputeDeveloperTools(state)
+	userTools := ComputeUserTools(state)
 
-	// Developer Tools sub-options control which loadouts are included
-	devConfig := state[ToolGroupDeveloper]
-	if devConfig != nil {
-		if devConfig.AddQueryTools {
-			loadouts = append(loadouts, LoadoutQuery)
-		}
-		if devConfig.AddOntologyMaintenance {
-			loadouts = append(loadouts, LoadoutOntologyMaintenance, LoadoutOntologyQuestions)
-		}
+	// Union into a set, then return in canonical order
+	enabled := make(map[string]bool)
+	for _, t := range devTools {
+		enabled[t.Name] = true
+	}
+	for _, t := range userTools {
+		enabled[t.Name] = true
 	}
 
-	return MergeLoadouts(loadouts...)
+	return toolsInCanonicalOrder(enabled)
 }
 
 // computeCustomTools returns tools based on individually selected tool names.
@@ -331,33 +302,96 @@ func IsToolInLoadout(toolName, loadoutName string) bool {
 }
 
 // ComputeUserTools returns the tool set for users with the "user" role.
-// Users get health check and limited query tools (execute approved queries only).
+// Uses per-app toggles to determine which user-facing tools are enabled.
 func ComputeUserTools(state map[string]*models.ToolGroupConfig) []ToolSpec {
-	return MergeLoadouts(LoadoutDefault, LoadoutLimitedQuery)
-}
+	cfg := getToolsConfig(state)
 
-// ComputeDeveloperTools computes tools for admin/data/developer roles.
-// Returns the full tool set based on Developer Tools configuration:
-// - Default loadout (health) always included
-// - Developer Core loadout (echo, execute)
-// - Query loadout if AddQueryTools is true
-// - Ontology Maintenance + Questions loadouts if AddOntologyMaintenance is true
-//
-// Note: For developers, we use the developer config for sub-options.
-func ComputeDeveloperTools(state map[string]*models.ToolGroupConfig) []ToolSpec {
-	loadouts := []string{LoadoutDefault, LoadoutDeveloperCore}
+	enabled := make(map[string]bool)
+	// health always included
+	for _, name := range Loadouts[LoadoutDefault] {
+		enabled[name] = true
+	}
 
-	devConfig := state[ToolGroupDeveloper]
-	if devConfig != nil {
-		if devConfig.AddQueryTools {
-			loadouts = append(loadouts, LoadoutQuery)
+	for _, toggle := range AppToggles {
+		if toggle.Role != "user" {
+			continue
 		}
-		if devConfig.AddOntologyMaintenance {
-			loadouts = append(loadouts, LoadoutOntologyMaintenance, LoadoutOntologyQuestions)
+		if IsToggleEnabled(cfg, toggle.ToggleKey) {
+			for _, toolName := range toggle.Tools {
+				enabled[toolName] = true
+			}
 		}
 	}
 
-	return MergeLoadouts(loadouts...)
+	return toolsInCanonicalOrder(enabled)
+}
+
+// ComputeDeveloperTools computes tools for admin/data/developer roles.
+// Uses per-app toggles to determine which developer-facing tools are enabled.
+func ComputeDeveloperTools(state map[string]*models.ToolGroupConfig) []ToolSpec {
+	cfg := getToolsConfig(state)
+
+	enabled := make(map[string]bool)
+	// health always included
+	for _, name := range Loadouts[LoadoutDefault] {
+		enabled[name] = true
+	}
+
+	for _, toggle := range AppToggles {
+		if toggle.Role != "developer" {
+			continue
+		}
+		if IsToggleEnabled(cfg, toggle.ToggleKey) {
+			for _, toolName := range toggle.Tools {
+				enabled[toolName] = true
+			}
+		}
+	}
+
+	return toolsInCanonicalOrder(enabled)
+}
+
+// getToolsConfig returns the "tools" config from state, falling back to legacy fields.
+// For backward compatibility: if "tools" key doesn't exist, construct from legacy "developer"/"user" keys.
+func getToolsConfig(state map[string]*models.ToolGroupConfig) *models.ToolGroupConfig {
+	if cfg, ok := state["tools"]; ok && cfg != nil {
+		return cfg
+	}
+
+	// Backward compat: map legacy fields to new toggles
+	cfg := &models.ToolGroupConfig{}
+
+	// Legacy "developer" key had AddQueryTools and AddOntologyMaintenance
+	if devCfg, ok := state[ToolGroupDeveloper]; ok && devCfg != nil {
+		// AddQueryTools previously controlled schema exploration + query tools
+		// Map to: Direct Database Access (echo/execute/query) + Approval Tools
+		cfg.AddDirectDatabaseAccess = devCfg.AddQueryTools
+		cfg.AddApprovalTools = devCfg.AddQueryTools
+
+		// AddOntologyMaintenance previously controlled ontology maintenance + questions
+		// Map to: Ontology Maintenance Tools
+		cfg.AddOntologyMaintenanceTools = devCfg.AddOntologyMaintenance
+	}
+
+	// Legacy "user" key had AllowOntologyMaintenance
+	if userCfg, ok := state[ToolGroupUser]; ok && userCfg != nil {
+		// Map to: Ontology Suggestions + Request Tools
+		cfg.AddOntologySuggestions = userCfg.AllowOntologyMaintenance
+		cfg.AddRequestTools = userCfg.AllowOntologyMaintenance
+	}
+
+	return cfg
+}
+
+// toolsInCanonicalOrder returns ToolSpecs for the given tool names in AllToolsOrdered order.
+func toolsInCanonicalOrder(enabled map[string]bool) []ToolSpec {
+	var result []ToolSpec
+	for _, tool := range AllToolsOrdered {
+		if enabled[tool.Name] {
+			result = append(result, tool)
+		}
+	}
+	return result
 }
 
 // ComputeAgentTools computes tools for AI agents (API key authentication).

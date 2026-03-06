@@ -63,6 +63,7 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "get_glossary_sql", Description: "Get SQL definition for a business term", ToolGroup: ToolGroupUser},
 	{Name: "update_glossary_term", Description: "Create or update a business glossary term with upsert semantics (definition, sql, aliases)", ToolGroup: ToolGroupDeveloper},
 	{Name: "delete_glossary_term", Description: "Delete a business glossary term that's no longer relevant", ToolGroup: ToolGroupDeveloper},
+	{Name: "create_glossary_term", Description: "Create a new business glossary term with SQL definition", ToolGroup: ToolGroupDeveloper},
 	{Name: "list_approved_queries", Description: "List pre-approved SQL queries", ToolGroup: ToolGroupUser},
 	{Name: "execute_approved_query", Description: "Execute a pre-approved query by ID", ToolGroup: ToolGroupUser},
 	{Name: "suggest_approved_query", Description: "Suggest a reusable parameterized query for approval", ToolGroup: ToolGroupUser},

@@ -272,31 +272,60 @@ func NewToolFilter(deps *MCPToolDeps) func(ctx context.Context, tools []mcp.Tool
 			enabledNames[td.Name] = true
 		}
 
-		// Check if AI Data Liaison app is installed - if not, remove data liaison tools
-		dataLiaisonInstalled := false
+		// Check which apps are installed
+		installedApps := map[string]bool{
+			models.AppIDMCPServer: true,
+		}
 		if deps.GetInstalledAppService() != nil {
-			installed, err := deps.GetInstalledAppService().IsInstalled(tenantCtx, projectID, models.AppIDAIDataLiaison)
-			if err != nil {
-				deps.Logger.Warn("Tool filter: failed to check AI Data Liaison app installation",
-					zap.String("project_id", projectID.String()),
-					zap.Error(err))
-				// On error, default to not installed (safer)
-			} else {
-				dataLiaisonInstalled = installed
+			for _, appID := range []string{models.AppIDOntologyForge, models.AppIDAIDataLiaison} {
+				installed, err := deps.GetInstalledAppService().IsInstalled(tenantCtx, projectID, appID)
+				if err != nil {
+					deps.Logger.Warn("Tool filter: failed to check app installation",
+						zap.String("project_id", projectID.String()),
+						zap.String("app_id", appID),
+						zap.Error(err))
+				} else if installed {
+					installedApps[appID] = true
+				}
 			}
 		}
 
-		// Remove data liaison tools if app not installed
-		if !dataLiaisonInstalled {
-			for toolName := range dataLiaisonTools {
+		// Build a map of tool name → set of owning app IDs across all roles.
+		// This avoids the fallback behavior of GetToolAppID which returns
+		// AppIDMCPServer for tools not found in a given role.
+		toolOwners := make(map[string]map[string]bool)
+		for _, toggle := range services.AppToggles {
+			for _, toolName := range toggle.Tools {
+				if toolOwners[toolName] == nil {
+					toolOwners[toolName] = make(map[string]bool)
+				}
+				toolOwners[toolName][toggle.AppID] = true
+			}
+		}
+
+		// Remove tools from uninstalled apps.
+		// A tool is allowed if ANY of its owning apps is installed.
+		// Tools not in any toggle (e.g., "health") are always allowed.
+		for toolName := range enabledNames {
+			owners := toolOwners[toolName]
+			if len(owners) == 0 {
+				continue // tool not in any toggle, always allowed
+			}
+			allowed := false
+			for appID := range owners {
+				if installedApps[appID] {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
 				delete(enabledNames, toolName)
 			}
 		}
 
 		deps.Logger.Debug("Tool filter: filtering based on GetEnabledTools",
 			zap.String("project_id", projectID.String()),
-			zap.Int("enabled_tool_count", len(enabledNames)),
-			zap.Bool("data_liaison_installed", dataLiaisonInstalled))
+			zap.Int("enabled_tool_count", len(enabledNames)))
 
 		// Filter MCP tools to only include enabled ones
 		return filterByEnabledNames(tools, enabledNames)
