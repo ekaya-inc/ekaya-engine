@@ -386,6 +386,12 @@ func (s *mcpConfigService) buildResponse(ctx context.Context, projectID uuid.UUI
 		}
 	}
 
+	// For existing projects without a "tools" key, derive toggle state from legacy keys
+	// so the API response matches the actual tool computation (which uses getToolsConfig)
+	if _, ok := result.State["tools"]; !ok {
+		toolGroups["tools"] = getToolsConfig(result.State)
+	}
+
 	serverURL, err := url.JoinPath(s.baseURL, "mcp", projectID.String())
 	if err != nil {
 		s.logger.Error("failed to build server URL",
