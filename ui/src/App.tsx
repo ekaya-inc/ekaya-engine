@@ -18,6 +18,7 @@ import EnrichmentPage from './pages/EnrichmentPage';
 import GlossaryPage from './pages/GlossaryPage';
 import HelpPage from './pages/HelpPage';
 import HomePage from './pages/HomePage';
+import MCPEventsPage from './pages/MCPEventsPage';
 import MCPServerPage from './pages/MCPServerPage';
 import OAuthCallbackPage from './pages/OAuthCallbackPage';
 import OntologyForgePage from './pages/OntologyForgePage';
@@ -61,6 +62,7 @@ const App = (): JSX.Element => {
                   <Route path="ontology-questions" element={<OntologyQuestionsPage />} />
                   <Route path="queries/*" element={<QueriesPage />} />
                   <Route path="mcp-server" element={<MCPServerPage />} />
+                  <Route path="mcp-events" element={<MCPEventsPage />} />
                   <Route path="ontology-forge" element={<OntologyForgePage />} />
                   <Route path="server-setup" element={<ServerSetupPage />} />
                   <Route path="settings" element={<SettingsPage />} />

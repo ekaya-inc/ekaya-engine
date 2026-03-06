@@ -14,6 +14,7 @@ import {
   Server,
   Shield,
   Sparkles,
+  Terminal,
 } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -30,7 +31,7 @@ import type {
   AIOption,
   OntologyWorkflowStatus,
 } from '../types';
-import { APP_ID_AI_DATA_LIAISON, APP_ID_AI_AGENTS, APP_ID_ONTOLOGY_FORGE } from '../types';
+import { APP_ID_AI_DATA_LIAISON, APP_ID_AI_AGENTS, APP_ID_MCP_SERVER, APP_ID_ONTOLOGY_FORGE } from '../types';
 
 type TileColor = 'blue' | 'green' | 'purple' | 'orange' | 'gray' | 'indigo' | 'cyan' | 'amber';
 
@@ -87,6 +88,17 @@ const ProjectDashboard = () => {
       },
     ];
 
+    if (installedApps.some((app) => app.app_id === APP_ID_MCP_SERVER)) {
+      tiles.push({
+        title: 'MCP Events',
+        description: 'Monitor MCP tool calls, security events, and API activity.',
+        icon: Terminal,
+        path: `/projects/${pid}/mcp-events`,
+        disabled: false,
+        color: 'blue',
+      });
+    }
+
     // Schema and Pre-Approved Queries only show when Ontology Forge is installed
     // (they are part of the business semantic layer)
     if (hasOntologyForge) {
@@ -111,7 +123,7 @@ const ProjectDashboard = () => {
     }
 
     return tiles;
-  }, [pid, isConnected, hasOntologyForge]);
+  }, [pid, isConnected, hasOntologyForge, installedApps]);
 
   const intelligenceTiles: Tile[] = useMemo(() => {
     const tiles: Tile[] = [
