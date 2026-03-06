@@ -15,6 +15,7 @@ vi.mock('../../services/engineApi', () => ({
     getInstalledApp: vi.fn(),
     listDataSources: vi.fn(),
     getMCPConfig: vi.fn(),
+    updateMCPConfig: vi.fn(),
     getAIConfig: vi.fn(),
     getSchema: vi.fn(),
     getOntologyDAGStatus: vi.fn(),
@@ -75,6 +76,7 @@ const mockMCPConfig: MCPConfigResponse = {
   developerTools: [],
   agentTools: [],
   toolGroups: {},
+  appNames: {},
   enabledTools: [],
 };
 
@@ -325,21 +327,21 @@ describe('AIDataLiaisonPage', () => {
     });
   });
 
-  describe('Enabled Tools', () => {
-    it('renders user tools card', async () => {
+  describe('Tool Configuration', () => {
+    it('renders tool configuration card', async () => {
       await renderAIDataLiaisonPage();
-      expect(screen.getByText('User Tools')).toBeInTheDocument();
+      expect(screen.getByText('Tool Configuration')).toBeInTheDocument();
     });
 
-    it('shows ontology maintenance toggle', async () => {
+    it('shows approval tools toggle', async () => {
       await renderAIDataLiaisonPage();
-      expect(screen.getByText('Allow Usage to Improve Ontology')).toBeInTheDocument();
+      expect(screen.getByText('Add Approval Tools')).toBeInTheDocument();
     });
 
-    it('shows additional developer tools section', async () => {
+    it('shows request tools toggle with recommended badge', async () => {
       await renderAIDataLiaisonPage();
-      expect(screen.getByText('Additional Developer Tools')).toBeInTheDocument();
-      expect(screen.getByText('list_query_suggestions')).toBeInTheDocument();
+      expect(screen.getByText('Add Request Tools')).toBeInTheDocument();
+      expect(screen.getByText('[RECOMMENDED]')).toBeInTheDocument();
     });
   });
 

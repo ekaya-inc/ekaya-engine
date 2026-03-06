@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as authToken from '../../lib/auth-token';
 import engineApi from '../../services/engineApi';
-import type { Datasource, InstalledApp, MCPConfigResponse } from '../../types';
+import type { Datasource, MCPConfigResponse } from '../../types';
 import OntologyForgePage from '../OntologyForgePage';
 
 vi.mock('../../services/engineApi', () => ({
@@ -17,7 +17,6 @@ vi.mock('../../services/engineApi', () => ({
     getOntologyQuestionCounts: vi.fn(),
     updateMCPConfig: vi.fn(),
     listQueries: vi.fn(),
-    getServerStatus: vi.fn(),
     getInstalledApp: vi.fn(),
     activateApp: vi.fn(),
     uninstallApp: vi.fn(),
@@ -83,15 +82,8 @@ const mockMCPConfig: MCPConfigResponse = {
   developerTools: [],
   agentTools: [],
   toolGroups: {},
+  appNames: {},
   enabledTools: [],
-};
-
-const mockInstalledApp: InstalledApp = {
-  id: 'ia-1',
-  project_id: 'proj-1',
-  app_id: 'ontology-forge',
-  installed_at: '2024-01-01',
-  settings: {},
 };
 
 const setupMocks = (options: {
@@ -117,8 +109,6 @@ const setupMocks = (options: {
     success: true,
     data: mockMCPConfig,
   });
-
-  vi.mocked(engineApi.getServerStatus).mockResolvedValue(null);
 
   vi.mocked(engineApi.listDataSources).mockResolvedValue({
     success: true,
@@ -192,9 +182,14 @@ const setupMocks = (options: {
 
   vi.mocked(engineApi.getInstalledApp).mockResolvedValue({
     success: true,
-    data: isActivated
-      ? { ...mockInstalledApp, activated_at: '2024-01-02' }
-      : mockInstalledApp,
+    data: {
+      id: 'ia-1',
+      project_id: 'proj-1',
+      app_id: 'ontology-forge',
+      installed_at: '2024-01-01',
+      settings: {},
+      ...(isActivated ? { activated_at: '2024-01-02' } : {}),
+    },
   });
 };
 
@@ -263,36 +258,7 @@ describe('OntologyForgePage - Checklist step prerequisites match dashboard tiles
     expect(link).toHaveAttribute('href', '/projects/proj-1/mcp-server');
   });
 
-  // -- Step 2: Activate Ontology Forge -- requires MCP Server set up (datasource)
-  it('activate step shows Activate button when datasource is configured', async () => {
-    setupMocks({ hasDatasource: true, isActivated: false });
-    await renderPage();
-    await waitFor(() => {
-      const btn = getStepButton('Activate Ontology Forge');
-      expect(btn).toBeInTheDocument();
-      expect(btn).toHaveTextContent('Activate');
-    });
-  });
-
-  it('activate step is disabled when datasource is not configured', async () => {
-    setupMocks({ hasDatasource: false, isActivated: false });
-    await renderPage();
-    await waitFor(() => {
-      expect(screen.getByText(/Activate Ontology Forge/)).toBeInTheDocument();
-    });
-    expect(screen.getByText('Complete step 1 before activating')).toBeInTheDocument();
-  });
-
-  it('activate step shows complete when activated', async () => {
-    setupMocks({ hasDatasource: true, isActivated: true });
-    await renderPage();
-    await waitFor(() => {
-      expect(screen.getByText(/Activate Ontology Forge/)).toBeInTheDocument();
-    });
-    expect(screen.getByText('Ontology Forge activated')).toBeInTheDocument();
-  });
-
-  // -- Step 3: Schema -- requires datasource (matches Schema tile: disabled when !isConnected)
+  // -- Step 2: Schema -- requires datasource (matches Schema tile: disabled when !isConnected)
   it('schema step shows Configure button when datasource exists', async () => {
     setupMocks({ hasDatasource: true, hasSelectedTables: false });
     await renderPage();
@@ -312,7 +278,7 @@ describe('OntologyForgePage - Checklist step prerequisites match dashboard tiles
     expect(btn).toBeNull();
   });
 
-  // -- Step 4: Pre-Approved Queries (optional) -- requires datasource
+  // -- Step 3: Pre-Approved Queries (optional) -- requires datasource
   it('queries step shows Configure button when datasource exists but no queries', async () => {
     setupMocks({ hasDatasource: true, hasApprovedQueries: false });
     await renderPage();
@@ -344,7 +310,7 @@ describe('OntologyForgePage - Checklist step prerequisites match dashboard tiles
     expect(btn).toBeNull();
   });
 
-  // -- Step 5: AI configured -- requires datasource + schema (matches AI config prerequisite)
+  // -- Step 4: AI configured -- requires datasource + schema (matches AI config prerequisite)
   it('AI step shows Configure button when datasource and schema exist', async () => {
     setupMocks({ hasDatasource: true, hasSelectedTables: true, hasAIConfig: false });
     await renderPage();
@@ -376,7 +342,7 @@ describe('OntologyForgePage - Checklist step prerequisites match dashboard tiles
     expect(btn).toBeNull();
   });
 
-  // -- Step 6: Ontology -- requires datasource + schema + AI (matches Intelligence tile logic)
+  // -- Step 5: Ontology -- requires datasource + schema + AI (matches Intelligence tile logic)
   it('ontology step shows Configure button when datasource, schema, and AI are all configured', async () => {
     setupMocks({ hasDatasource: true, hasSelectedTables: true, hasAIConfig: true, hasOntology: false });
     await renderPage();
@@ -419,7 +385,7 @@ describe('OntologyForgePage - Checklist step prerequisites match dashboard tiles
     expect(btn).toBeNull();
   });
 
-  // -- Step 7: Questions -- requires ontology complete
+  // -- Step 6: Questions -- requires ontology complete
   it('questions step shows Answer button when ontology is complete and questions exist', async () => {
     setupMocks({ hasOntology: true, questionCounts: { required: 2, optional: 0 } });
     await renderPage();
@@ -437,6 +403,42 @@ describe('OntologyForgePage - Checklist step prerequisites match dashboard tiles
     const stepEl = screen.getByText(/Critical Ontology Questions answered/).closest('[class*="rounded-lg"]');
     const btn = stepEl?.querySelector('a button');
     expect(btn).toBeNull();
+  });
+});
+
+describe('OntologyForgePage - Silent activation on ontology completion', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('calls activateApp when ontology is completed and app is not yet activated', async () => {
+    vi.mocked(engineApi.activateApp).mockResolvedValue({ success: true, data: {} });
+    setupMocks({ hasOntology: true, isActivated: false });
+    await renderPage();
+
+    await waitFor(() => {
+      expect(engineApi.activateApp).toHaveBeenCalledWith('proj-1', 'ontology-forge');
+    });
+  });
+
+  it('does not call activateApp when app is already activated', async () => {
+    setupMocks({ hasOntology: true, isActivated: true });
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Ontology Forge')).toBeInTheDocument();
+    });
+    expect(engineApi.activateApp).not.toHaveBeenCalled();
+  });
+
+  it('does not call activateApp when ontology is not completed', async () => {
+    setupMocks({ hasOntology: false, isActivated: false });
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Ontology Forge')).toBeInTheDocument();
+    });
+    expect(engineApi.activateApp).not.toHaveBeenCalled();
   });
 });
 
@@ -488,7 +490,6 @@ describe('OntologyForgePage - Questions checklist item', () => {
       hasOntology: true,
       questionCounts: { required: 0, optional: 0 },
       hasApprovedQueries: false,
-      isActivated: true,
     });
     await renderPage();
 
@@ -548,7 +549,7 @@ describe('OntologyForgePage - Role-based access', () => {
     await waitFor(() => {
       expect(screen.getByText('Setup Checklist')).toBeInTheDocument();
     });
-    expect(screen.getByText('Your MCP Server URL')).toBeInTheDocument();
+    expect(screen.getByText('Danger Zone')).toBeInTheDocument();
   });
 
   it('shows full config UI for data role', async () => {
@@ -559,7 +560,7 @@ describe('OntologyForgePage - Role-based access', () => {
     await waitFor(() => {
       expect(screen.getByText('Setup Checklist')).toBeInTheDocument();
     });
-    expect(screen.getByText('Your MCP Server URL')).toBeInTheDocument();
+    expect(screen.getByText('Danger Zone')).toBeInTheDocument();
   });
 
   it('shows instructions page for user role instead of config UI', async () => {
@@ -573,7 +574,7 @@ describe('OntologyForgePage - Role-based access', () => {
 
     // Should NOT show the admin config UI
     expect(screen.queryByText('Setup Checklist')).not.toBeInTheDocument();
-    expect(screen.queryByText('Your MCP Server URL')).not.toBeInTheDocument();
+    expect(screen.queryByText('Danger Zone')).not.toBeInTheDocument();
 
     // Should show instructions with a link to MCP setup
     expect(screen.getByText(/MCP Setup Instructions/)).toBeInTheDocument();
@@ -608,6 +609,6 @@ describe('OntologyForgePage - Role-based access', () => {
 
     // Should NOT show admin config UI
     expect(screen.queryByText('Setup Checklist')).not.toBeInTheDocument();
-    expect(screen.queryByText('Your MCP Server URL')).not.toBeInTheDocument();
+    expect(screen.queryByText('Danger Zone')).not.toBeInTheDocument();
   });
 });

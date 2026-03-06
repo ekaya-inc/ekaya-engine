@@ -1,14 +1,14 @@
-import { ArrowLeft, ExternalLink, Info, Loader2, Check, Copy } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ExternalLink, Info, Loader2, Check, Copy } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import MCPLogo from '../components/icons/MCPLogo';
-import DeveloperToolsSection from '../components/mcp/DeveloperToolsSection';
+import ToolInventory from '../components/mcp/ToolInventory';
 import SetupChecklist from '../components/SetupChecklist';
 import type { ChecklistItem } from '../components/SetupChecklist';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
-import { TOOL_GROUP_IDS } from '../constants/mcpToolMetadata';
+import { Switch } from '../components/ui/Switch';
 import { useConfig } from '../contexts/ConfigContext';
 import { useProject } from '../contexts/ProjectContext';
 import { useToast } from '../hooks/useToast';
@@ -32,10 +32,8 @@ const MCPServerPage = () => {
   const [datasource, setDatasource] = useState<Datasource | null>(null);
   const [serverStatus, setServerStatus] = useState<ServerStatusResponse | null>(null);
 
-  // Read tool group configs from backend
-  const developerState = config?.toolGroups[TOOL_GROUP_IDS.DEVELOPER];
-  const addQueryTools = developerState?.addQueryTools ?? true;
-  const addOntologyMaintenance = developerState?.addOntologyMaintenance ?? true;
+  // Read tool group config from backend
+  const addDirectDatabaseAccess = config?.toolGroups['tools']?.addDirectDatabaseAccess ?? true;
 
   const fetchConfig = useCallback(async () => {
     if (!pid) return;
@@ -88,50 +86,20 @@ const MCPServerPage = () => {
     ];
   };
 
-  const handleAddQueryToolsChange = async (enabled: boolean) => {
+  const handleDirectDatabaseAccessChange = async (enabled: boolean) => {
     if (!pid || !config) return;
 
     try {
       setUpdating(true);
       const response = await engineApi.updateMCPConfig(pid, {
-        addQueryTools: enabled,
+        addDirectDatabaseAccess: enabled,
       });
 
       if (response.success && response.data) {
         setConfig(response.data);
         toast({
           title: 'Success',
-          description: `Add Query Tools ${enabled ? 'enabled' : 'disabled'}`,
-        });
-      } else {
-        throw new Error(response.error ?? 'Failed to update configuration');
-      }
-    } catch (error) {
-      console.error('Failed to update MCP config:', error);
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to update configuration',
-        variant: 'destructive',
-      });
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  const handleAddOntologyMaintenanceChange = async (enabled: boolean) => {
-    if (!pid || !config) return;
-
-    try {
-      setUpdating(true);
-      const response = await engineApi.updateMCPConfig(pid, {
-        addOntologyMaintenance: enabled,
-      });
-
-      if (response.success && response.data) {
-        setConfig(response.data);
-        toast({
-          title: 'Success',
-          description: `Add Ontology Maintenance ${enabled ? 'enabled' : 'disabled'}`,
+          description: `Direct Database Access ${enabled ? 'enabled' : 'disabled'}`,
         });
       } else {
         throw new Error(response.error ?? 'Failed to update configuration');
@@ -318,14 +286,46 @@ const MCPServerPage = () => {
               </CardContent>
             </Card>
 
-            {/* Developer Tools Section */}
-            <DeveloperToolsSection
-              addQueryTools={addQueryTools}
-              onAddQueryToolsChange={handleAddQueryToolsChange}
-              addOntologyMaintenance={addOntologyMaintenance}
-              onAddOntologyMaintenanceChange={handleAddOntologyMaintenanceChange}
-              enabledTools={config.developerTools}
-              disabled={updating}
+            {/* Tool Configuration */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Tool Configuration</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Warning about direct access */}
+                <div className="flex items-start gap-2 rounded-md bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>
+                    The MCP Client will have direct access to the Datasource using the supplied credentials
+                    -- this access includes potentially destructive operations. Back up the data before
+                    allowing AI to modify it.
+                  </span>
+                </div>
+
+                {/* Direct Database Access toggle */}
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex-1">
+                    <span className="text-sm font-medium text-text-primary">Direct Database Access</span>
+                    <p className="text-sm text-text-secondary mt-1">
+                      Include tools for direct database access: echo, execute, and query.
+                      Enables the MCP Client to run arbitrary SQL against the datasource.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={addDirectDatabaseAccess}
+                    onCheckedChange={handleDirectDatabaseAccessChange}
+                    disabled={updating}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Tool Inventory */}
+            <ToolInventory
+              developerTools={config.developerTools}
+              userTools={config.userTools}
+              appNames={config.appNames}
+              projectId={pid ?? ''}
             />
 
           </>

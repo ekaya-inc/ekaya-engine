@@ -1,17 +1,16 @@
 import {
+  Anvil,
   ArrowLeft,
-  Check,
-  Copy,
   ExternalLink,
   Info,
+  Lightbulb,
   Loader2,
   Trash2,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
-import OntologyForgeLogo from '../components/icons/OntologyForgeLogo';
-import DeveloperToolsSection from '../components/mcp/DeveloperToolsSection';
+import MCPEnabledTools from '../components/mcp/MCPEnabledTools';
 import SetupChecklist from '../components/SetupChecklist';
 import type { ChecklistItem } from '../components/SetupChecklist';
 import { Button } from '../components/ui/Button';
@@ -31,13 +30,13 @@ import {
   DialogTitle,
 } from '../components/ui/Dialog';
 import { Input } from '../components/ui/Input';
-import { TOOL_GROUP_IDS } from '../constants/mcpToolMetadata';
+import { Switch } from '../components/ui/Switch';
 import { useConfig } from '../contexts/ConfigContext';
 import { useProject } from '../contexts/ProjectContext';
 import { useToast } from '../hooks/useToast';
 import { getUserRoles } from '../lib/auth-token';
 import engineApi from '../services/engineApi';
-import type { AIConfigResponse, DAGStatusResponse, Datasource, InstalledApp, MCPConfigResponse, ServerStatusResponse } from '../types';
+import type { AIConfigResponse, DAGStatusResponse, Datasource, MCPConfigResponse } from '../types';
 
 const OntologyForgePage = () => {
   const navigate = useNavigate();
@@ -50,7 +49,6 @@ const OntologyForgePage = () => {
   const [config, setConfig] = useState<MCPConfigResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   // Setup checklist state
   const [datasource, setDatasource] = useState<Datasource | null>(null);
@@ -59,30 +57,25 @@ const OntologyForgePage = () => {
   const [dagStatus, setDagStatus] = useState<DAGStatusResponse | null>(null);
   const [questionCounts, setQuestionCounts] = useState<{ required: number; optional: number } | null>(null);
   const [hasApprovedQueries, setHasApprovedQueries] = useState(false);
-  const [serverStatus, setServerStatus] = useState<ServerStatusResponse | null>(null);
 
-  // Activation & uninstall state
-  const [installedApp, setInstalledApp] = useState<InstalledApp | null>(null);
-  const [activating, setActivating] = useState(false);
+  // Uninstall state
   const [confirmText, setConfirmText] = useState('');
   const [isUninstalling, setIsUninstalling] = useState(false);
   const [showUninstallDialog, setShowUninstallDialog] = useState(false);
 
-  // Read tool group configs from backend
-  const developerState = config?.toolGroups[TOOL_GROUP_IDS.DEVELOPER];
-  const addQueryTools = developerState?.addQueryTools ?? true;
-  const addOntologyMaintenance = developerState?.addOntologyMaintenance ?? true;
+  // Read tool group config from backend
+  const addOntologyMaintenanceTools = config?.toolGroups['tools']?.addOntologyMaintenanceTools ?? true;
+  const addOntologySuggestions = config?.toolGroups['tools']?.addOntologySuggestions ?? true;
 
   const fetchConfig = useCallback(async () => {
     if (!pid) return;
 
     try {
       setLoading(true);
-      const [mcpRes, datasourcesRes, aiConfigRes, serverStatusRes, installedAppRes] = await Promise.all([
+      const [mcpRes, datasourcesRes, aiConfigRes, installedAppRes] = await Promise.all([
         engineApi.getMCPConfig(pid),
         engineApi.listDataSources(pid),
         engineApi.getAIConfig(pid),
-        engineApi.getServerStatus(),
         engineApi.getInstalledApp(pid, 'ontology-forge').catch(() => null),
       ]);
 
@@ -95,9 +88,8 @@ const OntologyForgePage = () => {
       const ds = datasourcesRes.data?.datasources?.[0] ?? null;
       setDatasource(ds);
       setAiConfig(aiConfigRes.data ?? null);
-      setServerStatus(serverStatusRes);
-      setInstalledApp(installedAppRes?.data ?? null);
 
+      let dagCompleted = false;
       if (ds) {
         try {
           const schemaRes = await engineApi.getSchema(pid, ds.datasource_id);
@@ -110,6 +102,7 @@ const OntologyForgePage = () => {
         try {
           const dagRes = await engineApi.getOntologyDAGStatus(pid, ds.datasource_id);
           setDagStatus(dagRes.data ?? null);
+          dagCompleted = dagRes.data?.status === 'completed';
         } catch {
           setDagStatus(null);
         }
@@ -128,6 +121,12 @@ const OntologyForgePage = () => {
         } catch {
           setHasApprovedQueries(false);
         }
+      }
+
+      // Silently activate when ontology extraction completes for the first time
+      const appData = installedAppRes?.data ?? null;
+      if (dagCompleted && appData && !appData.activated_at) {
+        engineApi.activateApp(pid, 'ontology-forge').catch(() => {});
       }
     } catch (error) {
       console.error('Failed to fetch MCP config:', error);
@@ -185,28 +184,6 @@ const OntologyForgePage = () => {
     processCallback();
   }, [searchParams, setSearchParams, pid, navigate, toast, fetchConfig]);
 
-  const handleActivate = async () => {
-    if (!pid) return;
-
-    setActivating(true);
-    try {
-      const response = await engineApi.activateApp(pid, 'ontology-forge');
-      if (response.data?.redirectUrl) {
-        window.location.href = response.data.redirectUrl;
-        return;
-      }
-      await fetchConfig();
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to activate application',
-        variant: 'destructive',
-      });
-    } finally {
-      setActivating(false);
-    }
-  };
-
   const handleUninstall = async () => {
     if (confirmText !== 'uninstall application' || !pid) return;
 
@@ -252,27 +229,7 @@ const OntologyForgePage = () => {
       linkText: datasource ? 'Manage' : 'Configure',
     });
 
-    // 2. Activate Ontology Forge (requires step 1)
-    const mcpServerReady = !!datasource;
-    const activated = installedApp?.activated_at != null;
-    items.push({
-      id: 'activate',
-      title: 'Activate Ontology Forge',
-      description: activated
-        ? 'Ontology Forge activated'
-        : mcpServerReady
-          ? 'Activate to start using the application'
-          : 'Complete step 1 before activating',
-      status: loading ? 'loading' : activated ? 'complete' : 'pending',
-      disabled: !mcpServerReady && !activated,
-      ...(activated ? {} : {
-        onAction: handleActivate,
-        actionText: 'Activate',
-        actionDisabled: activating || !mcpServerReady,
-      }),
-    });
-
-    // 3. Schema selected
+    // 2. Schema selected
     const schemaItem: ChecklistItem = {
       id: 'schema',
       title: 'Schema selected',
@@ -289,7 +246,7 @@ const OntologyForgePage = () => {
     }
     items.push(schemaItem);
 
-    // 4. Create Pre-Approved Queries (optional)
+    // 3. Create Pre-Approved Queries (optional)
     const queriesItem: ChecklistItem = {
       id: 'queries',
       title: 'Create Pre-Approved Queries',
@@ -307,7 +264,7 @@ const OntologyForgePage = () => {
     }
     items.push(queriesItem);
 
-    // 5. AI configured
+    // 4. AI configured
     const isAIConfigured = !!aiConfig?.config_type && aiConfig.config_type !== 'none';
     const aiConfigItem: ChecklistItem = {
       id: 'ai-config',
@@ -325,7 +282,7 @@ const OntologyForgePage = () => {
     }
     items.push(aiConfigItem);
 
-    // 6. Ontology extracted
+    // 5. Ontology extracted
     const ontologyComplete = dagStatus?.status === 'completed';
     const ontologyRunning = dagStatus?.status === 'running';
     const ontologyFailed = dagStatus?.status === 'failed';
@@ -356,7 +313,7 @@ const OntologyForgePage = () => {
     }
     items.push(ontologyItem);
 
-    // 7. Critical ontology questions answered
+    // 6. Critical ontology questions answered
     const questionsComplete = questionCounts !== null && questionCounts.required === 0;
     const hasQuestions = questionCounts !== null && (questionCounts.required > 0 || questionsComplete);
     const questionsItem: ChecklistItem = {
@@ -384,20 +341,20 @@ const OntologyForgePage = () => {
     return items;
   };
 
-  const handleAddQueryToolsChange = async (enabled: boolean) => {
+  const handleOntologyMaintenanceToolsChange = async (enabled: boolean) => {
     if (!pid || !config) return;
 
     try {
       setUpdating(true);
       const response = await engineApi.updateMCPConfig(pid, {
-        addQueryTools: enabled,
+        addOntologyMaintenanceTools: enabled,
       });
 
       if (response.success && response.data) {
         setConfig(response.data);
         toast({
           title: 'Success',
-          description: `Add Query Tools ${enabled ? 'enabled' : 'disabled'}`,
+          description: `Ontology Maintenance Tools ${enabled ? 'enabled' : 'disabled'}`,
         });
       } else {
         throw new Error(response.error ?? 'Failed to update configuration');
@@ -414,20 +371,20 @@ const OntologyForgePage = () => {
     }
   };
 
-  const handleAddOntologyMaintenanceChange = async (enabled: boolean) => {
+  const handleOntologySuggestionsChange = async (enabled: boolean) => {
     if (!pid || !config) return;
 
     try {
       setUpdating(true);
       const response = await engineApi.updateMCPConfig(pid, {
-        addOntologyMaintenance: enabled,
+        addOntologySuggestions: enabled,
       });
 
       if (response.success && response.data) {
         setConfig(response.data);
         toast({
           title: 'Success',
-          description: `Add Ontology Maintenance ${enabled ? 'enabled' : 'disabled'}`,
+          description: `Ontology Suggestions ${enabled ? 'enabled' : 'disabled'}`,
         });
       } else {
         throw new Error(response.error ?? 'Failed to update configuration');
@@ -441,17 +398,6 @@ const OntologyForgePage = () => {
       });
     } finally {
       setUpdating(false);
-    }
-  };
-
-  const handleCopyUrl = async () => {
-    if (!config) return;
-    try {
-      await navigator.clipboard.writeText(config.serverUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy URL:', err);
     }
   };
 
@@ -483,7 +429,7 @@ const OntologyForgePage = () => {
             Back to Dashboard
           </Button>
           <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
-            <OntologyForgeLogo size={32} className="text-brand-purple" />
+            <Anvil className="h-8 w-8 text-brand-purple" />
             Ontology Forge
           </h1>
         </div>
@@ -513,20 +459,6 @@ const OntologyForgePage = () => {
 
   const checklistItems = getChecklistItems();
 
-  const isAccessible = serverStatus?.accessible_for_business_users ?? false;
-  const deploymentItems: ChecklistItem[] = [
-    {
-      id: 'server-accessible',
-      title: 'MCP Server securely deployed',
-      description: isAccessible
-        ? 'Server is reachable by other users over HTTPS'
-        : 'Configure HTTPS on a reachable domain for other users',
-      status: loading ? 'loading' : isAccessible ? 'complete' : 'pending',
-      link: `/projects/${pid}/server-setup`,
-      linkText: isAccessible ? 'Review' : 'Configure',
-    },
-  ];
-
   return (
     <div className="mx-auto max-w-4xl">
       <div className="mb-6">
@@ -540,7 +472,7 @@ const OntologyForgePage = () => {
         </Button>
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
-            <OntologyForgeLogo size={32} className="text-brand-purple" />
+            <Anvil className="h-8 w-8 text-brand-purple" />
             Ontology Forge
           </h1>
           <a
@@ -563,68 +495,78 @@ const OntologyForgePage = () => {
           completeDescription="Ontology Forge is ready"
         />
 
-        {/* Deployment Checklist */}
-        <SetupChecklist
-          items={deploymentItems}
-          title="Deployment"
-          description="Optional steps for sharing with other users"
-          completeDescription="MCP Server is accessible to other users"
-        />
-
         {config && (
-          <>
-            {/* Simplified URL Section */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Your MCP Server URL</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 rounded-lg border border-border-light bg-surface-secondary px-4 py-3 font-mono text-sm text-text-primary">
-                    {config.serverUrl}
+          <Card>
+            <CardHeader>
+              <CardTitle>Tool Configuration</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Developer section */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex-1">
+                    <span className="text-sm font-medium text-text-primary">Add Ontology Maintenance Tools</span>
+                    <p className="text-sm text-text-secondary mt-1">
+                      Include tools to manage the ontology: update columns, relationships, refresh
+                      schema, and review pending changes.
+                    </p>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={handleCopyUrl}
-                    className="shrink-0"
-                    title={copied ? 'Copied!' : 'Copy to clipboard'}
-                  >
-                    {copied ? (
-                      <Check className="h-4 w-4 text-green-500" />
-                    ) : (
-                      <Copy className="h-4 w-4" />
-                    )}
-                  </Button>
+                  <Switch
+                    checked={addOntologyMaintenanceTools}
+                    onCheckedChange={handleOntologyMaintenanceToolsChange}
+                    disabled={updating}
+                  />
                 </div>
 
-                <a
-                  href={`${appConfig?.authServerUrl}/mcp-setup?mcp_url=${encodeURIComponent(config.serverUrl)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-sm text-brand-purple hover:underline"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  MCP Setup Instructions
-                </a>
+                <MCPEnabledTools
+                  tools={config.developerTools.filter(t => t.appId === 'ontology-forge')}
+                />
+              </div>
 
-                <p className="text-sm text-text-secondary font-medium">
-                  Note: Changes to configuration will take effect after restarting the MCP Client.
-                </p>
-              </CardContent>
-            </Card>
+              <div className="border-t border-border-light" />
 
-            {/* Developer Tools Section */}
-            <DeveloperToolsSection
-              addQueryTools={addQueryTools}
-              onAddQueryToolsChange={handleAddQueryToolsChange}
-              addOntologyMaintenance={addOntologyMaintenance}
-              onAddOntologyMaintenanceChange={handleAddOntologyMaintenanceChange}
-              enabledTools={config.developerTools}
-              disabled={updating}
-            />
+              {/* User section */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex-1">
+                    <span className="text-sm font-medium text-text-primary">Add Ontology Suggestions</span>
+                    <span className="ml-2 text-xs font-medium text-brand-purple">[RECOMMENDED]</span>
+                    <p className="text-sm text-text-secondary mt-1">
+                      Enable the MCP Client to suggest updates to columns, relationships, and glossary
+                      terms as it learns from user interactions. This helps improve query accuracy over time.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={addOntologySuggestions}
+                    onCheckedChange={handleOntologySuggestionsChange}
+                    disabled={updating}
+                  />
+                </div>
 
-          </>
+                <MCPEnabledTools
+                  tools={config.userTools.filter(t => t.appId === 'ontology-forge')}
+                />
+              </div>
+
+              {/* Pro tip */}
+              <div className="flex items-start gap-2 rounded-md bg-brand-purple/10 p-3 text-sm text-brand-purple dark:bg-brand-purple/20">
+                <Lightbulb className="mt-0.5 h-4 w-4 shrink-0" />
+                <div>
+                  <span className="font-semibold">Pro Tip:</span> Have AI answer questions about your
+                  Ontology{' '}
+                  <details className="inline">
+                    <summary className="inline cursor-pointer underline">(more info)</summary>
+                    <p className="mt-2 font-normal">
+                      After you have extracted your Ontology there might be questions that Ekaya cannot
+                      answer from the database schema and values alone. Connect your IDE to the MCP Server
+                      so that your LLM can answer questions by reviewing your codebase or other project
+                      documents saving you time.
+                    </p>
+                  </details>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         {/* Danger Zone */}

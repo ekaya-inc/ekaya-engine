@@ -10,7 +10,7 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
-import UserToolsSection from '../components/mcp/UserToolsSection';
+import MCPEnabledTools from '../components/mcp/MCPEnabledTools';
 import SetupChecklist from '../components/SetupChecklist';
 import type { ChecklistItem } from '../components/SetupChecklist';
 import { Button } from '../components/ui/Button';
@@ -30,21 +30,11 @@ import {
   DialogTitle,
 } from '../components/ui/Dialog';
 import { Input } from '../components/ui/Input';
-import { TOOL_GROUP_IDS } from '../constants/mcpToolMetadata';
+import { Switch } from '../components/ui/Switch';
 import { useConfig } from '../contexts/ConfigContext';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
 import type { DAGStatusResponse, Datasource, InstalledApp, MCPConfigResponse } from '../types';
-
-// Developer tools added to the MCP Server by AI Data Liaison installation
-const DATA_LIAISON_DEVELOPER_TOOLS = [
-  { name: 'list_query_suggestions', description: 'View pending query suggestions' },
-  { name: 'approve_query_suggestion', description: 'Approve a suggested query' },
-  { name: 'reject_query_suggestion', description: 'Reject a suggested query with feedback' },
-  { name: 'create_approved_query', description: 'Create query directly (bypass suggestion)' },
-  { name: 'update_approved_query', description: 'Update an existing query' },
-  { name: 'delete_approved_query', description: 'Delete a query' },
-];
 
 const AIDataLiaisonPage = () => {
   const navigate = useNavigate();
@@ -67,9 +57,9 @@ const AIDataLiaisonPage = () => {
   const [copied, setCopied] = useState(false);
   const [updatingConfig, setUpdatingConfig] = useState(false);
 
-  // User Tools config from MCP config
-  const allowOntologyMaintenance =
-    mcpConfig?.toolGroups[TOOL_GROUP_IDS.USER]?.allowOntologyMaintenance ?? true;
+  // Per-app tool config from MCP config
+  const addApprovalTools = mcpConfig?.toolGroups['tools']?.addApprovalTools ?? true;
+  const addRequestTools = mcpConfig?.toolGroups['tools']?.addRequestTools ?? true;
 
   const fetchChecklistData = useCallback(async () => {
     if (!pid) return;
@@ -224,20 +214,50 @@ const AIDataLiaisonPage = () => {
     }
   };
 
-  const handleAllowOntologyMaintenanceChange = async (enabled: boolean) => {
+  const handleApprovalToolsChange = async (enabled: boolean) => {
     if (!pid) return;
 
     try {
       setUpdatingConfig(true);
       const response = await engineApi.updateMCPConfig(pid, {
-        allowOntologyMaintenance: enabled,
+        addApprovalTools: enabled,
       });
 
       if (response.success && response.data) {
         setMcpConfig(response.data);
         toast({
           title: 'Success',
-          description: `Allow Usage to Improve Ontology ${enabled ? 'enabled' : 'disabled'}`,
+          description: `Approval Tools ${enabled ? 'enabled' : 'disabled'}`,
+        });
+      } else {
+        throw new Error(response.error ?? 'Failed to update configuration');
+      }
+    } catch (error) {
+      console.error('Failed to update MCP config:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to update configuration',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdatingConfig(false);
+    }
+  };
+
+  const handleRequestToolsChange = async (enabled: boolean) => {
+    if (!pid) return;
+
+    try {
+      setUpdatingConfig(true);
+      const response = await engineApi.updateMCPConfig(pid, {
+        addRequestTools: enabled,
+      });
+
+      if (response.success && response.data) {
+        setMcpConfig(response.data);
+        toast({
+          title: 'Success',
+          description: `Request Tools ${enabled ? 'enabled' : 'disabled'}`,
         });
       } else {
         throw new Error(response.error ?? 'Failed to update configuration');
@@ -372,39 +392,62 @@ const AIDataLiaisonPage = () => {
         </Card>
       )}
 
-      {/* User Tools Section */}
+      {/* Tool Configuration */}
       {mcpConfig && (
-        <UserToolsSection
-          projectId={pid ?? ''}
-          allowOntologyMaintenance={allowOntologyMaintenance}
-          onAllowOntologyMaintenanceChange={handleAllowOntologyMaintenanceChange}
-          enabledTools={mcpConfig.userTools}
-          disabled={updatingConfig}
-        />
-      )}
-
-      {/* Additional Developer Tools */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Additional Developer Tools</CardTitle>
-          <CardDescription>
-            AI Data Liaison adds these tools to the MCP Server for data engineers
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            {DATA_LIAISON_DEVELOPER_TOOLS.map((tool) => (
-              <div
-                key={tool.name}
-                className="flex items-center gap-3 rounded border border-border-light bg-surface-secondary px-3 py-2"
-              >
-                <code className="text-xs font-mono text-brand-purple">{tool.name}</code>
-                <span className="text-sm text-text-secondary">{tool.description}</span>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Tool Configuration</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Developer section */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex-1">
+                  <span className="text-sm font-medium text-text-primary">Add Approval Tools</span>
+                  <p className="text-sm text-text-secondary mt-1">
+                    Include tools to review and manage query suggestions: approve, reject,
+                    and manage approved queries.
+                  </p>
+                </div>
+                <Switch
+                  checked={addApprovalTools}
+                  onCheckedChange={handleApprovalToolsChange}
+                  disabled={updatingConfig}
+                />
               </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+
+              <MCPEnabledTools
+                tools={mcpConfig.developerTools.filter(t => t.appId === 'ai-data-liaison')}
+              />
+            </div>
+
+            <div className="border-t border-border-light" />
+
+            {/* User section */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex-1">
+                  <span className="text-sm font-medium text-text-primary">Add Request Tools</span>
+                  <span className="ml-2 text-xs font-medium text-brand-purple">[RECOMMENDED]</span>
+                  <p className="text-sm text-text-secondary mt-1">
+                    Enable business users to suggest queries and request data access through the
+                    MCP Client.
+                  </p>
+                </div>
+                <Switch
+                  checked={addRequestTools}
+                  onCheckedChange={handleRequestToolsChange}
+                  disabled={updatingConfig}
+                />
+              </div>
+
+              <MCPEnabledTools
+                tools={mcpConfig.userTools.filter(t => t.appId === 'ai-data-liaison')}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Auditing (only when setup is complete) */}
       {allComplete && (

@@ -75,6 +75,7 @@ const mockMCPConfig: MCPConfigResponse = {
   developerTools: [],
   agentTools: [],
   toolGroups: {},
+  appNames: {},
   enabledTools: [],
 };
 
