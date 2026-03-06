@@ -11,7 +11,7 @@ import {
   Clock,
   Loader2,
   RefreshCw,
-  Terminal,
+  History,
   XCircle,
 } from 'lucide-react';
 import { Fragment, useState, useEffect, useCallback, useRef } from 'react';
@@ -199,7 +199,7 @@ const MCPEventsPage = () => {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
-              <Terminal className="h-8 w-8 text-blue-500" />
+              <History className="h-8 w-8 text-blue-500" />
               MCP Events
             </h1>
             <p className="mt-2 text-text-secondary">
@@ -260,7 +260,7 @@ const MCPEventsPage = () => {
             </div>
           ) : !data || data.items.length === 0 ? (
             <div className="text-center py-12 text-text-secondary">
-              <Terminal className="h-8 w-8 mx-auto mb-2 text-text-tertiary" />
+              <History className="h-8 w-8 mx-auto mb-2 text-text-tertiary" />
               <p>No MCP events found</p>
             </div>
           ) : (

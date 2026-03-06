@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   Bot,
-  BrainCircuit,
+  Handshake,
   Database,
   Layers,
   Lightbulb,
@@ -11,17 +11,17 @@ import {
   Network,
   Plus,
   Search,
+  Anvil,
   Server,
   Shield,
   Sparkles,
-  Terminal,
+  History,
 } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import AIConfigWidget from '../components/AIConfigWidget';
 import MCPLogo from '../components/icons/MCPLogo';
-import OntologyForgeLogo from '../components/icons/OntologyForgeLogo';
 import { Button } from '../components/ui/Button';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import { useDatasourceConnection } from '../contexts/DatasourceConnectionContext';
@@ -92,7 +92,7 @@ const ProjectDashboard = () => {
       tiles.push({
         title: 'MCP Events',
         description: 'Monitor MCP tool calls, security events, and API activity.',
-        icon: Terminal,
+        icon: History,
         path: `/projects/${pid}/mcp-events`,
         disabled: false,
         color: 'blue',
@@ -210,7 +210,7 @@ const ProjectDashboard = () => {
       tiles.push({
         title: 'Ontology Forge',
         description: 'Build a business semantic layer on top of your schema with AI-powered extraction, enrichment, and developer tools.',
-        icon: Server,
+        icon: Anvil,
         path: `/projects/${pid}/ontology-forge`,
         disabled: false,
         color: 'purple', // Ontology Forge color
@@ -222,7 +222,7 @@ const ProjectDashboard = () => {
       tiles.push({
         title: 'AI Data Liaison',
         description: 'Make Better Business Decisions 10x Faster and lower the burden on the data team.',
-        icon: BrainCircuit,
+        icon: Handshake,
         path: `/projects/${pid}/ai-data-liaison`,
         disabled: !isConnected,
         disabledReason: 'Requires MCP Server to be enabled.',
@@ -334,7 +334,6 @@ const ProjectDashboard = () => {
     const Icon = tile.icon;
     const colorClasses = getColorClasses(tile.color);
     const isMCPServerTile = tile.title === 'MCP Server';
-    const isOntologyForgeTile = tile.title === 'Ontology Forge';
 
     return (
       <Card
@@ -353,8 +352,6 @@ const ProjectDashboard = () => {
             >
               {isMCPServerTile ? (
                 <MCPLogo size={48} />
-              ) : isOntologyForgeTile ? (
-                <OntologyForgeLogo size={48} />
               ) : (
                 <Icon className="h-12 w-12" />
               )}

@@ -1,15 +1,15 @@
 import type { LucideIcon } from 'lucide-react';
 import {
+  Anvil,
   ArrowLeft,
   Bot,
-  BrainCircuit,
   Check,
   ExternalLink,
   Hammer,
+  Handshake,
   Loader2,
   MessageSquare,
   Package,
-  Server,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -83,8 +83,8 @@ const applications: ApplicationInfo[] = [
     id: 'ai-data-liaison',
     title: 'AI Data Liaison',
     subtitle: 'Make Better Business Decisions 10x Faster and lower the burden on the data team',
-    icon: BrainCircuit,
-    color: 'blue',
+    icon: Handshake,
+    color: 'green',
     available: true,
     installable: true,
     learnMoreUrl: '/apps/ai-data-liaison',
@@ -94,8 +94,8 @@ const applications: ApplicationInfo[] = [
     id: 'ontology-forge',
     title: 'Ontology Forge',
     subtitle: 'Build a business semantic layer (ontology) on top of your schema with AI-powered extraction, enrichment, and developer tools',
-    icon: Server,
-    color: 'cyan',
+    icon: Anvil,
+    color: 'purple',
     available: true,
     installable: true,
   },
@@ -114,7 +114,7 @@ const applications: ApplicationInfo[] = [
     title: 'Product Kit [BETA]',
     subtitle: 'Enable AI Features in your existing SaaS Product',
     icon: Package,
-    color: 'purple',
+    color: 'gray',
     available: true,
   },
   {
@@ -122,7 +122,7 @@ const applications: ApplicationInfo[] = [
     title: 'On-Premise Chat [BETA]',
     subtitle: 'Deploy AI Chat where data never leaves your data boundary',
     icon: MessageSquare,
-    color: 'green',
+    color: 'gray',
     available: true,
   },
   {
@@ -130,7 +130,7 @@ const applications: ApplicationInfo[] = [
     title: 'Your own Data Application',
     subtitle: 'Need custom functionality or want to sell your own solution? Ekaya is the platform for connecting AI to Data.',
     icon: Hammer,
-    color: 'purple',
+    color: 'gray',
     available: true,
     contactSupport: true,
   },
