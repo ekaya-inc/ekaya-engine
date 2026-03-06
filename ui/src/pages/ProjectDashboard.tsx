@@ -20,6 +20,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import AIConfigWidget from '../components/AIConfigWidget';
 import MCPLogo from '../components/icons/MCPLogo';
+import OntologyForgeLogo from '../components/icons/OntologyForgeLogo';
 import { Button } from '../components/ui/Button';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import { useDatasourceConnection } from '../contexts/DatasourceConnectionContext';
@@ -29,7 +30,7 @@ import type {
   AIOption,
   OntologyWorkflowStatus,
 } from '../types';
-import { APP_ID_AI_DATA_LIAISON, APP_ID_AI_AGENTS } from '../types';
+import { APP_ID_AI_DATA_LIAISON, APP_ID_AI_AGENTS, APP_ID_ONTOLOGY_FORGE } from '../types';
 
 type TileColor = 'blue' | 'green' | 'purple' | 'orange' | 'gray' | 'indigo' | 'cyan' | 'amber';
 
@@ -72,32 +73,45 @@ const ProjectDashboard = () => {
     };
   }, []);
 
-  const dataTiles: Tile[] = [
-    {
-      title: 'Datasource',
-      description: 'Connect to your database and configure credentials.',
-      icon: Database,
-      path: `/projects/${pid}/datasource`,
-      disabled: false, // Always enabled - needed to configure datasource
-      color: 'blue',
-    },
-    {
-      title: 'Schema',
-      description: 'Select the tables and columns to include in your ontology.',
-      icon: ListTree,
-      path: `/projects/${pid}/schema`,
-      disabled: !isConnected, // Disabled if no datasource configured
-      color: 'green',
-    },
-    {
-      title: 'Pre-Approved Queries',
-      description: 'Create safe, parameterized queries your users can execute.',
-      icon: Search,
-      path: `/projects/${pid}/queries`,
-      disabled: !isConnected, // Disabled if no datasource configured
-      color: 'orange',
-    },
-  ];
+  const hasOntologyForge = installedApps.some((app) => app.app_id === APP_ID_ONTOLOGY_FORGE);
+
+  const dataTiles: Tile[] = useMemo(() => {
+    const tiles: Tile[] = [
+      {
+        title: 'Datasource',
+        description: 'Connect to your database and configure credentials.',
+        icon: Database,
+        path: `/projects/${pid}/datasource`,
+        disabled: false, // Always enabled - needed to configure datasource
+        color: 'blue', // MCP Server color
+      },
+    ];
+
+    // Schema and Pre-Approved Queries only show when Ontology Forge is installed
+    // (they are part of the business semantic layer)
+    if (hasOntologyForge) {
+      tiles.push(
+        {
+          title: 'Schema',
+          description: 'Select the tables and columns to include in your ontology.',
+          icon: ListTree,
+          path: `/projects/${pid}/schema`,
+          disabled: !isConnected, // Disabled if no datasource configured
+          color: 'purple', // Ontology Forge color
+        },
+        {
+          title: 'Pre-Approved Queries',
+          description: 'Create safe, parameterized queries your users can execute.',
+          icon: Search,
+          path: `/projects/${pid}/queries`,
+          disabled: !isConnected, // Disabled if no datasource configured
+          color: 'purple', // Ontology Forge color
+        },
+      );
+    }
+
+    return tiles;
+  }, [pid, isConnected, hasOntologyForge]);
 
   const intelligenceTiles: Tile[] = useMemo(() => {
     const tiles: Tile[] = [
@@ -107,7 +121,7 @@ const ProjectDashboard = () => {
         icon: Layers,
         path: `/projects/${pid}/ontology`,
         disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
-        color: 'purple',
+        color: 'purple', // Ontology Forge color
       },
       {
         title: 'Ontology Questions',
@@ -115,7 +129,7 @@ const ProjectDashboard = () => {
         icon: MessageCircleQuestion,
         path: `/projects/${pid}/ontology-questions`,
         disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
-        color: 'amber',
+        color: 'purple', // Ontology Forge color
       },
       {
         title: 'Project Knowledge',
@@ -123,7 +137,7 @@ const ProjectDashboard = () => {
         icon: Lightbulb,
         path: `/projects/${pid}/project-knowledge`,
         disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
-        color: 'indigo',
+        color: 'purple', // Ontology Forge color
       },
       {
         title: 'Enrichment',
@@ -131,7 +145,7 @@ const ProjectDashboard = () => {
         icon: Sparkles,
         path: `/projects/${pid}/enrichment`,
         disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
-        color: 'orange',
+        color: 'purple', // Ontology Forge color
       },
       {
         title: 'Relationships',
@@ -139,7 +153,7 @@ const ProjectDashboard = () => {
         icon: Network,
         path: `/projects/${pid}/relationships`,
         disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
-        color: 'indigo',
+        color: 'purple', // Ontology Forge color
       },
       // HIDDEN: Glossary tile temporarily removed from dashboard (see plans/FIX-unhide-glossary-tile.md)
       // {
@@ -148,7 +162,7 @@ const ProjectDashboard = () => {
       //   icon: BookOpen,
       //   path: `/projects/${pid}/glossary`,
       //   disabled: !isConnected || !hasSelectedTables || !activeAIConfig,
-      //   color: 'cyan',
+      //   color: 'purple', // Ontology Forge color
       // },
     ];
 
@@ -175,9 +189,21 @@ const ProjectDashboard = () => {
         icon: Server,
         path: `/projects/${pid}/mcp-server`,
         disabled: false,
-        color: 'cyan',
+        color: 'blue', // MCP Server color
       },
     ];
+
+    // Add Ontology Forge tile if installed
+    if (installedApps.some((app) => app.app_id === APP_ID_ONTOLOGY_FORGE)) {
+      tiles.push({
+        title: 'Ontology Forge',
+        description: 'Build a business semantic layer on top of your schema with AI-powered extraction, enrichment, and developer tools.',
+        icon: Server,
+        path: `/projects/${pid}/ontology-forge`,
+        disabled: false,
+        color: 'purple', // Ontology Forge color
+      });
+    }
 
     // Add AI Data Liaison tile if installed
     if (installedApps.some((app) => app.app_id === APP_ID_AI_DATA_LIAISON)) {
@@ -188,7 +214,7 @@ const ProjectDashboard = () => {
         path: `/projects/${pid}/ai-data-liaison`,
         disabled: !isConnected,
         disabledReason: 'Requires MCP Server to be enabled.',
-        color: 'blue',
+        color: 'green', // AI Data Liaison color
       });
     }
 
@@ -201,7 +227,7 @@ const ProjectDashboard = () => {
         path: `/projects/${pid}/ai-agents`,
         disabled: !isConnected,
         disabledReason: 'Requires MCP Server to be enabled.',
-        color: 'orange',
+        color: 'orange', // AI Agents color
       });
     }
 
@@ -296,6 +322,7 @@ const ProjectDashboard = () => {
     const Icon = tile.icon;
     const colorClasses = getColorClasses(tile.color);
     const isMCPServerTile = tile.title === 'MCP Server';
+    const isOntologyForgeTile = tile.title === 'Ontology Forge';
 
     return (
       <Card
@@ -314,6 +341,8 @@ const ProjectDashboard = () => {
             >
               {isMCPServerTile ? (
                 <MCPLogo size={48} />
+              ) : isOntologyForgeTile ? (
+                <OntologyForgeLogo size={48} />
               ) : (
                 <Icon className="h-12 w-12" />
               )}
@@ -367,38 +396,40 @@ const ProjectDashboard = () => {
         </div>
       </section>
 
-      {/* Intelligence Section */}
-      <section>
-        {!hasSelectedTables && (
-          <p className="text-sm text-red-500 mb-2">
-            Configure a datasource and select tables in the Schema page to enable Intelligence features.
+      {/* Intelligence Section - only shown when Ontology Forge is installed */}
+      {hasOntologyForge && (
+        <section>
+          {!hasSelectedTables && (
+            <p className="text-sm text-red-500 mb-2">
+              Configure a datasource and select tables in the Schema page to enable Intelligence features.
+            </p>
+          )}
+          <h1 className="text-2xl font-semibold mb-2">Intelligence</h1>
+          {/* TEMPORARY: Simplified description for BYOK-only launch
+              Original text: Add intelligence to the data by connecting a Large Language Model. You can bring your own AI keys or use Ekaya's models that are customized for data querying and analytics. Ekaya offers a free community model as well as licensed embeddable models that you can host so that no data leaves your data boundary.
+              TODO: Restore original text when Community/Embedded models are ready */}
+          <p className={`mb-4 ${!hasSelectedTables || !activeAIConfig ? 'text-text-secondary/50' : 'text-text-secondary'}`}>
+            Add intelligence to the data by connecting a Large Language Model. Configure your own OpenAI-compatible API keys to enable AI-powered features like ontology extraction, semantic search, and natural language querying.
           </p>
-        )}
-        <h1 className="text-2xl font-semibold mb-2">Intelligence</h1>
-        {/* TEMPORARY: Simplified description for BYOK-only launch
-            Original text: Add intelligence to the data by connecting a Large Language Model. You can bring your own AI keys or use Ekaya's models that are customized for data querying and analytics. Ekaya offers a free community model as well as licensed embeddable models that you can host so that no data leaves your data boundary.
-            TODO: Restore original text when Community/Embedded models are ready */}
-        <p className={`mb-4 ${!hasSelectedTables || !activeAIConfig ? 'text-text-secondary/50' : 'text-text-secondary'}`}>
-          Add intelligence to the data by connecting a Large Language Model. Configure your own OpenAI-compatible API keys to enable AI-powered features like ontology extraction, semantic search, and natural language querying.
-        </p>
 
-        <AIConfigWidget
-          projectId={pid ?? ''}
-          disabled={!hasSelectedTables}
-          onConfigChange={setActiveAIConfig}
-        />
+          <AIConfigWidget
+            projectId={pid ?? ''}
+            disabled={!hasSelectedTables}
+            onConfigChange={setActiveAIConfig}
+          />
 
-        {/* Status message when AI not configured (shown after AI selector, before tiles) */}
-        {hasSelectedTables && !activeAIConfig && (
-          <p className="text-sm text-red-500 mb-4">
-            Configure an AI model above to enable Intelligence features.
-          </p>
-        )}
+          {/* Status message when AI not configured (shown after AI selector, before tiles) */}
+          {hasSelectedTables && !activeAIConfig && (
+            <p className="text-sm text-red-500 mb-4">
+              Configure an AI model above to enable Intelligence features.
+            </p>
+          )}
 
-        <div className="grid gap-6 md:grid-cols-3">
-          {intelligenceTiles.map(renderTile)}
-        </div>
-      </section>
+          <div className="grid gap-6 md:grid-cols-3">
+            {intelligenceTiles.map(renderTile)}
+          </div>
+        </section>
+      )}
     </div>
   );
 };

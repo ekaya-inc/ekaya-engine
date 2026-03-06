@@ -9,6 +9,7 @@ import {
   Loader2,
   MessageSquare,
   Package,
+  Server,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -58,7 +59,7 @@ function getCentralOrigin(projectsPageUrl: string | null): string {
   return 'https://us.ekaya.ai';
 }
 
-type AppColor = 'blue' | 'purple' | 'green' | 'gray' | 'orange';
+type AppColor = 'blue' | 'purple' | 'green' | 'gray' | 'orange' | 'cyan';
 
 interface ApplicationInfo {
   id: string;
@@ -88,6 +89,15 @@ const applications: ApplicationInfo[] = [
     installable: true,
     learnMoreUrl: '/apps/ai-data-liaison',
     learnMoreBase: 'central',
+  },
+  {
+    id: 'ontology-forge',
+    title: 'Ontology Forge',
+    subtitle: 'Build a business semantic layer (ontology) on top of your schema with AI-powered extraction, enrichment, and developer tools',
+    icon: Server,
+    color: 'cyan',
+    available: true,
+    installable: true,
   },
   {
     id: 'ai-agents',
@@ -133,6 +143,7 @@ const getColorClasses = (color: AppColor): { bg: string; text: string } => {
     green: { bg: 'bg-green-500/10', text: 'text-green-500' },
     gray: { bg: 'bg-gray-500/10', text: 'text-gray-500' },
     orange: { bg: 'bg-orange-500/10', text: 'text-orange-500' },
+    cyan: { bg: 'bg-cyan-500/10', text: 'text-cyan-500' },
   };
   return colorMap[color];
 };
@@ -219,7 +230,7 @@ const ApplicationsPage = () => {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => navigate(`/projects/${pid}/ai-data-liaison`)}
+              onClick={() => navigate(`/projects/${pid}/${app.id}`)}
             >
               Configure
             </Button>

@@ -9,6 +9,7 @@ import (
 // AppID constants for known applications.
 const (
 	AppIDMCPServer     = "mcp-server"
+	AppIDOntologyForge = "ontology-forge"
 	AppIDAIDataLiaison = "ai-data-liaison"
 	AppIDAIAgents      = "ai-agents"
 )
@@ -16,6 +17,7 @@ const (
 // KnownAppIDs is the set of valid app identifiers.
 var KnownAppIDs = map[string]bool{
 	AppIDMCPServer:     true,
+	AppIDOntologyForge: true,
 	AppIDAIDataLiaison: true,
 	AppIDAIAgents:      true,
 }
