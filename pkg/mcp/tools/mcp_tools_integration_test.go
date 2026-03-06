@@ -18,6 +18,7 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 	"github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
@@ -100,9 +101,10 @@ func (tc *mcpToolsTestContext) filterToolsForTest(claims *auth.Claims) []string 
 	projectService := &mockProjectService{defaultDatasourceID: tc.datasourceID}
 	deps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               tc.engineDB.DB,
-			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, projectService, nil, "http://localhost", zap.NewNop()),
-			Logger:           zap.NewNop(),
+			DB:                  tc.engineDB.DB,
+			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, projectService, nil, "http://localhost", zap.NewNop()),
+			Logger:              zap.NewNop(),
+			InstalledAppService: newMockInstalledAppService(models.AppIDOntologyForge, models.AppIDAIDataLiaison),
 		},
 		ProjectService: projectService,
 	}

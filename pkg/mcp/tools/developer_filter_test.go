@@ -89,9 +89,8 @@ func TestNewToolFilter_DeveloperDisabled(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Create config with developer tools "disabled" via Enabled=false
-	// Note: For user auth, the Enabled flag is now ignored - tools are determined by sub-options
-	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: false})
+	// Create config with no toggles enabled
+	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{})
 
 	deps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
@@ -105,19 +104,15 @@ func TestNewToolFilter_DeveloperDisabled(t *testing.T) {
 	filter := NewToolFilter(deps)
 	tools := createTestTools()
 
-	// For user auth, tools are always enabled - only sub-options control loadouts
-	// With no sub-options (AddQueryTools=false, AddOntologyMaintenance=false), user gets Developer Core only
+	// No toggles enabled = only health
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Developer Core = health + echo + execute = 3 tools
-	if len(filtered) != 3 {
-		t.Errorf("expected 3 tools (Developer Core), got %d: %v", len(filtered), toolNames(filtered))
+	if len(filtered) != 1 {
+		t.Errorf("expected 1 tool (health only), got %d: %v", len(filtered), toolNames(filtered))
 	}
-	for _, name := range []string{"health", "echo", "execute"} {
-		if !containsTool(filtered, name) {
-			t.Errorf("expected tool %s to be present", name)
-		}
+	if !containsTool(filtered, "health") {
+		t.Error("expected health tool to be present")
 	}
 }
 
@@ -125,14 +120,21 @@ func TestNewToolFilter_DeveloperEnabled_AllToolsAvailable(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Create config with developer tools enabled AND AddQueryTools=true for all tools
-	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true, AddQueryTools: true})
+	// Create config with all toggles enabled
+	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{
+		AddDirectDatabaseAccess:     true,
+		AddOntologyMaintenanceTools: true,
+		AddOntologySuggestions:      true,
+		AddApprovalTools:            true,
+		AddRequestTools:             true,
+	})
 
 	deps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
-			Logger:           zap.NewNop(),
+			DB:                  engineDB.DB,
+			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:              zap.NewNop(),
+			InstalledAppService: newMockInstalledAppService(models.AppIDOntologyForge, models.AppIDAIDataLiaison),
 		},
 		ProjectService: mockProjectServiceWithDatasource(),
 	}
@@ -140,33 +142,17 @@ func TestNewToolFilter_DeveloperEnabled_AllToolsAvailable(t *testing.T) {
 	filter := NewToolFilter(deps)
 	tools := createTestTools()
 
-	// Developer mode with AddQueryTools = ALL tools available (full access for developers)
+	// All toggles enabled = ALL test tools available
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Should have ALL tools (12 total) when developer is enabled with AddQueryTools
+	// Should have ALL tools (12 total) when all toggles enabled
 	if len(filtered) != 12 {
 		t.Errorf("expected 12 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
 
-	// Execute should be included (part of Developer Core)
-	if !containsTool(filtered, "execute") {
-		t.Error("expected execute tool to be present in developer mode")
-	}
-
-	// All business user tools should also be present in developer mode
-	if !containsTool(filtered, "query") {
-		t.Error("expected query tool to be present in developer mode")
-	}
-	if !containsTool(filtered, "sample") {
-		t.Error("expected sample tool to be present in developer mode")
-	}
-	if !containsTool(filtered, "validate") {
-		t.Error("expected validate tool to be present in developer mode")
-	}
-
-	// All developer-specific tools should be present
-	for _, name := range []string{"health", "echo", "get_schema"} {
+	// All tools should be present
+	for _, name := range []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "list_glossary", "get_glossary_sql"} {
 		if !containsTool(filtered, name) {
 			t.Errorf("expected tool %s to be present", name)
 		}
@@ -177,14 +163,21 @@ func TestNewToolFilter_DeveloperEnabled_VerifyAllTools(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Create config with developer tools enabled AND AddQueryTools=true for all tools
-	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true, AddQueryTools: true})
+	// Create config with all toggles enabled
+	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{
+		AddDirectDatabaseAccess:     true,
+		AddOntologyMaintenanceTools: true,
+		AddOntologySuggestions:      true,
+		AddApprovalTools:            true,
+		AddRequestTools:             true,
+	})
 
 	deps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
-			Logger:           zap.NewNop(),
+			DB:                  engineDB.DB,
+			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:              zap.NewNop(),
+			InstalledAppService: newMockInstalledAppService(models.AppIDOntologyForge, models.AppIDAIDataLiaison),
 		},
 		ProjectService: mockProjectServiceWithDatasource(),
 	}
@@ -192,11 +185,11 @@ func TestNewToolFilter_DeveloperEnabled_VerifyAllTools(t *testing.T) {
 	filter := NewToolFilter(deps)
 	tools := createTestTools()
 
-	// Developer mode with AddQueryTools = ALL tools available (full access)
+	// All toggles enabled = ALL tools available
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Should have ALL 12 tools when developer is enabled with AddQueryTools
+	// Should have ALL 12 tools
 	if len(filtered) != 12 {
 		t.Errorf("expected 12 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
@@ -205,7 +198,7 @@ func TestNewToolFilter_DeveloperEnabled_VerifyAllTools(t *testing.T) {
 	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "list_glossary", "get_glossary_sql"}
 	for _, name := range allTools {
 		if !containsTool(filtered, name) {
-			t.Errorf("expected tool %s to be present in developer mode", name)
+			t.Errorf("expected tool %s to be present", name)
 		}
 	}
 }
@@ -213,13 +206,14 @@ func TestNewToolFilter_DeveloperEnabled_VerifyAllTools(t *testing.T) {
 func TestNewToolFilter_NilConfig(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
-	// Don't create any config - should use defaults (all tools ON)
+	// Don't create any config - should use DefaultMCPConfig which has all toggles enabled
 
 	deps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
-			Logger:           zap.NewNop(),
+			DB:                  engineDB.DB,
+			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:              zap.NewNop(),
+			InstalledAppService: newMockInstalledAppService(models.AppIDOntologyForge, models.AppIDAIDataLiaison),
 		},
 		ProjectService: mockProjectServiceWithDatasource(),
 	}
@@ -227,8 +221,7 @@ func TestNewToolFilter_NilConfig(t *testing.T) {
 	filter := NewToolFilter(deps)
 	tools := createTestTools()
 
-	// No config - uses DefaultMCPConfig which has AddQueryTools=true and AddOntologyMaintenance=true
-	// This gives: Developer Core + Query + OntologyMaintenance + OntologyQuestions loadouts
+	// No config = DefaultMCPConfig with all toggles enabled → all tools available
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
@@ -281,6 +274,7 @@ func TestFilterOutExecuteTool(t *testing.T) {
 }
 
 // setupTestConfig creates a project and MCP config for testing.
+// Uses the "tools" key with per-app toggles.
 func setupTestConfig(t *testing.T, db *database.DB, projectID uuid.UUID, config *models.ToolGroupConfig) {
 	t.Helper()
 
@@ -305,7 +299,7 @@ func setupTestConfig(t *testing.T, db *database.DB, projectID uuid.UUID, config 
 	mcpConfig := &models.MCPConfig{
 		ProjectID: projectID,
 		ToolGroups: map[string]*models.ToolGroupConfig{
-			"developer": config,
+			"tools": config,
 		},
 	}
 
@@ -327,8 +321,8 @@ func setupTestConfig(t *testing.T, db *database.DB, projectID uuid.UUID, config 
 	})
 }
 
-// setupTestConfigWithApprovedQueries creates a project and MCP config with approved_queries enabled.
-func setupTestConfigWithApprovedQueries(t *testing.T, db *database.DB, projectID uuid.UUID, devConfig, approvedQueriesConfig *models.ToolGroupConfig) {
+// setupTestConfigWithToolGroups creates a project and MCP config with the specified tool groups.
+func setupTestConfigWithToolGroups(t *testing.T, db *database.DB, projectID uuid.UUID, toolGroups map[string]*models.ToolGroupConfig) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -351,13 +345,7 @@ func setupTestConfigWithApprovedQueries(t *testing.T, db *database.DB, projectID
 
 	mcpConfig := &models.MCPConfig{
 		ProjectID:  projectID,
-		ToolGroups: make(map[string]*models.ToolGroupConfig),
-	}
-	if devConfig != nil {
-		mcpConfig.ToolGroups["developer"] = devConfig
-	}
-	if approvedQueriesConfig != nil {
-		mcpConfig.ToolGroups["approved_queries"] = approvedQueriesConfig
+		ToolGroups: toolGroups,
 	}
 
 	repo := repositories.NewMCPConfigRepository()
@@ -381,8 +369,8 @@ func TestNewToolFilter_DeveloperEnabled_ApprovedQueriesOff(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Developer enabled with AddQueryTools=true (only developer is ON, approved_queries is OFF)
-	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true, AddQueryTools: true})
+	// Only Direct Database Access enabled, no approval tools
+	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{AddDirectDatabaseAccess: true})
 
 	deps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
@@ -399,17 +387,23 @@ func TestNewToolFilter_DeveloperEnabled_ApprovedQueriesOff(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Developer mode with AddQueryTools = ALL tools available (12 total)
-	if len(filtered) != 12 {
-		t.Errorf("expected 12 tools (all), got %d: %v", len(filtered), toolNames(filtered))
+	// Direct Database Access = health + echo + execute + query = 4 tools
+	expectedTools := []string{"health", "echo", "execute", "query"}
+	if len(filtered) != len(expectedTools) {
+		t.Errorf("expected %d tools, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
+	}
+	for _, name := range expectedTools {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be present", name)
+		}
 	}
 
-	// All tools should be present in developer mode with AddQueryTools
-	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "list_glossary", "get_glossary_sql"}
-	for _, name := range allTools {
-		if !containsTool(filtered, name) {
-			t.Errorf("expected tool %s to be present in developer mode", name)
-		}
+	// Approval and ontology tools should NOT be present
+	if containsTool(filtered, "list_query_suggestions") {
+		t.Error("list_query_suggestions should not be present without AddApprovalTools")
+	}
+	if containsTool(filtered, "get_schema") {
+		t.Error("get_schema should not be present without AddOntologyMaintenanceTools")
 	}
 }
 
@@ -417,14 +411,10 @@ func TestNewToolFilter_ApprovedQueriesOnly_NoQueriesExist(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Legacy test: approved_queries enabled, developer "disabled"
-	// Note: For user auth, the Enabled flag is now ignored. Developer Core is always included.
-	// Sub-options (AddQueryTools, AddOntologyMaintenance) control additional loadouts.
-	// Since no developer sub-options are set, user gets Developer Core only.
-	setupTestConfigWithApprovedQueries(t, engineDB.DB, projectID,
-		nil,                                    // no developer config (uses defaults: AddQueryTools=false, AddOntologyMaintenance=false)
-		&models.ToolGroupConfig{Enabled: true}, // approved_queries Enabled is also now ignored
-	)
+	// No toggles enabled
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		"tools": {},
+	})
 
 	// Mock with no queries - query count doesn't affect tool filtering
 	testProjectService := &mockProjectService{defaultDatasourceID: uuid.New()}
@@ -443,23 +433,12 @@ func TestNewToolFilter_ApprovedQueriesOnly_NoQueriesExist(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// For user auth, tools are always enabled. With no explicit developer sub-options,
-	// user gets Developer Core loadout (health + echo + execute).
-	// The approved_queries.Enabled flag is no longer checked for user auth.
-	expectedTools := []string{"health", "echo", "execute"}
-	if len(filtered) != len(expectedTools) {
-		t.Errorf("expected %d tools (Developer Core), got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
+	// No toggles enabled = only health
+	if len(filtered) != 1 {
+		t.Errorf("expected 1 tool (health only), got %d: %v", len(filtered), toolNames(filtered))
 	}
-
-	for _, name := range expectedTools {
-		if !containsTool(filtered, name) {
-			t.Errorf("expected tool %s to be present", name)
-		}
-	}
-
-	// Query tools should NOT be present since AddQueryTools=false
-	if containsTool(filtered, "query") {
-		t.Error("query tool should not be present without AddQueryTools=true")
+	if !containsTool(filtered, "health") {
+		t.Error("expected health tool to be present")
 	}
 }
 
@@ -467,21 +446,20 @@ func TestNewToolFilter_ApprovedQueriesEnabledWithQueries(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Both developer and approved_queries "enabled" - but Enabled flag is now ignored for user auth
-	// Developer has AddQueryTools=false by default, so only Developer Core is enabled
-	setupTestConfigWithApprovedQueries(t, engineDB.DB, projectID,
-		&models.ToolGroupConfig{Enabled: true}, // Enabled is ignored, but no AddQueryTools
-		&models.ToolGroupConfig{Enabled: true}, // Enabled is ignored for user auth
-	)
+	// Only AddRequestTools enabled (user-facing request tools)
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		"tools": {AddRequestTools: true},
+	})
 
 	// Mock with queries - query count doesn't affect tool filtering
 	mockQueries := []*models.Query{{ID: uuid.New(), NaturalLanguagePrompt: "Test query"}}
 	testProjectService := &mockProjectService{defaultDatasourceID: uuid.New()}
 	deps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, testProjectService, nil, "http://localhost", zap.NewNop()),
-			Logger:           zap.NewNop(),
+			DB:                  engineDB.DB,
+			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, testProjectService, nil, "http://localhost", zap.NewNop()),
+			Logger:              zap.NewNop(),
+			InstalledAppService: newMockInstalledAppService(models.AppIDAIDataLiaison),
 		},
 		ProjectService: testProjectService,
 	}
@@ -492,22 +470,25 @@ func TestNewToolFilter_ApprovedQueriesEnabledWithQueries(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Developer Core = health + echo + execute = 3 tools
-	// (no AddQueryTools, so Query loadout not included)
-	expectedTools := []string{"health", "echo", "execute"}
-	if len(filtered) != len(expectedTools) {
-		t.Errorf("expected %d tools (Developer Core), got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
+	// AddRequestTools enables user-facing request tools: query, sample, validate,
+	// list_approved_queries, execute_approved_query, etc.
+	// Health always included.
+	if !containsTool(filtered, "health") {
+		t.Error("expected health tool to be present")
+	}
+	if !containsTool(filtered, "query") {
+		t.Error("expected query tool to be present with AddRequestTools")
+	}
+	if !containsTool(filtered, "list_approved_queries") {
+		t.Error("expected list_approved_queries to be present with AddRequestTools")
 	}
 
-	for _, name := range expectedTools {
-		if !containsTool(filtered, name) {
-			t.Errorf("expected tool %s to be present", name)
-		}
+	// Developer-only tools should NOT be present
+	if containsTool(filtered, "echo") {
+		t.Error("echo should not be present without AddDirectDatabaseAccess")
 	}
-
-	// Query tools should NOT be present since AddQueryTools=false
-	if containsTool(filtered, "query") {
-		t.Error("query tool should not be present without AddQueryTools=true")
+	if containsTool(filtered, "execute") {
+		t.Error("execute should not be present without AddDirectDatabaseAccess")
 	}
 }
 
@@ -583,12 +564,10 @@ func TestNewToolFilter_ForceModeOnlyShowsApprovedQueriesTools(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// ForceMode is a legacy feature. For user auth, Developer Core is always included.
-	// ForceMode on approved_queries has no effect on user auth tool filtering.
-	setupTestConfigWithApprovedQueries(t, engineDB.DB, projectID,
-		nil, // no developer config - uses defaults (AddQueryTools=false)
-		&models.ToolGroupConfig{Enabled: true, ForceMode: true}, // ForceMode is ignored for user auth
-	)
+	// No toggles enabled — ForceMode is a legacy feature with no effect
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		"tools": {},
+	})
 
 	// Mock with queries - query count doesn't affect tool filtering
 	mockQueries := []*models.Query{{ID: uuid.New(), NaturalLanguagePrompt: "Test query"}}
@@ -608,17 +587,12 @@ func TestNewToolFilter_ForceModeOnlyShowsApprovedQueriesTools(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// For user auth, Developer Core is always included (3 tools)
-	// No AddQueryTools, so no Query loadout
-	expectedTools := []string{"health", "echo", "execute"}
-	if len(filtered) != len(expectedTools) {
-		t.Errorf("expected %d tools (Developer Core), got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
+	// No toggles enabled = only health
+	if len(filtered) != 1 {
+		t.Errorf("expected 1 tool (health only), got %d: %v", len(filtered), toolNames(filtered))
 	}
-
-	for _, name := range expectedTools {
-		if !containsTool(filtered, name) {
-			t.Errorf("expected tool %s to be present", name)
-		}
+	if !containsTool(filtered, "health") {
+		t.Error("expected health tool to be present")
 	}
 }
 
@@ -626,21 +600,26 @@ func TestNewToolFilter_ForceModeOffAllowsDeveloperTools(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// ForceMode is a legacy feature. For user auth, sub-options control loadouts.
-	// Need AddQueryTools=true to get all tools.
-	setupTestConfigWithApprovedQueries(t, engineDB.DB, projectID,
-		&models.ToolGroupConfig{Enabled: true, AddQueryTools: true}, // Need AddQueryTools for all tools
-		&models.ToolGroupConfig{Enabled: true, ForceMode: false},    // ForceMode is ignored
-	)
+	// All toggles enabled
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		"tools": {
+			AddDirectDatabaseAccess:     true,
+			AddOntologyMaintenanceTools: true,
+			AddOntologySuggestions:      true,
+			AddApprovalTools:            true,
+			AddRequestTools:             true,
+		},
+	})
 
 	// Mock with queries - query count doesn't affect tool filtering
 	mockQueries := []*models.Query{{ID: uuid.New(), NaturalLanguagePrompt: "Test query"}}
 	testProjectService := &mockProjectService{defaultDatasourceID: uuid.New()}
 	deps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, testProjectService, nil, "http://localhost", zap.NewNop()),
-			Logger:           zap.NewNop(),
+			DB:                  engineDB.DB,
+			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, testProjectService, nil, "http://localhost", zap.NewNop()),
+			Logger:              zap.NewNop(),
+			InstalledAppService: newMockInstalledAppService(models.AppIDOntologyForge, models.AppIDAIDataLiaison),
 		},
 		ProjectService: testProjectService,
 	}
@@ -651,31 +630,28 @@ func TestNewToolFilter_ForceModeOffAllowsDeveloperTools(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// With AddQueryTools=true, all test tools (12) should be present
+	// All toggles = all 12 test tools
 	if len(filtered) != 12 {
-		t.Errorf("expected 12 tools (all) with AddQueryTools, got %d: %v", len(filtered), toolNames(filtered))
+		t.Errorf("expected 12 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
 
-	// Query and developer tools should be present
 	if !containsTool(filtered, "query") {
-		t.Error("query tool should be present with AddQueryTools")
+		t.Error("query tool should be present")
 	}
 	if !containsTool(filtered, "execute") {
 		t.Error("execute tool should be present")
 	}
 }
 
-// Test legacy Mode 2: Pre-Approved ON, Developer "OFF"
-// Note: For user auth, the Enabled flag is now ignored. Developer Core is always included.
+// Test with only user request tools enabled, no developer tools
 func TestNewToolFilter_ApprovedQueriesOn_DeveloperOff(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Pre-Approved ON, Developer "OFF" - but Enabled flag is ignored for user auth
-	setupTestConfigWithApprovedQueries(t, engineDB.DB, projectID,
-		&models.ToolGroupConfig{Enabled: false},                  // Enabled is ignored, AddQueryTools=false by default
-		&models.ToolGroupConfig{Enabled: true, ForceMode: false}, // Enabled is ignored for user auth
-	)
+	// Only AddRequestTools enabled
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		"tools": {AddRequestTools: true},
+	})
 
 	// Mock with queries - query count doesn't affect tool filtering
 	mockQueries := []*models.Query{{ID: uuid.New(), NaturalLanguagePrompt: "Test query"}}
@@ -695,17 +671,21 @@ func TestNewToolFilter_ApprovedQueriesOn_DeveloperOff(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// For user auth, Developer Core is always included (3 tools)
-	// No AddQueryTools=true in config, so no Query loadout
-	expectedTools := []string{"health", "echo", "execute"}
-	if len(filtered) != len(expectedTools) {
-		t.Errorf("expected %d tools (Developer Core), got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
+	// AddRequestTools enables user request tools: query, sample, validate,
+	// list_approved_queries, execute_approved_query, etc.
+	if !containsTool(filtered, "health") {
+		t.Error("expected health tool to be present")
+	}
+	if !containsTool(filtered, "query") {
+		t.Error("expected query tool to be present with AddRequestTools")
 	}
 
-	for _, name := range expectedTools {
-		if !containsTool(filtered, name) {
-			t.Errorf("expected tool %s to be present", name)
-		}
+	// Developer-only tools should NOT be present
+	if containsTool(filtered, "echo") {
+		t.Error("echo should not be present without AddDirectDatabaseAccess")
+	}
+	if containsTool(filtered, "execute") {
+		t.Error("execute should not be present without AddDirectDatabaseAccess")
 	}
 }
 
@@ -715,8 +695,8 @@ func TestNewToolFilter_DeveloperEnabled_ExecuteAlwaysAvailable(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Developer ON with AddQueryTools=true - execute should always be visible
-	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true, AddQueryTools: true})
+	// AddDirectDatabaseAccess includes echo, execute, query
+	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{AddDirectDatabaseAccess: true})
 
 	deps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
@@ -733,33 +713,25 @@ func TestNewToolFilter_DeveloperEnabled_ExecuteAlwaysAvailable(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Developer mode with AddQueryTools = 12 tools (all)
-	if len(filtered) != 12 {
-		t.Errorf("expected 12 tools (all), got %d: %v", len(filtered), toolNames(filtered))
-	}
-
-	// Execute should always be present when developer is enabled
+	// Execute should be present with AddDirectDatabaseAccess
 	if !containsTool(filtered, "execute") {
-		t.Error("execute tool should be present when developer is enabled")
+		t.Error("execute tool should be present with AddDirectDatabaseAccess")
 	}
-
-	// All tools should be present
-	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "list_glossary", "get_glossary_sql"}
-	for _, name := range allTools {
-		if !containsTool(filtered, name) {
-			t.Errorf("expected tool %s to be present in developer mode", name)
-		}
+	if !containsTool(filtered, "echo") {
+		t.Error("echo tool should be present with AddDirectDatabaseAccess")
+	}
+	if !containsTool(filtered, "query") {
+		t.Error("query tool should be present with AddDirectDatabaseAccess")
 	}
 }
 
-// Test developer mode with only Developer Core (no AddQueryTools)
-// Verifies that developer mode gives Developer Core tools only by default
+// Test with only AddDirectDatabaseAccess toggle (no other toggles)
 func TestNewToolFilter_DeveloperOnly_CoreToolsOnly(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Developer tools enabled without AddQueryTools - only Developer Core tools
-	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true})
+	// Only AddDirectDatabaseAccess enabled
+	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{AddDirectDatabaseAccess: true})
 
 	deps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
@@ -776,25 +748,21 @@ func TestNewToolFilter_DeveloperOnly_CoreToolsOnly(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Developer mode without AddQueryTools = 3 tools (health + echo + execute)
-	if len(filtered) != 3 {
-		t.Errorf("expected 3 tools (Developer Core), got %d: %v", len(filtered), toolNames(filtered))
+	// AddDirectDatabaseAccess = health + echo + execute + query = 4 tools
+	expectedTools := []string{"health", "echo", "execute", "query"}
+	if len(filtered) != len(expectedTools) {
+		t.Errorf("expected %d tools, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
 	}
 
-	// Developer Core tools should be present
-	coreTools := []string{"health", "echo", "execute"}
-	for _, name := range coreTools {
+	for _, name := range expectedTools {
 		if !containsTool(filtered, name) {
-			t.Errorf("expected Developer Core tool %s to be present", name)
+			t.Errorf("expected tool %s to be present", name)
 		}
 	}
 
-	// Query tools should NOT be present without AddQueryTools
-	if containsTool(filtered, "query") {
-		t.Error("query should NOT be present without AddQueryTools")
-	}
+	// Ontology tools should NOT be present
 	if containsTool(filtered, "get_schema") {
-		t.Error("get_schema should NOT be present without AddQueryTools")
+		t.Error("get_schema should NOT be present without AddOntologyMaintenanceTools")
 	}
 }
 
@@ -1086,52 +1054,23 @@ func TestNewToolFilter_UserAuth_DeveloperMode_AllTools(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Create config with developer tools enabled AND AddQueryTools=true for all tools
-	// (agent_tools config doesn't affect user authentication)
-	ctx := context.Background()
-	scope, err := engineDB.DB.WithTenant(ctx, projectID)
-	if err != nil {
-		t.Fatalf("failed to get tenant scope: %v", err)
-	}
-	defer scope.Close()
-
-	tenantCtx := database.SetTenantScope(ctx, scope)
-	_, err = scope.Conn.Exec(tenantCtx, `
-		INSERT INTO engine_projects (id, name, created_at, updated_at)
-		VALUES ($1, 'Test Project', NOW(), NOW())
-		ON CONFLICT (id) DO NOTHING`, projectID)
-	if err != nil {
-		t.Fatalf("failed to create test project: %v", err)
-	}
-
-	mcpConfig := &models.MCPConfig{
-		ProjectID: projectID,
-		ToolGroups: map[string]*models.ToolGroupConfig{
-			"developer": {Enabled: true, AddQueryTools: true},
+	// Create config with all toggles enabled
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		"tools": {
+			AddDirectDatabaseAccess:     true,
+			AddOntologyMaintenanceTools: true,
+			AddOntologySuggestions:      true,
+			AddApprovalTools:            true,
+			AddRequestTools:             true,
 		},
-	}
-
-	repo := repositories.NewMCPConfigRepository()
-	if err := repo.Upsert(tenantCtx, mcpConfig); err != nil {
-		t.Fatalf("failed to create test config: %v", err)
-	}
-
-	t.Cleanup(func() {
-		cleanupCtx := context.Background()
-		cleanupScope, err := engineDB.DB.WithTenant(cleanupCtx, projectID)
-		if err != nil {
-			return
-		}
-		defer cleanupScope.Close()
-		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_mcp_config WHERE project_id = $1", projectID)
-		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_projects WHERE id = $1", projectID)
 	})
 
 	deps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
-			Logger:           zap.NewNop(),
+			DB:                  engineDB.DB,
+			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:              zap.NewNop(),
+			InstalledAppService: newMockInstalledAppService(models.AppIDOntologyForge, models.AppIDAIDataLiaison),
 		},
 		ProjectService: mockProjectServiceWithDatasource(),
 	}
@@ -1142,19 +1081,19 @@ func TestNewToolFilter_UserAuth_DeveloperMode_AllTools(t *testing.T) {
 	// User authentication - claims.Subject is NOT "agent"
 	claims := &auth.Claims{ProjectID: projectID.String()}
 	claims.Subject = "user-123" // Normal user
-	ctx = context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 	filtered := filter(ctx, tools)
 
-	// User with developer mode + AddQueryTools = ALL tools (12 total)
+	// All toggles enabled = ALL tools (12 total)
 	if len(filtered) != 12 {
-		t.Errorf("expected 12 tools (all) for user in developer mode, got %d: %v", len(filtered), toolNames(filtered))
+		t.Errorf("expected 12 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
 
-	// All tools should be present in developer mode with AddQueryTools
+	// All tools should be present
 	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "list_glossary", "get_glossary_sql"}
 	for _, name := range allTools {
 		if !containsTool(filtered, name) {
-			t.Errorf("expected tool %s to be present in developer mode", name)
+			t.Errorf("expected tool %s to be present", name)
 		}
 	}
 }
@@ -1191,53 +1130,24 @@ func TestNewToolFilter_DataLiaisonNotInstalled_BusinessTools(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Create config with AddQueryTools enabled (to get Query loadout)
-	ctx := context.Background()
-	scope, err := engineDB.DB.WithTenant(ctx, projectID)
-	if err != nil {
-		t.Fatalf("failed to get tenant scope: %v", err)
-	}
-	defer scope.Close()
-
-	tenantCtx := database.SetTenantScope(ctx, scope)
-	_, err = scope.Conn.Exec(tenantCtx, `
-		INSERT INTO engine_projects (id, name, created_at, updated_at)
-		VALUES ($1, 'Test Project', NOW(), NOW())
-		ON CONFLICT (id) DO NOTHING`, projectID)
-	if err != nil {
-		t.Fatalf("failed to create test project: %v", err)
-	}
-
-	mcpConfig := &models.MCPConfig{
-		ProjectID: projectID,
-		ToolGroups: map[string]*models.ToolGroupConfig{
-			"developer": {AddQueryTools: true}, // Need AddQueryTools for Query loadout
+	// All toggles enabled — but AI Data Liaison not installed
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		"tools": {
+			AddDirectDatabaseAccess:     true,
+			AddOntologyMaintenanceTools: true,
+			AddOntologySuggestions:      true,
+			AddApprovalTools:            true,
+			AddRequestTools:             true,
 		},
-	}
-
-	repo := repositories.NewMCPConfigRepository()
-	if err := repo.Upsert(tenantCtx, mcpConfig); err != nil {
-		t.Fatalf("failed to create test config: %v", err)
-	}
-
-	t.Cleanup(func() {
-		cleanupCtx := context.Background()
-		cleanupScope, err := engineDB.DB.WithTenant(cleanupCtx, projectID)
-		if err != nil {
-			return
-		}
-		defer cleanupScope.Close()
-		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_mcp_config WHERE project_id = $1", projectID)
-		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_projects WHERE id = $1", projectID)
 	})
 
-	// AI Data Liaison NOT installed
+	// AI Data Liaison NOT installed (only Ontology Forge)
 	deps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
 			DB:                  engineDB.DB,
 			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
 			Logger:              zap.NewNop(),
-			InstalledAppService: newMockInstalledAppService(), // No AI Data Liaison
+			InstalledAppService: newMockInstalledAppService(models.AppIDOntologyForge), // Only Ontology Forge, no AI Data Liaison
 		},
 		ProjectService: mockProjectServiceWithDatasource(),
 	}
@@ -1247,10 +1157,10 @@ func TestNewToolFilter_DataLiaisonNotInstalled_BusinessTools(t *testing.T) {
 
 	claims := &auth.Claims{ProjectID: projectID.String()}
 	claims.Subject = "user-123"
-	ctx = context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 	filtered := filter(ctx, tools)
 
-	// Data Liaison tools should NOT be present
+	// Data Liaison tools should NOT be present (app not installed)
 	dataLiaisonTools := []string{"suggest_approved_query", "suggest_query_update"}
 	for _, name := range dataLiaisonTools {
 		if containsTool(filtered, name) {
@@ -1258,12 +1168,16 @@ func TestNewToolFilter_DataLiaisonNotInstalled_BusinessTools(t *testing.T) {
 		}
 	}
 
-	// Query loadout tools should be present
-	expectedTools := []string{"health", "query", "sample", "validate", "list_approved_queries", "execute_approved_query"}
-	for _, name := range expectedTools {
+	// MCP Server tools should be present (always installed)
+	for _, name := range []string{"health", "echo", "execute", "query"} {
 		if !containsTool(filtered, name) {
 			t.Errorf("expected tool %s to be present", name)
 		}
+	}
+
+	// Ontology Forge tools should be present (app installed)
+	if !containsTool(filtered, "get_schema") {
+		t.Error("expected get_schema to be present (Ontology Forge installed)")
 	}
 }
 
@@ -1271,44 +1185,15 @@ func TestNewToolFilter_DataLiaisonInstalled_BusinessTools(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Create config with AddQueryTools enabled (to get Query loadout)
-	ctx := context.Background()
-	scope, err := engineDB.DB.WithTenant(ctx, projectID)
-	if err != nil {
-		t.Fatalf("failed to get tenant scope: %v", err)
-	}
-	defer scope.Close()
-
-	tenantCtx := database.SetTenantScope(ctx, scope)
-	_, err = scope.Conn.Exec(tenantCtx, `
-		INSERT INTO engine_projects (id, name, created_at, updated_at)
-		VALUES ($1, 'Test Project', NOW(), NOW())
-		ON CONFLICT (id) DO NOTHING`, projectID)
-	if err != nil {
-		t.Fatalf("failed to create test project: %v", err)
-	}
-
-	mcpConfig := &models.MCPConfig{
-		ProjectID: projectID,
-		ToolGroups: map[string]*models.ToolGroupConfig{
-			"developer": {AddQueryTools: true}, // Need AddQueryTools for Query loadout
+	// All toggles enabled
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		"tools": {
+			AddDirectDatabaseAccess:     true,
+			AddOntologyMaintenanceTools: true,
+			AddOntologySuggestions:      true,
+			AddApprovalTools:            true,
+			AddRequestTools:             true,
 		},
-	}
-
-	repo := repositories.NewMCPConfigRepository()
-	if err := repo.Upsert(tenantCtx, mcpConfig); err != nil {
-		t.Fatalf("failed to create test config: %v", err)
-	}
-
-	t.Cleanup(func() {
-		cleanupCtx := context.Background()
-		cleanupScope, err := engineDB.DB.WithTenant(cleanupCtx, projectID)
-		if err != nil {
-			return
-		}
-		defer cleanupScope.Close()
-		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_mcp_config WHERE project_id = $1", projectID)
-		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_projects WHERE id = $1", projectID)
 	})
 
 	// AI Data Liaison IS installed
@@ -1327,7 +1212,7 @@ func TestNewToolFilter_DataLiaisonInstalled_BusinessTools(t *testing.T) {
 
 	claims := &auth.Claims{ProjectID: projectID.String()}
 	claims.Subject = "user-123"
-	ctx = context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 	filtered := filter(ctx, tools)
 
 	// Data Liaison business tools SHOULD be present when app is installed
@@ -1343,54 +1228,24 @@ func TestNewToolFilter_DataLiaisonNotInstalled_DeveloperTools(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Create config with developer tools enabled including ontology maintenance
-	// (data liaison dev tools are in the ontology maintenance loadout)
-	ctx := context.Background()
-	scope, err := engineDB.DB.WithTenant(ctx, projectID)
-	if err != nil {
-		t.Fatalf("failed to get tenant scope: %v", err)
-	}
-	defer scope.Close()
-
-	tenantCtx := database.SetTenantScope(ctx, scope)
-	_, err = scope.Conn.Exec(tenantCtx, `
-		INSERT INTO engine_projects (id, name, created_at, updated_at)
-		VALUES ($1, 'Test Project', NOW(), NOW())
-		ON CONFLICT (id) DO NOTHING`, projectID)
-	if err != nil {
-		t.Fatalf("failed to create test project: %v", err)
-	}
-
-	mcpConfig := &models.MCPConfig{
-		ProjectID: projectID,
-		ToolGroups: map[string]*models.ToolGroupConfig{
-			"developer": {Enabled: true, AddQueryTools: true, AddOntologyMaintenance: true},
+	// All toggles enabled — but AI Data Liaison not installed
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		"tools": {
+			AddDirectDatabaseAccess:     true,
+			AddOntologyMaintenanceTools: true,
+			AddOntologySuggestions:      true,
+			AddApprovalTools:            true,
+			AddRequestTools:             true,
 		},
-	}
-
-	repo := repositories.NewMCPConfigRepository()
-	if err := repo.Upsert(tenantCtx, mcpConfig); err != nil {
-		t.Fatalf("failed to create test config: %v", err)
-	}
-
-	t.Cleanup(func() {
-		cleanupCtx := context.Background()
-		cleanupScope, err := engineDB.DB.WithTenant(cleanupCtx, projectID)
-		if err != nil {
-			return
-		}
-		defer cleanupScope.Close()
-		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_mcp_config WHERE project_id = $1", projectID)
-		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_projects WHERE id = $1", projectID)
 	})
 
-	// AI Data Liaison NOT installed
+	// AI Data Liaison NOT installed (only Ontology Forge)
 	deps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
 			DB:                  engineDB.DB,
 			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
 			Logger:              zap.NewNop(),
-			InstalledAppService: newMockInstalledAppService(), // No AI Data Liaison
+			InstalledAppService: newMockInstalledAppService(models.AppIDOntologyForge), // Only Ontology Forge
 		},
 		ProjectService: mockProjectServiceWithDatasource(),
 	}
@@ -1400,7 +1255,7 @@ func TestNewToolFilter_DataLiaisonNotInstalled_DeveloperTools(t *testing.T) {
 
 	claims := &auth.Claims{ProjectID: projectID.String()}
 	claims.Subject = "user-123"
-	ctx = context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 	filtered := filter(ctx, tools)
 
 	// Developer Data Liaison tools should NOT be present
@@ -1418,7 +1273,7 @@ func TestNewToolFilter_DataLiaisonNotInstalled_DeveloperTools(t *testing.T) {
 		}
 	}
 
-	// Core developer tools should still be present
+	// Core developer tools should still be present (MCP Server + Ontology Forge)
 	coreDevTools := []string{"health", "echo", "execute", "get_schema"}
 	for _, name := range coreDevTools {
 		if !containsTool(filtered, name) {
@@ -1431,45 +1286,15 @@ func TestNewToolFilter_DataLiaisonInstalled_DeveloperTools(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Create config with developer tools enabled including ontology maintenance
-	// (data liaison dev tools are in the ontology maintenance loadout)
-	ctx := context.Background()
-	scope, err := engineDB.DB.WithTenant(ctx, projectID)
-	if err != nil {
-		t.Fatalf("failed to get tenant scope: %v", err)
-	}
-	defer scope.Close()
-
-	tenantCtx := database.SetTenantScope(ctx, scope)
-	_, err = scope.Conn.Exec(tenantCtx, `
-		INSERT INTO engine_projects (id, name, created_at, updated_at)
-		VALUES ($1, 'Test Project', NOW(), NOW())
-		ON CONFLICT (id) DO NOTHING`, projectID)
-	if err != nil {
-		t.Fatalf("failed to create test project: %v", err)
-	}
-
-	mcpConfig := &models.MCPConfig{
-		ProjectID: projectID,
-		ToolGroups: map[string]*models.ToolGroupConfig{
-			"developer": {Enabled: true, AddQueryTools: true, AddOntologyMaintenance: true},
+	// All toggles enabled
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		"tools": {
+			AddDirectDatabaseAccess:     true,
+			AddOntologyMaintenanceTools: true,
+			AddOntologySuggestions:      true,
+			AddApprovalTools:            true,
+			AddRequestTools:             true,
 		},
-	}
-
-	repo := repositories.NewMCPConfigRepository()
-	if err := repo.Upsert(tenantCtx, mcpConfig); err != nil {
-		t.Fatalf("failed to create test config: %v", err)
-	}
-
-	t.Cleanup(func() {
-		cleanupCtx := context.Background()
-		cleanupScope, err := engineDB.DB.WithTenant(cleanupCtx, projectID)
-		if err != nil {
-			return
-		}
-		defer cleanupScope.Close()
-		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_mcp_config WHERE project_id = $1", projectID)
-		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_projects WHERE id = $1", projectID)
 	})
 
 	// AI Data Liaison IS installed
@@ -1488,7 +1313,7 @@ func TestNewToolFilter_DataLiaisonInstalled_DeveloperTools(t *testing.T) {
 
 	claims := &auth.Claims{ProjectID: projectID.String()}
 	claims.Subject = "user-123"
-	ctx = context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 	filtered := filter(ctx, tools)
 
 	// Developer Data Liaison tools SHOULD be present when app is installed
@@ -1511,48 +1336,18 @@ func TestNewToolFilter_DataLiaisonNotInstalled_NilService_FallbackToHidden(t *te
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Create config with developer tools enabled including ontology maintenance
-	// (data liaison dev tools are in the ontology maintenance loadout)
-	ctx := context.Background()
-	scope, err := engineDB.DB.WithTenant(ctx, projectID)
-	if err != nil {
-		t.Fatalf("failed to get tenant scope: %v", err)
-	}
-	defer scope.Close()
-
-	tenantCtx := database.SetTenantScope(ctx, scope)
-	_, err = scope.Conn.Exec(tenantCtx, `
-		INSERT INTO engine_projects (id, name, created_at, updated_at)
-		VALUES ($1, 'Test Project', NOW(), NOW())
-		ON CONFLICT (id) DO NOTHING`, projectID)
-	if err != nil {
-		t.Fatalf("failed to create test project: %v", err)
-	}
-
-	mcpConfig := &models.MCPConfig{
-		ProjectID: projectID,
-		ToolGroups: map[string]*models.ToolGroupConfig{
-			"developer": {Enabled: true, AddQueryTools: true, AddOntologyMaintenance: true},
+	// All toggles enabled
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		"tools": {
+			AddDirectDatabaseAccess:     true,
+			AddOntologyMaintenanceTools: true,
+			AddOntologySuggestions:      true,
+			AddApprovalTools:            true,
+			AddRequestTools:             true,
 		},
-	}
-
-	repo := repositories.NewMCPConfigRepository()
-	if err := repo.Upsert(tenantCtx, mcpConfig); err != nil {
-		t.Fatalf("failed to create test config: %v", err)
-	}
-
-	t.Cleanup(func() {
-		cleanupCtx := context.Background()
-		cleanupScope, err := engineDB.DB.WithTenant(cleanupCtx, projectID)
-		if err != nil {
-			return
-		}
-		defer cleanupScope.Close()
-		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_mcp_config WHERE project_id = $1", projectID)
-		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_projects WHERE id = $1", projectID)
 	})
 
-	// InstalledAppService is nil - should default to hiding data liaison tools
+	// InstalledAppService is nil - should default to hiding non-MCP-Server app tools
 	deps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
 			DB:                  engineDB.DB,
@@ -1568,7 +1363,7 @@ func TestNewToolFilter_DataLiaisonNotInstalled_NilService_FallbackToHidden(t *te
 
 	claims := &auth.Claims{ProjectID: projectID.String()}
 	claims.Subject = "user-123"
-	ctx = context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 	filtered := filter(ctx, tools)
 
 	// All Data Liaison tools should be hidden when service is nil

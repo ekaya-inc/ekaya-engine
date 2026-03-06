@@ -55,11 +55,10 @@ func setupQuestionToolIntegrationTest(t *testing.T) *questionToolTestContext {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 	questionRepo := repositories.NewOntologyQuestionRepository()
 
-	// Configure mock to enable question tools (developer with ontology maintenance)
+	// Configure mock to enable question tools (per-app toggles)
 	mockMCPConfig := &mockMCPConfigService{
 		config: &models.ToolGroupConfig{
-			Enabled:                true,
-			AddOntologyMaintenance: true, // Enables ontology maintenance + question tools
+			AddOntologyMaintenanceTools: true, // Enables ontology maintenance + question tools
 		},
 	}
 

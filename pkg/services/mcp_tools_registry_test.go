@@ -20,38 +20,28 @@ func TestGetEnabledTools_EmptyState(t *testing.T) {
 	state := map[string]*models.ToolGroupConfig{}
 	tools := GetEnabledTools(state)
 
-	// For user auth, Developer Core is always included
+	// Empty state: no toggles enabled, only health
 	toolNames := extractToolNames(tools)
 	assert.Contains(t, toolNames, "health")
-	assert.Contains(t, toolNames, "echo")
-	assert.Contains(t, toolNames, "execute")
+	assert.Len(t, tools, 1, "empty state should only return health")
 }
 
 func TestGetEnabledTools_DeveloperEnabled(t *testing.T) {
+	// Legacy developer.Enabled is now ignored — toggles control tools
 	state := map[string]*models.ToolGroupConfig{
 		ToolGroupDeveloper: {Enabled: true},
 	}
 	tools := GetEnabledTools(state)
 
-	// Developer mode only enables Developer Core loadout (health, echo, execute)
 	toolNames := extractToolNames(tools)
 
-	// Developer Core tools only
+	// No toggles set, only health
 	assert.Contains(t, toolNames, "health")
-	assert.Contains(t, toolNames, "echo")
-	assert.Contains(t, toolNames, "execute")
-
-	// Query loadout tools should NOT be included without AddQueryTools option
-	assert.NotContains(t, toolNames, "validate")
-	assert.NotContains(t, toolNames, "query")
-	assert.NotContains(t, toolNames, "explain_query")
-	assert.NotContains(t, toolNames, "get_schema")
-	assert.NotContains(t, toolNames, "sample")
-	assert.NotContains(t, toolNames, "list_approved_queries")
-	assert.NotContains(t, toolNames, "get_ontology")
+	assert.Len(t, tools, 1, "developer.Enabled alone should only return health")
 }
 
 func TestGetEnabledTools_DeveloperWithQueryTools(t *testing.T) {
+	// Legacy AddQueryTools maps to AddDirectDatabaseAccess + AddApprovalTools
 	state := map[string]*models.ToolGroupConfig{
 		ToolGroupDeveloper: {Enabled: true, AddQueryTools: true},
 	}
@@ -59,22 +49,21 @@ func TestGetEnabledTools_DeveloperWithQueryTools(t *testing.T) {
 
 	toolNames := extractToolNames(tools)
 
-	// Developer Core + Query (but NOT Ontology Maintenance)
+	// Mapped via backward compat: AddDirectDatabaseAccess + AddApprovalTools
 	assert.Contains(t, toolNames, "health")
 	assert.Contains(t, toolNames, "echo")
 	assert.Contains(t, toolNames, "execute")
-	assert.Contains(t, toolNames, "get_schema")
-	assert.Contains(t, toolNames, "get_ontology")
-	assert.Contains(t, toolNames, "sample")
-	assert.Contains(t, toolNames, "list_approved_queries")
+	assert.Contains(t, toolNames, "query")
+	assert.Contains(t, toolNames, "list_query_suggestions")
 
-	// Ontology Maintenance tools should NOT be included with AddQueryTools alone
+	// Ontology Maintenance tools should NOT be included
 	assert.NotContains(t, toolNames, "update_table")
 	assert.NotContains(t, toolNames, "update_column")
 	assert.NotContains(t, toolNames, "refresh_schema")
 }
 
 func TestGetEnabledTools_DeveloperWithOntologyMaintenance(t *testing.T) {
+	// Legacy AddOntologyMaintenance maps to AddOntologyMaintenanceTools
 	state := map[string]*models.ToolGroupConfig{
 		ToolGroupDeveloper: {Enabled: true, AddOntologyMaintenance: true},
 	}
@@ -82,28 +71,51 @@ func TestGetEnabledTools_DeveloperWithOntologyMaintenance(t *testing.T) {
 
 	toolNames := extractToolNames(tools)
 
-	// Developer Core + Ontology Maintenance + Ontology Questions
 	assert.Contains(t, toolNames, "health")
-	assert.Contains(t, toolNames, "echo")
-	assert.Contains(t, toolNames, "execute")
-	// Ontology Questions tools
-	assert.Contains(t, toolNames, "list_ontology_questions")
-	assert.Contains(t, toolNames, "resolve_ontology_question")
-	assert.Contains(t, toolNames, "skip_ontology_question")
 	// Ontology Maintenance tools
+	assert.Contains(t, toolNames, "get_schema")
 	assert.Contains(t, toolNames, "update_table")
 	assert.Contains(t, toolNames, "update_column")
+	assert.Contains(t, toolNames, "list_ontology_questions")
+	assert.Contains(t, toolNames, "resolve_ontology_question")
 	assert.Contains(t, toolNames, "refresh_schema")
 	assert.Contains(t, toolNames, "list_pending_changes")
 
-	// Query tools should NOT be included
-	assert.NotContains(t, toolNames, "get_schema")
-	assert.NotContains(t, toolNames, "sample")
+	// Direct Database Access tools should NOT be included
+	assert.NotContains(t, toolNames, "echo")
+	assert.NotContains(t, toolNames, "execute")
+}
+
+func TestGetEnabledTools_WithToolsKey(t *testing.T) {
+	// New "tools" config key takes precedence
+	state := map[string]*models.ToolGroupConfig{
+		"tools": {
+			AddDirectDatabaseAccess:     true,
+			AddOntologyMaintenanceTools: true,
+			AddApprovalTools:            true,
+			AddOntologySuggestions:      true,
+			AddRequestTools:             true,
+		},
+	}
+	tools := GetEnabledTools(state)
+
+	toolNames := extractToolNames(tools)
+
+	// All toggle-controlled tools should be present
+	assert.Contains(t, toolNames, "health")
+	assert.Contains(t, toolNames, "echo")
+	assert.Contains(t, toolNames, "execute")
+	assert.Contains(t, toolNames, "query")
+	assert.Contains(t, toolNames, "get_schema")
+	assert.Contains(t, toolNames, "update_table")
+	assert.Contains(t, toolNames, "list_ontology_questions")
+	assert.Contains(t, toolNames, "list_query_suggestions")
+	assert.Contains(t, toolNames, "get_context")
+	assert.Contains(t, toolNames, "get_ontology")
 }
 
 func TestGetEnabledTools_ApprovedQueriesEnabled(t *testing.T) {
-	// NOTE: For user auth, approved_queries.Enabled is ignored.
-	// Developer Core is always included. Use developer.AddQueryTools for Query loadout.
+	// Legacy approved_queries.Enabled has no effect on tool computation
 	state := map[string]*models.ToolGroupConfig{
 		ToolGroupApprovedQueries: {Enabled: true},
 	}
@@ -111,20 +123,13 @@ func TestGetEnabledTools_ApprovedQueriesEnabled(t *testing.T) {
 
 	toolNames := extractToolNames(tools)
 
-	// Developer Core is always included for user auth
+	// Only health - no toggles set
 	assert.Contains(t, toolNames, "health")
-	assert.Contains(t, toolNames, "echo")
-	assert.Contains(t, toolNames, "execute")
-
-	// Query tools require developer.AddQueryTools=true, not approved_queries.Enabled
-	assert.NotContains(t, toolNames, "query")
-	assert.NotContains(t, toolNames, "sample")
-	assert.NotContains(t, toolNames, "validate")
+	assert.Len(t, tools, 1)
 }
 
 func TestGetEnabledTools_ApprovedQueriesWithOntologyMaintenance(t *testing.T) {
-	// NOTE: For user auth, approved_queries flags are ignored.
-	// Use developer.AddOntologyMaintenance for Ontology Maintenance loadout.
+	// Legacy approved_queries flags don't affect new toggle system
 	state := map[string]*models.ToolGroupConfig{
 		ToolGroupApprovedQueries: {Enabled: true, AllowOntologyMaintenance: true},
 	}
@@ -132,19 +137,14 @@ func TestGetEnabledTools_ApprovedQueriesWithOntologyMaintenance(t *testing.T) {
 
 	toolNames := extractToolNames(tools)
 
-	// Developer Core is always included for user auth
+	// Only health - approved_queries flags don't map to new toggles
 	assert.Contains(t, toolNames, "health")
-	assert.Contains(t, toolNames, "echo")
-	assert.Contains(t, toolNames, "execute")
-
-	// Ontology Maintenance requires developer.AddOntologyMaintenance, not approved_queries flags
 	assert.NotContains(t, toolNames, "update_table")
 	assert.NotContains(t, toolNames, "update_column")
 }
 
 func TestGetEnabledTools_AgentToolsEnabled_UserPerspective(t *testing.T) {
-	// From USER perspective, enabling agent_tools doesn't add any tools beyond Developer Core
-	// Developer Core is always included for user auth
+	// From USER perspective, agent_tools doesn't add any tools
 	state := map[string]*models.ToolGroupConfig{
 		ToolGroupAgentTools: {Enabled: true},
 	}
@@ -152,13 +152,9 @@ func TestGetEnabledTools_AgentToolsEnabled_UserPerspective(t *testing.T) {
 
 	toolNames := extractToolNames(tools)
 
-	// Developer Core is always included for user auth
+	// Only health - no toggles set for developer/user tools
 	assert.Contains(t, toolNames, "health")
-	assert.Contains(t, toolNames, "echo")
-	assert.Contains(t, toolNames, "execute")
-
-	// Agent-specific tools should NOT be included in user perspective
-	// (Limited Query loadout is only for agents)
+	assert.Len(t, tools, 1)
 }
 
 func TestGetEnabledToolsForAgent_AgentToolsEnabled(t *testing.T) {
@@ -205,9 +201,8 @@ func TestGetEnabledTools_CustomToolsEnabled(t *testing.T) {
 }
 
 func TestGetEnabledTools_ToolsInCanonicalOrder(t *testing.T) {
-	// Use developer.AddQueryTools to get Query loadout for more tools to verify order
 	state := map[string]*models.ToolGroupConfig{
-		ToolGroupDeveloper: {AddQueryTools: true},
+		"tools": {AddDirectDatabaseAccess: true, AddOntologyMaintenanceTools: true},
 	}
 	tools := GetEnabledTools(state)
 

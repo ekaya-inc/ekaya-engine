@@ -55,10 +55,10 @@ func (m *mockMCPConfigService) GetToolGroupsState(ctx context.Context, projectID
 	if m.err != nil {
 		return nil, m.err
 	}
-	// Return a map with just the configured tool group
+	// Return a map with "tools" key for per-app toggle system
 	if m.config != nil {
 		return map[string]*models.ToolGroupConfig{
-			"developer": m.config,
+			"tools": m.config,
 		}, nil
 	}
 	return map[string]*models.ToolGroupConfig{}, nil

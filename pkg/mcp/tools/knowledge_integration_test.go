@@ -54,11 +54,10 @@ func setupKnowledgeToolIntegrationTest(t *testing.T) *knowledgeToolTestContext {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 	knowledgeRepo := repositories.NewKnowledgeRepository()
 
-	// Configure mock to enable knowledge tools (developer with ontology maintenance)
+	// Configure mock to enable knowledge tools (per-app toggles)
 	mockMCPConfig := &mockMCPConfigService{
 		config: &models.ToolGroupConfig{
-			Enabled:                true,
-			AddOntologyMaintenance: true, // Enables ontology maintenance tools including knowledge tools
+			AddOntologyMaintenanceTools: true, // Enables ontology maintenance tools including knowledge tools
 		},
 	}
 
