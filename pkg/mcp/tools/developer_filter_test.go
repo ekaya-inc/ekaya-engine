@@ -654,13 +654,15 @@ func TestNewToolFilter_ApprovedQueriesOn_DeveloperOff(t *testing.T) {
 	})
 
 	// Mock with queries - query count doesn't affect tool filtering
+	// AI Data Liaison must be installed for AddRequestTools to take effect
 	mockQueries := []*models.Query{{ID: uuid.New(), NaturalLanguagePrompt: "Test query"}}
 	testProjectService := &mockProjectService{defaultDatasourceID: uuid.New()}
 	deps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, testProjectService, nil, "http://localhost", zap.NewNop()),
-			Logger:           zap.NewNop(),
+			DB:                  engineDB.DB,
+			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, testProjectService, nil, "http://localhost", zap.NewNop()),
+			Logger:              zap.NewNop(),
+			InstalledAppService: newMockInstalledAppService(models.AppIDAIDataLiaison),
 		},
 		ProjectService: testProjectService,
 	}
@@ -1454,6 +1456,212 @@ func TestNewToolFilter_AIAgentsInstalled_AgentToolsShown(t *testing.T) {
 	for _, name := range expectedTools {
 		if !containsTool(filtered, name) {
 			t.Errorf("expected tool %s to be present", name)
+		}
+	}
+}
+
+// TestNewToolFilter_MCPServerOnly_DirectDBAccessOff tests that when only MCP Server
+// is installed and Direct Database Access is OFF, the tool filter returns only "health".
+// This is the exact scenario where the tool filter diverged from the UI:
+// - addRequestTools=true persists in DB from a previously-installed AI Data Liaison
+// - ComputeUserTools includes "query" from that toggle
+// - The tool filter must filter it out because ai-data-liaison is NOT installed
+// - The UI correctly filtered it via per-role installation checks
+func TestNewToolFilter_MCPServerOnly_DirectDBAccessOff(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Direct Database Access OFF, but addRequestTools still true (leftover from uninstalled app)
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		"tools": {
+			AddDirectDatabaseAccess:     false,
+			AddOntologyMaintenanceTools: false,
+			AddOntologySuggestions:      false,
+			AddApprovalTools:            false,
+			AddRequestTools:             true, // leftover from previously-installed AI Data Liaison
+		},
+	})
+
+	// Only MCP Server installed (no Ontology Forge, no AI Data Liaison)
+	deps := &MCPToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:                  engineDB.DB,
+			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:              zap.NewNop(),
+			InstalledAppService: newMockInstalledAppService(), // No apps installed (MCP Server is implicit)
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createTestToolsWithDataLiaison()
+
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	claims.Subject = "user-123"
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	filtered := filter(ctx, tools)
+
+	// Only health should be returned — query must NOT leak through
+	if len(filtered) != 1 {
+		t.Errorf("expected 1 tool (health only), got %d: %v", len(filtered), toolNames(filtered))
+	}
+	if !containsTool(filtered, "health") {
+		t.Error("expected health tool to be present")
+	}
+	if containsTool(filtered, "query") {
+		t.Error("query must NOT be present: Direct Database Access is OFF and AI Data Liaison is not installed")
+	}
+}
+
+// TestNewToolFilter_PerRoleInstallationFiltering tests that tool installation checks
+// are per-role, not cross-role. A tool that appears in multiple app toggles across
+// different roles should only pass the installation check for the role whose app is installed.
+func TestNewToolFilter_PerRoleInstallationFiltering(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// MCP Server developer toggle ON, AI Data Liaison user toggle ON
+	// But AI Data Liaison is NOT installed
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		"tools": {
+			AddDirectDatabaseAccess:     true,
+			AddOntologyMaintenanceTools: false,
+			AddOntologySuggestions:      false,
+			AddApprovalTools:            false,
+			AddRequestTools:             true,
+		},
+	})
+
+	// Only MCP Server installed
+	deps := &MCPToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:                  engineDB.DB,
+			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:              zap.NewNop(),
+			InstalledAppService: newMockInstalledAppService(), // No apps beyond MCP Server
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createTestToolsWithDataLiaison()
+
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	claims.Subject = "user-123"
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	filtered := filter(ctx, tools)
+
+	// "query" should be present — enabled via MCP Server developer toggle (app always installed)
+	if !containsTool(filtered, "query") {
+		t.Error("query should be present via MCP Server developer toggle (Direct Database Access ON)")
+	}
+	// "echo" and "execute" should also be present (MCP Server developer toggle)
+	if !containsTool(filtered, "echo") {
+		t.Error("echo should be present via MCP Server developer toggle")
+	}
+	if !containsTool(filtered, "execute") {
+		t.Error("execute should be present via MCP Server developer toggle")
+	}
+
+	// AI Data Liaison-only tools should NOT be present (app not installed)
+	for _, name := range []string{"sample", "validate", "suggest_approved_query", "suggest_query_update"} {
+		if containsTool(filtered, name) {
+			t.Errorf("tool %s should NOT be present: AI Data Liaison is not installed", name)
+		}
+	}
+}
+
+// createAllTools builds an mcp.Tool for every tool in AllToolsOrdered,
+// so the tool filter has the complete universe to filter from.
+func createAllTools() []mcp.Tool {
+	var tools []mcp.Tool
+	for _, spec := range services.AllToolsOrdered {
+		tools = append(tools, mcp.Tool{Name: spec.Name})
+	}
+	return tools
+}
+
+// TestNewToolFilter_MatchesAPIResponse verifies that the tool filter produces
+// the same tool set as the API response (buildResponse). This is the architectural
+// invariant: UI and MCP Server must always agree on which tools are available.
+func TestNewToolFilter_MatchesAPIResponse(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Mixed toggle state with leftover toggles from uninstalled apps
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		"tools": {
+			AddDirectDatabaseAccess:     false,
+			AddOntologyMaintenanceTools: true,
+			AddOntologySuggestions:      true,
+			AddApprovalTools:            true,
+			AddRequestTools:             true,
+		},
+	})
+
+	mockInstalled := newMockInstalledAppService(models.AppIDOntologyForge) // Only Ontology Forge
+
+	deps := &MCPToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:                  engineDB.DB,
+			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), mockInstalled, "http://localhost", zap.NewNop()),
+			Logger:              zap.NewNop(),
+			InstalledAppService: mockInstalled,
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createAllTools()
+
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	claims.Subject = "user-123"
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	filtered := filter(ctx, tools)
+	filterNames := make(map[string]bool)
+	for _, t := range filtered {
+		filterNames[t.Name] = true
+	}
+
+	// Compute what the API response would return (same logic as buildResponse)
+	state := map[string]*models.ToolGroupConfig{
+		"tools": {
+			AddDirectDatabaseAccess:     false,
+			AddOntologyMaintenanceTools: true,
+			AddOntologySuggestions:      true,
+			AddApprovalTools:            true,
+			AddRequestTools:             true,
+		},
+	}
+	installedApps := map[string]bool{
+		models.AppIDMCPServer:     true,
+		models.AppIDOntologyForge: true,
+	}
+	devSpecs := services.ComputeDeveloperTools(state)
+	userSpecs := services.ComputeUserTools(state)
+	apiNames := make(map[string]bool)
+	for _, spec := range devSpecs {
+		appID := services.GetToolAppID(spec.Name, "developer")
+		if installedApps[appID] {
+			apiNames[spec.Name] = true
+		}
+	}
+	for _, spec := range userSpecs {
+		appID := services.GetToolAppID(spec.Name, "user")
+		if installedApps[appID] {
+			apiNames[spec.Name] = true
+		}
+	}
+
+	// The tool filter and API response must produce the same tool set
+	for name := range apiNames {
+		if !filterNames[name] {
+			t.Errorf("API response includes %q but tool filter does not", name)
+		}
+	}
+	for name := range filterNames {
+		if !apiNames[name] {
+			t.Errorf("tool filter includes %q but API response does not", name)
 		}
 	}
 }

@@ -254,22 +254,14 @@ func NewToolFilter(deps *MCPToolDeps) func(ctx context.Context, tools []mcp.Tool
 			return filterAgentTools(tools, effectiveEnabled)
 		}
 
-		// User authentication - use GetEnabledTools for consistent filtering with UI
+		// User authentication - compute enabled tools per-role with installation filtering,
+		// using the same logic as buildResponse to ensure UI and MCP Server always agree.
 		state, err := deps.MCPConfigService.GetToolGroupsState(tenantCtx, projectID)
 		if err != nil {
 			deps.Logger.Error("Tool filter: failed to get tool groups state",
 				zap.String("project_id", projectID.String()),
 				zap.Error(err))
 			return filterToHealthOnly(tools)
-		}
-
-		// Get enabled tools using the same function as the UI
-		enabledToolDefs := services.GetEnabledTools(state)
-
-		// Build a set of enabled tool names
-		enabledNames := make(map[string]bool, len(enabledToolDefs))
-		for _, td := range enabledToolDefs {
-			enabledNames[td.Name] = true
 		}
 
 		// Check which apps are installed
@@ -290,36 +282,20 @@ func NewToolFilter(deps *MCPToolDeps) func(ctx context.Context, tools []mcp.Tool
 			}
 		}
 
-		// Build a map of tool name → set of owning app IDs across all roles.
-		// This avoids the fallback behavior of GetToolAppID which returns
-		// AppIDMCPServer for tools not found in a given role.
-		toolOwners := make(map[string]map[string]bool)
-		for _, toggle := range services.AppToggles {
-			for _, toolName := range toggle.Tools {
-				if toolOwners[toolName] == nil {
-					toolOwners[toolName] = make(map[string]bool)
-				}
-				toolOwners[toolName][toggle.AppID] = true
+		// Compute per-role, then filter by installation per-role, then union.
+		// This matches buildResponse exactly: a tool enabled via a role's toggle
+		// is only included if that role's owning app is installed.
+		enabledNames := make(map[string]bool)
+		for _, spec := range services.ComputeDeveloperTools(state) {
+			appID := services.GetToolAppID(spec.Name, "developer")
+			if installedApps[appID] {
+				enabledNames[spec.Name] = true
 			}
 		}
-
-		// Remove tools from uninstalled apps.
-		// A tool is allowed if ANY of its owning apps is installed.
-		// Tools not in any toggle (e.g., "health") are always allowed.
-		for toolName := range enabledNames {
-			owners := toolOwners[toolName]
-			if len(owners) == 0 {
-				continue // tool not in any toggle, always allowed
-			}
-			allowed := false
-			for appID := range owners {
-				if installedApps[appID] {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				delete(enabledNames, toolName)
+		for _, spec := range services.ComputeUserTools(state) {
+			appID := services.GetToolAppID(spec.Name, "user")
+			if installedApps[appID] {
+				enabledNames[spec.Name] = true
 			}
 		}
 
@@ -591,7 +567,7 @@ func registerQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 		// Note: QueryID is nil for ad-hoc queries executed via the query tool
 		go logQueryExecution(tenantCtx, deps, QueryExecutionLog{
 			ProjectID:       projectID,
-			QueryID:         uuid.Nil, // Ad-hoc query, no associated approved query
+			QueryID:         nil, // Ad-hoc query, no associated approved query
 			SQL:             sql,
 			SQLType:         "SELECT",
 			RowCount:        len(rows),
@@ -840,7 +816,7 @@ func registerExecuteTool(s *server.MCPServer, deps *MCPToolDeps) {
 			// Log failed execution
 			go logQueryExecution(tenantCtx, deps, QueryExecutionLog{
 				ProjectID:       projectID,
-				QueryID:         uuid.Nil, // Ad-hoc query, no associated approved query
+				QueryID:         nil, // Ad-hoc query, no associated approved query
 				SQL:             sql,
 				SQLType:         string(sqlType),
 				RowCount:        0,
@@ -875,7 +851,7 @@ func registerExecuteTool(s *server.MCPServer, deps *MCPToolDeps) {
 		// Log successful execution
 		go logQueryExecution(tenantCtx, deps, QueryExecutionLog{
 			ProjectID:       projectID,
-			QueryID:         uuid.Nil, // Ad-hoc query, no associated approved query
+			QueryID:         nil, // Ad-hoc query, no associated approved query
 			SQL:             sql,
 			SQLType:         string(sqlType),
 			RowCount:        execResult.RowCount,
