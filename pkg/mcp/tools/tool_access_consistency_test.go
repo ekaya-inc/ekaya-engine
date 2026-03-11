@@ -160,10 +160,9 @@ func TestApprovedQueriesEnabled_ListAndCallConsistency(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Setup: AddQueryTools enabled to get Query loadout
-	// Note: approved_queries.Enabled is now ignored for user auth
+	// Setup: All toggles enabled including AddRequestTools for list_approved_queries
 	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		"developer": {AddQueryTools: true}, // Need AddQueryTools for Query loadout
+		"tools": {AddDirectDatabaseAccess: true, AddApprovalTools: true, AddRequestTools: true},
 	})
 
 	mcpConfigService := services.NewMCPConfigService(
@@ -178,9 +177,10 @@ func TestApprovedQueriesEnabled_ListAndCallConsistency(t *testing.T) {
 	// Part 1: Verify tool LISTING shows approved queries tools
 	filterDeps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: mcpConfigService,
-			Logger:           zap.NewNop(),
+			DB:                  engineDB.DB,
+			MCPConfigService:    mcpConfigService,
+			Logger:              zap.NewNop(),
+			InstalledAppService: newMockInstalledAppService(models.AppIDAIDataLiaison),
 		},
 		ProjectService: consistencyMockProjectService(),
 	}
@@ -227,15 +227,15 @@ func TestApprovedQueriesEnabled_ListAndCallConsistency(t *testing.T) {
 	t.Log("CALLING: approved queries tools are correctly callable for user auth with AddQueryTools enabled")
 }
 
-// TestNeitherEnabled_QueryToolsNotListed tests that when AddQueryTools is not enabled,
-// Query loadout tools are not listed (but Developer Core tools are always included for users).
+// TestNeitherEnabled_QueryToolsNotListed tests that when no toggles are enabled,
+// no tools are listed (only health).
 func TestNeitherEnabled_QueryToolsNotListed(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Setup: no AddQueryTools enabled
+	// Setup: no toggles enabled
 	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		// Empty - no sub-options enabled
+		"tools": {}, // No toggles
 	})
 
 	mcpConfigService := services.NewMCPConfigService(
@@ -247,7 +247,7 @@ func TestNeitherEnabled_QueryToolsNotListed(t *testing.T) {
 		zap.NewNop(),
 	)
 
-	// Part 1: Verify tool LISTING does NOT show Query loadout tools
+	// Part 1: Verify tool LISTING does NOT show any tools except health
 	filterDeps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
 			DB:               engineDB.DB,
@@ -260,38 +260,33 @@ func TestNeitherEnabled_QueryToolsNotListed(t *testing.T) {
 	filter := NewToolFilter(filterDeps)
 	allTools := createTestTools()
 
-	// Admin auth (use admin role to test config-based filtering, not role-based filtering)
+	// Admin auth
 	claims := &auth.Claims{ProjectID: projectID.String(), Roles: []string{models.RoleAdmin}}
 	claims.Subject = "user-123"
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 
 	filteredTools := filter(ctx, allTools)
 
-	// Query loadout tools should NOT be present without AddQueryTools
-	if containsTool(filteredTools, "list_approved_queries") {
-		t.Error("LISTING: list_approved_queries should NOT be visible without AddQueryTools")
-	}
-	if containsTool(filteredTools, "execute_approved_query") {
-		t.Error("LISTING: execute_approved_query should NOT be visible without AddQueryTools")
-	}
-	if containsTool(filteredTools, "query") {
-		t.Error("LISTING: query should NOT be visible without AddQueryTools")
-	}
-
-	// Developer Core tools should still be present (for admin auth)
+	// No toggles = only health
 	if !containsTool(filteredTools, "health") {
 		t.Error("LISTING: health should be visible")
 	}
-	if !containsTool(filteredTools, "echo") {
-		t.Error("LISTING: echo should be visible (Developer Core)")
+	if containsTool(filteredTools, "list_approved_queries") {
+		t.Error("LISTING: list_approved_queries should NOT be visible without toggles")
 	}
-	if !containsTool(filteredTools, "execute") {
-		t.Error("LISTING: execute should be visible (Developer Core)")
+	if containsTool(filteredTools, "query") {
+		t.Error("LISTING: query should NOT be visible without toggles")
+	}
+	if containsTool(filteredTools, "echo") {
+		t.Error("LISTING: echo should NOT be visible without toggles")
+	}
+	if containsTool(filteredTools, "execute") {
+		t.Error("LISTING: execute should NOT be visible without toggles")
 	}
 
-	t.Log("LISTING: Query tools are correctly hidden when AddQueryTools is not enabled")
+	t.Log("LISTING: Tools are correctly hidden when no toggles are enabled")
 
-	// Part 2: Verify Query tool CALLING fails (since not in loadout)
+	// Part 2: Verify tool CALLING fails (since not in loadout)
 	queryDeps := &QueryToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
 			DB:               engineDB.DB,
@@ -308,7 +303,7 @@ func TestNeitherEnabled_QueryToolsNotListed(t *testing.T) {
 	}
 
 	if err == nil {
-		t.Fatal("CALLING: AcquireToolAccess should fail when AddQueryTools is not enabled")
+		t.Fatal("CALLING: AcquireToolAccess should fail when no toggles are enabled")
 	}
 
 	t.Logf("CALLING: correctly rejected with error: %v", err)
@@ -374,11 +369,10 @@ func TestBothEnabled_UserSeesApprovedQueries(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Setup: both enabled
-	// Note: approved_queries.Enabled is now ignored for user auth
+	// Setup: both agent_tools and user-facing tools enabled
 	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
 		"agent_tools": {Enabled: true},
-		"developer":   {AddQueryTools: true}, // Need AddQueryTools for Query loadout
+		"tools":       {AddDirectDatabaseAccess: true, AddRequestTools: true},
 	})
 
 	mcpConfigService := services.NewMCPConfigService(
@@ -393,9 +387,10 @@ func TestBothEnabled_UserSeesApprovedQueries(t *testing.T) {
 	// Part 1: Verify user sees approved queries tools
 	filterDeps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: mcpConfigService,
-			Logger:           zap.NewNop(),
+			DB:                  engineDB.DB,
+			MCPConfigService:    mcpConfigService,
+			Logger:              zap.NewNop(),
+			InstalledAppService: newMockInstalledAppService(models.AppIDAIDataLiaison),
 		},
 		ProjectService: consistencyMockProjectService(),
 	}
@@ -534,9 +529,15 @@ func TestDataLiaison_Uninstalled_ExecutionBlocked(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Setup: developer with AddQueryTools (data liaison tools are in this loadout)
+	// Setup: all toggles enabled including request tools (suggest_approved_query is a user request tool)
 	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		"developer": {AddQueryTools: true, AddOntologyMaintenance: true},
+		"tools": {
+			AddDirectDatabaseAccess:     true,
+			AddOntologyMaintenanceTools: true,
+			AddOntologySuggestions:      true,
+			AddApprovalTools:            true,
+			AddRequestTools:             true,
+		},
 	})
 
 	mcpConfigService := services.NewMCPConfigService(
@@ -589,9 +590,15 @@ func TestDataLiaison_Installed_ExecutionAllowed(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Setup: developer with AddQueryTools (data liaison tools are in this loadout)
+	// Setup: all toggles enabled (suggest_approved_query is a user request tool)
 	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		"developer": {AddQueryTools: true, AddOntologyMaintenance: true},
+		"tools": {
+			AddDirectDatabaseAccess:     true,
+			AddOntologyMaintenanceTools: true,
+			AddOntologySuggestions:      true,
+			AddApprovalTools:            true,
+			AddRequestTools:             true,
+		},
 	})
 
 	mcpConfigService := services.NewMCPConfigService(

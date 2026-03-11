@@ -51,11 +51,11 @@ func setupRefreshSchemaIntegrationTest(t *testing.T) *refreshSchemaTestContext {
 	// Create MCP server with refresh_schema tool
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
-	// Configure mock to enable developer tools
+	// Configure mock to enable developer tools (per-app toggles)
 	mockMCPConfig := &mockMCPConfigService{
 		config: &models.ToolGroupConfig{
-			Enabled:       true,
-			AddQueryTools: true,
+			AddDirectDatabaseAccess:     true,
+			AddOntologyMaintenanceTools: true,
 		},
 	}
 
@@ -166,8 +166,7 @@ func TestRefreshSchema_AutoSelectApplied_ReflectsNewTables_Integration(t *testin
 			// Set up mocks - refresh_schema requires ontology maintenance to be enabled
 			mockMCPConfig := &mockMCPConfigService{
 				config: &models.ToolGroupConfig{
-					Enabled:                true,
-					AddOntologyMaintenance: true,
+					AddOntologyMaintenanceTools: true,
 				},
 			}
 
@@ -282,8 +281,7 @@ func TestRefreshSchema_ColumnsAdded_ReportsOnlyNewColumns_Integration(t *testing
 			// Set up mocks
 			mockMCPConfig := &mockMCPConfigService{
 				config: &models.ToolGroupConfig{
-					Enabled:                true,
-					AddOntologyMaintenance: true,
+					AddOntologyMaintenanceTools: true,
 				},
 			}
 

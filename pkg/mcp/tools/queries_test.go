@@ -1402,9 +1402,10 @@ func TestQueryLoggingDeps_MCPToolDepsImplements(t *testing.T) {
 
 func TestQueryExecutionLog_AllFields(t *testing.T) {
 	// Verify QueryExecutionLog struct has all required fields
+	qID := uuid.New()
 	log := QueryExecutionLog{
 		ProjectID:       uuid.New(),
-		QueryID:         uuid.New(),
+		QueryID:         &qID,
 		QueryName:       "Test Query",
 		SQL:             "SELECT * FROM users",
 		SQLType:         "SELECT",
@@ -1419,7 +1420,7 @@ func TestQueryExecutionLog_AllFields(t *testing.T) {
 
 	// Verify all fields are accessible
 	assert.NotEqual(t, uuid.Nil, log.ProjectID)
-	assert.NotEqual(t, uuid.Nil, log.QueryID)
+	assert.NotNil(t, log.QueryID)
 	assert.Equal(t, "Test Query", log.QueryName)
 	assert.Equal(t, "SELECT * FROM users", log.SQL)
 	assert.Equal(t, "SELECT", log.SQLType)
@@ -1434,9 +1435,10 @@ func TestQueryExecutionLog_AllFields(t *testing.T) {
 
 func TestQueryExecutionLog_ModifyingQuery(t *testing.T) {
 	// Verify QueryExecutionLog works for modifying queries
+	modQID := uuid.New()
 	log := QueryExecutionLog{
 		ProjectID:       uuid.New(),
-		QueryID:         uuid.New(),
+		QueryID:         &modQID,
 		QueryName:       "Update User",
 		SQL:             "UPDATE users SET name = 'test' WHERE id = 1",
 		SQLType:         "UPDATE",
@@ -1458,7 +1460,7 @@ func TestQueryExecutionLog_FailedQuery(t *testing.T) {
 	// Verify QueryExecutionLog captures error information
 	log := QueryExecutionLog{
 		ProjectID:       uuid.New(),
-		QueryID:         uuid.Nil, // Ad-hoc query
+		QueryID:         nil, // Ad-hoc query
 		SQL:             "SELECT * FROM nonexistent_table",
 		SQLType:         "SELECT",
 		RowCount:        0,
@@ -1468,7 +1470,34 @@ func TestQueryExecutionLog_FailedQuery(t *testing.T) {
 		ErrorMessage:    "relation 'nonexistent_table' does not exist",
 	}
 
-	assert.Equal(t, uuid.Nil, log.QueryID)
+	assert.Nil(t, log.QueryID)
 	assert.False(t, log.Success)
 	assert.Contains(t, log.ErrorMessage, "nonexistent_table")
+}
+
+func TestQueryExecutionLog_NilQueryID_ForAdHocQueries(t *testing.T) {
+	// Ad-hoc queries (via query/execute tools) have no associated approved query.
+	// QueryID should be nil, not uuid.Nil, so the DB column is NULL.
+	log := QueryExecutionLog{
+		ProjectID: uuid.New(),
+		QueryID:   nil,
+		SQL:       "SELECT 1",
+		SQLType:   "SELECT",
+	}
+
+	assert.Nil(t, log.QueryID, "ad-hoc queries must have nil QueryID")
+}
+
+func TestQueryExecutionLog_NonNilQueryID_ForApprovedQueries(t *testing.T) {
+	// Approved queries have a real QueryID referencing engine_queries.
+	qID := uuid.New()
+	log := QueryExecutionLog{
+		ProjectID: uuid.New(),
+		QueryID:   &qID,
+		SQL:       "SELECT * FROM users WHERE id = $1",
+		SQLType:   "SELECT",
+	}
+
+	assert.NotNil(t, log.QueryID, "approved queries must have non-nil QueryID")
+	assert.Equal(t, qID, *log.QueryID)
 }

@@ -82,6 +82,14 @@ Always follow test-driven development. For every change:
 
 Do NOT leave tests until the end. Tests come first, implementation follows. This applies to bug fixes (write a test that reproduces the bug before fixing it), new features (write tests for the expected behavior before implementing), and refactors (ensure test coverage exists before changing code).
 
+## Concurrent Work / Committing
+
+Multiple processes (agents, humans) may be working in this project simultaneously. When committing:
+
+- **Only commit files you changed.** Do not stage or commit files modified by another process.
+- If a file you changed also has changes you didn't make, check recent commits. If those changes aren't in a recent commit, leave the file for the other process to commit. If they are already committed and your changes are on top, include it in your commit.
+- Never run `git add -A` or `git add .` — always stage specific files by name.
+
 ## Key Architecture Concepts
 
 - **Ontology DAG**: 7-node sequential pipeline that extracts semantic metadata from database schemas. Nodes: KnowledgeSeeding → ColumnFeatureExtraction → FKDiscovery → TableFeatureExtraction → RelationshipDiscovery → ColumnEnrichment → OntologyFinalization.

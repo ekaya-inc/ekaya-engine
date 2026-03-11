@@ -23,6 +23,13 @@ export interface ToolGroupState {
   // Custom Tools - individually selected tool names
   customTools?: string[];
 
+  // Per-app tool toggles
+  addDirectDatabaseAccess?: boolean;
+  addOntologyMaintenanceTools?: boolean;
+  addOntologySuggestions?: boolean;
+  addApprovalTools?: boolean;
+  addRequestTools?: boolean;
+
   // Legacy sub-options (backward compatibility)
   enableExecute?: boolean;
   forceMode?: boolean;
@@ -36,6 +43,7 @@ export interface ToolGroupState {
 export interface EnabledToolInfo {
   name: string;
   description: string;
+  appId: string;
 }
 
 export interface ServerStatusResponse {
@@ -51,6 +59,7 @@ export interface MCPConfigResponse {
   userTools: EnabledToolInfo[];
   developerTools: EnabledToolInfo[];
   agentTools: EnabledToolInfo[];
+  appNames: Record<string, string>;
   /** @deprecated Use userTools, developerTools, or agentTools instead. Kept for backward compatibility. */
   enabledTools: EnabledToolInfo[];
 }
@@ -86,6 +95,12 @@ export interface UpdateMCPConfigRequest {
   // Developer Tools sub-options
   addQueryTools?: boolean;
   addOntologyMaintenance?: boolean;
+  // Per-app tool toggles
+  addDirectDatabaseAccess?: boolean;
+  addOntologyMaintenanceTools?: boolean;
+  addOntologySuggestions?: boolean;
+  addApprovalTools?: boolean;
+  addRequestTools?: boolean;
 }
 
 // UI Rendering Types (state merged with frontend metadata)

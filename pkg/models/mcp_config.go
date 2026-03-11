@@ -21,6 +21,16 @@ type ToolGroupConfig struct {
 	// AddOntologyMaintenance: When enabled, adds Ontology Maintenance + Ontology Questions tools
 	AddOntologyMaintenance bool `json:"addOntologyMaintenance"`
 
+	// Per-app toggles (new architecture)
+	// MCP Server
+	AddDirectDatabaseAccess bool `json:"addDirectDatabaseAccess"`
+	// Ontology Forge
+	AddOntologyMaintenanceTools bool `json:"addOntologyMaintenanceTools"`
+	AddOntologySuggestions      bool `json:"addOntologySuggestions"`
+	// AI Data Liaison
+	AddApprovalTools bool `json:"addApprovalTools"`
+	AddRequestTools  bool `json:"addRequestTools"`
+
 	// Custom Tools options
 	// CustomTools: List of individually selected tool names (only used when custom group is enabled)
 	CustomTools []string `json:"customTools,omitempty"`
@@ -49,12 +59,19 @@ func DefaultMCPConfig(projectID uuid.UUID) *MCPConfig {
 	return &MCPConfig{
 		ProjectID: projectID,
 		ToolGroups: map[string]*ToolGroupConfig{
-			// User tools - allowOntologyMaintenance defaults to true
-			"user": {AllowOntologyMaintenance: true},
-			// Developer tools - both sub-options default to true
-			"developer": {AddQueryTools: true, AddOntologyMaintenance: true},
+			// Per-app toggles — all default to enabled
+			"tools": {
+				AddDirectDatabaseAccess:     true,
+				AddOntologyMaintenanceTools: true,
+				AddOntologySuggestions:      true,
+				AddApprovalTools:            true,
+				AddRequestTools:             true,
+			},
 			// Agent tools - enabled by default (Enabled is legacy but still checked for agents)
 			"agent_tools": {Enabled: true},
+			// Legacy keys for backward compatibility
+			"user":      {AllowOntologyMaintenance: true},
+			"developer": {AddQueryTools: true, AddOntologyMaintenance: true},
 		},
 	}
 }

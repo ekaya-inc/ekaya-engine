@@ -146,6 +146,13 @@ func (v *mcpStateValidator) applyUpdate(groupName string, current, update *model
 	current.AddOntologyMaintenance = update.AddOntologyMaintenance
 	current.CustomTools = update.CustomTools
 
+	// Per-app toggles
+	current.AddDirectDatabaseAccess = update.AddDirectDatabaseAccess
+	current.AddOntologyMaintenanceTools = update.AddOntologyMaintenanceTools
+	current.AddOntologySuggestions = update.AddOntologySuggestions
+	current.AddApprovalTools = update.AddApprovalTools
+	current.AddRequestTools = update.AddRequestTools
+
 	// Legacy sub-options (backward compatibility)
 	current.ForceMode = update.ForceMode
 	current.AllowClientSuggestions = update.AllowClientSuggestions
@@ -206,6 +213,13 @@ func (v *mcpStateValidator) deepCopy(state map[string]*models.ToolGroupConfig) m
 				AddQueryTools:            v.AddQueryTools,
 				AddOntologyMaintenance:   v.AddOntologyMaintenance,
 				CustomTools:              customToolsCopy,
+
+				// Per-app toggles
+				AddDirectDatabaseAccess:     v.AddDirectDatabaseAccess,
+				AddOntologyMaintenanceTools: v.AddOntologyMaintenanceTools,
+				AddOntologySuggestions:      v.AddOntologySuggestions,
+				AddApprovalTools:            v.AddApprovalTools,
+				AddRequestTools:             v.AddRequestTools,
 
 				// Legacy sub-options
 				ForceMode:              v.ForceMode,

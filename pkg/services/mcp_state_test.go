@@ -262,8 +262,6 @@ func TestMCPStateValidator_UnknownToolGroup(t *testing.T) {
 }
 
 func TestMCPStateValidator_RadioButtonSwitchesState(t *testing.T) {
-	// With radio button behavior, enabling developer while agent_tools is active
-	// should succeed and switch to developer (disable agent_tools).
 	validator := NewMCPStateValidator()
 
 	original := map[string]*models.ToolGroupConfig{
@@ -430,8 +428,7 @@ func TestMCPStateValidator_EnabledTools(t *testing.T) {
 		return nil
 	}
 
-	t.Run("empty state returns Developer Core tools", func(t *testing.T) {
-		// For user auth, Developer Core is always included (Enabled flags are ignored)
+	t.Run("empty state returns only health", func(t *testing.T) {
 		result := validator.Apply(
 			MCPStateTransition{
 				Current: map[string]*models.ToolGroupConfig{},
@@ -443,13 +440,32 @@ func TestMCPStateValidator_EnabledTools(t *testing.T) {
 		require.Nil(t, result.Error)
 		require.NotNil(t, result.EnabledTools)
 
-		// Developer Core tools always included for user auth
-		assert.NotNil(t, findTool(result.EnabledTools, "health"), "health should be enabled (always available)")
-		assert.NotNil(t, findTool(result.EnabledTools, "echo"), "echo should be enabled (Developer Core)")
-		assert.NotNil(t, findTool(result.EnabledTools, "execute"), "execute should be enabled (Developer Core)")
+		// Only health - no toggles set
+		assert.NotNil(t, findTool(result.EnabledTools, "health"), "health should be enabled")
+		assert.Len(t, result.EnabledTools, 1, "only health with empty state")
 	})
 
-	t.Run("enabling developer shows Developer Core tools", func(t *testing.T) {
+	t.Run("tools key with toggles shows tools", func(t *testing.T) {
+		result := validator.Apply(
+			MCPStateTransition{
+				Current: map[string]*models.ToolGroupConfig{},
+				Update: map[string]*models.ToolGroupConfig{
+					"tools": {AddDirectDatabaseAccess: true},
+				},
+			},
+			MCPStateContext{HasEnabledQueries: true},
+		)
+
+		require.Nil(t, result.Error)
+		require.NotNil(t, result.EnabledTools)
+
+		assert.NotNil(t, findTool(result.EnabledTools, "health"))
+		assert.NotNil(t, findTool(result.EnabledTools, "echo"))
+		assert.NotNil(t, findTool(result.EnabledTools, "execute"))
+		assert.NotNil(t, findTool(result.EnabledTools, "query"))
+	})
+
+	t.Run("legacy developer.Enabled alone yields only health", func(t *testing.T) {
 		result := validator.Apply(
 			MCPStateTransition{
 				Current: map[string]*models.ToolGroupConfig{},
@@ -463,54 +479,17 @@ func TestMCPStateValidator_EnabledTools(t *testing.T) {
 		require.Nil(t, result.Error)
 		require.NotNil(t, result.EnabledTools)
 
-		// Should include Developer Core tools only (Default + DeveloperCore loadouts)
-		assert.NotNil(t, findTool(result.EnabledTools, "health"), "health should be enabled (always available)")
-		assert.NotNil(t, findTool(result.EnabledTools, "echo"), "echo should be enabled (Developer Core)")
-		assert.NotNil(t, findTool(result.EnabledTools, "execute"), "execute should be enabled (Developer Core)")
-
-		// Query loadout tools NOT included without AddQueryTools
-		assert.Nil(t, findTool(result.EnabledTools, "validate"), "validate requires AddQueryTools")
-		assert.Nil(t, findTool(result.EnabledTools, "query"), "query requires AddQueryTools")
-		assert.Nil(t, findTool(result.EnabledTools, "explain_query"), "explain_query requires AddQueryTools")
-		assert.Nil(t, findTool(result.EnabledTools, "get_schema"), "get_schema requires AddQueryTools")
-		assert.Nil(t, findTool(result.EnabledTools, "sample"), "sample requires AddQueryTools")
-	})
-
-	t.Run("approved_queries Enabled flag is now ignored for user auth", func(t *testing.T) {
-		// For user auth, approved_queries.Enabled is now ignored
-		// User gets Developer Core (no AddQueryTools in config)
-		result := validator.Apply(
-			MCPStateTransition{
-				Current: map[string]*models.ToolGroupConfig{},
-				Update: map[string]*models.ToolGroupConfig{
-					ToolGroupApprovedQueries: {Enabled: true}, // Enabled is ignored for user auth
-				},
-			},
-			MCPStateContext{HasEnabledQueries: true},
-		)
-
-		require.Nil(t, result.Error)
-		require.NotNil(t, result.EnabledTools)
-
-		// For user auth, Developer Core is always included
-		assert.NotNil(t, findTool(result.EnabledTools, "health"), "health should be enabled")
-		assert.NotNil(t, findTool(result.EnabledTools, "echo"), "echo should be enabled (Developer Core)")
-		assert.NotNil(t, findTool(result.EnabledTools, "execute"), "execute should be enabled (Developer Core)")
-
-		// Query loadout tools NOT included without AddQueryTools
-		assert.Nil(t, findTool(result.EnabledTools, "query"), "query requires AddQueryTools")
-		assert.Nil(t, findTool(result.EnabledTools, "sample"), "sample requires AddQueryTools")
-		assert.Nil(t, findTool(result.EnabledTools, "validate"), "validate requires AddQueryTools")
+		// Only health - developer.Enabled alone doesn't set toggles
+		assert.NotNil(t, findTool(result.EnabledTools, "health"))
+		assert.Len(t, result.EnabledTools, 1)
 	})
 
 	t.Run("agent_tools Enabled does not affect UI tool list", func(t *testing.T) {
-		// EnabledTools shows USER perspective - agent_tools.Enabled doesn't change it
-		// Agent tool filtering happens at MCP connection time
 		result := validator.Apply(
 			MCPStateTransition{
 				Current: map[string]*models.ToolGroupConfig{
-					"developer":              {Enabled: true}, // Enabled is ignored
-					ToolGroupApprovedQueries: {Enabled: true}, // Enabled is ignored
+					"developer":              {Enabled: true},
+					ToolGroupApprovedQueries: {Enabled: true},
 				},
 				Update: map[string]*models.ToolGroupConfig{
 					ToolGroupAgentTools: {Enabled: true},
@@ -522,43 +501,11 @@ func TestMCPStateValidator_EnabledTools(t *testing.T) {
 		require.Nil(t, result.Error)
 		require.NotNil(t, result.EnabledTools)
 
-		// EnabledTools shows USER perspective (Developer Core)
-		// agent_tools.Enabled doesn't change what tools users see
-		assert.NotNil(t, findTool(result.EnabledTools, "health"), "health should be enabled")
-		assert.NotNil(t, findTool(result.EnabledTools, "echo"), "echo should be enabled (Developer Core)")
-		assert.NotNil(t, findTool(result.EnabledTools, "execute"), "execute should be enabled (Developer Core)")
-	})
-
-	t.Run("force mode and Enabled flags are now ignored for user auth", func(t *testing.T) {
-		// For user auth, Enabled flags are ignored - Developer Core is always included
-		// Only sub-options (AddQueryTools, AddOntologyMaintenance) control loadouts
-		result := validator.Apply(
-			MCPStateTransition{
-				Current: map[string]*models.ToolGroupConfig{
-					"developer":              {Enabled: true},
-					ToolGroupApprovedQueries: {Enabled: true, ForceMode: true},
-				},
-				Update: map[string]*models.ToolGroupConfig{},
-			},
-			MCPStateContext{HasEnabledQueries: true},
-		)
-
-		require.Nil(t, result.Error)
-		require.NotNil(t, result.EnabledTools)
-
-		// For user auth, Developer Core is always included (Enabled is ignored)
-		// No AddQueryTools, so no Query loadout
-		assert.NotNil(t, findTool(result.EnabledTools, "health"), "health should be enabled (always available)")
-		assert.NotNil(t, findTool(result.EnabledTools, "echo"), "echo should be enabled (Developer Core)")
-		assert.NotNil(t, findTool(result.EnabledTools, "execute"), "execute should be enabled (Developer Core)")
-
-		// Query tools NOT included without AddQueryTools
-		assert.Nil(t, findTool(result.EnabledTools, "query"), "query requires AddQueryTools")
+		// Only health - no per-app toggles set
+		assert.NotNil(t, findTool(result.EnabledTools, "health"))
 	})
 
 	t.Run("radio button switch shows new state enabled tools", func(t *testing.T) {
-		// With radio button, enabling developer while agent_tools is active
-		// should succeed and show Developer Core tools only
 		result := validator.Apply(
 			MCPStateTransition{
 				Current: map[string]*models.ToolGroupConfig{
@@ -575,24 +522,13 @@ func TestMCPStateValidator_EnabledTools(t *testing.T) {
 		require.Nil(t, result.Error, "radio button switch should not error")
 		require.NotNil(t, result.EnabledTools)
 
-		// Should reflect the new state (Developer Core tools only)
-		assert.NotNil(t, findTool(result.EnabledTools, "health"), "health should be enabled (always available)")
-		assert.NotNil(t, findTool(result.EnabledTools, "echo"), "echo should be enabled (Developer Core)")
-		assert.NotNil(t, findTool(result.EnabledTools, "execute"), "execute should be enabled (Developer Core)")
-
-		// Query loadout tools NOT included without AddQueryTools
-		assert.Nil(t, findTool(result.EnabledTools, "query"), "query requires AddQueryTools")
-		assert.Nil(t, findTool(result.EnabledTools, "validate"), "validate requires AddQueryTools")
-		assert.Nil(t, findTool(result.EnabledTools, "explain_query"), "explain_query requires AddQueryTools")
-		assert.Nil(t, findTool(result.EnabledTools, "get_schema"), "get_schema requires AddQueryTools")
-		assert.Nil(t, findTool(result.EnabledTools, "sample"), "sample requires AddQueryTools")
+		// Only health - no per-app toggles set
+		assert.NotNil(t, findTool(result.EnabledTools, "health"))
 	})
 }
 
 // TestMCPStateValidator_EnabledToolsConsistency verifies that EnabledTools
 // always matches what GetEnabledTools would return for the resulting state.
-// EnabledTools always shows USER perspective (not agent) - agent tool filtering
-// happens at MCP connection time.
 func TestMCPStateValidator_EnabledToolsConsistency(t *testing.T) {
 	validator := NewMCPStateValidator()
 
@@ -634,6 +570,13 @@ func TestMCPStateValidator_EnabledToolsConsistency(t *testing.T) {
 				ToolGroupApprovedQueries: {Enabled: true, ForceMode: true},
 			},
 		},
+		{
+			name:    "tools key with toggles",
+			current: map[string]*models.ToolGroupConfig{},
+			update: map[string]*models.ToolGroupConfig{
+				"tools": {AddDirectDatabaseAccess: true, AddOntologyMaintenanceTools: true},
+			},
+		},
 	}
 
 	for _, tt := range transitions {
@@ -644,7 +587,6 @@ func TestMCPStateValidator_EnabledToolsConsistency(t *testing.T) {
 			)
 
 			// EnabledTools always shows USER perspective (not agent)
-			// Agent tool filtering happens at MCP connection time
 			expectedTools := GetEnabledTools(result.State)
 
 			// Verify EnabledTools matches
@@ -668,12 +610,8 @@ func TestMCPStateValidator_EnabledToolsConsistency(t *testing.T) {
 // ============================================================================
 // NEW TESTS: Radio Button Behavior for Tool Groups
 // ============================================================================
-// These tests verify the simplified radio-button behavior where only ONE
-// top-level tool group can be enabled at a time.
 
 func TestMCPStateValidator_RadioButton_OnlyOneGroupEnabled(t *testing.T) {
-	// CRITICAL: Only one of business_user, agent_tools, or developer can be
-	// enabled at a time. Enabling one should disable the others.
 	validator := NewMCPStateValidator()
 
 	tests := []struct {
@@ -768,7 +706,7 @@ func TestMCPStateValidator_RadioButton_OnlyOneGroupEnabled(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := validator.Apply(
 				MCPStateTransition{Current: tt.current, Update: tt.update},
-				MCPStateContext{HasEnabledQueries: true}, // Not relevant for radio button behavior
+				MCPStateContext{HasEnabledQueries: true},
 			)
 
 			require.Nil(t, result.Error, "radio button transitions should never error")
@@ -784,8 +722,6 @@ func TestMCPStateValidator_RadioButton_OnlyOneGroupEnabled(t *testing.T) {
 }
 
 func TestMCPStateValidator_RadioButton_NoQueriesNotBlocking(t *testing.T) {
-	// With radio button behavior, enabling business_user tools should work
-	// even without enabled queries (the restriction is removed)
 	validator := NewMCPStateValidator()
 
 	result := validator.Apply(
@@ -797,16 +733,15 @@ func TestMCPStateValidator_RadioButton_NoQueriesNotBlocking(t *testing.T) {
 				ToolGroupApprovedQueries: {Enabled: true},
 			},
 		},
-		MCPStateContext{HasEnabledQueries: false}, // No queries exist
+		MCPStateContext{HasEnabledQueries: false},
 	)
 
-	// Should succeed - no longer blocked by missing queries
 	require.Nil(t, result.Error, "enabling business_user should not require enabled queries")
 	assert.True(t, result.State[ToolGroupApprovedQueries].Enabled)
 }
 
 func TestMCPStateValidator_DeveloperTools_ExecuteAvailableByDefault(t *testing.T) {
-	// When developer tools is enabled, execute is always available as part of Developer Core loadout
+	// With new architecture, execute is controlled by AddDirectDatabaseAccess toggle
 	validator := NewMCPStateValidator()
 
 	findTool := func(tools []ToolDefinition, name string) *ToolDefinition {
@@ -822,7 +757,7 @@ func TestMCPStateValidator_DeveloperTools_ExecuteAvailableByDefault(t *testing.T
 		MCPStateTransition{
 			Current: map[string]*models.ToolGroupConfig{},
 			Update: map[string]*models.ToolGroupConfig{
-				"developer": {Enabled: true}, // Just enabled, no enableExecute flag needed
+				"tools": {AddDirectDatabaseAccess: true},
 			},
 		},
 		MCPStateContext{HasEnabledQueries: true},
@@ -831,18 +766,14 @@ func TestMCPStateValidator_DeveloperTools_ExecuteAvailableByDefault(t *testing.T
 	require.Nil(t, result.Error)
 	require.NotNil(t, result.EnabledTools)
 
-	// Execute should be included when developer mode is on
+	// Execute should be included when AddDirectDatabaseAccess is on
 	assert.NotNil(t, findTool(result.EnabledTools, "execute"),
-		"execute should be enabled when developer mode is on")
+		"execute should be enabled with AddDirectDatabaseAccess")
 	assert.NotNil(t, findTool(result.EnabledTools, "echo"),
-		"echo should be enabled")
-	// Developer Core does NOT include get_schema - need AddQueryTools option for that
-	assert.Nil(t, findTool(result.EnabledTools, "get_schema"),
-		"get_schema requires AddQueryTools option")
+		"echo should be enabled with AddDirectDatabaseAccess")
 }
 
 func TestMCPStateValidator_RadioButton_DisablingOneDoesNotEnableAnother(t *testing.T) {
-	// Disabling the active group should not automatically enable another
 	validator := NewMCPStateValidator()
 
 	result := validator.Apply(
@@ -868,8 +799,6 @@ func TestMCPStateValidator_RadioButton_DisablingOneDoesNotEnableAnother(t *testi
 }
 
 func TestMCPStateValidator_RadioButton_EnabledToolsReflectSelection(t *testing.T) {
-	// For user auth, Enabled flags are now ignored - Developer Core is always included.
-	// Only sub-options (AddQueryTools, AddOntologyMaintenance) control additional loadouts.
 	validator := NewMCPStateValidator()
 
 	findTool := func(tools []ToolDefinition, name string) *ToolDefinition {
@@ -881,29 +810,27 @@ func TestMCPStateValidator_RadioButton_EnabledToolsReflectSelection(t *testing.T
 		return nil
 	}
 
-	t.Run("approved_queries Enabled flag is ignored for user auth", func(t *testing.T) {
-		// For user auth, approved_queries.Enabled is ignored - user gets Developer Core
+	t.Run("tools key controls enabled tools", func(t *testing.T) {
 		result := validator.Apply(
 			MCPStateTransition{
-				Current: map[string]*models.ToolGroupConfig{"developer": {Enabled: true}},
-				Update:  map[string]*models.ToolGroupConfig{ToolGroupApprovedQueries: {Enabled: true}},
+				Current: map[string]*models.ToolGroupConfig{},
+				Update: map[string]*models.ToolGroupConfig{
+					"tools": {AddDirectDatabaseAccess: true, AddOntologyMaintenanceTools: true},
+				},
 			},
 			MCPStateContext{HasEnabledQueries: true},
 		)
 
 		require.Nil(t, result.Error)
 
-		// For user auth, Developer Core is always included (Enabled flags ignored)
 		assert.NotNil(t, findTool(result.EnabledTools, "health"))
 		assert.NotNil(t, findTool(result.EnabledTools, "echo"))
 		assert.NotNil(t, findTool(result.EnabledTools, "execute"))
-
-		// Query loadout NOT included without AddQueryTools
-		assert.Nil(t, findTool(result.EnabledTools, "query"))
-		assert.Nil(t, findTool(result.EnabledTools, "sample"))
+		assert.NotNil(t, findTool(result.EnabledTools, "update_table"))
+		assert.NotNil(t, findTool(result.EnabledTools, "get_schema"))
 	})
 
-	t.Run("developer selected shows Developer Core tools", func(t *testing.T) {
+	t.Run("empty state shows only health", func(t *testing.T) {
 		result := validator.Apply(
 			MCPStateTransition{
 				Current: map[string]*models.ToolGroupConfig{ToolGroupApprovedQueries: {Enabled: true}},
@@ -914,19 +841,8 @@ func TestMCPStateValidator_RadioButton_EnabledToolsReflectSelection(t *testing.T
 
 		require.Nil(t, result.Error)
 
-		// Developer Core tools should be present (Default + DeveloperCore loadouts)
+		// Only health - no per-app toggles set
 		assert.NotNil(t, findTool(result.EnabledTools, "health"))
-		assert.NotNil(t, findTool(result.EnabledTools, "echo"))
-		assert.NotNil(t, findTool(result.EnabledTools, "execute"))
-
-		// Query loadout tools should NOT be present (need AddQueryTools option)
-		assert.Nil(t, findTool(result.EnabledTools, "validate"))
-		assert.Nil(t, findTool(result.EnabledTools, "query"))
-		assert.Nil(t, findTool(result.EnabledTools, "explain_query"))
-		assert.Nil(t, findTool(result.EnabledTools, "get_schema"))
-		assert.Nil(t, findTool(result.EnabledTools, "sample"))
-
-		// Developer Core = 2 tools (echo, execute) + Default (health) = 3 tools
-		assert.Len(t, result.EnabledTools, 3)
+		assert.Len(t, result.EnabledTools, 1)
 	})
 }

@@ -97,6 +97,7 @@ describe('ApplicationsPage', () => {
     renderPage();
 
     expect(screen.getByText('AI Data Liaison')).toBeInTheDocument();
+    expect(screen.getByText('Ontology Forge')).toBeInTheDocument();
     // AI Agents tile is temporarily hidden
     expect(screen.queryByText('AI Agents and Automation')).not.toBeInTheDocument();
     expect(screen.getByText('Product Kit [BETA]')).toBeInTheDocument();
@@ -118,9 +119,9 @@ describe('ApplicationsPage', () => {
   it('renders Install buttons for installable apps when not installed', () => {
     renderPage();
 
-    // Only AI Data Liaison has Install button (AI Agents tile is temporarily hidden)
+    // AI Data Liaison + Ontology Forge have Install buttons (AI Agents tile is temporarily hidden)
     const installButtons = screen.getAllByRole('button', { name: 'Install' });
-    expect(installButtons).toHaveLength(1);
+    expect(installButtons).toHaveLength(2);
     const learnMoreButtons = screen.getAllByRole('button', { name: /Learn More/i });
     expect(learnMoreButtons).toHaveLength(1);
   });
@@ -133,8 +134,9 @@ describe('ApplicationsPage', () => {
     expect(
       screen.getByRole('button', { name: 'Configure' })
     ).toBeInTheDocument();
-    // No Install buttons remain (AI Agents tile is temporarily hidden)
-    expect(screen.queryByRole('button', { name: 'Install' })).not.toBeInTheDocument();
+    // Ontology Forge still has an Install button
+    const installButtons = screen.getAllByRole('button', { name: 'Install' });
+    expect(installButtons).toHaveLength(1);
   });
 
   it('calls install and navigates when clicking Install on AI Data Liaison', async () => {

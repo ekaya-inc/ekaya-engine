@@ -1,20 +1,20 @@
-import { ArrowLeft, ExternalLink, Info, Loader2, Check, Copy } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ExternalLink, Info, Loader2, Check, Copy } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import MCPLogo from '../components/icons/MCPLogo';
-import DeveloperToolsSection from '../components/mcp/DeveloperToolsSection';
+import ToolInventory from '../components/mcp/ToolInventory';
 import SetupChecklist from '../components/SetupChecklist';
 import type { ChecklistItem } from '../components/SetupChecklist';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
-import { TOOL_GROUP_IDS } from '../constants/mcpToolMetadata';
+import { Switch } from '../components/ui/Switch';
 import { useConfig } from '../contexts/ConfigContext';
 import { useProject } from '../contexts/ProjectContext';
 import { useToast } from '../hooks/useToast';
 import { getUserRoles } from '../lib/auth-token';
 import engineApi from '../services/engineApi';
-import type { AIConfigResponse, DAGStatusResponse, Datasource, MCPConfigResponse, ServerStatusResponse } from '../types';
+import type { Datasource, MCPConfigResponse, ServerStatusResponse } from '../types';
 
 const MCPServerPage = () => {
   const navigate = useNavigate();
@@ -30,27 +30,19 @@ const MCPServerPage = () => {
 
   // Setup checklist state
   const [datasource, setDatasource] = useState<Datasource | null>(null);
-  const [hasSelectedTables, setHasSelectedTables] = useState(false);
-  const [aiConfig, setAiConfig] = useState<AIConfigResponse | null>(null);
-  const [dagStatus, setDagStatus] = useState<DAGStatusResponse | null>(null);
-  const [questionCounts, setQuestionCounts] = useState<{ required: number; optional: number } | null>(null);
-  const [hasApprovedQueries, setHasApprovedQueries] = useState(false);
   const [serverStatus, setServerStatus] = useState<ServerStatusResponse | null>(null);
 
-  // Read tool group configs from backend
-  const developerState = config?.toolGroups[TOOL_GROUP_IDS.DEVELOPER];
-  const addQueryTools = developerState?.addQueryTools ?? true;
-  const addOntologyMaintenance = developerState?.addOntologyMaintenance ?? true;
+  // Read tool group config from backend
+  const addDirectDatabaseAccess = config?.toolGroups['tools']?.addDirectDatabaseAccess ?? true;
 
   const fetchConfig = useCallback(async () => {
     if (!pid) return;
 
     try {
       setLoading(true);
-      const [mcpRes, datasourcesRes, aiConfigRes, serverStatusRes] = await Promise.all([
+      const [mcpRes, datasourcesRes, serverStatusRes] = await Promise.all([
         engineApi.getMCPConfig(pid),
         engineApi.listDataSources(pid),
-        engineApi.getAIConfig(pid),
         engineApi.getServerStatus(),
       ]);
 
@@ -62,40 +54,7 @@ const MCPServerPage = () => {
 
       const ds = datasourcesRes.data?.datasources?.[0] ?? null;
       setDatasource(ds);
-      setAiConfig(aiConfigRes.data ?? null);
       setServerStatus(serverStatusRes);
-
-      if (ds) {
-        try {
-          const schemaRes = await engineApi.getSchema(pid, ds.datasource_id);
-          const hasSelections = schemaRes.data?.tables?.some((t) => t.is_selected === true) ?? false;
-          setHasSelectedTables(hasSelections);
-        } catch {
-          setHasSelectedTables(false);
-        }
-
-        try {
-          const dagRes = await engineApi.getOntologyDAGStatus(pid, ds.datasource_id);
-          setDagStatus(dagRes.data ?? null);
-        } catch {
-          setDagStatus(null);
-        }
-
-        try {
-          const countsRes = await engineApi.getOntologyQuestionCounts(pid);
-          setQuestionCounts(countsRes.data ?? null);
-        } catch {
-          setQuestionCounts(null);
-        }
-
-        try {
-          const queriesRes = await engineApi.listQueries(pid, ds.datasource_id);
-          const approvedCount = queriesRes.data?.queries?.filter((q) => q.status === 'approved').length ?? 0;
-          setHasApprovedQueries(approvedCount > 0);
-        } catch {
-          setHasApprovedQueries(false);
-        }
-      }
     } catch (error) {
       console.error('Failed to fetch MCP config:', error);
       toast({
@@ -113,176 +72,34 @@ const MCPServerPage = () => {
   }, [fetchConfig]);
 
   const getChecklistItems = (): ChecklistItem[] => {
-    const items: ChecklistItem[] = [];
-
-    // 1. Datasource configured
-    items.push({
-      id: 'datasource',
-      title: 'Datasource configured',
-      description: datasource
-        ? `Connected to ${datasource.name} (${datasource.type})`
-        : 'Connect a database to enable the MCP Server',
-      status: loading ? 'loading' : datasource ? 'complete' : 'pending',
-      link: `/projects/${pid}/datasource`,
-      linkText: datasource ? 'Manage' : 'Configure',
-    });
-
-    // 2. Schema selected
-    const schemaItem: ChecklistItem = {
-      id: 'schema',
-      title: 'Schema selected',
-      description: hasSelectedTables
-        ? 'Tables and columns selected for analysis'
-        : datasource
-          ? 'Select which tables and columns to include'
-          : 'Configure datasource first',
-      status: loading ? 'loading' : hasSelectedTables ? 'complete' : 'pending',
-      linkText: hasSelectedTables ? 'Manage' : 'Configure',
-    };
-    if (datasource) {
-      schemaItem.link = `/projects/${pid}/schema`;
-    }
-    items.push(schemaItem);
-
-    // 3. Create Pre-Approved Queries (optional)
-    const queriesItem: ChecklistItem = {
-      id: 'queries',
-      title: 'Create Pre-Approved Queries',
-      description: hasApprovedQueries
-        ? 'Pre-approved queries are available for the MCP Server'
-        : datasource
-          ? 'Create pre-approved SQL queries for the MCP Server to use'
-          : 'Configure datasource first',
-      status: loading ? 'loading' : hasApprovedQueries ? 'complete' : 'pending',
-      linkText: hasApprovedQueries ? 'Manage' : 'Configure',
-      optional: true,
-    };
-    if (datasource) {
-      queriesItem.link = `/projects/${pid}/queries`;
-    }
-    items.push(queriesItem);
-
-    // 4. AI configured (renumbered from 3)
-    const isAIConfigured = !!aiConfig?.config_type && aiConfig.config_type !== 'none';
-    const aiConfigItem: ChecklistItem = {
-      id: 'ai-config',
-      title: 'AI configured',
-      description: isAIConfigured
-        ? 'AI model configured'
-        : hasSelectedTables
-          ? 'Configure an AI model for ontology extraction'
-          : 'Configure datasource and select schema first',
-      status: loading ? 'loading' : isAIConfigured ? 'complete' : 'pending',
-    };
-    if (datasource && hasSelectedTables) {
-      aiConfigItem.link = `/projects/${pid}/ai-config`;
-      aiConfigItem.linkText = isAIConfigured ? 'Manage' : 'Configure';
-    }
-    items.push(aiConfigItem);
-
-    // 5. Ontology extracted
-    const ontologyComplete = dagStatus?.status === 'completed';
-    const ontologyRunning = dagStatus?.status === 'running';
-    const ontologyFailed = dagStatus?.status === 'failed';
-
-    const ontologyItem: ChecklistItem = {
-      id: 'ontology',
-      title: 'Ontology extracted',
-      description: ontologyComplete
-        ? 'Schema semantics extracted and ready'
-        : ontologyRunning
-          ? `Extracting... (${dagStatus?.current_node ?? 'starting'})`
-          : ontologyFailed
-            ? 'Extraction failed - click to retry'
-            : datasource && hasSelectedTables && isAIConfigured
-              ? 'Extract semantic understanding from your schema'
-              : 'Configure datasource, select schema, and configure AI first',
-      status: loading
-        ? 'loading'
-        : ontologyComplete
-          ? 'complete'
-          : ontologyFailed
-            ? 'error'
-            : 'pending',
-      linkText: ontologyComplete ? 'Manage' : ontologyFailed ? 'Retry' : 'Configure',
-    };
-    if (datasource && hasSelectedTables && isAIConfigured) {
-      ontologyItem.link = `/projects/${pid}/ontology`;
-    }
-    items.push(ontologyItem);
-
-    // 6. Critical ontology questions answered
-    const questionsComplete = questionCounts !== null && questionCounts.required === 0;
-    const hasQuestions = questionCounts !== null && (questionCounts.required > 0 || questionsComplete);
-    const questionsItem: ChecklistItem = {
-      id: 'questions',
-      title: 'Critical Ontology Questions answered',
-      description: questionsComplete
-        ? 'All critical questions about your schema have been answered'
-        : questionCounts !== null
-          ? `${questionCounts.required} critical question${questionCounts.required === 1 ? '' : 's'} need${questionCounts.required === 1 ? 's' : ''} answer${questionCounts.required === 1 ? '' : 's'}`
-          : ontologyComplete
-            ? 'Check for critical questions about your schema'
-            : 'Extract ontology first',
-      status: loading
-        ? 'loading'
-        : questionsComplete
-          ? 'complete'
-          : 'pending',
-    };
-    if (ontologyComplete && hasQuestions) {
-      questionsItem.link = `/projects/${pid}/ontology-questions`;
-      questionsItem.linkText = questionsComplete ? 'Manage' : 'Answer';
-    }
-    items.push(questionsItem);
-
-    return items;
+    return [
+      {
+        id: 'datasource',
+        title: 'Datasource configured',
+        description: datasource
+          ? `Connected to ${datasource.name} (${datasource.type})`
+          : 'Connect a database to enable the MCP Server',
+        status: loading ? 'loading' : datasource ? 'complete' : 'pending',
+        link: `/projects/${pid}/datasource`,
+        linkText: datasource ? 'Manage' : 'Configure',
+      },
+    ];
   };
 
-  const handleAddQueryToolsChange = async (enabled: boolean) => {
+  const handleDirectDatabaseAccessChange = async (enabled: boolean) => {
     if (!pid || !config) return;
 
     try {
       setUpdating(true);
       const response = await engineApi.updateMCPConfig(pid, {
-        addQueryTools: enabled,
+        addDirectDatabaseAccess: enabled,
       });
 
       if (response.success && response.data) {
         setConfig(response.data);
         toast({
           title: 'Success',
-          description: `Add Query Tools ${enabled ? 'enabled' : 'disabled'}`,
-        });
-      } else {
-        throw new Error(response.error ?? 'Failed to update configuration');
-      }
-    } catch (error) {
-      console.error('Failed to update MCP config:', error);
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to update configuration',
-        variant: 'destructive',
-      });
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  const handleAddOntologyMaintenanceChange = async (enabled: boolean) => {
-    if (!pid || !config) return;
-
-    try {
-      setUpdating(true);
-      const response = await engineApi.updateMCPConfig(pid, {
-        addOntologyMaintenance: enabled,
-      });
-
-      if (response.success && response.data) {
-        setConfig(response.data);
-        toast({
-          title: 'Success',
-          description: `Add Ontology Maintenance ${enabled ? 'enabled' : 'disabled'}`,
+          description: `Direct Database Access ${enabled ? 'enabled' : 'disabled'}`,
         });
       } else {
         throw new Error(response.error ?? 'Failed to update configuration');
@@ -469,14 +286,46 @@ const MCPServerPage = () => {
               </CardContent>
             </Card>
 
-            {/* Developer Tools Section */}
-            <DeveloperToolsSection
-              addQueryTools={addQueryTools}
-              onAddQueryToolsChange={handleAddQueryToolsChange}
-              addOntologyMaintenance={addOntologyMaintenance}
-              onAddOntologyMaintenanceChange={handleAddOntologyMaintenanceChange}
-              enabledTools={config.developerTools}
-              disabled={updating}
+            {/* Tool Configuration */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Tool Configuration</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Warning about direct access */}
+                <div className="flex items-start gap-2 rounded-md bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>
+                    The MCP Client will have direct access to the Datasource using the supplied credentials
+                    -- this access includes potentially destructive operations. Back up the data before
+                    allowing AI to modify it.
+                  </span>
+                </div>
+
+                {/* Direct Database Access toggle */}
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex-1">
+                    <span className="text-sm font-medium text-text-primary">Direct Database Access</span>
+                    <p className="text-sm text-text-secondary mt-1">
+                      Include tools for direct database access: echo, execute, and query.
+                      Enables the MCP Client to run arbitrary SQL against the datasource.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={addDirectDatabaseAccess}
+                    onCheckedChange={handleDirectDatabaseAccessChange}
+                    disabled={updating}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Tool Inventory */}
+            <ToolInventory
+              developerTools={config.developerTools}
+              userTools={config.userTools}
+              appNames={config.appNames}
+              projectId={pid ?? ''}
             />
 
           </>

@@ -54,11 +54,14 @@ func setupSearchToolIntegrationTest(t *testing.T) *searchToolTestContext {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 	schemaRepo := repositories.NewSchemaRepository()
 
-	// Configure mock to enable developer tools
+	// Configure mock to enable developer tools (per-app toggles)
 	mockMCPConfig := &mockMCPConfigService{
 		config: &models.ToolGroupConfig{
-			Enabled:       true,
-			AddQueryTools: true,
+			AddDirectDatabaseAccess:     true,
+			AddOntologyMaintenanceTools: true,
+			AddOntologySuggestions:      true,
+			AddApprovalTools:            true,
+			AddRequestTools:             true,
 		},
 	}
 

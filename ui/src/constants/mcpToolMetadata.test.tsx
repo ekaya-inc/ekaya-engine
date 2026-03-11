@@ -10,9 +10,13 @@ describe('mcpToolMetadata', () => {
       expect(TOOL_GROUP_IDS.AGENT).toBe('agent_tools');
     });
 
-    it('has exactly 3 tool group IDs', () => {
+    it('contains tools group ID', () => {
+      expect(TOOL_GROUP_IDS.TOOLS).toBe('tools');
+    });
+
+    it('has exactly 4 tool group IDs', () => {
       const ids = Object.keys(TOOL_GROUP_IDS);
-      expect(ids).toHaveLength(3);
+      expect(ids).toHaveLength(4);
     });
   });
 
@@ -26,9 +30,17 @@ describe('mcpToolMetadata', () => {
       expect(TOOL_GROUP_SUB_OPTIONS.ADD_ONTOLOGY_MAINTENANCE).toBe('addOntologyMaintenance');
     });
 
-    it('has exactly 3 sub-options', () => {
+    it('contains per-app tool toggle sub-options', () => {
+      expect(TOOL_GROUP_SUB_OPTIONS.ADD_DIRECT_DATABASE_ACCESS).toBe('addDirectDatabaseAccess');
+      expect(TOOL_GROUP_SUB_OPTIONS.ADD_ONTOLOGY_MAINTENANCE_TOOLS).toBe('addOntologyMaintenanceTools');
+      expect(TOOL_GROUP_SUB_OPTIONS.ADD_ONTOLOGY_SUGGESTIONS).toBe('addOntologySuggestions');
+      expect(TOOL_GROUP_SUB_OPTIONS.ADD_APPROVAL_TOOLS).toBe('addApprovalTools');
+      expect(TOOL_GROUP_SUB_OPTIONS.ADD_REQUEST_TOOLS).toBe('addRequestTools');
+    });
+
+    it('has exactly 8 sub-options', () => {
       const options = Object.keys(TOOL_GROUP_SUB_OPTIONS);
-      expect(options).toHaveLength(3);
+      expect(options).toHaveLength(8);
     });
   });
 });
