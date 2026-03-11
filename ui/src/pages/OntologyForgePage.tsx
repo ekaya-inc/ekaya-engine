@@ -1,8 +1,6 @@
 import {
   Anvil,
-  ArrowLeft,
   ExternalLink,
-  Info,
   Lightbulb,
   Loader2,
   Trash2,
@@ -10,6 +8,7 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
+import AppPageHeader from '../components/AppPageHeader';
 import MCPEnabledTools from '../components/mcp/MCPEnabledTools';
 import SetupChecklist from '../components/SetupChecklist';
 import type { ChecklistItem } from '../components/SetupChecklist';
@@ -32,7 +31,6 @@ import {
 import { Input } from '../components/ui/Input';
 import { Switch } from '../components/ui/Switch';
 import { useConfig } from '../contexts/ConfigContext';
-import { useProject } from '../contexts/ProjectContext';
 import { useToast } from '../hooks/useToast';
 import { getUserRoles } from '../lib/auth-token';
 import engineApi from '../services/engineApi';
@@ -43,7 +41,6 @@ const OntologyForgePage = () => {
   const { pid } = useParams<{ pid: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { config: appConfig } = useConfig();
-  const { urls } = useProject();
   const { toast } = useToast();
 
   const [config, setConfig] = useState<MCPConfigResponse | null>(null);
@@ -419,20 +416,12 @@ const OntologyForgePage = () => {
 
     return (
       <div className="mx-auto max-w-4xl">
-        <div className="mb-6">
-          <Button
-            variant="ghost"
-            onClick={() => navigate(`/projects/${pid}`)}
-            className="mb-4"
-          >
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Dashboard
-          </Button>
-          <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
-            <Anvil className="h-8 w-8 text-brand-purple" />
-            Ontology Forge
-          </h1>
-        </div>
+        <AppPageHeader
+          title="Ontology Forge"
+          slug="ontology-forge"
+          icon={<Anvil className="h-8 w-8 text-brand-purple" />}
+          description="Build a business semantic layer (ontology) on top of your schema with AI-powered extraction, enrichment, and developer tools"
+        />
 
         <Card>
           <CardHeader>
@@ -461,30 +450,12 @@ const OntologyForgePage = () => {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <div className="mb-6">
-        <Button
-          variant="ghost"
-          onClick={() => navigate(`/projects/${pid}`)}
-          className="mb-4"
-        >
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back to Dashboard
-        </Button>
-        <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
-            <Anvil className="h-8 w-8 text-brand-purple" />
-            Ontology Forge
-          </h1>
-          <a
-            href={`${urls.projectsPageUrl ? new URL(urls.projectsPageUrl).origin : 'https://us.ekaya.ai'}/apps/ontology-forge`}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Ontology Forge documentation"
-          >
-            <Info className="h-7 w-7 text-text-secondary hover:text-brand-purple transition-colors" />
-          </a>
-        </div>
-      </div>
+      <AppPageHeader
+        title="Ontology Forge"
+        slug="ontology-forge"
+        icon={<Anvil className="h-8 w-8 text-brand-purple" />}
+        description="Build a business semantic layer (ontology) on top of your schema with AI-powered extraction, enrichment, and developer tools"
+      />
 
       <div className="space-y-6">
         {/* Setup Checklist */}

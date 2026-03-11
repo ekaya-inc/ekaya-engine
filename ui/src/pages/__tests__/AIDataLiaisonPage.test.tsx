@@ -40,6 +40,13 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
+// Mock the ProjectContext (used by AppPageHeader)
+vi.mock('../../contexts/ProjectContext', () => ({
+  useProject: () => ({
+    urls: { projectsPageUrl: 'https://us.ekaya.ai/projects' },
+  }),
+}));
+
 // Mock the ConfigContext
 vi.mock('../../contexts/ConfigContext', () => ({
   useConfig: () => ({
@@ -206,12 +213,12 @@ describe('AIDataLiaisonPage', () => {
 
     it('renders back button', async () => {
       await renderAIDataLiaisonPage();
-      expect(screen.getByRole('button', { name: /back to project dashboard/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /back to dashboard/i })).toBeInTheDocument();
     });
 
     it('navigates to project dashboard when back button clicked', async () => {
       await renderAIDataLiaisonPage();
-      const backButton = screen.getByRole('button', { name: /back to project dashboard/i });
+      const backButton = screen.getByRole('button', { name: /back to dashboard/i });
       fireEvent.click(backButton);
       expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1');
     });

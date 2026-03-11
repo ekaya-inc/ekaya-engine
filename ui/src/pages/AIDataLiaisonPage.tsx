@@ -1,8 +1,8 @@
 import {
-  ArrowLeft,
   Check,
   Copy,
   ExternalLink,
+  Handshake,
   Loader2,
   ScrollText,
   Trash2,
@@ -10,6 +10,7 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
+import AppPageHeader from '../components/AppPageHeader';
 import MCPEnabledTools from '../components/mcp/MCPEnabledTools';
 import SetupChecklist from '../components/SetupChecklist';
 import type { ChecklistItem } from '../components/SetupChecklist';
@@ -325,23 +326,12 @@ const AIDataLiaisonPage = () => {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      {/* Header with back button */}
-      <div className="flex items-center gap-4">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Back to project dashboard"
-          onClick={() => navigate(`/projects/${pid}`)}
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div>
-          <h1 className="text-2xl font-bold">AI Data Liaison</h1>
-          <p className="text-text-secondary">
-            Ekaya acts as a data liaison between you and your business users. This application extends the Ekaya Engine with MCP tools that enable usage to enhance and extend the ontology and UI for you to manage queries suggested by users.
-          </p>
-        </div>
-      </div>
+      <AppPageHeader
+        title="AI Data Liaison"
+        slug="ai-data-liaison"
+        icon={<Handshake className="h-8 w-8 text-green-500" />}
+        description="Ekaya acts as a data liaison between you and your business users. This application extends the Ekaya Engine with MCP tools that enable usage to enhance and extend the ontology and UI for you to manage queries suggested by users."
+      />
 
       {/* Setup Checklist */}
       <SetupChecklist
