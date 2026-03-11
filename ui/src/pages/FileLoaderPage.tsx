@@ -176,7 +176,7 @@ const FileLoaderPage = () => {
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <AppPageHeader
-        title="Spreadsheet Loader"
+        title="Spreadsheet Loader [BETA]"
         slug="file-loader"
         icon={<FileSpreadsheet className="h-8 w-8" />}
         description="Import CSV, TSV, and Excel files into your SQL database"

@@ -122,7 +122,7 @@ const applications: ApplicationInfo[] = [
   },
   {
     id: 'file-loader',
-    title: 'Spreadsheet Loader',
+    title: 'Spreadsheet Loader [BETA]',
     subtitle: 'Import CSV, TSV, and Excel files into your SQL database with automatic schema inference',
     icon: FileSpreadsheet,
     color: 'cyan',
@@ -132,7 +132,7 @@ const applications: ApplicationInfo[] = [
   },
   {
     id: 'product-kit',
-    title: 'Product Kit [BETA]',
+    title: 'Product Kit [COMING SOON]',
     subtitle: 'Enable AI Features in your existing SaaS Product',
     icon: Package,
     color: 'gray',
@@ -140,7 +140,7 @@ const applications: ApplicationInfo[] = [
   },
   {
     id: 'on-premise-chat',
-    title: 'On-Premise Chat [BETA]',
+    title: 'On-Premise Chat [COMING SOON]',
     subtitle: 'Deploy AI Chat where data never leaves your data boundary',
     icon: MessageSquare,
     color: 'gray',

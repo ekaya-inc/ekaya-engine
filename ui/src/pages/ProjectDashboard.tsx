@@ -247,7 +247,7 @@ const ProjectDashboard = () => {
     // Add Spreadsheet Loader tile if installed
     if (installedApps.some((app) => app.app_id === APP_ID_FILE_LOADER)) {
       tiles.push({
-        title: 'Spreadsheet Loader',
+        title: 'Spreadsheet Loader [BETA]',
         description: 'Import CSV, TSV, and Excel files into your SQL database with automatic schema inference.',
         icon: FileSpreadsheet,
         path: `/projects/${pid}/file-loader`,
