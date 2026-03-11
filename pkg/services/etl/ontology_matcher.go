@@ -96,7 +96,11 @@ func (m *OntologyMatcher) Match(ctx context.Context, projectID uuid.UUID, candid
 	}
 
 	// Only propose a match if enough columns match
-	if float64(matchedCount)/float64(len(inferred)) < 0.3 {
+	if float64(matchedCount)/float64(len(inferred)) < 0.6 {
+		return newTableResult(), nil
+	}
+
+	if hasMissingNotNullColumns(existingColumns, mappings) {
 		return newTableResult(), nil
 	}
 
@@ -113,6 +117,24 @@ func newTableResult() *models.MatchResult {
 		IsNewTable: true,
 		Confidence: 0,
 	}
+}
+
+// hasMissingNotNullColumns returns true if the existing table has any NOT NULL columns
+// (without defaults) that are not covered by the column mappings. Such columns would
+// cause INSERT failures, so the match should be rejected in favor of a new table.
+func hasMissingNotNullColumns(existing []*models.SchemaColumn, mappings []models.ColumnMapping) bool {
+	mapped := make(map[string]bool, len(mappings))
+	for _, m := range mappings {
+		if m.MappedName != "" {
+			mapped[m.MappedName] = true
+		}
+	}
+	for _, col := range existing {
+		if !col.IsNullable && col.DefaultValue == nil && !mapped[col.ColumnName] {
+			return true
+		}
+	}
+	return false
 }
 
 // findBestTableMatch finds the table name with the highest similarity to the candidate.
