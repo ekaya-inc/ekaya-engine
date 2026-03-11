@@ -72,6 +72,7 @@ type QueryExecutionRow struct {
 	RowCount        int       `json:"row_count"`
 	ExecutionTimeMs int       `json:"execution_time_ms"`
 	UserID          *string   `json:"user_id,omitempty"`
+	UserEmail       *string   `json:"user_email,omitempty"`
 	Source          string    `json:"source"`
 	IsModifying     bool      `json:"is_modifying"`
 	Success         bool      `json:"success"`

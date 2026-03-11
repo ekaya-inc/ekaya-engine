@@ -1298,6 +1298,23 @@ class EngineApiService {
   }
 
   /**
+   * Resolve all open alerts for a project
+   * POST /api/projects/{projectId}/audit/alerts/resolve-all
+   */
+  async resolveAllAuditAlerts(
+    projectId: string,
+    body: ResolveAlertRequest
+  ): Promise<ApiResponse<{ message: string; resolved_count: number }>> {
+    return this.makeRequest<{ message: string; resolved_count: number }>(
+      `/${projectId}/audit/alerts/resolve-all`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }
+    );
+  }
+
+  /**
    * Get alert configuration for a project
    * GET /api/projects/{projectId}/audit/alert-config
    */

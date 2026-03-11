@@ -67,6 +67,10 @@ func (m *mockAlertService) ResolveAlert(_ context.Context, _ uuid.UUID, _ uuid.U
 	return m.resolveErr
 }
 
+func (m *mockAlertService) ResolveAllAlerts(_ context.Context, _ uuid.UUID, _ string, _ string, _ string) (int64, error) {
+	return 0, m.resolveErr
+}
+
 // mockMCPConfigRepoForAlert implements the MCPConfigRepository methods needed for alert handler testing.
 type mockMCPConfigRepoForAlert struct {
 	alertConfig *models.AlertConfig

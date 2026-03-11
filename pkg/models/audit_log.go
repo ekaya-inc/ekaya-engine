@@ -31,8 +31,9 @@ type AuditLogEntry struct {
 	Action     string    `json:"action"`      // 'create', 'update', 'delete'
 
 	// Who/how
-	Source string     `json:"source"`            // 'inference', 'mcp', 'manual'
-	UserID *uuid.UUID `json:"user_id,omitempty"` // Who triggered the action (from JWT, may be null for system operations)
+	Source    string     `json:"source"`            // 'inference', 'mcp', 'manual'
+	UserID    *uuid.UUID `json:"user_id,omitempty"` // Who triggered the action (from JWT, may be null for system operations)
+	UserEmail *string    `json:"user_email,omitempty"`
 
 	// What changed (for updates)
 	ChangedFields map[string]FieldChange `json:"changed_fields,omitempty"` // {"field": {"old": ..., "new": ...}}

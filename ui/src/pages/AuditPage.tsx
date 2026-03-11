@@ -396,7 +396,7 @@ function QueryExecutionsTab({ projectId, initialFilter }: { projectId: string; i
                       </div>
                     </td>
                     <td className="py-2 pr-3 text-text-primary truncate max-w-[120px]">
-                      {row.user_id ?? '–'}
+                      {row.user_email ?? row.user_id ?? '–'}
                     </td>
                     <td className="py-2 pr-3 text-text-primary truncate max-w-[160px]">
                       {row.query_name ?? '–'}
@@ -575,7 +575,7 @@ function OntologyChangesTab({ projectId }: { projectId: string }) {
                           )}
                         </td>
                         <td className="py-2 pr-3 whitespace-nowrap text-text-secondary">{formatDate(row.created_at)}</td>
-                        <td className="py-2 pr-3 text-text-primary truncate max-w-[120px]">{row.user_id ?? '–'}</td>
+                        <td className="py-2 pr-3 text-text-primary truncate max-w-[120px]">{row.user_email ?? row.user_id ?? '–'}</td>
                         <td className="py-2 pr-3">
                           <span className="px-1.5 py-0.5 text-xs rounded bg-surface-secondary text-text-primary">{row.entity_type}</span>
                         </td>
@@ -929,7 +929,7 @@ function QueryApprovalsTab({ projectId }: { projectId: string }) {
 // Alerts Tab
 // ============================================================================
 
-function AlertsTab({ projectId }: { projectId: string }) {
+function AlertsTab({ projectId, onSummaryRefresh }: { projectId: string; onSummaryRefresh?: () => void }) {
   const { toast } = useToast();
   const [data, setData] = useState<PaginatedResponse<AuditAlert> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -942,6 +942,12 @@ function AlertsTab({ projectId }: { projectId: string }) {
     notes: '',
   });
   const [submitting, setSubmitting] = useState(false);
+  const [showResolveAll, setShowResolveAll] = useState(false);
+  const [resolveAllForm, setResolveAllForm] = useState<{ resolution: ResolveAlertRequest['resolution']; notes: string }>({
+    resolution: 'resolved',
+    notes: '',
+  });
+  const [submittingAll, setSubmittingAll] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -975,12 +981,34 @@ function AlertsTab({ projectId }: { projectId: string }) {
         setResolvingId(null);
         setResolveForm({ resolution: 'resolved', notes: '' });
         fetchData();
+        onSummaryRefresh?.();
       }
     } catch (error) {
       console.error('Failed to resolve alert:', error);
       toast({ title: 'Error', description: 'Failed to resolve alert.', variant: 'destructive' });
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleResolveAll = async () => {
+    setSubmittingAll(true);
+    try {
+      const body: ResolveAlertRequest = { resolution: resolveAllForm.resolution };
+      if (resolveAllForm.notes) body.notes = resolveAllForm.notes;
+      const response = await engineApi.resolveAllAuditAlerts(projectId, body);
+      if (response.success) {
+        toast({ title: 'All alerts resolved', description: response.message ?? 'All open alerts resolved successfully.' });
+        setShowResolveAll(false);
+        setResolveAllForm({ resolution: 'resolved', notes: '' });
+        fetchData();
+        onSummaryRefresh?.();
+      }
+    } catch (error) {
+      console.error('Failed to resolve all alerts:', error);
+      toast({ title: 'Error', description: 'Failed to resolve all alerts.', variant: 'destructive' });
+    } finally {
+      setSubmittingAll(false);
     }
   };
 
@@ -1001,6 +1029,8 @@ function AlertsTab({ projectId }: { projectId: string }) {
       default: return 'bg-surface-secondary text-text-secondary';
     }
   };
+
+  const hasOpenAlerts = !loading && data && data.items.length > 0 && statusFilter === 'open';
 
   return (
     <div>
@@ -1025,7 +1055,68 @@ function AlertsTab({ projectId }: { projectId: string }) {
           <option value="warning">Warning</option>
           <option value="info">Info</option>
         </select>
+        {hasOpenAlerts && !showResolveAll && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => { setShowResolveAll(true); setResolvingId(null); }}
+            className="ml-auto text-xs"
+          >
+            Resolve All
+          </Button>
+        )}
       </div>
+
+      {showResolveAll && (
+        <div className="mb-4 rounded-md border border-amber-300 bg-amber-50/60 dark:border-amber-700 dark:bg-amber-900/20 px-4 py-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-xs font-medium text-amber-800 dark:text-amber-200 whitespace-nowrap">
+              Apply to all open alerts:
+            </span>
+            <label className="flex items-center gap-1 text-xs text-text-secondary">
+              <input
+                type="radio"
+                name="resolution-all"
+                checked={resolveAllForm.resolution === 'resolved'}
+                onChange={() => setResolveAllForm(f => ({ ...f, resolution: 'resolved' }))}
+                className="rounded"
+              />
+              Resolve
+            </label>
+            <label className="flex items-center gap-1 text-xs text-text-secondary">
+              <input
+                type="radio"
+                name="resolution-all"
+                checked={resolveAllForm.resolution === 'dismissed'}
+                onChange={() => setResolveAllForm(f => ({ ...f, resolution: 'dismissed' }))}
+                className="rounded"
+              />
+              Dismiss
+            </label>
+            <input
+              type="text"
+              placeholder="Notes (optional)..."
+              value={resolveAllForm.notes}
+              onChange={e => setResolveAllForm(f => ({ ...f, notes: e.target.value }))}
+              className="text-xs px-2 py-1 rounded border border-border-light bg-surface-primary text-text-primary flex-1 max-w-xs"
+            />
+            <Button
+              size="sm"
+              disabled={submittingAll}
+              onClick={handleResolveAll}
+            >
+              {submittingAll ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Confirm'}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { setShowResolveAll(false); setResolveAllForm({ resolution: 'resolved', notes: '' }); }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex justify-center py-12">
@@ -1074,7 +1165,7 @@ function AlertsTab({ projectId }: { projectId: string }) {
                         {alert.title}
                       </td>
                       <td className="py-2 pr-3 text-text-secondary truncate max-w-[140px]">
-                        {alert.affected_user_id ?? '–'}
+                        {alert.affected_user_email ?? alert.affected_user_id ?? '–'}
                       </td>
                       <td className="py-2 pr-3">
                         <span className={`px-1.5 py-0.5 text-xs rounded ${statusBadge(alert.status)}`}>
@@ -1247,7 +1338,7 @@ const AuditPage = () => {
           {activeTab === 'ontology-changes' && <OntologyChangesTab key={refreshKey} projectId={pid} />}
           {activeTab === 'schema-changes' && <SchemaChangesTab key={refreshKey} projectId={pid} />}
           {activeTab === 'query-approvals' && <QueryApprovalsTab key={refreshKey} projectId={pid} />}
-          {activeTab === 'alerts' && <AlertsTab key={refreshKey} projectId={pid} />}
+          {activeTab === 'alerts' && <AlertsTab key={refreshKey} projectId={pid} onSummaryRefresh={fetchSummary} />}
         </CardContent>
       </Card>
     </div>
