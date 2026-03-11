@@ -61,6 +61,7 @@ function getCentralOrigin(projectsPageUrl: string | null): string {
 }
 
 type AppColor = 'blue' | 'purple' | 'green' | 'gray' | 'orange' | 'cyan';
+type PricingBadge = 'free' | 'free-trial';
 
 interface ApplicationInfo {
   id: string;
@@ -77,9 +78,25 @@ interface ApplicationInfo {
   learnMoreBase?: 'marketing' | 'central';
   /** If true, show a Contact Support button instead of install/sales actions */
   contactSupport?: boolean;
+  /** Pricing badge to display next to the title */
+  pricingBadge?: PricingBadge;
+  /** ID of an app that this app depends on */
+  requires?: string;
 }
 
 const applications: ApplicationInfo[] = [
+  {
+    id: 'ontology-forge',
+    title: 'Ontology Forge',
+    subtitle: 'Build a business semantic layer (ontology) on top of your schema with AI-powered extraction, enrichment, and developer tools',
+    icon: Anvil,
+    color: 'purple',
+    available: true,
+    installable: true,
+    pricingBadge: 'free',
+    learnMoreUrl: '/apps/ontology-forge',
+    learnMoreBase: 'central',
+  },
   {
     id: 'ai-data-liaison',
     title: 'AI Data Liaison',
@@ -90,15 +107,8 @@ const applications: ApplicationInfo[] = [
     installable: true,
     learnMoreUrl: '/apps/ai-data-liaison',
     learnMoreBase: 'central',
-  },
-  {
-    id: 'ontology-forge',
-    title: 'Ontology Forge',
-    subtitle: 'Build a business semantic layer (ontology) on top of your schema with AI-powered extraction, enrichment, and developer tools',
-    icon: Anvil,
-    color: 'purple',
-    available: true,
-    installable: true,
+    pricingBadge: 'free-trial',
+    requires: 'ontology-forge',
   },
   {
     id: 'ai-agents',
@@ -118,6 +128,7 @@ const applications: ApplicationInfo[] = [
     color: 'green',
     available: true,
     installable: true,
+    pricingBadge: 'free',
   },
   {
     id: 'product-kit',
@@ -230,13 +241,24 @@ const ApplicationsPage = () => {
       const isCurrentlyInstalling = installingAppId === app.id && isInstalling;
 
       if (appIsInstalled) {
-        // Installed state - show "Installed" badge and Configure button
+        // Installed state - show "Installed" badge, Learn More, and Configure button
+        const learnMoreUrl = app.learnMoreUrl;
         return (
           <CardFooter className="pt-0 flex gap-2">
             <span className="text-xs text-green-600 font-medium flex items-center gap-1">
               <Check className="h-3 w-3" />
               Installed
             </span>
+            {learnMoreUrl ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={(e) => { e.stopPropagation(); handleLearnMore(learnMoreUrl, app.learnMoreBase); }}
+              >
+                <ExternalLink className="h-3 w-3 mr-1" />
+                Learn More
+              </Button>
+            ) : null}
             <Button
               variant="outline"
               size="sm"
@@ -248,24 +270,16 @@ const ApplicationsPage = () => {
         );
       }
 
-      // Not installed - show Learn More and Install buttons
+      // Not installed - show Install and Learn More buttons
       const learnMoreUrl = app.learnMoreUrl;
+      const requirementMet = !app.requires || isInstalled(app.requires);
+      const installDisabled = isCurrentlyInstalling || !requirementMet;
       return (
         <CardFooter className="pt-0 flex gap-2">
-          {learnMoreUrl ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleLearnMore(learnMoreUrl, app.learnMoreBase)}
-            >
-              <ExternalLink className="h-3 w-3 mr-1" />
-              Learn More
-            </Button>
-          ) : null}
           <Button
             variant="default"
             size="sm"
-            disabled={isCurrentlyInstalling}
+            disabled={installDisabled}
             onClick={() => handleInstall(app.id)}
           >
             {isCurrentlyInstalling ? (
@@ -277,6 +291,16 @@ const ApplicationsPage = () => {
               'Install'
             )}
           </Button>
+          {learnMoreUrl ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleLearnMore(learnMoreUrl, app.learnMoreBase)}
+            >
+              <ExternalLink className="h-3 w-3 mr-1" />
+              Learn More
+            </Button>
+          ) : null}
         </CardFooter>
       );
     }
@@ -342,18 +366,40 @@ const ApplicationsPage = () => {
               }
             >
               <CardHeader className="pb-2">
-                <div
-                  className={cn(
-                    'mb-2 flex h-12 w-12 items-center justify-center rounded-lg',
-                    colors.bg,
-                  )}
-                >
-                  <Icon className={cn('h-6 w-6', colors.text)} />
+                {app.pricingBadge && (
+                  <div className="absolute top-3 right-3">
+                    {app.pricingBadge === 'free' && (
+                      <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-green-700 ring-1 ring-inset ring-green-200">
+                        Free
+                      </span>
+                    )}
+                    {app.pricingBadge === 'free-trial' && (
+                      <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-700 ring-1 ring-inset ring-blue-200">
+                        Free Trial
+                      </span>
+                    )}
+                  </div>
+                )}
+                <div className="flex items-center gap-3">
+                  <div
+                    className={cn(
+                      'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg',
+                      colors.bg,
+                    )}
+                  >
+                    <Icon className={cn('h-5 w-5', colors.text)} />
+                  </div>
+                  <CardTitle className="text-base">{app.title}</CardTitle>
                 </div>
-                <CardTitle className="text-base">{app.title}</CardTitle>
                 <CardDescription className="line-clamp-2 text-xs">
                   {app.subtitle}
                 </CardDescription>
+                {app.requires && !isInstalled(app.requires) && (
+                  <p className="mt-1.5 text-[11px] font-medium text-amber-600">
+                    Requires{' '}
+                    {applications.find(a => a.id === app.requires)?.title ?? app.requires}
+                  </p>
+                )}
               </CardHeader>
               {renderAppFooter(app)}
             </Card>

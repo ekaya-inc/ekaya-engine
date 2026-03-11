@@ -123,10 +123,10 @@ describe('ApplicationsPage', () => {
     const installButtons = screen.getAllByRole('button', { name: 'Install' });
     expect(installButtons).toHaveLength(3);
     const learnMoreButtons = screen.getAllByRole('button', { name: /Learn More/i });
-    expect(learnMoreButtons).toHaveLength(1);
+    expect(learnMoreButtons).toHaveLength(2);
   });
 
-  it('renders Installed badge and Configure button when AI Data Liaison is installed', () => {
+  it('renders Installed badge, Learn More, and Configure button when AI Data Liaison is installed', () => {
     mockInstalledApps = ['ai-data-liaison'];
     renderPage();
 
@@ -134,17 +134,35 @@ describe('ApplicationsPage', () => {
     expect(
       screen.getByRole('button', { name: 'Configure' })
     ).toBeInTheDocument();
+    // Learn More should still be visible for installed apps that have a learnMoreUrl
+    const learnMoreButtons = screen.getAllByRole('button', { name: /Learn More/i });
+    expect(learnMoreButtons.length).toBeGreaterThanOrEqual(2);
     // Ontology Forge + Spreadsheet Loader still have Install buttons
     const installButtons = screen.getAllByRole('button', { name: 'Install' });
     expect(installButtons).toHaveLength(2);
   });
 
-  it('calls install and navigates when clicking Install on AI Data Liaison', async () => {
+  it('disables AI Data Liaison Install button when Ontology Forge is not installed', () => {
+    renderPage();
+
+    // AI Data Liaison Install button (second) should be disabled
+    const installButtons = screen.getAllByRole('button', { name: 'Install' });
+    expect(installButtons[1]).toBeDisabled();
+    // "Requires" note should be visible
+    expect(screen.getByText(/Requires Ontology Forge/)).toBeInTheDocument();
+  });
+
+  it('enables AI Data Liaison Install button when Ontology Forge is installed', async () => {
+    mockInstalledApps = ['ontology-forge'];
     mockInstall.mockResolvedValue({ id: 'test-id', app_id: 'ai-data-liaison' });
     renderPage();
 
-    // Click the first Install button (AI Data Liaison)
+    // "Requires" note should be hidden
+    expect(screen.queryByText(/Requires Ontology Forge/)).not.toBeInTheDocument();
+
+    // AI Data Liaison Install button (first non-installed) should be enabled
     const installButtons = screen.getAllByRole('button', { name: 'Install' });
+    expect(installButtons[0]).not.toBeDisabled();
     fireEvent.click(installButtons[0] as HTMLElement);
 
     await waitFor(() => {
@@ -232,8 +250,15 @@ describe('ApplicationsPage', () => {
     renderPage();
 
     const learnMoreButtons = screen.getAllByRole('button', { name: /Learn More/i });
+    // First Learn More is Ontology Forge (central), second is AI Data Liaison (central)
     fireEvent.click(learnMoreButtons[0] as HTMLElement);
+    expect(mockOpen).toHaveBeenCalledWith(
+      'https://us.ekaya.ai/apps/ontology-forge',
+      '_blank',
+      'noopener,noreferrer'
+    );
 
+    fireEvent.click(learnMoreButtons[1] as HTMLElement);
     expect(mockOpen).toHaveBeenCalledWith(
       'https://us.ekaya.ai/apps/ai-data-liaison',
       '_blank',
