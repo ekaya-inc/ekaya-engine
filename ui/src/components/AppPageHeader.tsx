@@ -10,9 +10,10 @@ interface AppPageHeaderProps {
   slug: string;
   icon: React.ReactNode;
   description?: string;
+  showInfoLink?: boolean;
 }
 
-const AppPageHeader = ({ title, slug, icon, description }: AppPageHeaderProps) => {
+const AppPageHeader = ({ title, slug, icon, description, showInfoLink = true }: AppPageHeaderProps) => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
   const { urls } = useProject();
@@ -36,14 +37,16 @@ const AppPageHeader = ({ title, slug, icon, description }: AppPageHeaderProps) =
           {icon}
           {title}
         </h1>
-        <a
-          href={`${origin}/apps/${slug}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          title={`${title} documentation`}
-        >
-          <Info className="h-7 w-7 text-text-secondary hover:text-brand-purple transition-colors" />
-        </a>
+        {showInfoLink && (
+          <a
+            href={`${origin}/apps/${slug}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={`${title} documentation`}
+          >
+            <Info className="h-7 w-7 text-text-secondary hover:text-brand-purple transition-colors" />
+          </a>
+        )}
       </div>
       {description && (
         <p className="mt-2 text-text-secondary">{description}</p>

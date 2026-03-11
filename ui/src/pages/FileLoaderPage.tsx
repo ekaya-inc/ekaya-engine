@@ -1,5 +1,5 @@
 import {
-  ArrowLeft,
+  FileSpreadsheet,
   FileText,
   Loader2,
   Trash2,
@@ -8,6 +8,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
+import AppPageHeader from '../components/AppPageHeader';
 import { Button } from '../components/ui/Button';
 import {
   Card,
@@ -174,21 +175,13 @@ const FileLoaderPage = () => {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Back to dashboard"
-          onClick={() => navigate(`/projects/${pid}`)}
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div>
-          <h1 className="text-2xl font-bold">Spreadsheet Loader</h1>
-          <p className="text-text-secondary text-sm">Import CSV, TSV, and Excel files into your SQL database</p>
-        </div>
-      </div>
+      <AppPageHeader
+        title="Spreadsheet Loader"
+        slug="file-loader"
+        icon={<FileSpreadsheet className="h-8 w-8" />}
+        description="Import CSV, TSV, and Excel files into your SQL database"
+        showInfoLink={false}
+      />
 
       {/* Upload dropzone */}
       <Card>
