@@ -3,7 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import engineApi from '../../services/engineApi';
-import type { Datasource, MCPConfigResponse } from '../../types';
+import type { MCPConfigResponse } from '../../types';
 import AIDataLiaisonPage from '../AIDataLiaisonPage';
 
 // Mock the engineApi
@@ -13,12 +13,8 @@ vi.mock('../../services/engineApi', () => ({
     activateApp: vi.fn(),
     completeAppCallback: vi.fn(),
     getInstalledApp: vi.fn(),
-    listDataSources: vi.fn(),
     getMCPConfig: vi.fn(),
     updateMCPConfig: vi.fn(),
-    getAIConfig: vi.fn(),
-    getSchema: vi.fn(),
-    getOntologyDAGStatus: vi.fn(),
   },
 }));
 
@@ -62,21 +58,6 @@ vi.mock('../../contexts/ConfigContext', () => ({
   }),
 }));
 
-const mockDatasource: Datasource = {
-  datasource_id: 'ds-1',
-  project_id: 'proj-1',
-  name: 'Test DB',
-  type: 'postgres',
-  config: {
-    host: 'localhost',
-    port: 5432,
-    name: 'test_db',
-    ssl_mode: 'disable',
-  },
-  created_at: '2024-01-01',
-  updated_at: '2024-01-01',
-};
-
 const mockMCPConfig: MCPConfigResponse = {
   serverUrl: 'https://example.com/mcp/proj-1',
   userTools: [],
@@ -88,30 +69,43 @@ const mockMCPConfig: MCPConfigResponse = {
 };
 
 const setupMocks = (options: {
-  hasDatasource?: boolean;
-  hasOntology?: boolean;
+  hasOntologyForge?: boolean;
   hasMCPConfig?: boolean;
-  hasSelectedTables?: boolean;
-  hasAIConfig?: boolean;
   isActivated?: boolean;
 } = {}) => {
-  const { hasDatasource = true, hasOntology = false, hasMCPConfig = true, hasSelectedTables = false, hasAIConfig = false, isActivated = false } = options;
+  const { hasOntologyForge = false, hasMCPConfig = true, isActivated = false } = options;
 
-  vi.mocked(engineApi.getInstalledApp).mockResolvedValue({
-    success: true,
-    data: {
-      id: 'inst-1',
-      project_id: 'proj-1',
-      app_id: 'ai-data-liaison',
-      installed_at: '2024-01-01',
-      settings: {},
-      ...(isActivated ? { activated_at: '2024-01-02' } : {}),
-    },
-  });
-
-  vi.mocked(engineApi.listDataSources).mockResolvedValue({
-    success: true,
-    data: { datasources: hasDatasource ? [mockDatasource] : [] },
+  vi.mocked(engineApi.getInstalledApp).mockImplementation((_pid: string, appId: string) => {
+    if (appId === 'ai-data-liaison') {
+      return Promise.resolve({
+        success: true,
+        data: {
+          id: 'inst-1',
+          project_id: 'proj-1',
+          app_id: 'ai-data-liaison',
+          installed_at: '2024-01-01',
+          settings: {},
+          ...(isActivated ? { activated_at: '2024-01-02' } : {}),
+        },
+      });
+    }
+    if (appId === 'ontology-forge') {
+      if (hasOntologyForge) {
+        return Promise.resolve({
+          success: true,
+          data: {
+            id: 'inst-2',
+            project_id: 'proj-1',
+            app_id: 'ontology-forge',
+            installed_at: '2024-01-01',
+            activated_at: '2024-01-02',
+            settings: {},
+          },
+        });
+      }
+      return Promise.reject(new Error('Not found'));
+    }
+    return Promise.reject(new Error('Unknown app'));
   });
 
   if (hasMCPConfig) {
@@ -124,44 +118,12 @@ const setupMocks = (options: {
       success: true,
     });
   }
-
-  vi.mocked(engineApi.getAIConfig).mockResolvedValue(
-    hasAIConfig
-      ? { success: true, data: { project_id: 'proj-1', config_type: 'anthropic' } }
-      : { success: true },
-  );
-
-  vi.mocked(engineApi.getSchema).mockResolvedValue({
-    success: true,
-    data: {
-      tables: hasSelectedTables
-        ? [{ table_name: 'users', schema_name: 'public', is_selected: true, columns: [] }]
-        : [],
-      total_tables: hasSelectedTables ? 1 : 0,
-      relationships: [],
-    },
-  });
-
-  if (hasOntology) {
-    vi.mocked(engineApi.getOntologyDAGStatus).mockResolvedValue({
-      success: true,
-      data: { dag_id: 'dag-1', status: 'completed', is_incremental: false, nodes: [] },
-    });
-  } else {
-    vi.mocked(engineApi.getOntologyDAGStatus).mockResolvedValue({
-      success: true,
-      data: null,
-    });
-  }
 };
 
 const setupAllCompleteMocks = (options: { isActivated?: boolean } = {}) => {
   const { isActivated = true } = options;
   setupMocks({
-    hasDatasource: true,
-    hasSelectedTables: true,
-    hasAIConfig: true,
-    hasOntology: true,
+    hasOntologyForge: true,
     hasMCPConfig: true,
     isActivated,
   });
@@ -230,17 +192,17 @@ describe('AIDataLiaisonPage', () => {
       expect(screen.getByText('Setup Checklist')).toBeInTheDocument();
     });
 
-    it('shows MCP Server as pending when not ready', async () => {
+    it('shows Ontology Forge as pending when not ready', async () => {
       await renderAIDataLiaisonPage();
-      expect(screen.getByText('1. MCP Server set up')).toBeInTheDocument();
-      expect(screen.getByText('Configure datasource, schema, AI, and extract ontology')).toBeInTheDocument();
+      expect(screen.getByText('1. Ontology Forge set up')).toBeInTheDocument();
+      expect(screen.getByText('Set up Ontology Forge to extract your business semantic layer')).toBeInTheDocument();
     });
 
-    it('shows MCP Server as complete when ontology is ready', async () => {
+    it('shows Ontology Forge as complete when installed and activated', async () => {
       setupAllCompleteMocks();
       await renderAIDataLiaisonPage();
-      expect(screen.getByText('1. MCP Server set up')).toBeInTheDocument();
-      expect(screen.getByText('Datasource, schema, AI, and ontology configured')).toBeInTheDocument();
+      expect(screen.getByText('1. Ontology Forge set up')).toBeInTheDocument();
+      expect(screen.getByText('Ontology Forge is configured and ready')).toBeInTheDocument();
     });
 
   });
@@ -255,7 +217,7 @@ describe('AIDataLiaisonPage', () => {
     });
 
     it('shows activate step disabled when prerequisites are not met', async () => {
-      setupMocks({ hasDatasource: true, hasOntology: false });
+      setupMocks({ hasOntologyForge: false });
       await renderAIDataLiaisonPage();
       expect(screen.getByText(/Activate AI Data Liaison/)).toBeInTheDocument();
       expect(screen.getByText('Complete step 1 before activating')).toBeInTheDocument();
@@ -361,7 +323,7 @@ describe('AIDataLiaisonPage', () => {
     });
 
     it('hides auditing card when checklist is incomplete', async () => {
-      setupMocks({ hasDatasource: true, hasOntology: false });
+      setupMocks({ hasOntologyForge: false });
       await renderAIDataLiaisonPage();
       expect(screen.queryByText('Auditing')).not.toBeInTheDocument();
     });
