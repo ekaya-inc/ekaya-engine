@@ -11,6 +11,8 @@ const (
 	AppIDMCPServer     = "mcp-server"
 	AppIDAIDataLiaison = "ai-data-liaison"
 	AppIDAIAgents      = "ai-agents"
+	AppIDETLCSV        = "etl-csv"
+	AppIDETLExcel      = "etl-excel"
 )
 
 // KnownAppIDs is the set of valid app identifiers.
@@ -18,6 +20,8 @@ var KnownAppIDs = map[string]bool{
 	AppIDMCPServer:     true,
 	AppIDAIDataLiaison: true,
 	AppIDAIAgents:      true,
+	AppIDETLCSV:        true,
+	AppIDETLExcel:      true,
 }
 
 // InstalledApp represents an application installed for a project.

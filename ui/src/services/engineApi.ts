@@ -1365,6 +1365,52 @@ class EngineApiService {
       }
     );
   }
+  // ─── ETL Methods ───
+
+  /**
+   * Upload a file for ETL loading (multipart/form-data).
+   */
+  async etlUploadFile<T>(
+    projectId: string,
+    appId: string,
+    file: File,
+    endpoint: 'load' | 'preview' = 'load'
+  ): Promise<ApiResponse<T>> {
+    const url = `${this.baseURL}/${projectId}/etl/${appId}/${endpoint}`;
+    const formData = new FormData();
+    formData.append('file', file);
+
+    // Do NOT set Content-Type — the browser sets it with the multipart boundary
+    const response = await fetchWithAuth(url, {
+      method: 'POST',
+      body: formData,
+    });
+
+    const data = (await response.json()) as ApiResponse<T>;
+
+    if (!response.ok) {
+      throw new Error(
+        data.message ?? data.error ?? `HTTP ${response.status}: ${response.statusText}`
+      );
+    }
+
+    return data;
+  }
+
+  /**
+   * Get ETL load history for a project (all applets or a specific one).
+   */
+  async etlGetLoadHistory<T>(
+    projectId: string,
+    appId?: string,
+    limit?: number
+  ): Promise<ApiResponse<T>> {
+    const path = appId
+      ? `/${projectId}/etl/${appId}/status`
+      : `/${projectId}/etl/status`;
+    const params = limit ? `?limit=${limit}` : '';
+    return this.makeRequest<T>(`${path}${params}`);
+  }
 }
 
 // Create and export singleton instance

@@ -5,6 +5,8 @@ import {
   BrainCircuit,
   Check,
   ExternalLink,
+  FileSpreadsheet,
+  FileText,
   Hammer,
   Loader2,
   MessageSquare,
@@ -98,6 +100,24 @@ const applications: ApplicationInfo[] = [
     available: true,
     installable: true,
     learnMoreUrl: '/ai-agents/',
+  },
+  {
+    id: 'etl-csv',
+    title: 'CSV/TSV Loader',
+    subtitle: 'Drop CSV or TSV files into a watched directory and have them automatically loaded into your SQL database',
+    icon: FileText,
+    color: 'green',
+    available: true,
+    installable: true,
+  },
+  {
+    id: 'etl-excel',
+    title: 'Excel Loader',
+    subtitle: 'Import XLSX spreadsheets into your SQL database with automatic schema inference and multi-sheet support',
+    icon: FileSpreadsheet,
+    color: 'green',
+    available: true,
+    installable: true,
   },
   {
     id: 'product-kit',
@@ -219,7 +239,7 @@ const ApplicationsPage = () => {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => navigate(`/projects/${pid}/ai-data-liaison`)}
+              onClick={() => navigate(`/projects/${pid}/${app.id}`)}
             >
               Configure
             </Button>

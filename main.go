@@ -34,6 +34,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/middleware"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
+	etlservice "github.com/ekaya-inc/ekaya-engine/pkg/services/etl"
 	"github.com/ekaya-inc/ekaya-engine/ui"
 	_ "github.com/jackc/pgx/v5/stdlib" // PostgreSQL driver for database/sql (migrations)
 )
@@ -454,6 +455,14 @@ func main() {
 	// Register installed apps handler (protected) - application installation tracking
 	installedAppHandler := handlers.NewInstalledAppHandler(installedAppService, logger)
 	installedAppHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register ETL handler (protected) - file import to SQL
+	etlRepo := repositories.NewETLRepository()
+	ontologyMatcher := etlservice.NewOntologyMatcher(schemaRepo, columnMetadataRepo, tableMetadataRepo, logger)
+	etlService := etlservice.NewService(datasourceService, adapterFactory, installedAppService, ontologyMatcher, etlRepo, logger)
+	defer etlService.Close()
+	etlHandler := handlers.NewETLHandler(etlService, logger)
+	etlHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register audit page handler (protected) - audit visibility UI
 	auditPageRepo := repositories.NewAuditPageRepository()
