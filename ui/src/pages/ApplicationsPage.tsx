@@ -125,7 +125,7 @@ const applications: ApplicationInfo[] = [
     title: 'Spreadsheet Loader',
     subtitle: 'Import CSV, TSV, and Excel files into your SQL database with automatic schema inference',
     icon: FileSpreadsheet,
-    color: 'green',
+    color: 'cyan',
     available: true,
     installable: true,
     pricingBadge: 'free',
