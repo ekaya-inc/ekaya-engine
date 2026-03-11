@@ -118,9 +118,9 @@ describe('ApplicationsPage', () => {
   it('renders Install buttons for installable apps when not installed', () => {
     renderPage();
 
-    // AI Data Liaison + CSV Loader + Excel Loader have Install buttons (AI Agents tile is temporarily hidden)
+    // AI Data Liaison + Spreadsheet Loader have Install buttons (AI Agents tile is temporarily hidden)
     const installButtons = screen.getAllByRole('button', { name: 'Install' });
-    expect(installButtons).toHaveLength(3);
+    expect(installButtons).toHaveLength(2);
     const learnMoreButtons = screen.getAllByRole('button', { name: /Learn More/i });
     expect(learnMoreButtons).toHaveLength(1);
   });
@@ -133,9 +133,9 @@ describe('ApplicationsPage', () => {
     expect(
       screen.getByRole('button', { name: 'Configure' })
     ).toBeInTheDocument();
-    // CSV Loader + Excel Loader still have Install buttons
+    // Spreadsheet Loader still has Install button
     const installButtons = screen.getAllByRole('button', { name: 'Install' });
-    expect(installButtons).toHaveLength(2);
+    expect(installButtons).toHaveLength(1);
   });
 
   it('calls install and navigates when clicking Install on AI Data Liaison', async () => {

@@ -41,14 +41,7 @@ interface LoadResult {
   errors: string[];
 }
 
-interface ETLAppPageProps {
-  appId: string;
-  title: string;
-  description: string;
-  acceptedExtensions: string;
-}
-
-const ETLAppPage = ({ appId, title, description, acceptedExtensions }: ETLAppPageProps) => {
+const FileLoaderPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
   const { toast } = useToast();
@@ -59,17 +52,19 @@ const ETLAppPage = ({ appId, title, description, acceptedExtensions }: ETLAppPag
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
 
+  const acceptedExtensions = '.csv,.tsv,.txt,.xlsx,.xlsm,.xltx';
+
   const fetchHistory = useCallback(async () => {
     if (!pid) return;
     try {
-      const response = await engineApi.etlGetLoadHistory<LoadStatus[]>(pid, appId);
+      const response = await engineApi.etlGetLoadHistory<LoadStatus[]>(pid);
       setLoadHistory(response.data ?? []);
     } catch {
       // Ignore errors on initial load
     } finally {
       setLoading(false);
     }
-  }, [pid, appId]);
+  }, [pid]);
 
   useEffect(() => {
     fetchHistory();
@@ -80,7 +75,7 @@ const ETLAppPage = ({ appId, title, description, acceptedExtensions }: ETLAppPag
     setUploading(true);
 
     try {
-      const response = await engineApi.etlUploadFile<LoadResult>(pid, appId, file);
+      const response = await engineApi.etlUploadFile<LoadResult>(pid, file);
 
       if (response.data) {
         toast({
@@ -145,8 +140,8 @@ const ETLAppPage = ({ appId, title, description, acceptedExtensions }: ETLAppPag
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div>
-          <h1 className="text-2xl font-bold">{title}</h1>
-          <p className="text-text-secondary text-sm">{description}</p>
+          <h1 className="text-2xl font-bold">Spreadsheet Loader</h1>
+          <p className="text-text-secondary text-sm">Import CSV, TSV, and Excel files into your SQL database</p>
         </div>
       </div>
 
@@ -255,23 +250,4 @@ const ETLAppPage = ({ appId, title, description, acceptedExtensions }: ETLAppPag
   );
 };
 
-// Wrapper components for each applet
-export const ETLCSVPage = () => (
-  <ETLAppPage
-    appId="etl-csv"
-    title="CSV/TSV Loader"
-    description="Import CSV and TSV files into your SQL database"
-    acceptedExtensions=".csv,.tsv,.txt"
-  />
-);
-
-export const ETLExcelPage = () => (
-  <ETLAppPage
-    appId="etl-excel"
-    title="Excel Loader"
-    description="Import XLSX spreadsheets into your SQL database"
-    acceptedExtensions=".xlsx,.xlsm,.xltx"
-  />
-);
-
-export default ETLAppPage;
+export default FileLoaderPage;

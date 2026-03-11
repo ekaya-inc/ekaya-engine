@@ -58,13 +58,13 @@ func NewService(
 }
 
 // Preview parses a file and returns the inferred schema and sample rows without loading.
-func (s *Service) Preview(ctx context.Context, projectID uuid.UUID, appID string, fileName string, data []byte) (*models.PreviewResult, error) {
-	settings, err := s.getSettings(ctx, projectID, appID)
+func (s *Service) Preview(ctx context.Context, projectID uuid.UUID, fileName string, data []byte) (*models.PreviewResult, error) {
+	settings, err := s.getSettings(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
 
-	parsedSheets, err := s.parseFile(appID, fileName, data)
+	parsedSheets, err := s.parseFile(fileName, data)
 	if err != nil {
 		return nil, err
 	}
@@ -105,13 +105,13 @@ func (s *Service) Preview(ctx context.Context, projectID uuid.UUID, appID string
 }
 
 // LoadFile parses and loads a file into the project's datasource.
-func (s *Service) LoadFile(ctx context.Context, projectID uuid.UUID, appID string, fileName string, data []byte) (*models.LoadResult, error) {
-	settings, err := s.getSettings(ctx, projectID, appID)
+func (s *Service) LoadFile(ctx context.Context, projectID uuid.UUID, fileName string, data []byte) (*models.LoadResult, error) {
+	settings, err := s.getSettings(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
 
-	parsedSheets, err := s.parseFile(appID, fileName, data)
+	parsedSheets, err := s.parseFile(fileName, data)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ func (s *Service) LoadFile(ctx context.Context, projectID uuid.UUID, appID strin
 		loadStatus := &models.LoadStatus{
 			ID:        uuid.New(),
 			ProjectID: projectID,
-			AppID:     appID,
+			AppID:     models.AppIDFileLoader,
 			FileName:  fileName,
 			TableName: tableName,
 			StartedAt: time.Now(),
@@ -202,13 +202,13 @@ func (s *Service) LoadFile(ctx context.Context, projectID uuid.UUID, appID strin
 }
 
 // GetLoadHistory returns load history for a project.
-func (s *Service) GetLoadHistory(ctx context.Context, projectID uuid.UUID, appID string, limit int) ([]*models.LoadStatus, error) {
-	return s.etlRepo.ListLoadStatus(ctx, projectID, appID, limit)
+func (s *Service) GetLoadHistory(ctx context.Context, projectID uuid.UUID, limit int) ([]*models.LoadStatus, error) {
+	return s.etlRepo.ListLoadStatus(ctx, projectID, models.AppIDFileLoader, limit)
 }
 
-// StartWatcher starts the file watcher for a project/app if configured.
-func (s *Service) StartWatcher(ctx context.Context, projectID uuid.UUID, appID string) error {
-	settings, err := s.getSettings(ctx, projectID, appID)
+// StartWatcher starts the file watcher for a project if configured.
+func (s *Service) StartWatcher(ctx context.Context, projectID uuid.UUID) error {
+	settings, err := s.getSettings(ctx, projectID)
 	if err != nil {
 		return err
 	}
@@ -217,12 +217,12 @@ func (s *Service) StartWatcher(ctx context.Context, projectID uuid.UUID, appID s
 		return nil // No watch directory configured
 	}
 
-	return s.watcher.Watch(ctx, projectID, appID, settings.WatchDirectory)
+	return s.watcher.Watch(ctx, projectID, settings.WatchDirectory)
 }
 
-// StopWatcher stops the file watcher for a project/app.
-func (s *Service) StopWatcher(projectID uuid.UUID, appID string) {
-	s.watcher.StopWatch(projectID, appID)
+// StopWatcher stops the file watcher for a project.
+func (s *Service) StopWatcher(projectID uuid.UUID) {
+	s.watcher.StopWatch(projectID)
 }
 
 // Close shuts down all watchers.
@@ -231,7 +231,7 @@ func (s *Service) Close() {
 }
 
 // handleFile is called by the watcher when a new file is detected.
-func (s *Service) handleFile(ctx context.Context, projectID uuid.UUID, appID, filePath string) {
+func (s *Service) handleFile(ctx context.Context, projectID uuid.UUID, filePath string) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		s.logger.Error("failed to read watched file",
@@ -242,7 +242,7 @@ func (s *Service) handleFile(ctx context.Context, projectID uuid.UUID, appID, fi
 	}
 
 	fileName := filepath.Base(filePath)
-	result, err := s.LoadFile(ctx, projectID, appID, fileName, data)
+	result, err := s.LoadFile(ctx, projectID, fileName, data)
 	if err != nil {
 		s.logger.Error("failed to load watched file",
 			zap.String("file", filePath),
@@ -259,7 +259,7 @@ func (s *Service) handleFile(ctx context.Context, projectID uuid.UUID, appID, fi
 	)
 }
 
-func (s *Service) parseFile(appID, fileName string, data []byte) ([]models.SheetData, error) {
+func (s *Service) parseFile(fileName string, data []byte) ([]models.SheetData, error) {
 	ext := strings.ToLower(filepath.Ext(fileName))
 
 	switch {
@@ -297,8 +297,8 @@ func (s *Service) resolveTableName(fileName, sheetName string) string {
 	return tableName
 }
 
-func (s *Service) getSettings(ctx context.Context, projectID uuid.UUID, appID string) (*models.ETLSettings, error) {
-	rawSettings, err := s.installedAppSvc.GetSettings(ctx, projectID, appID)
+func (s *Service) getSettings(ctx context.Context, projectID uuid.UUID) (*models.ETLSettings, error) {
+	rawSettings, err := s.installedAppSvc.GetSettings(ctx, projectID, models.AppIDFileLoader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app settings: %w", err)
 	}

@@ -15,7 +15,7 @@ import ApplicationsPage from './pages/ApplicationsPage';
 import AuditPage from './pages/AuditPage';
 import DatasourcePage from './pages/DatasourcePage';
 import EnrichmentPage from './pages/EnrichmentPage';
-import { ETLCSVPage, ETLExcelPage } from './pages/ETLAppPage';
+import FileLoaderPage from './pages/FileLoaderPage';
 import GlossaryPage from './pages/GlossaryPage';
 import HelpPage from './pages/HelpPage';
 import HomePage from './pages/HomePage';
@@ -51,8 +51,7 @@ const App = (): JSX.Element => {
                   <Route path="ai-agents" element={<AIAgentsPage />} />
                   <Route path="ai-data-liaison" element={<AIDataLiaisonPage />} />
                   <Route path="audit" element={<AuditPage />} />
-                  <Route path="etl-csv" element={<ETLCSVPage />} />
-                  <Route path="etl-excel" element={<ETLExcelPage />} />
+                  <Route path="file-loader" element={<FileLoaderPage />} />
                   <Route path="datasource" element={<DatasourcePage />} />
                   <Route path="schema" element={<SchemaPage />} />
                   <Route path="relationships" element={<RelationshipsPage />} />

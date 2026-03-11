@@ -1365,18 +1365,17 @@ class EngineApiService {
       }
     );
   }
-  // ─── ETL Methods ───
+  // ─── File Loader Methods ───
 
   /**
-   * Upload a file for ETL loading (multipart/form-data).
+   * Upload a file for loading (multipart/form-data).
    */
   async etlUploadFile<T>(
     projectId: string,
-    appId: string,
     file: File,
     endpoint: 'load' | 'preview' = 'load'
   ): Promise<ApiResponse<T>> {
-    const url = `${this.baseURL}/${projectId}/etl/${appId}/${endpoint}`;
+    const url = `${this.baseURL}/${projectId}/file-loader/${endpoint}`;
     const formData = new FormData();
     formData.append('file', file);
 
@@ -1398,18 +1397,14 @@ class EngineApiService {
   }
 
   /**
-   * Get ETL load history for a project (all applets or a specific one).
+   * Get file-loader load history for a project.
    */
   async etlGetLoadHistory<T>(
     projectId: string,
-    appId?: string,
     limit?: number
   ): Promise<ApiResponse<T>> {
-    const path = appId
-      ? `/${projectId}/etl/${appId}/status`
-      : `/${projectId}/etl/status`;
     const params = limit ? `?limit=${limit}` : '';
-    return this.makeRequest<T>(`${path}${params}`);
+    return this.makeRequest<T>(`/${projectId}/file-loader/status${params}`);
   }
 }
 

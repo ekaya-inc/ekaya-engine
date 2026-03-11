@@ -9,15 +9,17 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
 
 // FileHandler is called when a new file is detected in a watched directory.
-type FileHandler func(ctx context.Context, projectID uuid.UUID, appID, filePath string)
+type FileHandler func(ctx context.Context, projectID uuid.UUID, filePath string)
 
 // Watcher monitors directories for new files and dispatches to handlers.
 type Watcher struct {
 	mu       sync.Mutex
-	watchers map[string]*fsnotify.Watcher // keyed by projectID:appID
+	watchers map[string]*fsnotify.Watcher // keyed by projectID:file-loader
 	handlers map[string]FileHandler       // keyed by file extension
 	logger   *zap.Logger
 	cancel   context.CancelFunc
@@ -41,12 +43,12 @@ func (w *Watcher) RegisterHandler(extensions []string, handler FileHandler) {
 	}
 }
 
-// Watch starts watching a directory for a specific project/app.
-func (w *Watcher) Watch(ctx context.Context, projectID uuid.UUID, appID, directory string) error {
-	key := projectID.String() + ":" + appID
+// Watch starts watching a directory for a specific project.
+func (w *Watcher) Watch(ctx context.Context, projectID uuid.UUID, directory string) error {
+	key := projectID.String() + ":" + models.AppIDFileLoader
 
 	w.mu.Lock()
-	// Stop existing watcher for this project/app
+	// Stop existing watcher for this project
 	if existing, ok := w.watchers[key]; ok {
 		existing.Close()
 		delete(w.watchers, key)
@@ -67,18 +69,17 @@ func (w *Watcher) Watch(ctx context.Context, projectID uuid.UUID, appID, directo
 	w.watchers[key] = fsWatcher
 	w.mu.Unlock()
 
-	go w.watchLoop(ctx, fsWatcher, projectID, appID, key)
+	go w.watchLoop(ctx, fsWatcher, projectID, key)
 
 	w.logger.Info("started watching directory",
 		zap.String("directory", directory),
 		zap.String("project_id", projectID.String()),
-		zap.String("app_id", appID),
 	)
 
 	return nil
 }
 
-func (w *Watcher) watchLoop(ctx context.Context, fsWatcher *fsnotify.Watcher, projectID uuid.UUID, appID, key string) {
+func (w *Watcher) watchLoop(ctx context.Context, fsWatcher *fsnotify.Watcher, projectID uuid.UUID, key string) {
 	defer func() {
 		w.mu.Lock()
 		delete(w.watchers, key)
@@ -108,7 +109,7 @@ func (w *Watcher) watchLoop(ctx context.Context, fsWatcher *fsnotify.Watcher, pr
 					zap.String("file", event.Name),
 					zap.String("ext", ext),
 				)
-				go handler(ctx, projectID, appID, event.Name)
+				go handler(ctx, projectID, event.Name)
 			}
 
 		case err, ok := <-fsWatcher.Errors:
@@ -123,9 +124,9 @@ func (w *Watcher) watchLoop(ctx context.Context, fsWatcher *fsnotify.Watcher, pr
 	}
 }
 
-// StopWatch stops watching for a specific project/app.
-func (w *Watcher) StopWatch(projectID uuid.UUID, appID string) {
-	key := projectID.String() + ":" + appID
+// StopWatch stops watching for a specific project.
+func (w *Watcher) StopWatch(projectID uuid.UUID) {
+	key := projectID.String() + ":" + models.AppIDFileLoader
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
