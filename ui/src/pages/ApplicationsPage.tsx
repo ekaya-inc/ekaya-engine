@@ -1,12 +1,13 @@
 import type { LucideIcon } from 'lucide-react';
 import {
+  Anvil,
   ArrowLeft,
   Bot,
-  BrainCircuit,
   Check,
   ExternalLink,
   FileSpreadsheet,
   Hammer,
+  Handshake,
   Loader2,
   MessageSquare,
   Package,
@@ -59,7 +60,7 @@ function getCentralOrigin(projectsPageUrl: string | null): string {
   return 'https://us.ekaya.ai';
 }
 
-type AppColor = 'blue' | 'purple' | 'green' | 'gray' | 'orange';
+type AppColor = 'blue' | 'purple' | 'green' | 'gray' | 'orange' | 'cyan';
 
 interface ApplicationInfo {
   id: string;
@@ -83,12 +84,21 @@ const applications: ApplicationInfo[] = [
     id: 'ai-data-liaison',
     title: 'AI Data Liaison',
     subtitle: 'Make Better Business Decisions 10x Faster and lower the burden on the data team',
-    icon: BrainCircuit,
-    color: 'blue',
+    icon: Handshake,
+    color: 'green',
     available: true,
     installable: true,
     learnMoreUrl: '/apps/ai-data-liaison',
     learnMoreBase: 'central',
+  },
+  {
+    id: 'ontology-forge',
+    title: 'Ontology Forge',
+    subtitle: 'Build a business semantic layer (ontology) on top of your schema with AI-powered extraction, enrichment, and developer tools',
+    icon: Anvil,
+    color: 'purple',
+    available: true,
+    installable: true,
   },
   {
     id: 'ai-agents',
@@ -114,7 +124,7 @@ const applications: ApplicationInfo[] = [
     title: 'Product Kit [BETA]',
     subtitle: 'Enable AI Features in your existing SaaS Product',
     icon: Package,
-    color: 'purple',
+    color: 'gray',
     available: true,
   },
   {
@@ -122,7 +132,7 @@ const applications: ApplicationInfo[] = [
     title: 'On-Premise Chat [BETA]',
     subtitle: 'Deploy AI Chat where data never leaves your data boundary',
     icon: MessageSquare,
-    color: 'green',
+    color: 'gray',
     available: true,
   },
   {
@@ -130,7 +140,7 @@ const applications: ApplicationInfo[] = [
     title: 'Your own Data Application',
     subtitle: 'Need custom functionality or want to sell your own solution? Ekaya is the platform for connecting AI to Data.',
     icon: Hammer,
-    color: 'purple',
+    color: 'gray',
     available: true,
     contactSupport: true,
   },
@@ -143,6 +153,7 @@ const getColorClasses = (color: AppColor): { bg: string; text: string } => {
     green: { bg: 'bg-green-500/10', text: 'text-green-500' },
     gray: { bg: 'bg-gray-500/10', text: 'text-gray-500' },
     orange: { bg: 'bg-orange-500/10', text: 'text-orange-500' },
+    cyan: { bg: 'bg-cyan-500/10', text: 'text-cyan-500' },
   };
   return colorMap[color];
 };

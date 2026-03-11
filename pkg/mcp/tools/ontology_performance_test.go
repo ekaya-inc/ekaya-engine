@@ -229,9 +229,15 @@ func setupOntologyPerformanceTest(t *testing.T) *ontologyPerformanceTestContext 
 		logger,
 	)
 
-	// Create mock MCP config service with developer tools enabled
+	// Create mock MCP config service with all toggles enabled
 	mcpConfigService := &mockMCPConfigService{
-		config:                    &models.ToolGroupConfig{Enabled: true, AddQueryTools: true},
+		config: &models.ToolGroupConfig{
+			AddDirectDatabaseAccess:     true,
+			AddOntologyMaintenanceTools: true,
+			AddOntologySuggestions:      true,
+			AddApprovalTools:            true,
+			AddRequestTools:             true,
+		},
 		shouldShowApprovedQueries: true,
 	}
 

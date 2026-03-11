@@ -686,8 +686,8 @@ func TestMCPConfigService_Get_ServerURLConstruction(t *testing.T) {
 }
 
 func TestMCPConfigService_Get_EnabledToolsIncluded(t *testing.T) {
-	// DefaultMCPConfig has AddQueryTools=true and AddOntologyMaintenance=true
-	// So it includes all tools (Developer Core + Query + Ontology Maintenance + Ontology Questions)
+	// DefaultMCPConfig has "tools" key with all toggles enabled
+	// So it includes all tools from all per-app toggles
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
@@ -716,23 +716,23 @@ func TestMCPConfigService_Get_EnabledToolsIncluded(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// DefaultMCPConfig enables all loadouts, so many tools should be available
+	// DefaultMCPConfig enables all toggles, so many tools should be available
 	toolNames := make([]string, len(resp.EnabledTools))
 	for i, tool := range resp.EnabledTools {
 		toolNames[i] = tool.Name
 	}
 
-	// Should include health (always), Developer Core, Query loadout, and Ontology tools
+	// Should include health (always) and tools from all toggles
 	assert.Contains(t, toolNames, "health", "should include health tool (always available)")
-	assert.Contains(t, toolNames, "echo", "should include echo tool (Developer Core)")
-	assert.Contains(t, toolNames, "execute", "should include execute tool (Developer Core)")
-	assert.Contains(t, toolNames, "query", "should include query tool (Query loadout)")
-	assert.Contains(t, toolNames, "list_approved_queries", "should include list_approved_queries (Query loadout)")
+	assert.Contains(t, toolNames, "echo", "should include echo tool (Direct Database Access)")
+	assert.Contains(t, toolNames, "execute", "should include execute tool (Direct Database Access)")
+	assert.Contains(t, toolNames, "query", "should include query tool (Direct Database Access / Request)")
+	assert.Contains(t, toolNames, "list_approved_queries", "should include list_approved_queries (Request)")
 }
 
 func TestMCPConfigService_Get_EnabledToolsWithDeveloperEnabled(t *testing.T) {
-	// When developer tools are enabled, only Developer Core tools are available
-	// Query loadout tools require AddQueryTools option
+	// With new architecture, "developer": {Enabled: true} alone does not enable any tools
+	// because no per-app toggles are set. Only health is available.
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
@@ -766,27 +766,18 @@ func TestMCPConfigService_Get_EnabledToolsWithDeveloperEnabled(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// Developer Core tools only (Default + DeveloperCore loadouts)
 	toolNames := make([]string, len(resp.EnabledTools))
 	for i, tool := range resp.EnabledTools {
 		toolNames[i] = tool.Name
 	}
 
-	// Should include Developer Core tools
+	// Only health - no per-app toggles set
 	assert.Contains(t, toolNames, "health", "should include health tool (always available)")
-	assert.Contains(t, toolNames, "echo", "should include echo tool (Developer Core)")
-	assert.Contains(t, toolNames, "execute", "should include execute tool (Developer Core)")
-
-	// Query loadout tools NOT included without AddQueryTools option
-	assert.NotContains(t, toolNames, "validate", "validate requires AddQueryTools option")
-	assert.NotContains(t, toolNames, "query", "query requires AddQueryTools option")
-	assert.NotContains(t, toolNames, "explain_query", "explain_query requires AddQueryTools option")
-	assert.NotContains(t, toolNames, "get_schema", "get_schema requires AddQueryTools option")
-	assert.NotContains(t, toolNames, "sample", "sample requires AddQueryTools option")
+	assert.Len(t, resp.EnabledTools, 1, "only health without per-app toggles")
 }
 
-func TestMCPConfigService_Get_EnabledToolsWithDeveloperCoreIncludesExecute(t *testing.T) {
-	// When developer tools are enabled, execute tool is always included (part of Developer Core)
+func TestMCPConfigService_Get_EnabledToolsWithDirectDatabaseAccess(t *testing.T) {
+	// When AddDirectDatabaseAccess is enabled, execute/echo/query are included
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
@@ -794,7 +785,7 @@ func TestMCPConfigService_Get_EnabledToolsWithDeveloperCoreIncludesExecute(t *te
 		config: &models.MCPConfig{
 			ProjectID: projectID,
 			ToolGroups: map[string]*models.ToolGroupConfig{
-				"developer": {Enabled: true},
+				"tools": {AddDirectDatabaseAccess: true},
 			},
 		},
 	}
@@ -825,13 +816,14 @@ func TestMCPConfigService_Get_EnabledToolsWithDeveloperCoreIncludesExecute(t *te
 		toolNames[i] = tool.Name
 	}
 
-	assert.Contains(t, toolNames, "execute", "should include execute tool in Developer Core")
+	assert.Contains(t, toolNames, "execute", "should include execute tool with Direct Database Access")
+	assert.Contains(t, toolNames, "echo", "should include echo tool with Direct Database Access")
+	assert.Contains(t, toolNames, "query", "should include query tool with Direct Database Access")
 }
 
 func TestMCPConfigService_Get_EnabledToolsWithApprovedQueries(t *testing.T) {
-	// Note: For user auth, approved_queries.Enabled is now IGNORED.
-	// This test now verifies behavior with only approved_queries config (no developer sub-options).
-	// Users get Developer Core tools by default.
+	// Legacy approved_queries.Enabled has no effect on new toggle system.
+	// Without per-app toggles, only health is returned.
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
@@ -839,7 +831,7 @@ func TestMCPConfigService_Get_EnabledToolsWithApprovedQueries(t *testing.T) {
 		config: &models.MCPConfig{
 			ProjectID: projectID,
 			ToolGroups: map[string]*models.ToolGroupConfig{
-				ToolGroupApprovedQueries: {Enabled: true}, // Enabled is ignored for user auth
+				ToolGroupApprovedQueries: {Enabled: true},
 			},
 		},
 	}
@@ -870,23 +862,14 @@ func TestMCPConfigService_Get_EnabledToolsWithApprovedQueries(t *testing.T) {
 		toolNames[i] = tool.Name
 	}
 
-	// For user auth, Developer Core is always included (Enabled is ignored)
+	// Only health - legacy Enabled flag doesn't set per-app toggles
 	assert.Contains(t, toolNames, "health", "should include health tool")
-	assert.Contains(t, toolNames, "echo", "should include echo tool (Developer Core)")
-	assert.Contains(t, toolNames, "execute", "should include execute tool (Developer Core)")
-
-	// Query loadout tools NOT included without AddQueryTools
-	assert.NotContains(t, toolNames, "query", "query requires AddQueryTools")
-	assert.NotContains(t, toolNames, "sample", "sample requires AddQueryTools")
-	assert.NotContains(t, toolNames, "validate", "validate requires AddQueryTools")
-	assert.NotContains(t, toolNames, "get_ontology", "get_ontology requires AddQueryTools")
-	assert.NotContains(t, toolNames, "list_approved_queries", "list_approved_queries requires AddQueryTools")
+	assert.Len(t, resp.EnabledTools, 1, "only health without per-app toggles")
 }
 
 func TestMCPConfigService_Get_EnabledToolsWithAgentTools(t *testing.T) {
-	// When only agent_tools is enabled (no developer sub-options),
-	// the UI shows tools from the USER perspective (Developer Core).
-	// agent_tools.Enabled only affects agent authentication at MCP connection time.
+	// agent_tools.Enabled doesn't affect EnabledTools (user perspective).
+	// Without per-app toggles, only health is returned.
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
@@ -895,7 +878,6 @@ func TestMCPConfigService_Get_EnabledToolsWithAgentTools(t *testing.T) {
 			ProjectID: projectID,
 			ToolGroups: map[string]*models.ToolGroupConfig{
 				ToolGroupAgentTools: {Enabled: true},
-				// No developer sub-options, so Developer Core only
 			},
 		},
 	}
@@ -926,16 +908,13 @@ func TestMCPConfigService_Get_EnabledToolsWithAgentTools(t *testing.T) {
 		toolNames[i] = tool.Name
 	}
 
-	// EnabledTools shows USER perspective (Developer Core)
-	// agent_tools.Enabled doesn't affect user tools in the UI
+	// Only health - no per-app toggles set
 	assert.Contains(t, toolNames, "health", "should include health tool")
-	assert.Contains(t, toolNames, "echo", "should include echo tool (Developer Core)")
-	assert.Contains(t, toolNames, "execute", "should include execute tool (Developer Core)")
-	assert.Len(t, resp.EnabledTools, 3, "should have 3 tools (Developer Core)")
+	assert.Len(t, resp.EnabledTools, 1, "only health without per-app toggles")
 }
 
 func TestMCPConfigService_Update_DeveloperToolsReflectNewState(t *testing.T) {
-	// When Update() is called with developer sub-options, DeveloperTools should reflect the new state
+	// When Update() is called with per-app toggles, DeveloperTools should reflect the new state
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
@@ -960,12 +939,12 @@ func TestMCPConfigService_Update_DeveloperToolsReflectNewState(t *testing.T) {
 		zap.NewNop(),
 	)
 
-	// Update developer tools with AddQueryTools option (but not AddOntologyMaintenance)
-	addQueryTools := true
-	addOntologyMaintenance := false
+	// Update with new per-app toggles: enable Direct Database Access but disable Ontology Maintenance
+	addDirectDB := true
+	addOntologyMaint := false
 	req := &UpdateMCPConfigRequest{
-		AddQueryTools:          &addQueryTools,
-		AddOntologyMaintenance: &addOntologyMaintenance,
+		AddDirectDatabaseAccess:     &addDirectDB,
+		AddOntologyMaintenanceTools: &addOntologyMaint,
 	}
 
 	resp, err := svc.Update(context.Background(), projectID, req)
@@ -978,12 +957,13 @@ func TestMCPConfigService_Update_DeveloperToolsReflectNewState(t *testing.T) {
 		toolNames[i] = tool.Name
 	}
 
-	// Developer Core + Query loadout (NO ontology maintenance - that requires AddOntologyMaintenance)
+	// Direct Database Access tools present
 	assert.Contains(t, toolNames, "echo", "should include echo in developer tools")
 	assert.Contains(t, toolNames, "execute", "should include execute in developer tools")
-	assert.Contains(t, toolNames, "get_schema", "should include get_schema with AddQueryTools")
-	assert.Contains(t, toolNames, "sample", "should include sample with AddQueryTools")
-	assert.NotContains(t, toolNames, "update_table", "should NOT include update_table with AddQueryTools (requires AddOntologyMaintenance)")
+	assert.Contains(t, toolNames, "query", "should include query with AddDirectDatabaseAccess")
+
+	// Ontology Maintenance tools NOT present (toggle disabled)
+	assert.NotContains(t, toolNames, "update_table", "should NOT include update_table when AddOntologyMaintenanceTools=false")
 }
 
 func TestMCPConfigService_Update_AllowOntologyMaintenance(t *testing.T) {
@@ -1095,17 +1075,23 @@ func (m *mockInstalledAppServiceForMCP) EnsureInstalled(ctx context.Context, pro
 }
 
 func TestMCPConfigService_Get_FiltersDataLiaisonTools_WhenNotInstalled(t *testing.T) {
-	// When AI Data Liaison app is not installed, data liaison tools should not appear in EnabledTools
+	// When AI Data Liaison app is not installed, its tools should not appear in EnabledTools
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
-	// Enable developer tools with query tools AND ontology maintenance (which includes data liaison tools)
+	// Enable all toggles including approval tools (AI Data Liaison)
 	configRepo := &mockMCPConfigRepository{
 		config: &models.MCPConfig{
 			ProjectID: projectID,
 			ToolGroups: map[string]*models.ToolGroupConfig{
-				ToolGroupDeveloper: {Enabled: true, AddQueryTools: true, AddOntologyMaintenance: true},
+				"tools": {
+					AddDirectDatabaseAccess:     true,
+					AddOntologyMaintenanceTools: true,
+					AddApprovalTools:            true,
+					AddOntologySuggestions:      true,
+					AddRequestTools:             true,
+				},
 			},
 		},
 	}
@@ -1113,10 +1099,11 @@ func TestMCPConfigService_Get_FiltersDataLiaisonTools_WhenNotInstalled(t *testin
 	queryService := &mockQueryServiceForMCP{hasEnabledQueries: true}
 	projectService := &mockProjectServiceForMCP{defaultDatasourceID: datasourceID}
 
-	// AI Data Liaison app is NOT installed
+	// AI Data Liaison NOT installed, Ontology Forge IS installed
 	installedAppService := &mockInstalledAppServiceForMCP{
 		installed: map[string]bool{
 			models.AppIDAIDataLiaison: false,
+			models.AppIDOntologyForge: true,
 		},
 	}
 
@@ -1138,33 +1125,34 @@ func TestMCPConfigService_Get_FiltersDataLiaisonTools_WhenNotInstalled(t *testin
 		toolNames[i] = tool.Name
 	}
 
-	// Should have developer tools but NOT data liaison tools
-	assert.Contains(t, toolNames, "get_schema", "should include regular developer tools")
+	// Ontology Forge tools should be present (app is installed)
+	assert.Contains(t, toolNames, "get_schema", "should include ontology forge tools")
 	assert.Contains(t, toolNames, "update_table", "should include ontology maintenance tools")
 
-	// Data liaison tools should be filtered out
-	assert.NotContains(t, toolNames, "suggest_approved_query", "should NOT include suggest_approved_query")
-	assert.NotContains(t, toolNames, "suggest_query_update", "should NOT include suggest_query_update")
+	// AI Data Liaison tools should be filtered out (app not installed)
 	assert.NotContains(t, toolNames, "list_query_suggestions", "should NOT include list_query_suggestions")
 	assert.NotContains(t, toolNames, "approve_query_suggestion", "should NOT include approve_query_suggestion")
-	assert.NotContains(t, toolNames, "reject_query_suggestion", "should NOT include reject_query_suggestion")
 	assert.NotContains(t, toolNames, "create_approved_query", "should NOT include create_approved_query")
-	assert.NotContains(t, toolNames, "update_approved_query", "should NOT include update_approved_query")
-	assert.NotContains(t, toolNames, "delete_approved_query", "should NOT include delete_approved_query")
 }
 
 func TestMCPConfigService_Get_IncludesDataLiaisonTools_WhenInstalled(t *testing.T) {
-	// When AI Data Liaison app IS installed, data liaison tools should appear in EnabledTools
+	// When AI Data Liaison app IS installed, its tools should appear in EnabledTools
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
-	// Enable developer tools with query tools AND ontology maintenance
+	// Enable all toggles
 	configRepo := &mockMCPConfigRepository{
 		config: &models.MCPConfig{
 			ProjectID: projectID,
 			ToolGroups: map[string]*models.ToolGroupConfig{
-				ToolGroupDeveloper: {Enabled: true, AddQueryTools: true, AddOntologyMaintenance: true},
+				"tools": {
+					AddDirectDatabaseAccess:     true,
+					AddOntologyMaintenanceTools: true,
+					AddApprovalTools:            true,
+					AddOntologySuggestions:      true,
+					AddRequestTools:             true,
+				},
 			},
 		},
 	}
@@ -1172,10 +1160,11 @@ func TestMCPConfigService_Get_IncludesDataLiaisonTools_WhenInstalled(t *testing.
 	queryService := &mockQueryServiceForMCP{hasEnabledQueries: true}
 	projectService := &mockProjectServiceForMCP{defaultDatasourceID: datasourceID}
 
-	// AI Data Liaison app IS installed
+	// Both apps installed
 	installedAppService := &mockInstalledAppServiceForMCP{
 		installed: map[string]bool{
 			models.AppIDAIDataLiaison: true,
+			models.AppIDOntologyForge: true,
 		},
 	}
 
@@ -1197,15 +1186,15 @@ func TestMCPConfigService_Get_IncludesDataLiaisonTools_WhenInstalled(t *testing.
 		toolNames[i] = tool.Name
 	}
 
-	// Should have developer tools including data liaison tools
-	assert.Contains(t, toolNames, "get_schema", "should include regular developer tools")
+	// Should have tools from both apps
+	assert.Contains(t, toolNames, "get_schema", "should include ontology forge tools")
 	assert.Contains(t, toolNames, "list_query_suggestions", "should include list_query_suggestions")
 	assert.Contains(t, toolNames, "approve_query_suggestion", "should include approve_query_suggestion")
 	assert.Contains(t, toolNames, "create_approved_query", "should include create_approved_query")
 }
 
-func TestMCPConfigService_Get_NilInstalledAppService_FiltersDataLiaisonTools(t *testing.T) {
-	// When installedAppService is nil, data liaison tools should be filtered (fail closed)
+func TestMCPConfigService_Get_NilInstalledAppService_FiltersNonMCPServerTools(t *testing.T) {
+	// When installedAppService is nil, only MCP Server tools pass (fail closed for other apps)
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -1214,7 +1203,11 @@ func TestMCPConfigService_Get_NilInstalledAppService_FiltersDataLiaisonTools(t *
 		config: &models.MCPConfig{
 			ProjectID: projectID,
 			ToolGroups: map[string]*models.ToolGroupConfig{
-				ToolGroupDeveloper: {Enabled: true, AddOntologyMaintenance: true},
+				"tools": {
+					AddDirectDatabaseAccess:     true,
+					AddOntologyMaintenanceTools: true,
+					AddApprovalTools:            true,
+				},
 			},
 		},
 	}
@@ -1241,8 +1234,15 @@ func TestMCPConfigService_Get_NilInstalledAppService_FiltersDataLiaisonTools(t *
 		toolNames[i] = tool.Name
 	}
 
-	// Data liaison tools should be filtered (fail closed)
-	assert.NotContains(t, toolNames, "suggest_approved_query", "should NOT include suggest_approved_query with nil service")
+	// MCP Server tools should be present (always available)
+	assert.Contains(t, toolNames, "health", "health should be present with nil service")
+	assert.Contains(t, toolNames, "echo", "echo should be present (MCP Server app)")
+	assert.Contains(t, toolNames, "execute", "execute should be present (MCP Server app)")
+
+	// Ontology Forge tools should be filtered (fail closed)
+	assert.NotContains(t, toolNames, "get_schema", "should NOT include get_schema with nil service")
+
+	// AI Data Liaison tools should be filtered (fail closed)
 	assert.NotContains(t, toolNames, "list_query_suggestions", "should NOT include list_query_suggestions with nil service")
 }
 
@@ -1287,28 +1287,33 @@ func TestMCPConfigService_Get_IncludesPerRoleToolLists(t *testing.T) {
 }
 
 func TestMCPConfigService_Get_UserToolsContainsQueryTools(t *testing.T) {
-	// Test that UserTools includes query tools and optionally ontology maintenance
+	// Test that UserTools includes request tools when AddRequestTools toggle is enabled
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
-	// Config with AllowOntologyMaintenance enabled for user tools
 	configRepo := &mockMCPConfigRepository{
 		config: &models.MCPConfig{
 			ProjectID: projectID,
 			ToolGroups: map[string]*models.ToolGroupConfig{
-				ToolGroupUser: {AllowOntologyMaintenance: true},
+				"tools": {AddOntologySuggestions: true, AddRequestTools: true},
 			},
 		},
 	}
 
 	queryService := &mockQueryServiceForMCP{hasEnabledQueries: true}
 	projectService := &mockProjectServiceForMCP{defaultDatasourceID: datasourceID}
+	installedAppService := &mockInstalledAppServiceForMCP{
+		installed: map[string]bool{
+			models.AppIDOntologyForge: true,
+			models.AppIDAIDataLiaison: true,
+		},
+	}
 
 	svc := NewMCPConfigService(
 		configRepo,
 		queryService,
 		projectService,
-		nil,
+		installedAppService,
 		"http://localhost:3443",
 		zap.NewNop(),
 	)
@@ -1322,40 +1327,49 @@ func TestMCPConfigService_Get_UserToolsContainsQueryTools(t *testing.T) {
 		userToolNames[i] = tool.Name
 	}
 
-	// UserTools are restricted to Default + LimitedQuery (health + approved query execution)
+	// AddRequestTools enables AI Data Liaison user tools
 	assert.Contains(t, userToolNames, "health", "UserTools should include health")
 	assert.Contains(t, userToolNames, "list_approved_queries", "UserTools should include list_approved_queries")
 	assert.Contains(t, userToolNames, "execute_approved_query", "UserTools should include execute_approved_query")
 
-	// UserTools should NOT include developer or ontology tools (those require admin/data role)
-	assert.NotContains(t, userToolNames, "query", "UserTools should NOT include query (developer only)")
+	// AddOntologySuggestions enables Ontology Forge user tools
+	assert.Contains(t, userToolNames, "get_context", "UserTools should include get_context")
+	assert.Contains(t, userToolNames, "get_ontology", "UserTools should include get_ontology")
+
+	// UserTools should NOT include developer-only tools
 	assert.NotContains(t, userToolNames, "update_table", "UserTools should NOT include update_table (developer only)")
 	assert.NotContains(t, userToolNames, "echo", "UserTools should NOT include echo (developer only)")
 	assert.NotContains(t, userToolNames, "execute", "UserTools should NOT include execute (developer only)")
 }
 
 func TestMCPConfigService_Get_UserToolsWithoutOntologyMaintenance(t *testing.T) {
-	// Test that UserTools excludes ontology maintenance when option is disabled
+	// Test that UserTools excludes ontology suggestions when toggle is disabled
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
+	// Only AddRequestTools enabled, not AddOntologySuggestions
 	configRepo := &mockMCPConfigRepository{
 		config: &models.MCPConfig{
 			ProjectID: projectID,
 			ToolGroups: map[string]*models.ToolGroupConfig{
-				ToolGroupApprovedQueries: {Enabled: true, AllowOntologyMaintenance: false},
+				"tools": {AddRequestTools: true, AddOntologySuggestions: false},
 			},
 		},
 	}
 
 	queryService := &mockQueryServiceForMCP{hasEnabledQueries: true}
 	projectService := &mockProjectServiceForMCP{defaultDatasourceID: datasourceID}
+	installedAppService := &mockInstalledAppServiceForMCP{
+		installed: map[string]bool{
+			models.AppIDAIDataLiaison: true,
+		},
+	}
 
 	svc := NewMCPConfigService(
 		configRepo,
 		queryService,
 		projectService,
-		nil,
+		installedAppService,
 		"http://localhost:3443",
 		zap.NewNop(),
 	)
@@ -1369,17 +1383,20 @@ func TestMCPConfigService_Get_UserToolsWithoutOntologyMaintenance(t *testing.T) 
 		userToolNames[i] = tool.Name
 	}
 
-	// UserTools are restricted to Default + LimitedQuery regardless of config
+	// AddRequestTools enables AI Data Liaison user tools
 	assert.Contains(t, userToolNames, "health", "UserTools should include health")
 	assert.Contains(t, userToolNames, "list_approved_queries", "UserTools should include list_approved_queries")
 
-	// UserTools should NOT include developer tools (those require admin/data role)
-	assert.NotContains(t, userToolNames, "query", "UserTools should NOT include query (developer only)")
+	// Ontology suggestions NOT enabled, so no Ontology Forge user tools
+	assert.NotContains(t, userToolNames, "get_context", "UserTools should NOT include get_context")
+	assert.NotContains(t, userToolNames, "get_ontology", "UserTools should NOT include get_ontology")
+
+	// Developer-only tools should NOT be present
 	assert.NotContains(t, userToolNames, "update_table", "UserTools should NOT include update_table (developer only)")
 }
 
 func TestMCPConfigService_Get_DeveloperToolsContainsDevCore(t *testing.T) {
-	// Test that DeveloperTools includes developer core tools
+	// Test that DeveloperTools includes all developer tools when all toggles are enabled
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
@@ -1387,19 +1404,29 @@ func TestMCPConfigService_Get_DeveloperToolsContainsDevCore(t *testing.T) {
 		config: &models.MCPConfig{
 			ProjectID: projectID,
 			ToolGroups: map[string]*models.ToolGroupConfig{
-				ToolGroupDeveloper: {Enabled: true, AddQueryTools: true, AddOntologyMaintenance: true},
+				"tools": {
+					AddDirectDatabaseAccess:     true,
+					AddOntologyMaintenanceTools: true,
+					AddApprovalTools:            true,
+				},
 			},
 		},
 	}
 
 	queryService := &mockQueryServiceForMCP{hasEnabledQueries: true}
 	projectService := &mockProjectServiceForMCP{defaultDatasourceID: datasourceID}
+	installedAppService := &mockInstalledAppServiceForMCP{
+		installed: map[string]bool{
+			models.AppIDOntologyForge: true,
+			models.AppIDAIDataLiaison: true,
+		},
+	}
 
 	svc := NewMCPConfigService(
 		configRepo,
 		queryService,
 		projectService,
-		nil,
+		installedAppService,
 		"http://localhost:3443",
 		zap.NewNop(),
 	)
@@ -1413,21 +1440,22 @@ func TestMCPConfigService_Get_DeveloperToolsContainsDevCore(t *testing.T) {
 		devToolNames[i] = tool.Name
 	}
 
-	// DeveloperTools should include developer core tools
+	// Direct Database Access tools (MCP Server)
 	assert.Contains(t, devToolNames, "health", "DeveloperTools should include health")
 	assert.Contains(t, devToolNames, "echo", "DeveloperTools should include echo")
 	assert.Contains(t, devToolNames, "execute", "DeveloperTools should include execute")
+	assert.Contains(t, devToolNames, "query", "DeveloperTools should include query")
 
-	// With AddQueryTools, should include query tools
-	assert.Contains(t, devToolNames, "query", "DeveloperTools should include query with AddQueryTools")
-	assert.Contains(t, devToolNames, "get_schema", "DeveloperTools should include get_schema with AddQueryTools")
+	// Ontology Maintenance tools (Ontology Forge)
+	assert.Contains(t, devToolNames, "get_schema", "DeveloperTools should include get_schema")
+	assert.Contains(t, devToolNames, "update_table", "DeveloperTools should include update_table")
 
-	// With AddOntologyMaintenance, should include ontology tools
-	assert.Contains(t, devToolNames, "update_table", "DeveloperTools should include update_table with AddOntologyMaintenance")
+	// Approval tools (AI Data Liaison)
+	assert.Contains(t, devToolNames, "list_query_suggestions", "DeveloperTools should include list_query_suggestions")
 }
 
 func TestMCPConfigService_Get_DeveloperToolsWithoutSubOptions(t *testing.T) {
-	// Test that DeveloperTools only has core tools when sub-options are disabled
+	// Test that DeveloperTools only has health when no toggles are enabled
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
@@ -1435,7 +1463,11 @@ func TestMCPConfigService_Get_DeveloperToolsWithoutSubOptions(t *testing.T) {
 		config: &models.MCPConfig{
 			ProjectID: projectID,
 			ToolGroups: map[string]*models.ToolGroupConfig{
-				ToolGroupDeveloper: {Enabled: true, AddQueryTools: false, AddOntologyMaintenance: false},
+				"tools": {
+					AddDirectDatabaseAccess:     false,
+					AddOntologyMaintenanceTools: false,
+					AddApprovalTools:            false,
+				},
 			},
 		},
 	}
@@ -1461,16 +1493,14 @@ func TestMCPConfigService_Get_DeveloperToolsWithoutSubOptions(t *testing.T) {
 		devToolNames[i] = tool.Name
 	}
 
-	// DeveloperTools should include developer core tools
+	// Only health when no toggles are enabled
 	assert.Contains(t, devToolNames, "health", "DeveloperTools should include health")
-	assert.Contains(t, devToolNames, "echo", "DeveloperTools should include echo")
-	assert.Contains(t, devToolNames, "execute", "DeveloperTools should include execute")
 
-	// Without AddQueryTools, should NOT include query tools
-	assert.NotContains(t, devToolNames, "query", "DeveloperTools should NOT include query without AddQueryTools")
-
-	// Without AddOntologyMaintenance, should NOT include ontology tools
-	assert.NotContains(t, devToolNames, "update_table", "DeveloperTools should NOT include update_table without AddOntologyMaintenance")
+	// No other tools without any toggles
+	assert.NotContains(t, devToolNames, "echo", "DeveloperTools should NOT include echo without toggles")
+	assert.NotContains(t, devToolNames, "execute", "DeveloperTools should NOT include execute without toggles")
+	assert.NotContains(t, devToolNames, "query", "DeveloperTools should NOT include query without toggles")
+	assert.NotContains(t, devToolNames, "update_table", "DeveloperTools should NOT include update_table without toggles")
 }
 
 func TestMCPConfigService_Get_AgentToolsIsLimited(t *testing.T) {

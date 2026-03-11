@@ -68,12 +68,14 @@ func setupSensitiveIntegrationTest(t *testing.T) *sensitiveTestContext {
 	columnMetadataRepo := repositories.NewColumnMetadataRepository()
 	schemaRepo := repositories.NewSchemaRepository()
 
-	// Configure mock to enable developer tools
+	// Configure mock to enable developer tools (per-app toggles)
 	mockMCPConfig := &mockMCPConfigService{
 		config: &models.ToolGroupConfig{
-			Enabled:                true,
-			AddQueryTools:          true,
-			AddOntologyMaintenance: true,
+			AddDirectDatabaseAccess:     true,
+			AddOntologyMaintenanceTools: true,
+			AddOntologySuggestions:      true,
+			AddApprovalTools:            true,
+			AddRequestTools:             true,
 		},
 	}
 

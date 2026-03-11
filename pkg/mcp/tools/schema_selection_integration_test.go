@@ -78,9 +78,11 @@ func setupSchemaSelectionTest(t *testing.T) *schemaSelectionTestContext {
 
 	mockMCPConfig := &mockMCPConfigService{
 		config: &models.ToolGroupConfig{
-			Enabled:                true,
-			AddQueryTools:          true,
-			AddOntologyMaintenance: true,
+			AddDirectDatabaseAccess:     true,
+			AddOntologyMaintenanceTools: true,
+			AddOntologySuggestions:      true,
+			AddApprovalTools:            true,
+			AddRequestTools:             true,
 		},
 	}
 	mockProject := &mockProjectService{defaultDatasourceID: datasourceID}

@@ -1,6 +1,6 @@
 # Ekaya Engine Application Brainstorm
 
-## First Three Apps: The AI Data Guardian Suite
+## First Four Apps: The AI Data Guardian Suite
 
 **Status:** Selected for first implementation after WASM platform foundation is built.
 **Design docs:** `DESIGN-wasm-application-platform.md` (runtime), `DESIGN-engine-app-marketplace.md` (engine integration)
@@ -92,14 +92,62 @@ All three apps are **AI-automated** — they require LLM access (via `llm_genera
 
 ---
 
+### 4. AI Query Monitor
+
+**App ID:** `ai-query-monitor`
+**Category:** AI monitoring & governance (Stage 4: Governed)
+**Problem:** Ekaya's MCP Events page only tracks queries routed through Ekaya's MCP Server. But the homepage promises "See what AI is already doing with your data" — and the shadow AI problem (77% of employees paste company data into AI tools) means most database activity happens *outside* Ekaya. There is no visibility into what else is hitting the database.
+
+**What it does:**
+- On installation, enables database-native query tracking extensions:
+  - **PostgreSQL:** Installs `pg_stat_statements` extension (`CREATE EXTENSION IF NOT EXISTS pg_stat_statements`) and configures `shared_preload_libraries` (requires a one-time database restart)
+  - **SQL Server:** Enables Query Store (`ALTER DATABASE [db] SET QUERY_STORE = ON`) — no restart needed
+- Periodically reads the query statistics view to capture all database query activity:
+  - **PostgreSQL `pg_stat_statements`:** Normalized query text, call count, total/mean/min/max execution time, rows returned, user ID
+  - **SQL Server `sys.query_store_runtime_stats` + `sys.query_store_query_text`:** Query text, execution count, avg duration, avg row count, last execution time
+- **Correlates database-level queries against Ekaya's MCP audit log** — queries that came through Ekaya are tagged; everything else is flagged as "unmonitored access"
+- **AI classifies unmonitored queries:** "This query pattern (`SELECT email, phone FROM users WHERE ...`) appears 340 times/day from a connection not routed through Ekaya. It accesses PII columns and likely originates from an AI tool or script."
+- **AI identifies shadow AI fingerprints:** Patterns characteristic of AI-generated SQL (e.g., verbose column aliasing, consistent parameterization patterns, LLM-typical query structures) vs. human-written or ORM-generated queries
+- Stores query snapshots and classification results in app-isolated Postgres schema (`app_ai_query_monitor`)
+- Alerts when new unmonitored access patterns appear or when sensitive table access is detected outside Ekaya
+
+**PostgreSQL implementation detail:**
+`pg_stat_statements` provides aggregated statistics, not individual executions with timestamps. The app works with what's available:
+- Tracks `calls` delta between snapshots to detect new activity
+- Uses `userid` to map queries to database roles
+- Normalized query text (literals replaced with `$1`, `$2`) groups query patterns
+- Limitation: No per-execution timestamps. For customers needing individual execution logs, the app can recommend enabling `log_statement = 'all'` in `postgresql.conf` for file-based logging.
+
+**SQL Server implementation detail:**
+Query Store is significantly richer:
+- `last_execution_time` provides actual timestamps per query
+- `count_executions` per time interval enables trend analysis
+- Built-in retention policies (`CLEANUP_POLICY`)
+- Persists across restarts
+- One `ALTER DATABASE` statement to enable — no restart, no extension installation
+
+**Existing engine code it leverages:**
+- `pkg/models/mcp_audit.go` — MCP audit events for correlation (identifying which queries came through Ekaya)
+- `pkg/adapters/datasource/interfaces.go` — `QueryExecutor` for reading `pg_stat_statements` / Query Store views
+- `pkg/adapters/datasource/postgres/schema.go` — Schema introspection to enrich query analysis with table/column context
+- `pkg/adapters/datasource/mssql/schema.go` — Same interfaces for SQL Server
+- `pkg/models/column_metadata.go` — `IsSensitive` flag to identify when unmonitored queries touch sensitive columns
+
+**Host functions used:** `datasource_query`, `db_query`, `llm_generate`, `get_auth_context`, `log`
+
+**Why it belongs in the suite:** The first three apps monitor what happens *inside* the database (schema changes, data quality, compliance posture). AI Query Monitor closes the loop by monitoring *who is accessing* the database and *how* — especially access that bypasses Ekaya entirely. This directly delivers on the "shadow AI visibility" promise from ekaya.ai's homepage and maps to Stage 4 (Governed) of the AI Data Readiness Framework.
+
+---
+
 ### Suite economics
 
-These three apps form a natural upsell chain:
+These four apps form a natural upsell chain:
 1. **AI Drift Monitor** (entry point) — "Your schema changed and it's going to break things" → hooks the data team
 2. **AI Data Guardian** (expansion) — "Here are all the quality issues, and here's how to fix them" → becomes indispensable
 3. **AI Compliance Manager** (lock-in) — "Here's your audit evidence package, generated automatically" → justifies the platform to the CFO
+4. **AI Query Monitor** (governance) — "Here's everything hitting your database that you don't control" → makes the security team a champion
 
-Together they replace manual processes that cost mid-market companies 2-4 engineering weeks per quarter in audit prep, incident detection, and quality firefighting.
+Together they replace manual processes that cost mid-market companies 2-4 engineering weeks per quarter in audit prep, incident detection, and quality firefighting. AI Query Monitor adds a new dimension: visibility into shadow AI and unmonitored database access that no existing plan covers.
 
 ---
 
@@ -107,7 +155,7 @@ Together they replace manual processes that cost mid-market companies 2-4 engine
 
 # Application Ideas: Full Catalog
 
-**The following is a catalog of 29 application ideas** evaluated for the Ekaya Engine WASM platform. The first three (AI Data Guardian suite above) have been selected for initial implementation. The rest are prioritized below for future waves.
+**The following is a catalog of 29 application ideas** evaluated for the Ekaya Engine WASM platform. The first four (AI Data Guardian suite above) have been selected for initial implementation. The rest are prioritized below for future waves.
 
 **Ekaya Engine sits at the intersection of three converging enterprise pain points: data infrastructure sprawl costing mid-market companies millions annually, a compliance gap at the data layer that existing tools ignore, and the collapse of the "modern data stack" into consolidated platforms.** The ideas below exploit Ekaya's unique combination of WASM-sandboxed execution, direct customer database access, and a managed PostgreSQL runtime — targeting the exact problems CTOs solve today with spreadsheets, scripts, and duct tape.
 

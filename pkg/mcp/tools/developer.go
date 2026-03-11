@@ -254,7 +254,8 @@ func NewToolFilter(deps *MCPToolDeps) func(ctx context.Context, tools []mcp.Tool
 			return filterAgentTools(tools, effectiveEnabled)
 		}
 
-		// User authentication - use GetEnabledTools for consistent filtering with UI
+		// User authentication - compute enabled tools per-role with installation filtering,
+		// using the same logic as buildResponse to ensure UI and MCP Server always agree.
 		state, err := deps.MCPConfigService.GetToolGroupsState(tenantCtx, projectID)
 		if err != nil {
 			deps.Logger.Error("Tool filter: failed to get tool groups state",
@@ -263,40 +264,44 @@ func NewToolFilter(deps *MCPToolDeps) func(ctx context.Context, tools []mcp.Tool
 			return filterToHealthOnly(tools)
 		}
 
-		// Get enabled tools using the same function as the UI
-		enabledToolDefs := services.GetEnabledTools(state)
-
-		// Build a set of enabled tool names
-		enabledNames := make(map[string]bool, len(enabledToolDefs))
-		for _, td := range enabledToolDefs {
-			enabledNames[td.Name] = true
+		// Check which apps are installed
+		installedApps := map[string]bool{
+			models.AppIDMCPServer: true,
 		}
-
-		// Check if AI Data Liaison app is installed - if not, remove data liaison tools
-		dataLiaisonInstalled := false
 		if deps.GetInstalledAppService() != nil {
-			installed, err := deps.GetInstalledAppService().IsInstalled(tenantCtx, projectID, models.AppIDAIDataLiaison)
-			if err != nil {
-				deps.Logger.Warn("Tool filter: failed to check AI Data Liaison app installation",
-					zap.String("project_id", projectID.String()),
-					zap.Error(err))
-				// On error, default to not installed (safer)
-			} else {
-				dataLiaisonInstalled = installed
+			for _, appID := range []string{models.AppIDOntologyForge, models.AppIDAIDataLiaison} {
+				installed, err := deps.GetInstalledAppService().IsInstalled(tenantCtx, projectID, appID)
+				if err != nil {
+					deps.Logger.Warn("Tool filter: failed to check app installation",
+						zap.String("project_id", projectID.String()),
+						zap.String("app_id", appID),
+						zap.Error(err))
+				} else if installed {
+					installedApps[appID] = true
+				}
 			}
 		}
 
-		// Remove data liaison tools if app not installed
-		if !dataLiaisonInstalled {
-			for toolName := range dataLiaisonTools {
-				delete(enabledNames, toolName)
+		// Compute per-role, then filter by installation per-role, then union.
+		// This matches buildResponse exactly: a tool enabled via a role's toggle
+		// is only included if that role's owning app is installed.
+		enabledNames := make(map[string]bool)
+		for _, spec := range services.ComputeDeveloperTools(state) {
+			appID := services.GetToolAppID(spec.Name, "developer")
+			if installedApps[appID] {
+				enabledNames[spec.Name] = true
+			}
+		}
+		for _, spec := range services.ComputeUserTools(state) {
+			appID := services.GetToolAppID(spec.Name, "user")
+			if installedApps[appID] {
+				enabledNames[spec.Name] = true
 			}
 		}
 
 		deps.Logger.Debug("Tool filter: filtering based on GetEnabledTools",
 			zap.String("project_id", projectID.String()),
-			zap.Int("enabled_tool_count", len(enabledNames)),
-			zap.Bool("data_liaison_installed", dataLiaisonInstalled))
+			zap.Int("enabled_tool_count", len(enabledNames)))
 
 		// Filter MCP tools to only include enabled ones
 		return filterByEnabledNames(tools, enabledNames)
@@ -562,7 +567,7 @@ func registerQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 		// Note: QueryID is nil for ad-hoc queries executed via the query tool
 		go logQueryExecution(tenantCtx, deps, QueryExecutionLog{
 			ProjectID:       projectID,
-			QueryID:         uuid.Nil, // Ad-hoc query, no associated approved query
+			QueryID:         nil, // Ad-hoc query, no associated approved query
 			SQL:             sql,
 			SQLType:         "SELECT",
 			RowCount:        len(rows),
@@ -811,7 +816,7 @@ func registerExecuteTool(s *server.MCPServer, deps *MCPToolDeps) {
 			// Log failed execution
 			go logQueryExecution(tenantCtx, deps, QueryExecutionLog{
 				ProjectID:       projectID,
-				QueryID:         uuid.Nil, // Ad-hoc query, no associated approved query
+				QueryID:         nil, // Ad-hoc query, no associated approved query
 				SQL:             sql,
 				SQLType:         string(sqlType),
 				RowCount:        0,
@@ -846,7 +851,7 @@ func registerExecuteTool(s *server.MCPServer, deps *MCPToolDeps) {
 		// Log successful execution
 		go logQueryExecution(tenantCtx, deps, QueryExecutionLog{
 			ProjectID:       projectID,
-			QueryID:         uuid.Nil, // Ad-hoc query, no associated approved query
+			QueryID:         nil, // Ad-hoc query, no associated approved query
 			SQL:             sql,
 			SQLType:         string(sqlType),
 			RowCount:        execResult.RowCount,

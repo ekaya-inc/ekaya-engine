@@ -83,26 +83,26 @@ func TestComputeToolsForRole_DataRole(t *testing.T) {
 }
 
 func TestComputeToolsForRole_UserRole(t *testing.T) {
-	// User role gets restricted access: only Default + LimitedQuery
+	// User role gets tools based on user-role toggles only.
+	// Developer toggles do NOT affect user tools.
 	claims := &auth.Claims{
 		ProjectID: "test-project",
 		Roles:     []string{models.RoleUser},
 	}
 	claims.Subject = "user-regular"
 
+	// Only developer toggles set — user-role toggles are not set
 	state := map[string]*models.ToolGroupConfig{
-		services.ToolGroupDeveloper: {AddQueryTools: true, AddOntologyMaintenance: true},
+		"tools": {AddDirectDatabaseAccess: true, AddOntologyMaintenanceTools: true},
 	}
 
 	tools := computeToolsForRole(claims, state)
 	toolNames := toolSpecNamesToMap(tools)
 
-	// User gets health + limited query tools only
+	// User gets only health when no user-role toggles are enabled
 	assert.True(t, toolNames["health"], "user should have health")
-	assert.True(t, toolNames["list_approved_queries"], "user should have list_approved_queries")
-	assert.True(t, toolNames["execute_approved_query"], "user should have execute_approved_query")
 
-	// User should NOT get developer tools regardless of config
+	// User should NOT get developer tools regardless of developer toggles
 	assert.False(t, toolNames["echo"], "user should NOT have echo")
 	assert.False(t, toolNames["execute"], "user should NOT have execute")
 	assert.False(t, toolNames["query"], "user should NOT have query")
@@ -110,10 +110,13 @@ func TestComputeToolsForRole_UserRole(t *testing.T) {
 	assert.False(t, toolNames["get_schema"], "user should NOT have get_schema")
 	assert.False(t, toolNames["refresh_schema"], "user should NOT have refresh_schema")
 	assert.False(t, toolNames["update_column"], "user should NOT have update_column")
+	assert.False(t, toolNames["list_approved_queries"], "user should NOT have list_approved_queries without AddRequestTools")
+	assert.False(t, toolNames["execute_approved_query"], "user should NOT have execute_approved_query without AddRequestTools")
 }
 
 func TestComputeToolsForRole_UserRole_IgnoresConfig(t *testing.T) {
-	// User role is restricted regardless of developer config settings
+	// User role ignores developer config; only user-role toggles matter.
+	// Legacy ToolGroupUser.AllowOntologyMaintenance maps to AddOntologySuggestions + AddRequestTools.
 	claims := &auth.Claims{
 		ProjectID: "test-project",
 		Roles:     []string{models.RoleUser},
@@ -121,23 +124,32 @@ func TestComputeToolsForRole_UserRole_IgnoresConfig(t *testing.T) {
 	claims.Subject = "user-regular"
 
 	state := map[string]*models.ToolGroupConfig{
-		services.ToolGroupDeveloper: {AddQueryTools: true, AddOntologyMaintenance: true},
-		services.ToolGroupUser:      {AllowOntologyMaintenance: true},
+		"tools": {
+			AddDirectDatabaseAccess:     true, // developer toggle — ignored for user
+			AddOntologyMaintenanceTools: true, // developer toggle — ignored for user
+			AddOntologySuggestions:      true, // user toggle
+			AddRequestTools:             true, // user toggle
+		},
 	}
 
 	tools := computeToolsForRole(claims, state)
 	toolNames := toolSpecNamesToMap(tools)
 
-	// Still only gets limited tools
+	// User gets tools from user-role toggles
 	assert.True(t, toolNames["health"], "user should have health")
 	assert.True(t, toolNames["list_approved_queries"], "user should have list_approved_queries")
 	assert.True(t, toolNames["execute_approved_query"], "user should have execute_approved_query")
+	assert.True(t, toolNames["get_context"], "user should have get_context from AddOntologySuggestions")
+	assert.True(t, toolNames["get_ontology"], "user should have get_ontology from AddOntologySuggestions")
+
+	// Developer tools NOT accessible to user regardless of developer toggles
 	assert.False(t, toolNames["echo"], "user should NOT have echo")
-	assert.False(t, toolNames["query"], "user should NOT have query")
+	assert.False(t, toolNames["execute"], "user should NOT have execute")
+	assert.False(t, toolNames["get_schema"], "user should NOT have get_schema")
 }
 
 func TestComputeToolsForRole_NoRoles(t *testing.T) {
-	// No roles defaults to user (least privilege)
+	// No roles defaults to user (least privilege) — only health without user-role toggles
 	claims := &auth.Claims{
 		ProjectID: "test-project",
 		Roles:     []string{},
@@ -145,21 +157,20 @@ func TestComputeToolsForRole_NoRoles(t *testing.T) {
 	claims.Subject = "user-no-roles"
 
 	state := map[string]*models.ToolGroupConfig{
-		services.ToolGroupDeveloper: {AddQueryTools: true},
+		"tools": {AddDirectDatabaseAccess: true},
 	}
 
 	tools := computeToolsForRole(claims, state)
 	toolNames := toolSpecNamesToMap(tools)
 
-	// Defaults to user-level tools (least privilege)
+	// Defaults to user-level tools (least privilege) — only health without user toggles
 	assert.True(t, toolNames["health"], "should have health")
-	assert.True(t, toolNames["list_approved_queries"], "should have list_approved_queries")
-	assert.True(t, toolNames["execute_approved_query"], "should have execute_approved_query")
 
 	// Should NOT get developer tools
 	assert.False(t, toolNames["echo"], "should NOT have echo")
 	assert.False(t, toolNames["execute"], "should NOT have execute")
 	assert.False(t, toolNames["query"], "should NOT have query")
+	assert.False(t, toolNames["list_approved_queries"], "should NOT have list_approved_queries without AddRequestTools")
 }
 
 func TestComputeToolsForRole_MultipleRolesUserAndAdmin(t *testing.T) {
@@ -287,24 +298,21 @@ func TestToolAccessError(t *testing.T) {
 // Security Boundary: User Role Allow-List
 // =============================================================================
 
-// TestSecurityBoundary_UserToolsAllowList is a security gate that asserts the
-// exact set of tools available to role:user. If this test fails, a tool was
-// added to (or removed from) the user's toolset — review the change carefully
-// before updating the allow-list.
-//
-// This test exercises computeToolsForRole with every config permutation to
-// ensure role:user ALWAYS receives the same fixed toolset regardless of what
-// flags are enabled in the UI.
+// TestSecurityBoundary_UserToolsAllowList is a security gate that verifies:
+// 1. User role NEVER gets developer-only tools regardless of developer toggles
+// 2. User role tools are determined solely by user-role toggles
+// 3. With no user-role toggles, user gets only health
 func TestSecurityBoundary_UserToolsAllowList(t *testing.T) {
-	// The exhaustive allow-list. Update ONLY after security review.
-	allowList := map[string]bool{
-		"health":                 true,
-		"list_approved_queries":  true,
-		"execute_approved_query": true,
+	// Developer-only tools that must NEVER appear for role:user
+	developerOnlyTools := []string{
+		"echo", "execute", "get_schema", "search_schema", "probe_column",
+		"update_column", "update_columns", "update_table",
+		"refresh_schema", "list_ontology_questions", "resolve_ontology_question",
+		"list_query_suggestions", "approve_query_suggestion", "create_approved_query",
+		"list_pending_changes", "approve_change", "reject_change",
 	}
 
-	// Config permutations: every combination of flags that could affect tools.
-	// Role:user must get the same toolset in ALL cases.
+	// Config permutations that enable developer toggles. User must NEVER get developer tools.
 	configs := []struct {
 		name  string
 		state map[string]*models.ToolGroupConfig
@@ -312,22 +320,14 @@ func TestSecurityBoundary_UserToolsAllowList(t *testing.T) {
 		{"nil state", nil},
 		{"empty state", map[string]*models.ToolGroupConfig{}},
 		{"all developer flags on", map[string]*models.ToolGroupConfig{
-			services.ToolGroupDeveloper: {AddQueryTools: true, AddOntologyMaintenance: true},
-		}},
-		{"user ontology maintenance on", map[string]*models.ToolGroupConfig{
-			services.ToolGroupUser: {AllowOntologyMaintenance: true},
+			"tools": {AddDirectDatabaseAccess: true, AddOntologyMaintenanceTools: true, AddApprovalTools: true},
 		}},
 		{"agent tools on", map[string]*models.ToolGroupConfig{
 			services.ToolGroupAgentTools: {Enabled: true},
 		}},
-		{"custom tools on", map[string]*models.ToolGroupConfig{
-			services.ToolGroupCustom: {Enabled: true, CustomTools: []string{"query", "execute", "echo"}},
-		}},
-		{"everything on", map[string]*models.ToolGroupConfig{
-			services.ToolGroupDeveloper:  {AddQueryTools: true, AddOntologyMaintenance: true},
-			services.ToolGroupUser:       {AllowOntologyMaintenance: true},
+		{"developer only toggles", map[string]*models.ToolGroupConfig{
+			"tools":                      {AddDirectDatabaseAccess: true, AddOntologyMaintenanceTools: true, AddApprovalTools: true},
 			services.ToolGroupAgentTools: {Enabled: true},
-			services.ToolGroupCustom:     {Enabled: true, CustomTools: []string{"query", "execute"}},
 		}},
 	}
 
@@ -355,11 +355,62 @@ func TestSecurityBoundary_UserToolsAllowList(t *testing.T) {
 				tools := computeToolsForRole(claims, cfg.state)
 				actual := toolSpecNamesToMap(tools)
 
-				assert.Equal(t, allowList, actual,
-					"SECURITY: role:user tools changed! If intentional, update the allow-list after security review.")
+				// Health is always present
+				assert.True(t, actual["health"],
+					"SECURITY: health should always be available to user role")
+
+				// Developer-only tools must NEVER be available
+				for _, devTool := range developerOnlyTools {
+					assert.False(t, actual[devTool],
+						"SECURITY: developer tool %q must NOT be available to user role", devTool)
+				}
 			})
 		}
 	}
+
+	// Verify that with no user-role toggles, user gets ONLY health
+	t.Run("no user toggles gives only health", func(t *testing.T) {
+		claims := &auth.Claims{
+			ProjectID: "test-project",
+			Roles:     []string{models.RoleUser},
+		}
+		claims.Subject = "user-boundary-test"
+
+		state := map[string]*models.ToolGroupConfig{
+			"tools": {AddDirectDatabaseAccess: true, AddOntologyMaintenanceTools: true, AddApprovalTools: true},
+		}
+
+		tools := computeToolsForRole(claims, state)
+		assert.Len(t, tools, 1, "user with no user-role toggles should get only health")
+		assert.Equal(t, "health", tools[0].Name)
+	})
+
+	// Verify that user-role toggles correctly add user tools
+	t.Run("user toggles add user tools", func(t *testing.T) {
+		claims := &auth.Claims{
+			ProjectID: "test-project",
+			Roles:     []string{models.RoleUser},
+		}
+		claims.Subject = "user-boundary-test"
+
+		state := map[string]*models.ToolGroupConfig{
+			"tools": {AddOntologySuggestions: true, AddRequestTools: true},
+		}
+
+		tools := computeToolsForRole(claims, state)
+		actual := toolSpecNamesToMap(tools)
+
+		assert.True(t, actual["health"], "should have health")
+		assert.True(t, actual["get_context"], "should have get_context from AddOntologySuggestions")
+		assert.True(t, actual["list_approved_queries"], "should have list_approved_queries from AddRequestTools")
+		assert.True(t, actual["execute_approved_query"], "should have execute_approved_query from AddRequestTools")
+
+		// Still no developer tools
+		for _, devTool := range developerOnlyTools {
+			assert.False(t, actual[devTool],
+				"SECURITY: developer tool %q must NOT be available to user role", devTool)
+		}
+	})
 }
 
 // toolSpecNamesToMap converts a slice of ToolSpec to a map for easy lookup.

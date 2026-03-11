@@ -14,11 +14,17 @@ import (
 // UpdateMCPConfigRequest is the request body for PATCH /api/projects/{pid}/mcp/config.
 // Uses optional pointers to distinguish "not sent" from "sent as false".
 type UpdateMCPConfigRequest struct {
-	// User Tools sub-option: allow MCP clients with user role to update ontology
+	// Per-app toggles
+	AddDirectDatabaseAccess     *bool `json:"addDirectDatabaseAccess,omitempty"`
+	AddOntologyMaintenanceTools *bool `json:"addOntologyMaintenanceTools,omitempty"`
+	AddOntologySuggestions      *bool `json:"addOntologySuggestions,omitempty"`
+	AddApprovalTools            *bool `json:"addApprovalTools,omitempty"`
+	AddRequestTools             *bool `json:"addRequestTools,omitempty"`
+
+	// Legacy fields (backward compat)
 	AllowOntologyMaintenance *bool `json:"allowOntologyMaintenance,omitempty"`
-	// Developer Tools sub-options
-	AddQueryTools          *bool `json:"addQueryTools,omitempty"`          // adds Query loadout
-	AddOntologyMaintenance *bool `json:"addOntologyMaintenance,omitempty"` // adds Ontology Maintenance tools
+	AddQueryTools            *bool `json:"addQueryTools,omitempty"`
+	AddOntologyMaintenance   *bool `json:"addOntologyMaintenance,omitempty"`
 }
 
 // MCPConfigHandler handles MCP configuration HTTP requests.
@@ -90,6 +96,13 @@ func (h *MCPConfigHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	// Convert flat request to service request format
 	serviceReq := &services.UpdateMCPConfigRequest{
+		// Per-app toggles
+		AddDirectDatabaseAccess:     req.AddDirectDatabaseAccess,
+		AddOntologyMaintenanceTools: req.AddOntologyMaintenanceTools,
+		AddOntologySuggestions:      req.AddOntologySuggestions,
+		AddApprovalTools:            req.AddApprovalTools,
+		AddRequestTools:             req.AddRequestTools,
+		// Legacy fields
 		AllowOntologyMaintenance: req.AllowOntologyMaintenance,
 		AddQueryTools:            req.AddQueryTools,
 		AddOntologyMaintenance:   req.AddOntologyMaintenance,

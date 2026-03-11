@@ -315,7 +315,7 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 				// Log failed execution for audit
 				go logQueryExecution(tenantCtx, deps, QueryExecutionLog{
 					ProjectID:       projectID,
-					QueryID:         queryID,
+					QueryID:         &queryID,
 					QueryName:       query.NaturalLanguagePrompt,
 					SQL:             query.SQLQuery,
 					SQLType:         string(sqlType),
@@ -335,7 +335,7 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			modDurationMs := int(executionTimeMs)
 			go logQueryExecution(tenantCtx, deps, QueryExecutionLog{
 				ProjectID:       projectID,
-				QueryID:         queryID,
+				QueryID:         &queryID,
 				QueryName:       query.NaturalLanguagePrompt,
 				SQL:             query.SQLQuery,
 				SQLType:         string(sqlType),
@@ -400,7 +400,7 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		durationMs := int(executionTimeMs)
 		go logQueryExecution(tenantCtx, deps, QueryExecutionLog{
 			ProjectID:       projectID,
-			QueryID:         queryID,
+			QueryID:         &queryID,
 			QueryName:       query.NaturalLanguagePrompt,
 			SQL:             query.SQLQuery,
 			SQLType:         string(sqlType),
@@ -1109,7 +1109,7 @@ func buildColumnInfo(columns []columnDetail) []columnDetail {
 // QueryExecutionLog contains all fields needed to log a query execution.
 type QueryExecutionLog struct {
 	ProjectID       uuid.UUID
-	QueryID         uuid.UUID
+	QueryID         *uuid.UUID // nil for ad-hoc queries (no associated approved query)
 	QueryName       string
 	SQL             string
 	SQLType         string // SELECT, INSERT, UPDATE, DELETE, CALL
@@ -1204,16 +1204,24 @@ func logQueryExecution(ctx context.Context, deps QueryLoggingDeps, log QueryExec
 	)
 
 	if err != nil {
+		queryIDStr := "<ad-hoc>"
+		if log.QueryID != nil {
+			queryIDStr = log.QueryID.String()
+		}
 		logger.Error("Failed to log query execution",
 			zap.Error(err),
 			zap.String("project_id", log.ProjectID.String()),
-			zap.String("query_id", log.QueryID.String()))
+			zap.String("query_id", queryIDStr))
 	}
 
 	// For modifying queries, also log to SIEM audit trail
 	auditor := deps.GetAuditor()
 	if log.IsModifying && auditor != nil {
-		auditor.LogModifyingQueryExecution(ctx, log.ProjectID, log.QueryID,
+		queryID := uuid.Nil
+		if log.QueryID != nil {
+			queryID = *log.QueryID
+		}
+		auditor.LogModifyingQueryExecution(ctx, log.ProjectID, queryID,
 			audit.ModifyingQueryDetails{
 				QueryName:       log.QueryName,
 				SQLType:         log.SQLType,
