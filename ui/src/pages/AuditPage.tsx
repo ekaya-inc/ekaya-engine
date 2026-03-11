@@ -1305,11 +1305,11 @@ const AuditPage = () => {
       <div className="mb-6">
         <Button
           variant="ghost"
-          onClick={() => navigate(`/projects/${pid}/ai-data-liaison`)}
+          onClick={() => navigate(`/projects/${pid}`)}
           className="mb-4"
         >
           <ArrowLeft className="mr-2 h-4 w-4" />
-          Back to AI Data Liaison
+          Back to the Dashboard
         </Button>
         <div className="flex items-center justify-between">
           <div>
