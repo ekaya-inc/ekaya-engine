@@ -20,6 +20,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -65,6 +66,26 @@ func GetProjectIDFromContext(ctx context.Context) uuid.UUID {
 	}
 
 	return projectID
+}
+
+// GetAgentID extracts the authenticated named agent ID from context.
+// Returns uuid.Nil and false when the request is not a named-agent request.
+func GetAgentID(ctx context.Context) (uuid.UUID, bool) {
+	agentID, ok := ctx.Value(AgentIDKey).(uuid.UUID)
+	if !ok || agentID == uuid.Nil {
+		return uuid.Nil, false
+	}
+	return agentID, true
+}
+
+// IsAgentSubject returns true when the subject represents agent authentication.
+func IsAgentSubject(subject string) bool {
+	return strings.HasPrefix(subject, "agent:")
+}
+
+// IsAgentClaims returns true when the claims came from agent authentication.
+func IsAgentClaims(claims *Claims) bool {
+	return claims != nil && IsAgentSubject(claims.Subject)
 }
 
 // RequireUserIDFromContext extracts the user ID from context and returns an error if not found.

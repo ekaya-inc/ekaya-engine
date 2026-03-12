@@ -33,22 +33,22 @@ type AuthFailureLogger interface {
 // headers for OAuth 2.0 Bearer token authentication errors.
 // Supports both JWT (Bearer) and Agent API key authentication.
 type Middleware struct {
-	authService     auth.AuthService
-	agentKeyService services.AgentAPIKeyService
-	tenantProvider  TenantScopeProvider
-	auditLogger     AuthFailureLogger
-	logger          *zap.Logger
+	authService    auth.AuthService
+	agentService   services.AgentKeyValidator
+	tenantProvider TenantScopeProvider
+	auditLogger    AuthFailureLogger
+	logger         *zap.Logger
 }
 
 // NewMiddleware creates a new MCP auth middleware.
-// agentKeyService and tenantProvider can be nil if agent API key authentication is not needed.
+// agentService and tenantProvider can be nil if agent API key authentication is not needed.
 // auditLogger can be nil if auth failure auditing is not needed.
-func NewMiddleware(authService auth.AuthService, agentKeyService services.AgentAPIKeyService, tenantProvider TenantScopeProvider, logger *zap.Logger, opts ...MiddlewareOption) *Middleware {
+func NewMiddleware(authService auth.AuthService, agentService services.AgentKeyValidator, tenantProvider TenantScopeProvider, logger *zap.Logger, opts ...MiddlewareOption) *Middleware {
 	m := &Middleware{
-		authService:     authService,
-		agentKeyService: agentKeyService,
-		tenantProvider:  tenantProvider,
-		logger:          logger,
+		authService:    authService,
+		agentService:   agentService,
+		tenantProvider: tenantProvider,
+		logger:         logger,
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -117,8 +117,8 @@ func isJWT(token string) bool {
 func (m *Middleware) handleAgentKeyAuth(w http.ResponseWriter, r *http.Request, next http.Handler, pathParamName string, apiKey string) {
 	ctx := r.Context()
 
-	if m.agentKeyService == nil {
-		m.logger.Error("MCP auth failed: agent key service not configured")
+	if m.agentService == nil {
+		m.logger.Error("MCP auth failed: agent service not configured")
 		m.writeWWWAuthenticate(w, http.StatusInternalServerError, "server_error", "Agent authentication not configured")
 		return
 	}
@@ -168,7 +168,7 @@ func (m *Middleware) handleAgentKeyAuth(w http.ResponseWriter, r *http.Request, 
 	defer cleanup()
 
 	// Validate API key
-	valid, err := m.agentKeyService.ValidateKey(tenantCtx, projectID, apiKey)
+	agent, err := m.agentService.ValidateKey(tenantCtx, projectID, apiKey)
 	if err != nil {
 		m.logger.Error("MCP agent auth failed: key validation error",
 			zap.String("path", r.URL.Path),
@@ -176,7 +176,7 @@ func (m *Middleware) handleAgentKeyAuth(w http.ResponseWriter, r *http.Request, 
 		m.writeWWWAuthenticate(w, http.StatusInternalServerError, "server_error", "Authentication failed")
 		return
 	}
-	if !valid {
+	if agent == nil {
 		m.logger.Debug("MCP agent auth failed: invalid API key",
 			zap.String("path", r.URL.Path),
 			zap.String("project_id", projectID.String()))
@@ -184,12 +184,20 @@ func (m *Middleware) handleAgentKeyAuth(w http.ResponseWriter, r *http.Request, 
 		m.writeWWWAuthenticate(w, http.StatusUnauthorized, "invalid_token", "Invalid API key")
 		return
 	}
+	if agent.ID == uuid.Nil {
+		m.logger.Error("MCP agent auth failed: named agent ID missing",
+			zap.String("path", r.URL.Path),
+			zap.String("project_id", projectID.String()))
+		m.writeWWWAuthenticate(w, http.StatusUnauthorized, "invalid_token", "Invalid API key")
+		return
+	}
 
 	// Create synthetic claims for agent context
 	claims := &auth.Claims{
 		ProjectID: projectID.String(),
+		Email:     agent.Name,
 	}
-	claims.Subject = "agent" // Special marker for agent authentication
+	claims.Subject = "agent:" + agent.ID.String()
 
 	m.logger.Debug("MCP agent auth successful",
 		zap.String("path", r.URL.Path),
@@ -197,6 +205,7 @@ func (m *Middleware) handleAgentKeyAuth(w http.ResponseWriter, r *http.Request, 
 
 	// Inject claims into context (no token for agent auth)
 	ctx = context.WithValue(ctx, auth.ClaimsKey, claims)
+	ctx = context.WithValue(ctx, auth.AgentIDKey, agent.ID)
 	next.ServeHTTP(w, r.WithContext(ctx))
 }
 

@@ -217,8 +217,8 @@ func NewToolFilter(deps *MCPToolDeps) func(ctx context.Context, tools []mcp.Tool
 			return filterToHealthOnly(tools)
 		}
 
-		// Check if this is agent authentication (Subject = "agent" set by MCP auth middleware)
-		isAgent := claims.Subject == "agent"
+		// Check if this is named-agent authentication.
+		isAgent := auth.IsAgentClaims(claims)
 
 		if isAgent {
 			// Agent authentication - only allow agent tools when agent_tools is enabled AND ai-agents app is installed

@@ -111,7 +111,7 @@ func TestAgentToolsEnabled_ListAndCallConsistency(t *testing.T) {
 
 	// Create agent auth context
 	claims := &auth.Claims{ProjectID: projectID.String()}
-	claims.Subject = "agent" // Agent authentication
+	claims.Subject = "agent:" + uuid.New().String()
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 
 	filteredTools := filter(ctx, allTools)
@@ -346,7 +346,7 @@ func TestAgentAuth_AgentToolsDisabled(t *testing.T) {
 
 	// Agent auth
 	claims := &auth.Claims{ProjectID: projectID.String()}
-	claims.Subject = "agent"
+	claims.Subject = "agent:" + uuid.New().String()
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 
 	filteredTools := filter(ctx, allTools)
@@ -473,7 +473,7 @@ func TestAgentToolsEnabled_LimitedQueryToolsConsistency(t *testing.T) {
 
 	// Create agent auth context
 	claims := &auth.Claims{ProjectID: projectID.String()}
-	claims.Subject = "agent" // Agent authentication
+	claims.Subject = "agent:" + uuid.New().String()
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 
 	filteredTools := filter(ctx, allTools)
@@ -680,7 +680,7 @@ func TestAIAgents_Uninstalled_ListAndCallBlocked(t *testing.T) {
 	allTools := createTestTools()
 
 	claims := &auth.Claims{ProjectID: projectID.String()}
-	claims.Subject = "agent"
+	claims.Subject = "agent:" + uuid.New().String()
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 
 	filteredTools := filter(ctx, allTools)
@@ -760,7 +760,7 @@ func TestAIAgents_Installed_ListAndCallAllowed(t *testing.T) {
 	allTools := createTestTools()
 
 	claims := &auth.Claims{ProjectID: projectID.String()}
-	claims.Subject = "agent"
+	claims.Subject = "agent:" + uuid.New().String()
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 
 	filteredTools := filter(ctx, allTools)

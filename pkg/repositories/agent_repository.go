@@ -1,0 +1,292 @@
+package repositories
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
+	"github.com/ekaya-inc/ekaya-engine/pkg/database"
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+)
+
+// AgentRepository provides data access for named AI agents.
+type AgentRepository interface {
+	Create(ctx context.Context, agent *models.Agent) error
+	GetByID(ctx context.Context, projectID, agentID uuid.UUID) (*models.Agent, error)
+	ListByProject(ctx context.Context, projectID uuid.UUID) ([]*models.Agent, error)
+	UpdateAPIKey(ctx context.Context, agentID uuid.UUID, encryptedKey string) error
+	Delete(ctx context.Context, projectID, agentID uuid.UUID) error
+	SetQueryAccess(ctx context.Context, agentID uuid.UUID, queryIDs []uuid.UUID) error
+	GetQueryAccess(ctx context.Context, agentID uuid.UUID) ([]uuid.UUID, error)
+	HasQueryAccess(ctx context.Context, agentID, queryID uuid.UUID) (bool, error)
+	FindByAPIKey(ctx context.Context, projectID uuid.UUID) ([]*models.Agent, error)
+}
+
+type agentRepository struct{}
+
+// NewAgentRepository creates a new AgentRepository.
+func NewAgentRepository() AgentRepository {
+	return &agentRepository{}
+}
+
+func (r *agentRepository) Create(ctx context.Context, agent *models.Agent) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	now := time.Now().UTC()
+	if agent.ID == uuid.Nil {
+		agent.ID = uuid.New()
+	}
+	agent.CreatedAt = now
+	agent.UpdatedAt = now
+
+	query := `
+		INSERT INTO engine_agents (id, project_id, name, api_key_encrypted, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6)`
+
+	_, err := scope.Conn.Exec(ctx, query,
+		agent.ID,
+		agent.ProjectID,
+		agent.Name,
+		agent.APIKeyEncrypted,
+		agent.CreatedAt,
+		agent.UpdatedAt,
+	)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return apperrors.ErrConflict
+		}
+		return fmt.Errorf("failed to create agent: %w", err)
+	}
+
+	return nil
+}
+
+func (r *agentRepository) GetByID(ctx context.Context, projectID, agentID uuid.UUID) (*models.Agent, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT id, project_id, name, api_key_encrypted, created_at, updated_at
+		FROM engine_agents
+		WHERE project_id = $1 AND id = $2`
+
+	var agent models.Agent
+	err := scope.Conn.QueryRow(ctx, query, projectID, agentID).Scan(
+		&agent.ID,
+		&agent.ProjectID,
+		&agent.Name,
+		&agent.APIKeyEncrypted,
+		&agent.CreatedAt,
+		&agent.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, apperrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get agent: %w", err)
+	}
+
+	return &agent, nil
+}
+
+func (r *agentRepository) ListByProject(ctx context.Context, projectID uuid.UUID) ([]*models.Agent, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT id, project_id, name, api_key_encrypted, created_at, updated_at
+		FROM engine_agents
+		WHERE project_id = $1
+		ORDER BY created_at ASC, name ASC`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list agents: %w", err)
+	}
+	defer rows.Close()
+
+	var agents []*models.Agent
+	for rows.Next() {
+		var agent models.Agent
+		if err := rows.Scan(
+			&agent.ID,
+			&agent.ProjectID,
+			&agent.Name,
+			&agent.APIKeyEncrypted,
+			&agent.CreatedAt,
+			&agent.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan agent: %w", err)
+		}
+		agents = append(agents, &agent)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate agents: %w", err)
+	}
+
+	return agents, nil
+}
+
+func (r *agentRepository) UpdateAPIKey(ctx context.Context, agentID uuid.UUID, encryptedKey string) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		UPDATE engine_agents
+		SET api_key_encrypted = $2, updated_at = $3
+		WHERE id = $1`
+
+	tag, err := scope.Conn.Exec(ctx, query, agentID, encryptedKey, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("failed to update agent API key: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return apperrors.ErrNotFound
+	}
+
+	return nil
+}
+
+func (r *agentRepository) Delete(ctx context.Context, projectID, agentID uuid.UUID) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `DELETE FROM engine_agents WHERE project_id = $1 AND id = $2`
+	tag, err := scope.Conn.Exec(ctx, query, projectID, agentID)
+	if err != nil {
+		return fmt.Errorf("failed to delete agent: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return apperrors.ErrNotFound
+	}
+
+	return nil
+}
+
+func (r *agentRepository) SetQueryAccess(ctx context.Context, agentID uuid.UUID, queryIDs []uuid.UUID) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	tx, err := scope.Conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // best effort cleanup
+
+	if _, err := tx.Exec(ctx, `DELETE FROM engine_agent_queries WHERE agent_id = $1`, agentID); err != nil {
+		return fmt.Errorf("failed to clear agent query access: %w", err)
+	}
+
+	for _, queryID := range queryIDs {
+		tag, err := tx.Exec(ctx, `
+			INSERT INTO engine_agent_queries (agent_id, query_id)
+			SELECT a.id, q.id
+			FROM engine_agents a
+			JOIN engine_queries q
+			  ON q.id = $2
+			 AND q.project_id = a.project_id
+			WHERE a.id = $1
+			  AND q.is_enabled = true
+			  AND q.status = 'approved'
+			  AND q.deleted_at IS NULL`,
+			agentID,
+			queryID,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to set agent query access: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("%w: %s", apperrors.ErrNotFound, queryID.String())
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit agent query access: %w", err)
+	}
+
+	return nil
+}
+
+func (r *agentRepository) GetQueryAccess(ctx context.Context, agentID uuid.UUID) ([]uuid.UUID, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	rows, err := scope.Conn.Query(ctx, `
+		SELECT query_id
+		FROM engine_agent_queries
+		WHERE agent_id = $1
+		ORDER BY query_id ASC`,
+		agentID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get agent query access: %w", err)
+	}
+	defer rows.Close()
+
+	var queryIDs []uuid.UUID
+	for rows.Next() {
+		var queryID uuid.UUID
+		if err := rows.Scan(&queryID); err != nil {
+			return nil, fmt.Errorf("failed to scan agent query access: %w", err)
+		}
+		queryIDs = append(queryIDs, queryID)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate agent query access: %w", err)
+	}
+
+	return queryIDs, nil
+}
+
+func (r *agentRepository) HasQueryAccess(ctx context.Context, agentID, queryID uuid.UUID) (bool, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return false, fmt.Errorf("no tenant scope in context")
+	}
+
+	var exists bool
+	err := scope.Conn.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM engine_agent_queries
+			WHERE agent_id = $1 AND query_id = $2
+		)`,
+		agentID,
+		queryID,
+	).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to check agent query access: %w", err)
+	}
+
+	return exists, nil
+}
+
+func (r *agentRepository) FindByAPIKey(ctx context.Context, projectID uuid.UUID) ([]*models.Agent, error) {
+	return r.ListByProject(ctx, projectID)
+}
+
+var _ AgentRepository = (*agentRepository)(nil)

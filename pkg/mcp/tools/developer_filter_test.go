@@ -924,9 +924,9 @@ func TestNewToolFilter_AgentAuth_AgentToolsEnabled(t *testing.T) {
 	filter := NewToolFilter(deps)
 	tools := createTestTools()
 
-	// Agent authentication - claims.Subject = "agent"
+	// Agent authentication - claims.Subject = "agent:<uuid>"
 	claims := &auth.Claims{ProjectID: projectID.String()}
-	claims.Subject = "agent"
+	claims.Subject = "agent:" + uuid.New().String()
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 	filtered := filter(ctx, tools)
 
@@ -975,9 +975,9 @@ func TestNewToolFilter_AgentAuth_AgentToolsDisabled(t *testing.T) {
 	filter := NewToolFilter(deps)
 	tools := createTestTools()
 
-	// Agent authentication - claims.Subject = "agent"
+	// Agent authentication - claims.Subject = "agent:<uuid>"
 	claims := &auth.Claims{ProjectID: projectID.String()}
-	claims.Subject = "agent"
+	claims.Subject = "agent:" + uuid.New().String()
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 	filtered := filter(ctx, tools)
 
@@ -1033,9 +1033,9 @@ func TestNewToolFilter_AgentAuth_NoConfig(t *testing.T) {
 	filter := NewToolFilter(deps)
 	tools := createTestTools()
 
-	// Agent authentication - claims.Subject = "agent"
+	// Agent authentication - claims.Subject = "agent:<uuid>"
 	claims := &auth.Claims{ProjectID: projectID.String()}
-	claims.Subject = "agent"
+	claims.Subject = "agent:" + uuid.New().String()
 	ctx = context.WithValue(context.Background(), auth.ClaimsKey, claims)
 	filtered := filter(ctx, tools)
 
@@ -1408,7 +1408,7 @@ func TestNewToolFilter_AIAgentsNotInstalled_AgentToolsHidden(t *testing.T) {
 
 	// Agent authentication
 	claims := &auth.Claims{ProjectID: projectID.String()}
-	claims.Subject = "agent"
+	claims.Subject = "agent:" + uuid.New().String()
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 	filtered := filter(ctx, tools)
 
@@ -1444,7 +1444,7 @@ func TestNewToolFilter_AIAgentsInstalled_AgentToolsShown(t *testing.T) {
 
 	// Agent authentication
 	claims := &auth.Claims{ProjectID: projectID.String()}
-	claims.Subject = "agent"
+	claims.Subject = "agent:" + uuid.New().String()
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 	filtered := filter(ctx, tools)
 

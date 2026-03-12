@@ -18,6 +18,8 @@ const (
 	ClaimsKey contextKey = "claims"
 	// TokenKey is the context key for storing the raw JWT token string.
 	TokenKey contextKey = "token"
+	// AgentIDKey is the context key for storing the authenticated named agent ID.
+	AgentIDKey contextKey = "agent_id"
 	// AzureTokenRefIDKey is the context key for storing Azure token reference ID.
 	AzureTokenRefIDKey contextKey = "azure_token_ref_id"
 )

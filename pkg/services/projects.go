@@ -92,7 +92,6 @@ type projectService struct {
 	projectRepo          repositories.ProjectRepository
 	userRepo             repositories.UserRepository
 	mcpConfigRepo        repositories.MCPConfigRepository
-	agentAPIKeyService   AgentAPIKeyService
 	installedAppService  InstalledAppService
 	centralClient        *central.Client
 	centralProjectClient CentralProjectClient
@@ -107,7 +106,6 @@ func NewProjectService(
 	projectRepo repositories.ProjectRepository,
 	userRepo repositories.UserRepository,
 	mcpConfigRepo repositories.MCPConfigRepository,
-	agentAPIKeyService AgentAPIKeyService,
 	installedAppService InstalledAppService,
 	centralClient *central.Client,
 	nonceStore NonceStore,
@@ -119,7 +117,6 @@ func NewProjectService(
 		projectRepo:          projectRepo,
 		userRepo:             userRepo,
 		mcpConfigRepo:        mcpConfigRepo,
-		agentAPIKeyService:   agentAPIKeyService,
 		installedAppService:  installedAppService,
 		centralClient:        centralClient,
 		centralProjectClient: centralClient,
@@ -210,9 +207,6 @@ func (s *projectService) Provision(ctx context.Context, projectID uuid.UUID, nam
 	if hasMCPServer || hasAIAgents {
 		// Create MCP config with defaults.
 		s.createDefaultMCPConfig(ctx, projectID)
-
-		// Generate Agent API Key for authentication.
-		s.generateAgentAPIKey(ctx, projectID)
 	}
 
 	// Extract URLs from parameters
@@ -242,7 +236,7 @@ func (s *projectService) Provision(ctx context.Context, projectID uuid.UUID, nam
 
 // createDefaultMCPConfig creates the MCP config with default settings for a new project.
 // This ensures tools are configured correctly from the start and prevents
-// other code paths (like SetAgentAPIKey) from creating config with wrong defaults.
+// other code paths from creating config with wrong defaults.
 // Errors are logged but not propagated since this is best-effort.
 func (s *projectService) createDefaultMCPConfig(ctx context.Context, projectID uuid.UUID) {
 	if s.mcpConfigRepo == nil {
@@ -252,23 +246,6 @@ func (s *projectService) createDefaultMCPConfig(ctx context.Context, projectID u
 	defaultConfig := models.DefaultMCPConfig(projectID)
 	if err := s.mcpConfigRepo.Upsert(ctx, defaultConfig); err != nil {
 		s.logger.Error("failed to create default MCP config",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err),
-		)
-	}
-}
-
-// generateAgentAPIKey generates an Agent API Key for MCP authentication.
-// This is called during project provisioning so the key is ready when the user
-// first visits the MCP Server configuration page. Users can regenerate the key there if needed.
-// Errors are logged but not propagated since this is best-effort.
-func (s *projectService) generateAgentAPIKey(ctx context.Context, projectID uuid.UUID) {
-	if s.agentAPIKeyService == nil {
-		return
-	}
-
-	if _, err := s.agentAPIKeyService.GenerateKey(ctx, projectID); err != nil {
-		s.logger.Error("failed to generate agent API key",
 			zap.String("project_id", projectID.String()),
 			zap.Error(err),
 		)

@@ -1,0 +1,247 @@
+package services
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
+	"github.com/ekaya-inc/ekaya-engine/pkg/crypto"
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+)
+
+const agentServiceTestEncryptionKey = "0123456789abcdef0123456789abcdef"
+
+type mockAgentRepository struct {
+	agents          map[uuid.UUID]*models.Agent
+	agentsByProj    map[uuid.UUID][]*models.Agent
+	queryAccess     map[uuid.UUID][]uuid.UUID
+	hasAccess       map[uuid.UUID]map[uuid.UUID]bool
+	createErr       error
+	getErr          error
+	listErr         error
+	updateAPIKeyErr error
+	deleteErr       error
+	setAccessErr    error
+	getAccessErr    error
+	hasAccessErr    error
+	findErr         error
+}
+
+func newMockAgentRepository() *mockAgentRepository {
+	return &mockAgentRepository{
+		agents:       make(map[uuid.UUID]*models.Agent),
+		agentsByProj: make(map[uuid.UUID][]*models.Agent),
+		queryAccess:  make(map[uuid.UUID][]uuid.UUID),
+		hasAccess:    make(map[uuid.UUID]map[uuid.UUID]bool),
+	}
+}
+
+func (m *mockAgentRepository) Create(ctx context.Context, agent *models.Agent) error {
+	if m.createErr != nil {
+		return m.createErr
+	}
+
+	cloned := *agent
+	m.agents[agent.ID] = &cloned
+	m.agentsByProj[agent.ProjectID] = append(m.agentsByProj[agent.ProjectID], &cloned)
+	return nil
+}
+
+func (m *mockAgentRepository) GetByID(ctx context.Context, projectID, agentID uuid.UUID) (*models.Agent, error) {
+	if m.getErr != nil {
+		return nil, m.getErr
+	}
+
+	agent, ok := m.agents[agentID]
+	if !ok || agent.ProjectID != projectID {
+		return nil, errors.New("agent not found")
+	}
+
+	cloned := *agent
+	return &cloned, nil
+}
+
+func (m *mockAgentRepository) ListByProject(ctx context.Context, projectID uuid.UUID) ([]*models.Agent, error) {
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
+
+	agents := m.agentsByProj[projectID]
+	result := make([]*models.Agent, 0, len(agents))
+	for _, agent := range agents {
+		cloned := *agent
+		result = append(result, &cloned)
+	}
+	return result, nil
+}
+
+func (m *mockAgentRepository) UpdateAPIKey(ctx context.Context, agentID uuid.UUID, encryptedKey string) error {
+	if m.updateAPIKeyErr != nil {
+		return m.updateAPIKeyErr
+	}
+
+	agent, ok := m.agents[agentID]
+	if !ok {
+		return errors.New("agent not found")
+	}
+	agent.APIKeyEncrypted = encryptedKey
+
+	for _, agents := range m.agentsByProj {
+		for _, listed := range agents {
+			if listed.ID == agentID {
+				listed.APIKeyEncrypted = encryptedKey
+			}
+		}
+	}
+
+	return nil
+}
+
+func (m *mockAgentRepository) Delete(ctx context.Context, projectID, agentID uuid.UUID) error {
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
+
+	delete(m.agents, agentID)
+	delete(m.queryAccess, agentID)
+	delete(m.hasAccess, agentID)
+
+	agents := m.agentsByProj[projectID]
+	filtered := make([]*models.Agent, 0, len(agents))
+	for _, agent := range agents {
+		if agent.ID != agentID {
+			filtered = append(filtered, agent)
+		}
+	}
+	m.agentsByProj[projectID] = filtered
+
+	return nil
+}
+
+func (m *mockAgentRepository) SetQueryAccess(ctx context.Context, agentID uuid.UUID, queryIDs []uuid.UUID) error {
+	if m.setAccessErr != nil {
+		return m.setAccessErr
+	}
+
+	cloned := append([]uuid.UUID(nil), queryIDs...)
+	m.queryAccess[agentID] = cloned
+	lookup := make(map[uuid.UUID]bool, len(queryIDs))
+	for _, queryID := range queryIDs {
+		lookup[queryID] = true
+	}
+	m.hasAccess[agentID] = lookup
+	return nil
+}
+
+func (m *mockAgentRepository) GetQueryAccess(ctx context.Context, agentID uuid.UUID) ([]uuid.UUID, error) {
+	if m.getAccessErr != nil {
+		return nil, m.getAccessErr
+	}
+
+	return append([]uuid.UUID(nil), m.queryAccess[agentID]...), nil
+}
+
+func (m *mockAgentRepository) HasQueryAccess(ctx context.Context, agentID, queryID uuid.UUID) (bool, error) {
+	if m.hasAccessErr != nil {
+		return false, m.hasAccessErr
+	}
+
+	return m.hasAccess[agentID][queryID], nil
+}
+
+func (m *mockAgentRepository) FindByAPIKey(ctx context.Context, projectID uuid.UUID) ([]*models.Agent, error) {
+	if m.findErr != nil {
+		return nil, m.findErr
+	}
+
+	return m.ListByProject(ctx, projectID)
+}
+
+func setupAgentServiceTest(t *testing.T) (AgentService, *mockAgentRepository) {
+	t.Helper()
+
+	encryptor, err := crypto.NewCredentialEncryptor(agentServiceTestEncryptionKey)
+	require.NoError(t, err)
+
+	repo := newMockAgentRepository()
+
+	svc := NewAgentService(repo, encryptor, zap.NewNop())
+	return svc, repo
+}
+
+func TestAgentServiceCreateRequiresAtLeastOneQuery(t *testing.T) {
+	svc, _ := setupAgentServiceTest(t)
+
+	agent, key, err := svc.Create(context.Background(), uuid.New(), "sales-bot", nil)
+	require.Error(t, err)
+	assert.Nil(t, agent)
+	assert.Empty(t, key)
+	assert.Contains(t, err.Error(), "at least one query")
+}
+
+func TestAgentServiceCreateAndValidateKey(t *testing.T) {
+	svc, repo := setupAgentServiceTest(t)
+	projectID := uuid.New()
+	queryIDs := []uuid.UUID{uuid.New(), uuid.New()}
+
+	agent, key, err := svc.Create(context.Background(), projectID, "sales-bot", queryIDs)
+	require.NoError(t, err)
+	require.NotNil(t, agent)
+	assert.Len(t, key, 64)
+	assert.Equal(t, "sales-bot", agent.Name)
+	assert.NotEqual(t, key, agent.APIKeyEncrypted)
+
+	storedQueries, err := repo.GetQueryAccess(context.Background(), agent.ID)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, queryIDs, storedQueries)
+
+	validated, err := svc.ValidateKey(context.Background(), projectID, key)
+	require.NoError(t, err)
+	require.NotNil(t, validated)
+	assert.Equal(t, agent.ID, validated.ID)
+	assert.Equal(t, "sales-bot", validated.Name)
+}
+
+func TestAgentServiceValidateKey_NoLegacyFallback(t *testing.T) {
+	svc, _ := setupAgentServiceTest(t)
+
+	agent, err := svc.ValidateKey(context.Background(), uuid.New(), "legacy-project-key")
+	require.NoError(t, err)
+	assert.Nil(t, agent)
+}
+
+func TestAgentServiceGetAndRotateKey(t *testing.T) {
+	svc, _ := setupAgentServiceTest(t)
+	projectID := uuid.New()
+	queryIDs := []uuid.UUID{uuid.New()}
+
+	agent, originalKey, err := svc.Create(context.Background(), projectID, "finance-bot", queryIDs)
+	require.NoError(t, err)
+
+	revealedKey, err := svc.GetKey(context.Background(), projectID, agent.ID)
+	require.NoError(t, err)
+	assert.Equal(t, originalKey, revealedKey)
+
+	rotatedKey, err := svc.RotateKey(context.Background(), projectID, agent.ID)
+	require.NoError(t, err)
+	assert.Len(t, rotatedKey, 64)
+	assert.NotEqual(t, originalKey, rotatedKey)
+
+	validated, err := svc.ValidateKey(context.Background(), projectID, rotatedKey)
+	require.NoError(t, err)
+	require.NotNil(t, validated)
+	assert.Equal(t, agent.ID, validated.ID)
+}
+
+func TestAgentServiceUpdateQueryAccessRequiresAtLeastOneQuery(t *testing.T) {
+	svc, _ := setupAgentServiceTest(t)
+
+	err := svc.UpdateQueryAccess(context.Background(), uuid.New(), uuid.New(), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at least one query")
+}

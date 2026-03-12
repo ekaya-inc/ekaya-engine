@@ -268,7 +268,7 @@ func (st *mcpScenarioTest) getToolsForBusinessUser() []string {
 
 // getToolsForAgent returns tools available to an agent (API key auth).
 func (st *mcpScenarioTest) getToolsForAgent() []string {
-	return st.getToolsForUser("agent")
+	return st.getToolsForUser("agent:" + uuid.New().String())
 }
 
 // ============================================================================

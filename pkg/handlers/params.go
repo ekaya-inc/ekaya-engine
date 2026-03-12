@@ -39,6 +39,12 @@ func ParseQueryID(w http.ResponseWriter, r *http.Request, logger *zap.Logger) (u
 	return parseUUID(w, r, "qid", "invalid_query_id", "Invalid query ID format", logger)
 }
 
+// ParseAgentID extracts and validates the agent ID from the request path.
+// Expects path parameter: aid
+func ParseAgentID(w http.ResponseWriter, r *http.Request, logger *zap.Logger) (uuid.UUID, bool) {
+	return parseUUID(w, r, "aid", "invalid_agent_id", "Invalid agent ID format", logger)
+}
+
 // ParseTermID extracts and validates the glossary term ID from the request path.
 // Returns the parsed UUID and true on success, or uuid.Nil and false on error
 // (after writing an error response).

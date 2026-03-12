@@ -261,11 +261,11 @@ func TestMCPTools_NewProject_UserGetsBusinessTools(t *testing.T) {
 func TestMCPTools_NewProject_AgentGetsAgentTools(t *testing.T) {
 	tc := setupMCPToolsTest(t)
 
-	// Agent authentication - claims.Subject = "agent"
+	// Agent authentication - claims.Subject = "agent:<uuid>"
 	claims := &auth.Claims{
 		ProjectID: tc.projectID.String(),
 	}
-	claims.Subject = "agent" // Agent auth identifier
+	claims.Subject = "agent:" + uuid.New().String()
 
 	tools := tc.filterToolsForTest(claims)
 

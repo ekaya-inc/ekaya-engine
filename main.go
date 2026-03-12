@@ -122,12 +122,12 @@ func main() {
 
 	// MCP config repository
 	mcpConfigRepo := repositories.NewMCPConfigRepository()
+	agentRepo := repositories.NewAgentRepository()
 
 	// Installed apps repository
 	installedAppRepo := repositories.NewInstalledAppRepository()
 
-	// Agent API key service (needed for MCP auth middleware)
-	agentAPIKeyService := services.NewAgentAPIKeyService(mcpConfigRepo, credentialEncryptor, logger)
+	agentService := services.NewAgentService(agentRepo, credentialEncryptor, logger)
 
 	// Ontology repositories
 	ontologyChatRepo := repositories.NewOntologyChatRepository()
@@ -160,7 +160,7 @@ func main() {
 	// Create services
 	nonceStore := services.NewNonceStore()
 	installedAppService := services.NewInstalledAppService(installedAppRepo, centralClient, nonceStore, cfg.BaseURL, logger)
-	projectService := services.NewProjectService(db, projectRepo, userRepo, mcpConfigRepo, agentAPIKeyService, installedAppService, centralClient, nonceStore, cfg.BaseURL, logger)
+	projectService := services.NewProjectService(db, projectRepo, userRepo, mcpConfigRepo, installedAppService, centralClient, nonceStore, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, adapterFactory, projectService, logger)
 	schemaService := services.NewSchemaService(schemaRepo, columnMetadataRepo, datasourceService, adapterFactory, logger)
@@ -334,6 +334,7 @@ func main() {
 		},
 		ProjectService:      projectService,
 		QueryService:        queryService,
+		AgentService:        agentService,
 		Auditor:             securityAuditor,
 		QueryHistoryService: queryHistoryService,
 	}
@@ -382,7 +383,7 @@ func main() {
 
 	mcpHandler := handlers.NewMCPHandler(mcpServer, logger, cfg.MCP)
 	tenantScopeProvider := database.NewTenantScopeProvider(db)
-	mcpAuthMiddleware := mcpauth.NewMiddleware(authService, agentAPIKeyService, tenantScopeProvider, logger,
+	mcpAuthMiddleware := mcpauth.NewMiddleware(authService, agentService, tenantScopeProvider, logger,
 		mcpauth.WithAuditLogger(mcpAuditLogger),
 	)
 	mcpHandler.RegisterRoutes(mux, mcpAuthMiddleware)
@@ -424,9 +425,8 @@ func main() {
 	mcpConfigHandler := handlers.NewMCPConfigHandler(mcpConfigService, logger)
 	mcpConfigHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
-	// Register agent API key handler (protected)
-	agentAPIKeyHandler := handlers.NewAgentAPIKeyHandler(agentAPIKeyService, logger)
-	agentAPIKeyHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+	agentHandler := handlers.NewAgentHandler(agentService, logger)
+	agentHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register ontology handlers (protected)
 	ontologyQuestionsHandler := handlers.NewOntologyQuestionsHandler(ontologyQuestionService, logger)
