@@ -268,7 +268,7 @@ func parseJWKSEndpoints(value string) map[string]string {
 
 	pairs := strings.Split(value, ",")
 	for _, pair := range pairs {
-		parts := strings.Split(pair, "=")
+		parts := strings.SplitN(strings.TrimSpace(pair), "=", 2)
 		if len(parts) == 2 {
 			endpoints[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
 		}
