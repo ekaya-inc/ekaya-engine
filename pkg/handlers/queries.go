@@ -10,6 +10,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/jsonutil"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 	sqlvalidator "github.com/ekaya-inc/ekaya-engine/pkg/sql"
@@ -1036,8 +1037,8 @@ func (h *QueriesHandler) toQueryResponse(q *models.Query) QueryResponse {
 		Constraints:           q.Constraints,
 		Tags:                  q.Tags,
 		UsageCount:            q.UsageCount,
-		CreatedAt:             q.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt:             q.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:             jsonutil.FormatUTCTime(q.CreatedAt),
+		UpdatedAt:             jsonutil.FormatUTCTime(q.UpdatedAt),
 		Status:                q.Status,
 		SuggestedBy:           q.SuggestedBy,
 		SuggestionContext:     q.SuggestionContext,
@@ -1045,8 +1046,7 @@ func (h *QueriesHandler) toQueryResponse(q *models.Query) QueryResponse {
 	}
 
 	if q.LastUsedAt != nil {
-		lastUsed := q.LastUsedAt.Format("2006-01-02T15:04:05Z07:00")
-		resp.LastUsedAt = &lastUsed
+		resp.LastUsedAt = jsonutil.FormatUTCTimePtr(q.LastUsedAt)
 	}
 
 	if q.ParentQueryID != nil {
@@ -1059,8 +1059,7 @@ func (h *QueriesHandler) toQueryResponse(q *models.Query) QueryResponse {
 	}
 
 	if q.ReviewedAt != nil {
-		reviewedAt := q.ReviewedAt.Format("2006-01-02T15:04:05Z07:00")
-		resp.ReviewedAt = &reviewedAt
+		resp.ReviewedAt = jsonutil.FormatUTCTimePtr(q.ReviewedAt)
 	}
 
 	return resp
@@ -1083,8 +1082,8 @@ func (h *QueriesHandler) toPendingQueryResponse(q *models.Query) PendingQueryRes
 		SuggestedBy:           q.SuggestedBy,
 		SuggestionContext:     q.SuggestionContext,
 		AllowsModification:    q.AllowsModification,
-		CreatedAt:             q.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt:             q.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:             jsonutil.FormatUTCTime(q.CreatedAt),
+		UpdatedAt:             jsonutil.FormatUTCTime(q.UpdatedAt),
 	}
 
 	if q.ParentQueryID != nil {

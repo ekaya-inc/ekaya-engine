@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/jsonutil"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
@@ -369,7 +370,7 @@ func (h *OntologyQuestionsHandler) toQuestionResponse(q *models.OntologyQuestion
 		DetectedPattern: q.DetectedPattern,
 		Status:          string(q.Status),
 		Answer:          q.Answer,
-		CreatedAt:       q.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:       jsonutil.FormatUTCTime(q.CreatedAt),
 	}
 
 	if q.WorkflowID != nil {
@@ -383,8 +384,7 @@ func (h *OntologyQuestionsHandler) toQuestionResponse(q *models.OntologyQuestion
 	}
 
 	if q.AnsweredAt != nil {
-		answered := q.AnsweredAt.Format("2006-01-02T15:04:05Z07:00")
-		resp.AnsweredAt = &answered
+		resp.AnsweredAt = jsonutil.FormatUTCTimePtr(q.AnsweredAt)
 	}
 
 	return resp

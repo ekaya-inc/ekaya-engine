@@ -3,6 +3,8 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/ekaya-inc/ekaya-engine/pkg/jsonutil"
 )
 
 // ErrorResponse writes a JSON error response and returns any encoding error.
@@ -21,5 +23,12 @@ func WriteJSON(w http.ResponseWriter, statusCode int, data interface{}) error {
 	if statusCode != http.StatusOK {
 		w.WriteHeader(statusCode)
 	}
-	return json.NewEncoder(w).Encode(data)
+
+	body, err := jsonutil.MarshalNormalized(data)
+	if err != nil {
+		return err
+	}
+
+	_, err = w.Write(append(body, '\n'))
+	return err
 }

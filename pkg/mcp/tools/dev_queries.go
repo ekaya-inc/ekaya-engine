@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/jsonutil"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
@@ -160,14 +161,7 @@ Use approve_query_suggestion or reject_query_suggestion to process suggestions.`
 		// Build response
 		suggestions := make([]querySuggestionInfo, 0, len(queries))
 		for _, q := range queries {
-			info := querySuggestionInfo{
-				ID:           q.ID.String(),
-				Name:         q.NaturalLanguagePrompt,
-				SQL:          q.SQLQuery,
-				CreatedAt:    q.CreatedAt.Format("2006-01-02T15:04:05Z"),
-				DatasourceID: q.DatasourceID.String(),
-				Status:       q.Status,
-			}
+			info := buildQuerySuggestionInfo(q, parentQueries)
 
 			// Set suggested_by
 			if q.SuggestedBy != nil {
@@ -218,6 +212,17 @@ Use approve_query_suggestion or reject_query_suggestion to process suggestions.`
 	}
 
 	mcpServer.AddTool(tool, handler)
+}
+
+func buildQuerySuggestionInfo(q *models.Query, _ map[uuid.UUID]*models.Query) querySuggestionInfo {
+	return querySuggestionInfo{
+		ID:           q.ID.String(),
+		Name:         q.NaturalLanguagePrompt,
+		SQL:          q.SQLQuery,
+		CreatedAt:    jsonutil.FormatUTCTime(q.CreatedAt),
+		DatasourceID: q.DatasourceID.String(),
+		Status:       q.Status,
+	}
 }
 
 // calculateChanges determines which fields changed between the parent query and the suggestion.

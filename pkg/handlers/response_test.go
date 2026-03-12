@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestErrorResponse(t *testing.T) {
@@ -110,5 +111,53 @@ func TestWriteJSON_UnencodableData(t *testing.T) {
 	err := WriteJSON(w, http.StatusOK, data)
 	if err == nil {
 		t.Error("expected error for unencodable data, got nil")
+	}
+}
+
+func TestWriteJSON_NormalizesTimestampFieldsToUTCRFC3339(t *testing.T) {
+	loc := time.FixedZone("UTC+2", 2*60*60)
+	createdAt := time.Date(2026, time.March, 12, 14, 15, 16, 987000000, loc)
+	updatedAt := createdAt.Add(90 * time.Second)
+
+	type nested struct {
+		UpdatedAt time.Time `json:"updated_at"`
+	}
+
+	type response struct {
+		CreatedAt  time.Time  `json:"created_at"`
+		ReviewedAt *time.Time `json:"reviewed_at,omitempty"`
+		Nested     nested     `json:"nested"`
+	}
+
+	w := httptest.NewRecorder()
+	err := WriteJSON(w, http.StatusOK, response{
+		CreatedAt:  createdAt,
+		ReviewedAt: &updatedAt,
+		Nested: nested{
+			UpdatedAt: updatedAt,
+		},
+	})
+	if err != nil {
+		t.Fatalf("WriteJSON returned error: %v", err)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
+
+	if got := body["created_at"]; got != "2026-03-12T12:15:16Z" {
+		t.Fatalf("created_at = %v, want %q", got, "2026-03-12T12:15:16Z")
+	}
+	if got := body["reviewed_at"]; got != "2026-03-12T12:16:46Z" {
+		t.Fatalf("reviewed_at = %v, want %q", got, "2026-03-12T12:16:46Z")
+	}
+
+	nestedBody, ok := body["nested"].(map[string]any)
+	if !ok {
+		t.Fatalf("nested = %T, want map[string]any", body["nested"])
+	}
+	if got := nestedBody["updated_at"]; got != "2026-03-12T12:16:46Z" {
+		t.Fatalf("nested.updated_at = %v, want %q", got, "2026-03-12T12:16:46Z")
 	}
 }

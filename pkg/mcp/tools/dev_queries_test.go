@@ -595,6 +595,24 @@ func TestQuerySuggestionInfo_OmitsEmptyFields(t *testing.T) {
 	}
 }
 
+func TestBuildQuerySuggestionInfoNormalizesCreatedAtToUTCRFC3339(t *testing.T) {
+	loc := time.FixedZone("UTC+2", 2*60*60)
+	createdAt := time.Date(2026, time.March, 12, 14, 15, 16, 987000000, loc)
+	suggestedBy := "agent"
+
+	info := buildQuerySuggestionInfo(&models.Query{
+		ID:                    uuid.New(),
+		DatasourceID:          uuid.New(),
+		NaturalLanguagePrompt: "Recent orders",
+		SQLQuery:              "SELECT * FROM orders",
+		CreatedAt:             createdAt,
+		Status:                "pending",
+		SuggestedBy:           &suggestedBy,
+	}, map[uuid.UUID]*models.Query{})
+
+	assert.Equal(t, "2026-03-12T12:15:16Z", info.CreatedAt)
+}
+
 func TestApproveQuerySuggestionResponse_Structure(t *testing.T) {
 	// Test that the response structure is correct
 	response := approveQuerySuggestionResponse{

@@ -3,13 +3,13 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/config"
+	"github.com/ekaya-inc/ekaya-engine/pkg/jsonutil"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
@@ -112,7 +112,7 @@ func (h *AIConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 		response.EmbeddingModel = cfg.EmbeddingModel
 		response.LastTestSuccess = cfg.LastTestSuccess
 		if cfg.LastTestedAt != nil {
-			response.LastTestedAt = cfg.LastTestedAt.Format(time.RFC3339)
+			response.LastTestedAt = jsonutil.FormatUTCTime(*cfg.LastTestedAt)
 		}
 	}
 

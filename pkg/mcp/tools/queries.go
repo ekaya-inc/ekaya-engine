@@ -15,6 +15,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/audit"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
+	"github.com/ekaya-inc/ekaya-engine/pkg/jsonutil"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
@@ -1436,7 +1437,7 @@ func registerGetQueryHistoryTool(s *server.MCPServer, deps *QueryToolDeps) {
 				ID:                  e.ID.String(),
 				NaturalLanguage:     e.NaturalLanguage,
 				SQL:                 e.SQL,
-				ExecutedAt:          e.ExecutedAt.Format(time.RFC3339),
+				ExecutedAt:          jsonutil.FormatUTCTime(e.ExecutedAt),
 				RowCount:            e.RowCount,
 				ExecutionDurationMs: e.ExecutionDurationMs,
 				TablesUsed:          e.TablesUsed,

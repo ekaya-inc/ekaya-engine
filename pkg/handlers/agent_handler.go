@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/jsonutil"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 	"github.com/google/uuid"
@@ -358,16 +358,15 @@ func buildAgentResponse(agent *services.AgentWithQueries) agentResponse {
 
 	var lastAccessed *string
 	if agent.LastAccessAt != nil {
-		s := agent.LastAccessAt.UTC().Format(time.RFC3339)
-		lastAccessed = &s
+		lastAccessed = jsonutil.FormatUTCTimePtr(agent.LastAccessAt)
 	}
 
 	return agentResponse{
 		ID:           agent.ID.String(),
 		Name:         agent.Name,
 		QueryIDs:     queryIDs,
-		CreatedAt:    agent.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:    agent.UpdatedAt.UTC().Format(time.RFC3339),
+		CreatedAt:    jsonutil.FormatUTCTime(agent.CreatedAt),
+		UpdatedAt:    jsonutil.FormatUTCTime(agent.UpdatedAt),
 		LastAccessAt: lastAccessed,
 		MCPCallCount: agent.MCPCallCount,
 	}
