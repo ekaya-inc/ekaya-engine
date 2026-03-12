@@ -203,6 +203,11 @@ func (m *Middleware) handleAgentKeyAuth(w http.ResponseWriter, r *http.Request, 
 		zap.String("path", r.URL.Path),
 		zap.String("project_id", projectID.String()))
 
+	// Record agent access (best effort — don't block the request on failure)
+	if err := m.agentService.RecordAccess(tenantCtx, agent.ID); err != nil {
+		m.logger.Warn("Failed to record agent access", zap.String("agent_id", agent.ID.String()), zap.Error(err))
+	}
+
 	// Inject claims into context (no token for agent auth)
 	ctx = context.WithValue(ctx, auth.ClaimsKey, claims)
 	ctx = context.WithValue(ctx, auth.AgentIDKey, agent.ID)

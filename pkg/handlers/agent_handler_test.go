@@ -92,6 +92,10 @@ func (m *mockAgentService) GetQueryAccess(ctx context.Context, agentID uuid.UUID
 	return m.getQueryAccessFn(ctx, agentID)
 }
 
+func (m *mockAgentService) RecordAccess(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
 func TestAgentHandlerCreateRejectsEmptyQuerySelection(t *testing.T) {
 	handler := NewAgentHandler(&mockAgentService{}, zap.NewNop())
 	projectID := uuid.New()

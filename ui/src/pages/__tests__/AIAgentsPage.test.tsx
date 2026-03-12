@@ -3,13 +3,11 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import engineApi from '../../services/engineApi';
-import type { MCPConfigResponse } from '../../types';
 import AIAgentsPage from '../AIAgentsPage';
 
 vi.mock('../../services/engineApi', () => ({
   default: {
     getInstalledApp: vi.fn(),
-    getMCPConfig: vi.fn(),
     listDataSources: vi.fn(),
     listQueries: vi.fn(),
     listAgents: vi.fn(),
@@ -20,6 +18,7 @@ vi.mock('../../services/engineApi', () => ({
     rotateAgentKey: vi.fn(),
     deleteAgent: vi.fn(),
     uninstallApp: vi.fn(),
+    getMCPConfig: vi.fn(),
   },
 }));
 
@@ -59,17 +58,7 @@ vi.mock('../../contexts/ConfigContext', () => ({
   }),
 }));
 
-const mockMCPConfig: MCPConfigResponse = {
-  serverUrl: 'https://example.com/mcp/proj-1',
-  userTools: [],
-  developerTools: [],
-  agentTools: [],
-  toolGroups: {},
-  appNames: {},
-  enabledTools: [],
-};
-
-function setupPageMocks(options: { agents?: Array<{ id: string; name: string; query_ids: string[]; created_at: string }>; approvedQueries?: Array<{ query_id: string; natural_language_prompt: string }>; } = {}) {
+function setupPageMocks(options: { agents?: Array<{ id: string; name: string; query_ids: string[]; created_at: string; mcp_call_count: number }>; approvedQueries?: Array<{ query_id: string; natural_language_prompt: string }>; } = {}) {
   const {
     agents = [],
     approvedQueries = [
@@ -78,10 +67,6 @@ function setupPageMocks(options: { agents?: Array<{ id: string; name: string; qu
     ],
   } = options;
 
-  vi.mocked(engineApi.getMCPConfig).mockResolvedValue({
-    success: true,
-    data: mockMCPConfig,
-  });
   vi.mocked(engineApi.getInstalledApp).mockResolvedValue({
     success: true,
     data: {
@@ -138,6 +123,7 @@ function setupPageMocks(options: { agents?: Array<{ id: string; name: string; qu
       name: 'sales-bot',
       query_ids: ['query-1'],
       created_at: '2024-01-01T00:00:00Z',
+      mcp_call_count: 0,
       api_key: 'created-key',
     },
   } as any);
@@ -148,6 +134,7 @@ function setupPageMocks(options: { agents?: Array<{ id: string; name: string; qu
       name: 'sales-bot',
       query_ids: ['query-1'],
       created_at: '2024-01-01T00:00:00Z',
+      mcp_call_count: 0,
     },
   } as any);
   vi.mocked(engineApi.rotateAgentKey).mockResolvedValue({
@@ -156,6 +143,10 @@ function setupPageMocks(options: { agents?: Array<{ id: string; name: string; qu
   });
   vi.mocked(engineApi.deleteAgent).mockResolvedValue({ success: true });
   vi.mocked(engineApi.uninstallApp).mockResolvedValue({ success: true });
+  vi.mocked(engineApi.getMCPConfig).mockResolvedValue({
+    success: true,
+    data: { server_url: 'http://localhost:3443/mcp/proj-1' },
+  } as any);
 }
 
 async function renderPage() {
@@ -181,7 +172,7 @@ describe('AIAgentsPage', () => {
   it('allows opening add agent dialog and cancelling without side effects', async () => {
     await renderPage();
 
-    fireEvent.click(screen.getByRole('button', { name: /\+ add agent/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add agent/i }));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
@@ -195,7 +186,7 @@ describe('AIAgentsPage', () => {
   it('requires selecting at least one pre-approved query before save is enabled', async () => {
     await renderPage();
 
-    fireEvent.click(screen.getByRole('button', { name: /\+ add agent/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add agent/i }));
     fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'sales-bot' } });
 
     const saveButton = screen.getByRole('button', { name: /^save$/i });
@@ -205,7 +196,7 @@ describe('AIAgentsPage', () => {
     expect(saveButton).toBeEnabled();
   });
 
-  it('shows read-only name on edit and requires exact delete phrase', async () => {
+  it('shows non-editable name on edit dialog', async () => {
     setupPageMocks({
       agents: [
         {
@@ -213,6 +204,7 @@ describe('AIAgentsPage', () => {
           name: 'sales-bot',
           query_ids: ['query-1'],
           created_at: '2024-01-01T00:00:00Z',
+          mcp_call_count: 0,
         },
       ],
     });
@@ -220,8 +212,25 @@ describe('AIAgentsPage', () => {
     await renderPage();
 
     fireEvent.click(screen.getByRole('button', { name: /edit sales-bot/i }));
-    const nameInput = await screen.findByLabelText(/name/i);
-    expect(nameInput).toHaveAttribute('readonly');
+    await screen.findByText('Edit Agent');
+    const nameField = screen.getByText('sales-bot', { selector: '#edit-agent-name' });
+    expect(nameField.tagName).toBe('DIV');
+  });
+
+  it('requires exact delete phrase before delete is enabled', async () => {
+    setupPageMocks({
+      agents: [
+        {
+          id: 'agent-1',
+          name: 'sales-bot',
+          query_ids: ['query-1'],
+          created_at: '2024-01-01T00:00:00Z',
+          mcp_call_count: 0,
+        },
+      ],
+    });
+
+    await renderPage();
 
     fireEvent.click(screen.getByRole('button', { name: /delete sales-bot/i }));
     const deleteButton = screen.getByRole('button', { name: /^delete$/i });

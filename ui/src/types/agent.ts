@@ -4,6 +4,8 @@ export interface Agent {
   query_ids: string[];
   created_at: string;
   updated_at?: string;
+  last_access_at?: string | null;
+  mcp_call_count: number;
 }
 
 export interface AgentCreateResponse extends Agent {

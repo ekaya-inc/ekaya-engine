@@ -17,6 +17,7 @@ import (
 // AgentKeyValidator validates agent API keys for MCP authentication.
 type AgentKeyValidator interface {
 	ValidateKey(ctx context.Context, projectID uuid.UUID, key string) (*models.Agent, error)
+	RecordAccess(ctx context.Context, agentID uuid.UUID) error
 }
 
 // AgentQueryAccessService exposes the agent query-access operations needed by MCP tools.
@@ -38,6 +39,7 @@ type AgentService interface {
 	UpdateQueryAccess(ctx context.Context, projectID, agentID uuid.UUID, queryIDs []uuid.UUID) error
 	RotateKey(ctx context.Context, projectID, agentID uuid.UUID) (string, error)
 	Delete(ctx context.Context, projectID, agentID uuid.UUID) error
+	RecordAccess(ctx context.Context, agentID uuid.UUID) error
 }
 
 // AgentWithQueries represents an agent plus its allowed query IDs.
@@ -225,6 +227,10 @@ func (s *agentService) GetQueryAccess(ctx context.Context, agentID uuid.UUID) ([
 
 func (s *agentService) HasQueryAccess(ctx context.Context, agentID, queryID uuid.UUID) (bool, error) {
 	return s.repo.HasQueryAccess(ctx, agentID, queryID)
+}
+
+func (s *agentService) RecordAccess(ctx context.Context, agentID uuid.UUID) error {
+	return s.repo.RecordAccess(ctx, agentID)
 }
 
 func (s *agentService) generateEncryptedKey() (string, string, error) {

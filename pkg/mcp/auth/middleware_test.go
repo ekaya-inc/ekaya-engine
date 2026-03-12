@@ -71,6 +71,10 @@ func (m *mockAgentKeyService) ValidateKey(ctx context.Context, projectID uuid.UU
 	return namedAgent, nil
 }
 
+func (m *mockAgentKeyService) RecordAccess(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
 // mockTenantScopeProvider is a mock implementation of TenantScopeProvider for testing.
 type mockTenantScopeProvider struct {
 	err error

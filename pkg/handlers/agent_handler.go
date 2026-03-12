@@ -25,11 +25,13 @@ type updateAgentRequest struct {
 }
 
 type agentResponse struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	QueryIDs  []string `json:"query_ids"`
-	CreatedAt string   `json:"created_at"`
-	UpdatedAt string   `json:"updated_at"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	QueryIDs     []string `json:"query_ids"`
+	CreatedAt    string   `json:"created_at"`
+	UpdatedAt    string   `json:"updated_at"`
+	LastAccessAt *string  `json:"last_access_at"`
+	MCPCallCount int64    `json:"mcp_call_count"`
 }
 
 type createAgentResponse struct {
@@ -354,11 +356,19 @@ func buildAgentResponse(agent *services.AgentWithQueries) agentResponse {
 		queryIDs = append(queryIDs, queryID.String())
 	}
 
+	var lastAccessed *string
+	if agent.LastAccessAt != nil {
+		s := agent.LastAccessAt.UTC().Format(time.RFC3339)
+		lastAccessed = &s
+	}
+
 	return agentResponse{
-		ID:        agent.ID.String(),
-		Name:      agent.Name,
-		QueryIDs:  queryIDs,
-		CreatedAt: agent.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt: agent.UpdatedAt.UTC().Format(time.RFC3339),
+		ID:           agent.ID.String(),
+		Name:         agent.Name,
+		QueryIDs:     queryIDs,
+		CreatedAt:    agent.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:    agent.UpdatedAt.UTC().Format(time.RFC3339),
+		LastAccessAt: lastAccessed,
+		MCPCallCount: agent.MCPCallCount,
 	}
 }

@@ -27,6 +27,7 @@ type AgentRepository interface {
 	GetQueryAccessByAgentIDs(ctx context.Context, agentIDs []uuid.UUID) (map[uuid.UUID][]uuid.UUID, error)
 	HasQueryAccess(ctx context.Context, agentID, queryID uuid.UUID) (bool, error)
 	FindByAPIKey(ctx context.Context, projectID uuid.UUID) ([]*models.Agent, error)
+	RecordAccess(ctx context.Context, agentID uuid.UUID) error
 }
 
 type agentRepository struct{}
@@ -78,8 +79,8 @@ func (r *agentRepository) insertAgent(ctx context.Context, execer agentExecer, a
 	agent.UpdatedAt = now
 
 	query := `
-		INSERT INTO engine_agents (id, project_id, name, api_key_encrypted, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6)`
+		INSERT INTO engine_agents (id, project_id, name, api_key_encrypted, created_at, updated_at, last_access_at, mcp_call_count)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
 
 	_, err := execer.Exec(ctx, query,
 		agent.ID,
@@ -88,6 +89,8 @@ func (r *agentRepository) insertAgent(ctx context.Context, execer agentExecer, a
 		agent.APIKeyEncrypted,
 		agent.CreatedAt,
 		agent.UpdatedAt,
+		agent.LastAccessAt,
+		agent.MCPCallCount,
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -107,7 +110,7 @@ func (r *agentRepository) GetByID(ctx context.Context, projectID, agentID uuid.U
 	}
 
 	query := `
-		SELECT id, project_id, name, api_key_encrypted, created_at, updated_at
+		SELECT id, project_id, name, api_key_encrypted, created_at, updated_at, last_access_at, mcp_call_count
 		FROM engine_agents
 		WHERE project_id = $1 AND id = $2`
 
@@ -119,6 +122,8 @@ func (r *agentRepository) GetByID(ctx context.Context, projectID, agentID uuid.U
 		&agent.APIKeyEncrypted,
 		&agent.CreatedAt,
 		&agent.UpdatedAt,
+		&agent.LastAccessAt,
+		&agent.MCPCallCount,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -137,7 +142,7 @@ func (r *agentRepository) ListByProject(ctx context.Context, projectID uuid.UUID
 	}
 
 	query := `
-		SELECT id, project_id, name, api_key_encrypted, created_at, updated_at
+		SELECT id, project_id, name, api_key_encrypted, created_at, updated_at, last_access_at, mcp_call_count
 		FROM engine_agents
 		WHERE project_id = $1
 		ORDER BY created_at ASC, name ASC`
@@ -158,6 +163,8 @@ func (r *agentRepository) ListByProject(ctx context.Context, projectID uuid.UUID
 			&agent.APIKeyEncrypted,
 			&agent.CreatedAt,
 			&agent.UpdatedAt,
+			&agent.LastAccessAt,
+			&agent.MCPCallCount,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan agent: %w", err)
 		}
@@ -363,6 +370,25 @@ func (r *agentRepository) HasQueryAccess(ctx context.Context, agentID, queryID u
 
 func (r *agentRepository) FindByAPIKey(ctx context.Context, projectID uuid.UUID) ([]*models.Agent, error) {
 	return r.ListByProject(ctx, projectID)
+}
+
+func (r *agentRepository) RecordAccess(ctx context.Context, agentID uuid.UUID) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		UPDATE engine_agents
+		SET last_access_at = $2, mcp_call_count = mcp_call_count + 1
+		WHERE id = $1`
+
+	_, err := scope.Conn.Exec(ctx, query, agentID, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("failed to record agent access: %w", err)
+	}
+
+	return nil
 }
 
 var _ AgentRepository = (*agentRepository)(nil)

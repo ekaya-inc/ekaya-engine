@@ -193,6 +193,10 @@ func (m *mockAgentRepository) FindByAPIKey(ctx context.Context, projectID uuid.U
 	return m.ListByProject(ctx, projectID)
 }
 
+func (m *mockAgentRepository) RecordAccess(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
 func setupAgentServiceTest(t *testing.T) (AgentService, *mockAgentRepository) {
 	t.Helper()
 
