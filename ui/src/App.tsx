@@ -25,6 +25,7 @@ import OAuthCallbackPage from './pages/OAuthCallbackPage';
 import OntologyForgePage from './pages/OntologyForgePage';
 import OntologyPage from './pages/OntologyPage';
 import OntologyQuestionsPage from './pages/OntologyQuestionsPage';
+import PendingQueriesPage from './pages/PendingQueriesPage';
 import ProjectDashboard from './pages/ProjectDashboard';
 import ProjectKnowledgePage from './pages/ProjectKnowledgePage';
 import ProjectsRedirect from './pages/ProjectsRedirect';
@@ -62,6 +63,7 @@ const App = (): JSX.Element => {
                   <Route path="project-knowledge" element={<ProjectKnowledgePage />} />
                   <Route path="ontology" element={<OntologyPage />} />
                   <Route path="ontology-questions" element={<OntologyQuestionsPage />} />
+                  <Route path="pending-queries/*" element={<PendingQueriesPage />} />
                   <Route path="queries/*" element={<QueriesPage />} />
                   <Route path="mcp-server" element={<MCPServerPage />} />
                   <Route path="mcp-events" element={<MCPEventsPage />} />

@@ -123,6 +123,18 @@ const ProjectDashboard = () => {
       );
     }
 
+    // Pending Queries tile for AI Data Liaison
+    if (installedApps.some((app) => app.app_id === APP_ID_AI_DATA_LIAISON)) {
+      tiles.push({
+        title: 'Pending Queries',
+        description: 'Review, approve, or reject AI-suggested queries.',
+        icon: Search,
+        path: `/projects/${pid}/pending-queries`,
+        disabled: !isConnected,
+        color: 'green', // AI Data Liaison color
+      });
+    }
+
     return tiles;
   }, [pid, isConnected, hasOntologyForge, installedApps]);
 
