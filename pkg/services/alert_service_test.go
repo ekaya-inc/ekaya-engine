@@ -84,6 +84,24 @@ func (m *mockAlertRepo) ResolveAlert(_ context.Context, projectID uuid.UUID, ale
 	return fmt.Errorf("alert not found or already resolved")
 }
 
+func (m *mockAlertRepo) ResolveAllAlerts(_ context.Context, projectID uuid.UUID, resolvedBy string, status string, notes string) (int64, error) {
+	if m.resolveErr != nil {
+		return 0, m.resolveErr
+	}
+	var count int64
+	for _, a := range m.alerts {
+		if a.ProjectID == projectID && a.Status == models.AlertStatusOpen {
+			a.Status = status
+			a.ResolvedBy = &resolvedBy
+			now := time.Now()
+			a.ResolvedAt = &now
+			a.ResolutionNotes = &notes
+			count++
+		}
+	}
+	return count, nil
+}
+
 func TestAlertService_CreateAlert_Valid(t *testing.T) {
 	repo := &mockAlertRepo{}
 	svc := NewAlertService(repo, zap.NewNop())

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -38,6 +39,9 @@ func (h *AlertHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.M
 	mux.HandleFunc("POST "+base+"/{alert_id}/resolve",
 		authMiddleware.RequireAuthWithPathValidation("pid")(
 			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.ResolveAlert))))
+	mux.HandleFunc("POST "+base+"/resolve-all",
+		authMiddleware.RequireAuthWithPathValidation("pid")(
+			auth.RequireRole(models.RoleAdmin, models.RoleData)(tenantMiddleware(h.ResolveAllAlerts))))
 
 	configBase := "/api/projects/{pid}/audit/alert-config"
 	mux.HandleFunc("GET "+configBase,
@@ -146,6 +150,54 @@ func (h *AlertHandler) ResolveAlert(w http.ResponseWriter, r *http.Request) {
 	if err := WriteJSON(w, http.StatusOK, ApiResponse{
 		Success: true,
 		Message: "Alert resolved successfully",
+	}); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// ResolveAllAlerts handles POST /api/projects/{pid}/audit/alerts/resolve-all
+func (h *AlertHandler) ResolveAllAlerts(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	var req resolveAlertRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_request", "Invalid request body"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if !models.ValidAlertResolution(req.Resolution) {
+		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_resolution", "Resolution must be 'resolved' or 'dismissed'"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	resolvedBy := auth.GetUserIDFromContext(r.Context())
+	if resolvedBy == "" {
+		if err := ErrorResponse(w, http.StatusUnauthorized, "unauthorized", "User ID not found in context"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	count, err := h.alertService.ResolveAllAlerts(r.Context(), projectID, resolvedBy, req.Resolution, req.Notes)
+	if err != nil {
+		h.logger.Error("Failed to resolve all alerts", zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "resolve_all_alerts_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if err := WriteJSON(w, http.StatusOK, ApiResponse{
+		Success: true,
+		Message: fmt.Sprintf("%d alert(s) resolved successfully", count),
+		Data:    map[string]int64{"resolved_count": count},
 	}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}

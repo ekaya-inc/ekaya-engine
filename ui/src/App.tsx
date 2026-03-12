@@ -15,6 +15,7 @@ import ApplicationsPage from './pages/ApplicationsPage';
 import AuditPage from './pages/AuditPage';
 import DatasourcePage from './pages/DatasourcePage';
 import EnrichmentPage from './pages/EnrichmentPage';
+import FileLoaderPage from './pages/FileLoaderPage';
 import GlossaryPage from './pages/GlossaryPage';
 import HelpPage from './pages/HelpPage';
 import HomePage from './pages/HomePage';
@@ -24,6 +25,7 @@ import OAuthCallbackPage from './pages/OAuthCallbackPage';
 import OntologyForgePage from './pages/OntologyForgePage';
 import OntologyPage from './pages/OntologyPage';
 import OntologyQuestionsPage from './pages/OntologyQuestionsPage';
+import PendingQueriesPage from './pages/PendingQueriesPage';
 import ProjectDashboard from './pages/ProjectDashboard';
 import ProjectKnowledgePage from './pages/ProjectKnowledgePage';
 import ProjectsRedirect from './pages/ProjectsRedirect';
@@ -52,6 +54,7 @@ const App = (): JSX.Element => {
                   <Route path="ai-agents" element={<AIAgentsPage />} />
                   <Route path="ai-data-liaison" element={<AIDataLiaisonPage />} />
                   <Route path="audit" element={<AuditPage />} />
+                  <Route path="file-loader" element={<FileLoaderPage />} />
                   <Route path="datasource" element={<DatasourcePage />} />
                   <Route path="schema" element={<SchemaPage />} />
                   <Route path="relationships" element={<RelationshipsPage />} />
@@ -60,6 +63,7 @@ const App = (): JSX.Element => {
                   <Route path="project-knowledge" element={<ProjectKnowledgePage />} />
                   <Route path="ontology" element={<OntologyPage />} />
                   <Route path="ontology-questions" element={<OntologyQuestionsPage />} />
+                  <Route path="pending-queries/*" element={<PendingQueriesPage />} />
                   <Route path="queries/*" element={<QueriesPage />} />
                   <Route path="mcp-server" element={<MCPServerPage />} />
                   <Route path="mcp-events" element={<MCPEventsPage />} />

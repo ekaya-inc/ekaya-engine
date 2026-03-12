@@ -12,6 +12,7 @@ const (
 	AppIDOntologyForge = "ontology-forge"
 	AppIDAIDataLiaison = "ai-data-liaison"
 	AppIDAIAgents      = "ai-agents"
+	AppIDFileLoader    = "file-loader"
 )
 
 // KnownAppIDs is the set of valid app identifiers.
@@ -20,6 +21,7 @@ var KnownAppIDs = map[string]bool{
 	AppIDOntologyForge: true,
 	AppIDAIDataLiaison: true,
 	AppIDAIAgents:      true,
+	AppIDFileLoader:    true,
 }
 
 // InstalledApp represents an application installed for a project.

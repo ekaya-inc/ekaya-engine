@@ -39,10 +39,11 @@ type AuditAlert struct {
 	AlertType string `json:"alert_type"`
 	Severity  string `json:"severity"`
 
-	Title           string      `json:"title"`
-	Description     *string     `json:"description,omitempty"`
-	AffectedUserID  *string     `json:"affected_user_id,omitempty"`
-	RelatedAuditIDs []uuid.UUID `json:"related_audit_ids,omitempty"`
+	Title             string      `json:"title"`
+	Description       *string     `json:"description,omitempty"`
+	AffectedUserID    *string     `json:"affected_user_id,omitempty"`
+	AffectedUserEmail *string     `json:"affected_user_email,omitempty"`
+	RelatedAuditIDs   []uuid.UUID `json:"related_audit_ids,omitempty"`
 
 	Status          string     `json:"status"`
 	ResolvedBy      *string    `json:"resolved_by,omitempty"`

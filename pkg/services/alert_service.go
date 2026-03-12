@@ -17,6 +17,7 @@ type AlertService interface {
 	GetAlertByID(ctx context.Context, projectID uuid.UUID, alertID uuid.UUID) (*models.AuditAlert, error)
 	CreateAlert(ctx context.Context, alert *models.AuditAlert) error
 	ResolveAlert(ctx context.Context, projectID uuid.UUID, alertID uuid.UUID, resolvedBy string, resolution string, notes string) error
+	ResolveAllAlerts(ctx context.Context, projectID uuid.UUID, resolvedBy string, resolution string, notes string) (int64, error)
 }
 
 type alertService struct {
@@ -111,4 +112,25 @@ func (s *alertService) ResolveAlert(ctx context.Context, projectID uuid.UUID, al
 		return err
 	}
 	return nil
+}
+
+func (s *alertService) ResolveAllAlerts(ctx context.Context, projectID uuid.UUID, resolvedBy string, resolution string, notes string) (int64, error) {
+	if !models.ValidAlertResolution(resolution) {
+		return 0, fmt.Errorf("invalid resolution: %s (must be 'resolved' or 'dismissed')", resolution)
+	}
+	if resolvedBy == "" {
+		return 0, fmt.Errorf("resolved_by is required")
+	}
+
+	count, err := s.repo.ResolveAllAlerts(ctx, projectID, resolvedBy, resolution, notes)
+	if err != nil {
+		s.logger.Error("Failed to resolve all alerts",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		return 0, err
+	}
+	s.logger.Info("Resolved all open alerts",
+		zap.String("project_id", projectID.String()),
+		zap.Int64("count", count))
+	return count, nil
 }

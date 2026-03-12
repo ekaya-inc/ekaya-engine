@@ -727,6 +727,10 @@ func (m *mockAlertServiceForRBAC) ResolveAlert(ctx context.Context, projectID uu
 	return nil
 }
 
+func (m *mockAlertServiceForRBAC) ResolveAllAlerts(ctx context.Context, projectID uuid.UUID, resolvedBy string, resolution string, notes string) (int64, error) {
+	return 0, nil
+}
+
 func TestRBAC_GlossaryHandler(t *testing.T) {
 	projectID := uuid.New()
 	termID := uuid.New()

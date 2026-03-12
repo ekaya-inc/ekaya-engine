@@ -19,6 +19,7 @@ type AlertRepository interface {
 	GetAlertByID(ctx context.Context, projectID uuid.UUID, alertID uuid.UUID) (*models.AuditAlert, error)
 	CreateAlert(ctx context.Context, alert *models.AuditAlert) error
 	ResolveAlert(ctx context.Context, projectID uuid.UUID, alertID uuid.UUID, resolvedBy string, status string, notes string) error
+	ResolveAllAlerts(ctx context.Context, projectID uuid.UUID, resolvedBy string, status string, notes string) (int64, error)
 }
 
 type alertRepository struct{}
@@ -37,27 +38,27 @@ func (r *alertRepository) ListAlerts(ctx context.Context, projectID uuid.UUID, f
 
 	limit, offset := normalizePageParams(filters.Limit, filters.Offset)
 
-	conditions := []string{"project_id = $1"}
+	conditions := []string{"a.project_id = $1"}
 	args := []any{projectID}
 	argIdx := 2
 
 	if filters.Status != "" {
-		conditions = append(conditions, fmt.Sprintf("status = $%d", argIdx))
+		conditions = append(conditions, fmt.Sprintf("a.status = $%d", argIdx))
 		args = append(args, filters.Status)
 		argIdx++
 	}
 	if filters.Severity != "" {
-		conditions = append(conditions, fmt.Sprintf("severity = $%d", argIdx))
+		conditions = append(conditions, fmt.Sprintf("a.severity = $%d", argIdx))
 		args = append(args, filters.Severity)
 		argIdx++
 	}
 	if filters.Since != nil {
-		conditions = append(conditions, fmt.Sprintf("created_at >= $%d", argIdx))
+		conditions = append(conditions, fmt.Sprintf("a.created_at >= $%d", argIdx))
 		args = append(args, *filters.Since)
 		argIdx++
 	}
 	if filters.Until != nil {
-		conditions = append(conditions, fmt.Sprintf("created_at <= $%d", argIdx))
+		conditions = append(conditions, fmt.Sprintf("a.created_at <= $%d", argIdx))
 		args = append(args, *filters.Until)
 		argIdx++
 	}
@@ -65,20 +66,21 @@ func (r *alertRepository) ListAlerts(ctx context.Context, projectID uuid.UUID, f
 	where := strings.Join(conditions, " AND ")
 
 	// Count
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM engine_mcp_audit_alerts WHERE %s`, where)
+	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM engine_mcp_audit_alerts a WHERE %s`, where)
 	var total int
 	if err := scope.Conn.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("failed to count alerts: %w", err)
 	}
 
-	// Data
+	// Data with join to engine_users for affected user email
 	dataQuery := fmt.Sprintf(`
-		SELECT id, project_id, alert_type, severity, title, description,
-		       affected_user_id, related_audit_ids, status, resolved_by,
-		       resolved_at, resolution_notes, created_at, updated_at
-		FROM engine_mcp_audit_alerts
+		SELECT a.id, a.project_id, a.alert_type, a.severity, a.title, a.description,
+		       a.affected_user_id, u.email, a.related_audit_ids, a.status, a.resolved_by,
+		       a.resolved_at, a.resolution_notes, a.created_at, a.updated_at
+		FROM engine_mcp_audit_alerts a
+		LEFT JOIN engine_users u ON u.project_id = a.project_id AND u.user_id::text = a.affected_user_id
 		WHERE %s
-		ORDER BY created_at DESC
+		ORDER BY a.created_at DESC
 		LIMIT $%d OFFSET $%d`, where, argIdx, argIdx+1)
 
 	args = append(args, limit, offset)
@@ -112,18 +114,19 @@ func (r *alertRepository) GetAlertByID(ctx context.Context, projectID uuid.UUID,
 	}
 
 	row := scope.Conn.QueryRow(ctx, `
-		SELECT id, project_id, alert_type, severity, title, description,
-		       affected_user_id, related_audit_ids, status, resolved_by,
-		       resolved_at, resolution_notes, created_at, updated_at
-		FROM engine_mcp_audit_alerts
-		WHERE project_id = $1 AND id = $2`, projectID, alertID)
+		SELECT a.id, a.project_id, a.alert_type, a.severity, a.title, a.description,
+		       a.affected_user_id, u.email, a.related_audit_ids, a.status, a.resolved_by,
+		       a.resolved_at, a.resolution_notes, a.created_at, a.updated_at
+		FROM engine_mcp_audit_alerts a
+		LEFT JOIN engine_users u ON u.project_id = a.project_id AND u.user_id::text = a.affected_user_id
+		WHERE a.project_id = $1 AND a.id = $2`, projectID, alertID)
 
 	alert := &models.AuditAlert{}
 	err := row.Scan(
 		&alert.ID, &alert.ProjectID, &alert.AlertType, &alert.Severity,
-		&alert.Title, &alert.Description, &alert.AffectedUserID, &alert.RelatedAuditIDs,
-		&alert.Status, &alert.ResolvedBy, &alert.ResolvedAt, &alert.ResolutionNotes,
-		&alert.CreatedAt, &alert.UpdatedAt,
+		&alert.Title, &alert.Description, &alert.AffectedUserID, &alert.AffectedUserEmail,
+		&alert.RelatedAuditIDs, &alert.Status, &alert.ResolvedBy, &alert.ResolvedAt,
+		&alert.ResolutionNotes, &alert.CreatedAt, &alert.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -182,13 +185,33 @@ func (r *alertRepository) ResolveAlert(ctx context.Context, projectID uuid.UUID,
 	return nil
 }
 
+func (r *alertRepository) ResolveAllAlerts(ctx context.Context, projectID uuid.UUID, resolvedBy string, status string, notes string) (int64, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return 0, fmt.Errorf("no tenant scope in context")
+	}
+
+	now := time.Now()
+	tag, err := scope.Conn.Exec(ctx, `
+		UPDATE engine_mcp_audit_alerts
+		SET status = $2, resolved_by = $3, resolved_at = $4, resolution_notes = $5, updated_at = $4
+		WHERE project_id = $1 AND status = 'open'`,
+		projectID, status, resolvedBy, now, notes,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failed to resolve all alerts: %w", err)
+	}
+
+	return tag.RowsAffected(), nil
+}
+
 func scanAlert(rows pgx.Rows) (*models.AuditAlert, error) {
 	alert := &models.AuditAlert{}
 	err := rows.Scan(
 		&alert.ID, &alert.ProjectID, &alert.AlertType, &alert.Severity,
-		&alert.Title, &alert.Description, &alert.AffectedUserID, &alert.RelatedAuditIDs,
-		&alert.Status, &alert.ResolvedBy, &alert.ResolvedAt, &alert.ResolutionNotes,
-		&alert.CreatedAt, &alert.UpdatedAt,
+		&alert.Title, &alert.Description, &alert.AffectedUserID, &alert.AffectedUserEmail,
+		&alert.RelatedAuditIDs, &alert.Status, &alert.ResolvedBy, &alert.ResolvedAt,
+		&alert.ResolutionNotes, &alert.CreatedAt, &alert.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan alert: %w", err)

@@ -100,8 +100,8 @@ describe('ApplicationsPage', () => {
     expect(screen.getByText('Ontology Forge')).toBeInTheDocument();
     // AI Agents tile is temporarily hidden
     expect(screen.queryByText('AI Agents and Automation')).not.toBeInTheDocument();
-    expect(screen.getByText('Product Kit [BETA]')).toBeInTheDocument();
-    expect(screen.getByText('On-Premise Chat [BETA]')).toBeInTheDocument();
+    expect(screen.getByText('Product Kit [COMING SOON]')).toBeInTheDocument();
+    expect(screen.getByText('On-Premise Chat [COMING SOON]')).toBeInTheDocument();
     expect(screen.getByText('Your own Data Application')).toBeInTheDocument();
   });
 
@@ -119,14 +119,14 @@ describe('ApplicationsPage', () => {
   it('renders Install buttons for installable apps when not installed', () => {
     renderPage();
 
-    // AI Data Liaison + Ontology Forge have Install buttons (AI Agents tile is temporarily hidden)
+    // AI Data Liaison + Ontology Forge + Spreadsheet Loader have Install buttons (AI Agents tile is temporarily hidden)
     const installButtons = screen.getAllByRole('button', { name: 'Install' });
-    expect(installButtons).toHaveLength(2);
+    expect(installButtons).toHaveLength(3);
     const learnMoreButtons = screen.getAllByRole('button', { name: /Learn More/i });
-    expect(learnMoreButtons).toHaveLength(1);
+    expect(learnMoreButtons).toHaveLength(2);
   });
 
-  it('renders Installed badge and Configure button when AI Data Liaison is installed', () => {
+  it('renders Installed badge, Learn More, and Configure button when AI Data Liaison is installed', () => {
     mockInstalledApps = ['ai-data-liaison'];
     renderPage();
 
@@ -134,17 +134,35 @@ describe('ApplicationsPage', () => {
     expect(
       screen.getByRole('button', { name: 'Configure' })
     ).toBeInTheDocument();
-    // Ontology Forge still has an Install button
+    // Learn More should still be visible for installed apps that have a learnMoreUrl
+    const learnMoreButtons = screen.getAllByRole('button', { name: /Learn More/i });
+    expect(learnMoreButtons.length).toBeGreaterThanOrEqual(2);
+    // Ontology Forge + Spreadsheet Loader still have Install buttons
     const installButtons = screen.getAllByRole('button', { name: 'Install' });
-    expect(installButtons).toHaveLength(1);
+    expect(installButtons).toHaveLength(2);
   });
 
-  it('calls install and navigates when clicking Install on AI Data Liaison', async () => {
+  it('disables AI Data Liaison Install button when Ontology Forge is not installed', () => {
+    renderPage();
+
+    // AI Data Liaison Install button (second) should be disabled
+    const installButtons = screen.getAllByRole('button', { name: 'Install' });
+    expect(installButtons[1]).toBeDisabled();
+    // "Requires" note should be visible
+    expect(screen.getByText(/Requires Ontology Forge/)).toBeInTheDocument();
+  });
+
+  it('enables AI Data Liaison Install button when Ontology Forge is installed', async () => {
+    mockInstalledApps = ['ontology-forge'];
     mockInstall.mockResolvedValue({ id: 'test-id', app_id: 'ai-data-liaison' });
     renderPage();
 
-    // Click the first Install button (AI Data Liaison)
+    // "Requires" note should be hidden
+    expect(screen.queryByText(/Requires Ontology Forge/)).not.toBeInTheDocument();
+
+    // AI Data Liaison Install button (first non-installed) should be enabled
     const installButtons = screen.getAllByRole('button', { name: 'Install' });
+    expect(installButtons[0]).not.toBeDisabled();
     fireEvent.click(installButtons[0] as HTMLElement);
 
     await waitFor(() => {
@@ -175,7 +193,7 @@ describe('ApplicationsPage', () => {
 
     expect(mockClick).toHaveBeenCalled();
     expect(capturedHref).toBe(
-      'mailto:sales@ekaya.ai?subject=Interest%20in%20Product%20Kit%20%5BBETA%5D%20for%20my%20Ekaya%20project'
+      'mailto:sales@ekaya.ai?subject=Interest%20in%20Product%20Kit%20%5BCOMING%20SOON%5D%20for%20my%20Ekaya%20project'
     );
   });
 
@@ -190,7 +208,7 @@ describe('ApplicationsPage', () => {
 
     expect(mockClick).toHaveBeenCalled();
     expect(capturedHref).toBe(
-      'mailto:sales@ekaya.ai?subject=Interest%20in%20On-Premise%20Chat%20%5BBETA%5D%20for%20my%20Ekaya%20project'
+      'mailto:sales@ekaya.ai?subject=Interest%20in%20On-Premise%20Chat%20%5BCOMING%20SOON%5D%20for%20my%20Ekaya%20project'
     );
   });
 
@@ -232,8 +250,15 @@ describe('ApplicationsPage', () => {
     renderPage();
 
     const learnMoreButtons = screen.getAllByRole('button', { name: /Learn More/i });
+    // First Learn More is Ontology Forge (central), second is AI Data Liaison (central)
     fireEvent.click(learnMoreButtons[0] as HTMLElement);
+    expect(mockOpen).toHaveBeenCalledWith(
+      'https://us.ekaya.ai/apps/ontology-forge',
+      '_blank',
+      'noopener,noreferrer'
+    );
 
+    fireEvent.click(learnMoreButtons[1] as HTMLElement);
     expect(mockOpen).toHaveBeenCalledWith(
       'https://us.ekaya.ai/apps/ai-data-liaison',
       '_blank',

@@ -87,6 +87,7 @@ Do NOT leave tests until the end. Tests come first, implementation follows. This
 Multiple processes (agents, humans) may be working in this project simultaneously. When committing:
 
 - **Only commit files you changed.** Do not stage or commit files modified by another process.
+- **Never revert or restore files you didn't change.** If `git status` or `git diff` shows modifications to files you didn't touch, leave them alone — another process is working on them.
 - If a file you changed also has changes you didn't make, check recent commits. If those changes aren't in a recent commit, leave the file for the other process to commit. If they are already committed and your changes are on top, include it in your commit.
 - Never run `git add -A` or `git add .` — always stage specific files by name.
 

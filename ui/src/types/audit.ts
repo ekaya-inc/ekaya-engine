@@ -20,6 +20,7 @@ export interface QueryExecution {
   row_count: number;
   execution_time_ms: number;
   user_id?: string;
+  user_email?: string;
   source: string;
   is_modifying: boolean;
   success: boolean;
@@ -48,6 +49,7 @@ export interface OntologyChange {
   action: string;
   source: string;
   user_id?: string;
+  user_email?: string;
   changed_fields?: Record<string, { old: unknown; new: unknown }>;
   created_at: string;
 }
@@ -159,6 +161,7 @@ export interface AuditAlert {
   title: string;
   description?: string;
   affected_user_id?: string;
+  affected_user_email?: string;
   related_audit_ids?: string[];
   status: string;
   resolved_by?: string;

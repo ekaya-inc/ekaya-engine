@@ -1298,6 +1298,23 @@ class EngineApiService {
   }
 
   /**
+   * Resolve all open alerts for a project
+   * POST /api/projects/{projectId}/audit/alerts/resolve-all
+   */
+  async resolveAllAuditAlerts(
+    projectId: string,
+    body: ResolveAlertRequest
+  ): Promise<ApiResponse<{ message: string; resolved_count: number }>> {
+    return this.makeRequest<{ message: string; resolved_count: number }>(
+      `/${projectId}/audit/alerts/resolve-all`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }
+    );
+  }
+
+  /**
    * Get alert configuration for a project
    * GET /api/projects/{projectId}/audit/alert-config
    */
@@ -1364,6 +1381,47 @@ class EngineApiService {
         body: JSON.stringify({ action, status, state }),
       }
     );
+  }
+  // ─── File Loader Methods ───
+
+  /**
+   * Upload a file for loading (multipart/form-data).
+   */
+  async etlUploadFile<T>(
+    projectId: string,
+    file: File,
+    endpoint: 'load' | 'preview' = 'load'
+  ): Promise<ApiResponse<T>> {
+    const url = `${this.baseURL}/${projectId}/file-loader/${endpoint}`;
+    const formData = new FormData();
+    formData.append('file', file);
+
+    // Do NOT set Content-Type — the browser sets it with the multipart boundary
+    const response = await fetchWithAuth(url, {
+      method: 'POST',
+      body: formData,
+    });
+
+    const data = (await response.json()) as ApiResponse<T>;
+
+    if (!response.ok) {
+      throw new Error(
+        data.message ?? data.error ?? `HTTP ${response.status}: ${response.statusText}`
+      );
+    }
+
+    return data;
+  }
+
+  /**
+   * Get file-loader load history for a project.
+   */
+  async etlGetLoadHistory<T>(
+    projectId: string,
+    limit?: number
+  ): Promise<ApiResponse<T>> {
+    const params = limit ? `?limit=${limit}` : '';
+    return this.makeRequest<T>(`/${projectId}/file-loader/status${params}`);
   }
 }
 

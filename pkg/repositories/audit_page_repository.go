@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -87,13 +88,14 @@ func (r *auditPageRepository) ListQueryExecutions(ctx context.Context, projectID
 		return nil, 0, fmt.Errorf("failed to count query executions: %w", err)
 	}
 
-	// Data query with join to engine_queries for query name
+	// Data query with join to engine_queries for query name and engine_users for email
 	dataQuery := fmt.Sprintf(`
 		SELECT e.id, e.project_id, e.query_id, e.sql, e.executed_at, e.row_count,
-		       e.execution_time_ms, e.user_id, e.source, e.is_modifying, e.success,
+		       e.execution_time_ms, e.user_id, u.email, e.source, e.is_modifying, e.success,
 		       e.error_message, q.natural_language_prompt
 		FROM engine_query_executions e
 		LEFT JOIN engine_queries q ON q.id = e.query_id AND q.deleted_at IS NULL
+		LEFT JOIN engine_users u ON u.project_id = e.project_id AND u.user_id::text = e.user_id
 		WHERE %s
 		ORDER BY e.executed_at DESC
 		LIMIT $%d OFFSET $%d`, where, argIdx, argIdx+1)
@@ -111,7 +113,7 @@ func (r *auditPageRepository) ListQueryExecutions(ctx context.Context, projectID
 		row := &models.QueryExecutionRow{}
 		if err := rows.Scan(
 			&row.ID, &row.ProjectID, &row.QueryID, &row.SQL, &row.ExecutedAt,
-			&row.RowCount, &row.ExecutionTimeMs, &row.UserID, &row.Source,
+			&row.RowCount, &row.ExecutionTimeMs, &row.UserID, &row.UserEmail, &row.Source,
 			&row.IsModifying, &row.Success, &row.ErrorMessage, &row.QueryName,
 		); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan query execution: %w", err)
@@ -134,12 +136,12 @@ func (r *auditPageRepository) ListOntologyChanges(ctx context.Context, projectID
 
 	limit, offset := normalizePageParams(filters.Limit, filters.Offset)
 
-	conditions := []string{"project_id = $1"}
+	conditions := []string{"a.project_id = $1"}
 	args := []any{projectID}
 	argIdx := 2
 
 	if filters.UserID != "" {
-		conditions = append(conditions, fmt.Sprintf("user_id = $%d", argIdx))
+		conditions = append(conditions, fmt.Sprintf("a.user_id = $%d", argIdx))
 		uid, err := uuid.Parse(filters.UserID)
 		if err != nil {
 			return nil, 0, fmt.Errorf("invalid user_id: %w", err)
@@ -148,27 +150,27 @@ func (r *auditPageRepository) ListOntologyChanges(ctx context.Context, projectID
 		argIdx++
 	}
 	if filters.Since != nil {
-		conditions = append(conditions, fmt.Sprintf("created_at >= $%d", argIdx))
+		conditions = append(conditions, fmt.Sprintf("a.created_at >= $%d", argIdx))
 		args = append(args, *filters.Since)
 		argIdx++
 	}
 	if filters.Until != nil {
-		conditions = append(conditions, fmt.Sprintf("created_at <= $%d", argIdx))
+		conditions = append(conditions, fmt.Sprintf("a.created_at <= $%d", argIdx))
 		args = append(args, *filters.Until)
 		argIdx++
 	}
 	if filters.EntityType != "" {
-		conditions = append(conditions, fmt.Sprintf("entity_type = $%d", argIdx))
+		conditions = append(conditions, fmt.Sprintf("a.entity_type = $%d", argIdx))
 		args = append(args, filters.EntityType)
 		argIdx++
 	}
 	if filters.Action != "" {
-		conditions = append(conditions, fmt.Sprintf("action = $%d", argIdx))
+		conditions = append(conditions, fmt.Sprintf("a.action = $%d", argIdx))
 		args = append(args, filters.Action)
 		argIdx++
 	}
 	if filters.Source != "" {
-		conditions = append(conditions, fmt.Sprintf("source = $%d", argIdx))
+		conditions = append(conditions, fmt.Sprintf("a.source = $%d", argIdx))
 		args = append(args, filters.Source)
 		argIdx++
 	}
@@ -176,18 +178,19 @@ func (r *auditPageRepository) ListOntologyChanges(ctx context.Context, projectID
 	where := strings.Join(conditions, " AND ")
 
 	// Count
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM engine_audit_log WHERE %s`, where)
+	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM engine_audit_log a WHERE %s`, where)
 	var total int
 	if err := scope.Conn.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("failed to count ontology changes: %w", err)
 	}
 
-	// Data
+	// Data with join to engine_users for email
 	dataQuery := fmt.Sprintf(`
-		SELECT id, project_id, entity_type, entity_id, action, source, user_id, changed_fields, created_at
-		FROM engine_audit_log
+		SELECT a.id, a.project_id, a.entity_type, a.entity_id, a.action, a.source, a.user_id, u.email, a.changed_fields, a.created_at
+		FROM engine_audit_log a
+		LEFT JOIN engine_users u ON u.project_id = a.project_id AND u.user_id = a.user_id
 		WHERE %s
-		ORDER BY created_at DESC
+		ORDER BY a.created_at DESC
 		LIMIT $%d OFFSET $%d`, where, argIdx, argIdx+1)
 
 	args = append(args, limit, offset)
@@ -200,11 +203,21 @@ func (r *auditPageRepository) ListOntologyChanges(ctx context.Context, projectID
 
 	var entries []*models.AuditLogEntry
 	for rows.Next() {
-		entry, err := scanAuditLogEntry(rows)
-		if err != nil {
-			return nil, 0, err
+		var entry models.AuditLogEntry
+		var changedFieldsJSON []byte
+		if err := rows.Scan(
+			&entry.ID, &entry.ProjectID, &entry.EntityType, &entry.EntityID,
+			&entry.Action, &entry.Source, &entry.UserID, &entry.UserEmail,
+			&changedFieldsJSON, &entry.CreatedAt,
+		); err != nil {
+			return nil, 0, fmt.Errorf("failed to scan ontology change: %w", err)
 		}
-		entries = append(entries, entry)
+		if len(changedFieldsJSON) > 0 {
+			if err := json.Unmarshal(changedFieldsJSON, &entry.ChangedFields); err != nil {
+				return nil, 0, fmt.Errorf("failed to unmarshal changed_fields: %w", err)
+			}
+		}
+		entries = append(entries, &entry)
 	}
 
 	if err := rows.Err(); err != nil {

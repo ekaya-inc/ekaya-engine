@@ -1,7 +1,8 @@
-import { AlertTriangle, ArrowLeft, ExternalLink, Info, Loader2, Check, Copy } from 'lucide-react';
+import { AlertTriangle, ExternalLink, Loader2, Check, Copy } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 
+import AppPageHeader from '../components/AppPageHeader';
 import MCPLogo from '../components/icons/MCPLogo';
 import ToolInventory from '../components/mcp/ToolInventory';
 import SetupChecklist from '../components/SetupChecklist';
@@ -10,17 +11,14 @@ import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Switch } from '../components/ui/Switch';
 import { useConfig } from '../contexts/ConfigContext';
-import { useProject } from '../contexts/ProjectContext';
 import { useToast } from '../hooks/useToast';
 import { getUserRoles } from '../lib/auth-token';
 import engineApi from '../services/engineApi';
 import type { Datasource, MCPConfigResponse, ServerStatusResponse } from '../types';
 
 const MCPServerPage = () => {
-  const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
   const { config: appConfig } = useConfig();
-  const { urls } = useProject();
   const { toast } = useToast();
 
   const [config, setConfig] = useState<MCPConfigResponse | null>(null);
@@ -145,20 +143,12 @@ const MCPServerPage = () => {
 
     return (
       <div className="mx-auto max-w-4xl">
-        <div className="mb-6">
-          <Button
-            variant="ghost"
-            onClick={() => navigate(`/projects/${pid}`)}
-            className="mb-4"
-          >
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Dashboard
-          </Button>
-          <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
-            <MCPLogo size={32} className="text-brand-purple" />
-            MCP Server
-          </h1>
-        </div>
+        <AppPageHeader
+          title="MCP Server"
+          slug="mcp-server"
+          icon={<MCPLogo size={32} className="text-brand-purple" />}
+          description="Configure the tools AI can use to access your data via Model Context Protocol (MCP), the industry standard for integration."
+        />
 
         <Card>
           <CardHeader>
@@ -201,30 +191,12 @@ const MCPServerPage = () => {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <div className="mb-6">
-        <Button
-          variant="ghost"
-          onClick={() => navigate(`/projects/${pid}`)}
-          className="mb-4"
-        >
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back to Dashboard
-        </Button>
-        <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
-            <MCPLogo size={32} className="text-brand-purple" />
-            MCP Server
-          </h1>
-          <a
-            href={`${urls.projectsPageUrl ? new URL(urls.projectsPageUrl).origin : 'https://us.ekaya.ai'}/apps/mcp-server`}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="MCP Server documentation"
-          >
-            <Info className="h-7 w-7 text-text-secondary hover:text-brand-purple transition-colors" />
-          </a>
-        </div>
-      </div>
+      <AppPageHeader
+        title="MCP Server"
+        slug="mcp-server"
+        icon={<MCPLogo size={32} className="text-brand-purple" />}
+        description="Configure the tools AI can use to access your data via Model Context Protocol (MCP), the industry standard for integration."
+      />
 
       <div className="space-y-6">
         {/* Setup Checklist */}

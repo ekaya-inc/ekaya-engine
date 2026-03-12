@@ -115,7 +115,7 @@ func (s *alertTriggerService) checkSQLInjection(ctx context.Context, event *mode
 
 	severity := config.GetSeverity(models.AlertTypeSQLInjection, models.AlertSeverityCritical)
 	return s.createAlertIfNew(ctx, event, models.AlertTypeSQLInjection, severity,
-		fmt.Sprintf("SQL injection pattern detected from %s", event.UserID),
+		"SQL injection pattern detected",
 		describeSecurityEvent(event),
 	)
 }
@@ -148,7 +148,7 @@ func (s *alertTriggerService) checkUnusualQueryVolume(ctx context.Context, event
 
 	severity := config.GetSeverity(models.AlertTypeUnusualQueryVolume, models.AlertSeverityWarning)
 	return s.createAlertIfNew(ctx, event, models.AlertTypeUnusualQueryVolume, severity,
-		fmt.Sprintf("Unusual query volume from %s (%d queries in last hour)", event.UserID, count),
+		fmt.Sprintf("Unusual query volume (%d queries in last hour)", count),
 		fmt.Sprintf("User %s has executed %d queries in the last hour, exceeding threshold of %d.", event.UserID, count, threshold),
 	)
 }
@@ -168,7 +168,7 @@ func (s *alertTriggerService) checkLargeDataExport(ctx context.Context, event *m
 
 	severity := config.GetSeverity(models.AlertTypeLargeDataExport, models.AlertSeverityInfo)
 	return s.createAlertIfNew(ctx, event, models.AlertTypeLargeDataExport, severity,
-		fmt.Sprintf("Large data export by %s (%d rows)", event.UserID, rowCount),
+		fmt.Sprintf("Large data export (%d rows)", rowCount),
 		fmt.Sprintf("User %s executed a query returning %d rows (threshold: %d).", event.UserID, rowCount, threshold),
 	)
 }
@@ -208,7 +208,7 @@ func (s *alertTriggerService) checkAfterHoursAccess(ctx context.Context, event *
 
 	severity := config.GetSeverity(models.AlertTypeAfterHoursAccess, models.AlertSeverityInfo)
 	return s.createAlertIfNew(ctx, event, models.AlertTypeAfterHoursAccess, severity,
-		fmt.Sprintf("After-hours access by %s", event.UserID),
+		"After-hours access detected",
 		fmt.Sprintf("User %s accessed the system at %s %s, outside business hours (%02d:%02d-%02d:%02d).",
 			event.UserID, now.Format("15:04"), loc.String(), startHour, startMin, endHour, endMin),
 	)
@@ -249,7 +249,7 @@ func (s *alertTriggerService) checkNewUserHighVolume(ctx context.Context, event 
 
 	severity := config.GetSeverity(models.AlertTypeNewUserHighVolume, models.AlertSeverityWarning)
 	return s.createAlertIfNew(ctx, event, models.AlertTypeNewUserHighVolume, severity,
-		fmt.Sprintf("New user %s with high query volume (%d queries)", event.UserID, count),
+		fmt.Sprintf("New user with high query volume (%d queries)", count),
 		fmt.Sprintf("User %s (first seen %s) has executed %d queries within their first 24 hours.",
 			event.UserID, firstTime.Format(time.RFC3339), count),
 	)
@@ -291,7 +291,7 @@ func (s *alertTriggerService) checkRepeatedErrors(ctx context.Context, event *mo
 
 	severity := config.GetSeverity(models.AlertTypeRepeatedErrors, models.AlertSeverityWarning)
 	return s.createAlertIfNew(ctx, event, models.AlertTypeRepeatedErrors, severity,
-		fmt.Sprintf("Repeated errors from %s (%d occurrences in %d min)", event.UserID, count, windowMinutes),
+		fmt.Sprintf("Repeated errors (%d occurrences in %d min)", count, windowMinutes),
 		fmt.Sprintf("User %s has encountered the same error %d times in the last %d minutes: %s",
 			event.UserID, count, windowMinutes, truncate(*event.ErrorMessage, 200)),
 	)

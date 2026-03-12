@@ -1,8 +1,8 @@
 import {
-  ArrowLeft,
   Check,
   Copy,
   ExternalLink,
+  Handshake,
   Loader2,
   ScrollText,
   Trash2,
@@ -10,6 +10,7 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
+import AppPageHeader from '../components/AppPageHeader';
 import MCPEnabledTools from '../components/mcp/MCPEnabledTools';
 import SetupChecklist from '../components/SetupChecklist';
 import type { ChecklistItem } from '../components/SetupChecklist';
@@ -34,7 +35,7 @@ import { Switch } from '../components/ui/Switch';
 import { useConfig } from '../contexts/ConfigContext';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
-import type { DAGStatusResponse, Datasource, InstalledApp, MCPConfigResponse } from '../types';
+import type { InstalledApp, MCPConfigResponse } from '../types';
 
 const AIDataLiaisonPage = () => {
   const navigate = useNavigate();
@@ -50,7 +51,7 @@ const AIDataLiaisonPage = () => {
 
   // Checklist state
   const [loading, setLoading] = useState(true);
-  const [mcpServerReady, setMcpServerReady] = useState(false);
+  const [ontologyForgeReady, setOntologyForgeReady] = useState(false);
   const [mcpConfig, setMcpConfig] = useState<MCPConfigResponse | null>(null);
   const [installedApp, setInstalledApp] = useState<InstalledApp | null>(null);
   const [activating, setActivating] = useState(false);
@@ -66,29 +67,16 @@ const AIDataLiaisonPage = () => {
 
     setLoading(true);
     try {
-      // Fetch MCP config, datasources, and installed app in parallel
-      const [mcpConfigRes, datasourcesRes, installedAppRes] = await Promise.all([
+      // Fetch MCP config, installed app, and ontology forge status in parallel
+      const [mcpConfigRes, installedAppRes, ontologyForgeRes] = await Promise.all([
         engineApi.getMCPConfig(pid),
-        engineApi.listDataSources(pid),
         engineApi.getInstalledApp(pid, 'ai-data-liaison').catch(() => null),
+        engineApi.getInstalledApp(pid, 'ontology-forge').catch(() => null),
       ]);
 
       setMcpConfig(mcpConfigRes.data ?? null);
       setInstalledApp(installedAppRes?.data ?? null);
-
-      // Check if MCP Server is ready: ontology DAG completed implies all prereqs are met
-      const ds: Datasource | null = datasourcesRes.data?.datasources?.[0] ?? null;
-      let dagCompleted = false;
-      if (ds) {
-        try {
-          const dagRes = await engineApi.getOntologyDAGStatus(pid, ds.datasource_id);
-          const dagData: DAGStatusResponse | null = dagRes.data ?? null;
-          dagCompleted = dagData?.status === 'completed';
-        } catch {
-          // DAG might not exist yet
-        }
-      }
-      setMcpServerReady(dagCompleted);
+      setOntologyForgeReady(ontologyForgeRes?.data?.activated_at != null);
     } catch (error) {
       console.error('Failed to fetch checklist data:', error);
       toast({
@@ -278,16 +266,16 @@ const AIDataLiaisonPage = () => {
   const getChecklistItems = (): ChecklistItem[] => {
     const items: ChecklistItem[] = [];
 
-    // 1. MCP Server set up
+    // 1. Ontology Forge set up
     items.push({
-      id: 'mcp-server',
-      title: 'MCP Server set up',
-      description: mcpServerReady
-        ? 'Datasource, schema, AI, and ontology configured'
-        : 'Configure datasource, schema, AI, and extract ontology',
-      status: loading ? 'loading' : mcpServerReady ? 'complete' : 'pending',
-      link: `/projects/${pid}/mcp-server`,
-      linkText: mcpServerReady ? 'Manage' : 'Configure',
+      id: 'ontology-forge',
+      title: 'Ontology Forge set up',
+      description: ontologyForgeReady
+        ? 'Ontology Forge is configured and ready'
+        : 'Set up Ontology Forge to extract your business semantic layer',
+      status: loading ? 'loading' : ontologyForgeReady ? 'complete' : 'pending',
+      link: `/projects/${pid}/ontology-forge`,
+      linkText: ontologyForgeReady ? 'Manage' : 'Set up',
     });
 
     // 2. Activate (only requires step 1)
@@ -297,15 +285,15 @@ const AIDataLiaisonPage = () => {
       title: 'Activate AI Data Liaison',
       description: activated
         ? 'AI Data Liaison activated'
-        : mcpServerReady
+        : ontologyForgeReady
           ? 'Activate to start using the application'
           : 'Complete step 1 before activating',
       status: loading ? 'loading' : activated ? 'complete' : 'pending',
-      disabled: !mcpServerReady && !activated,
+      disabled: !ontologyForgeReady && !activated,
       ...(activated ? {} : {
         onAction: handleActivate,
         actionText: 'Activate',
-        actionDisabled: activating || !mcpServerReady,
+        actionDisabled: activating || !ontologyForgeReady,
       }),
     });
 
@@ -325,23 +313,12 @@ const AIDataLiaisonPage = () => {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      {/* Header with back button */}
-      <div className="flex items-center gap-4">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Back to project dashboard"
-          onClick={() => navigate(`/projects/${pid}`)}
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div>
-          <h1 className="text-2xl font-bold">AI Data Liaison</h1>
-          <p className="text-text-secondary">
-            Ekaya acts as a data liaison between you and your business users. This application extends the Ekaya Engine with MCP tools that enable usage to enhance and extend the ontology and UI for you to manage queries suggested by users.
-          </p>
-        </div>
-      </div>
+      <AppPageHeader
+        title="AI Data Liaison"
+        slug="ai-data-liaison"
+        icon={<Handshake className="h-8 w-8 text-green-500" />}
+        description="Ekaya acts as a data liaison between you and your business users. This application extends the Ekaya Engine with MCP tools that enable usage to enhance and extend the ontology and UI for you to manage queries suggested by users."
+      />
 
       {/* Setup Checklist */}
       <SetupChecklist

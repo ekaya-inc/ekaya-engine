@@ -12,6 +12,7 @@ import {
   Plus,
   Search,
   Anvil,
+  FileSpreadsheet,
   Server,
   Shield,
   Sparkles,
@@ -31,7 +32,7 @@ import type {
   AIOption,
   OntologyWorkflowStatus,
 } from '../types';
-import { APP_ID_AI_DATA_LIAISON, APP_ID_AI_AGENTS, APP_ID_MCP_SERVER, APP_ID_ONTOLOGY_FORGE } from '../types';
+import { APP_ID_AI_DATA_LIAISON, APP_ID_AI_AGENTS, APP_ID_FILE_LOADER, APP_ID_MCP_SERVER, APP_ID_ONTOLOGY_FORGE } from '../types';
 
 type TileColor = 'blue' | 'green' | 'purple' | 'orange' | 'gray' | 'indigo' | 'cyan' | 'amber';
 
@@ -120,6 +121,18 @@ const ProjectDashboard = () => {
           color: 'purple', // Ontology Forge color
         },
       );
+    }
+
+    // Pending Queries tile for AI Data Liaison
+    if (installedApps.some((app) => app.app_id === APP_ID_AI_DATA_LIAISON)) {
+      tiles.push({
+        title: 'Pending Queries',
+        description: 'Review, approve, or reject AI-suggested queries.',
+        icon: Search,
+        path: `/projects/${pid}/pending-queries`,
+        disabled: !isConnected,
+        color: 'green', // AI Data Liaison color
+      });
     }
 
     return tiles;
@@ -240,6 +253,18 @@ const ProjectDashboard = () => {
         disabled: !isConnected,
         disabledReason: 'Requires MCP Server to be enabled.',
         color: 'orange', // AI Agents color
+      });
+    }
+
+    // Add Spreadsheet Loader tile if installed
+    if (installedApps.some((app) => app.app_id === APP_ID_FILE_LOADER)) {
+      tiles.push({
+        title: 'Spreadsheet Loader [BETA]',
+        description: 'Import CSV, TSV, and Excel files into your SQL database with automatic schema inference.',
+        icon: FileSpreadsheet,
+        path: `/projects/${pid}/file-loader`,
+        disabled: false,
+        color: 'cyan',
       });
     }
 

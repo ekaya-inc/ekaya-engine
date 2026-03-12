@@ -1181,8 +1181,11 @@ func (s *queryService) SuggestUpdate(ctx context.Context, projectID uuid.UUID, r
 		return nil, fmt.Errorf("parameter validation failed: %w", err)
 	}
 
-	// Set suggested_by to "agent" (this is typically called by MCP tools)
-	suggestedBy := "agent"
+	// Use authenticated user's email for audit trail, fall back to "agent" for MCP sessions
+	suggestedBy := auth.GetEmailFromContext(ctx)
+	if suggestedBy == "" {
+		suggestedBy = "agent"
+	}
 	suggestion.SuggestedBy = &suggestedBy
 
 	if err := s.queryRepo.Create(ctx, suggestion); err != nil {
@@ -1201,9 +1204,13 @@ func (s *queryService) SuggestUpdate(ctx context.Context, projectID uuid.UUID, r
 // DirectCreate creates a new query with status="approved" (no review required).
 // This is for admin users who can bypass the approval workflow.
 func (s *queryService) DirectCreate(ctx context.Context, projectID, datasourceID uuid.UUID, req *CreateQueryRequest) (*models.Query, error) {
-	// Force approved status and admin suggested_by
+	// Force approved status; use authenticated user's email for audit trail
 	req.Status = "approved"
-	req.SuggestedBy = "admin"
+	if email := auth.GetEmailFromContext(ctx); email != "" {
+		req.SuggestedBy = email
+	} else {
+		req.SuggestedBy = "admin"
+	}
 
 	// Enable the query by default for direct creation
 	req.IsEnabled = true
