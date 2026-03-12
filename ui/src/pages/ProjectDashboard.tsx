@@ -246,8 +246,8 @@ const ProjectDashboard = () => {
     // Add AI Agents tile if installed
     if (installedApps.some((app) => app.app_id === APP_ID_AI_AGENTS)) {
       tiles.push({
-        title: 'AI Agents and Automation',
-        description: 'Connect AI coding agents and automation tools to your data via API key authentication.',
+        title: 'AI Agents',
+        description: 'Connect autonomous AI agents and processes to your data via API key authentication.',
         icon: Bot,
         path: `/projects/${pid}/ai-agents`,
         disabled: !isConnected,

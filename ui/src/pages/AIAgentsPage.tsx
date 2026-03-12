@@ -1,8 +1,9 @@
-import { ArrowLeft, Loader2, Trash2 } from 'lucide-react';
+import { Bot, Loader2, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import AgentToolsSection from '../components/mcp/AgentToolsSection';
+import AppPageHeader from '../components/AppPageHeader';
 import SetupChecklist from '../components/SetupChecklist';
 import type { ChecklistItem } from '../components/SetupChecklist';
 import { Button } from '../components/ui/Button';
@@ -162,30 +163,19 @@ const AIAgentsPage = () => {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      {/* Header with back button */}
-      <div className="flex items-center gap-4">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Back to project dashboard"
-          onClick={() => navigate(`/projects/${pid}`)}
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div>
-          <h1 className="text-2xl font-bold">AI Agents and Automation</h1>
-          <p className="text-text-secondary">
-            Connect AI coding agents and automation tools to your data. Agents authenticate with an API key and can only use the enabled Pre-Approved Queries, giving you full control over access.
-          </p>
-        </div>
-      </div>
+      <AppPageHeader
+        title="AI Agents"
+        slug="ai-agents"
+        icon={<Bot className="h-8 w-8 text-orange-500" />}
+        description="Connect autonomous AI agents and processes to your data. Agents authenticate with an API key and can only use the enabled Pre-Approved Queries and Tools, giving you full control over access."
+      />
 
       {/* Setup Checklist */}
       <SetupChecklist
         items={getChecklistItems()}
         title="Setup Checklist"
         description="Complete these steps to enable AI Agents"
-        completeDescription="AI Agents and Automation is ready"
+        completeDescription="AI Agents is ready"
       />
 
       {/* Agent Tools Section (reused component) */}
@@ -208,7 +198,7 @@ const AIAgentsPage = () => {
             </div>
             <div>
               <CardTitle className="text-red-600 dark:text-red-400">Danger Zone</CardTitle>
-              <CardDescription>Remove AI Agents and Automation from this project</CardDescription>
+              <CardDescription>Remove AI Agents from this project</CardDescription>
             </div>
           </div>
         </CardHeader>
@@ -240,7 +230,7 @@ const AIAgentsPage = () => {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Uninstall AI Agents and Automation?</DialogTitle>
+            <DialogTitle>Uninstall AI Agents?</DialogTitle>
             <DialogDescription>
               This will revoke the Agent API Key and disable all agent access.
               Existing agents using this key will no longer be able to connect.

@@ -98,7 +98,7 @@ describe('ApplicationsPage', () => {
 
     expect(screen.getByText('AI Data Liaison')).toBeInTheDocument();
     expect(screen.getByText('Ontology Forge')).toBeInTheDocument();
-    expect(screen.getByText('AI Agents and Automation')).toBeInTheDocument();
+    expect(screen.getByText('AI Agents')).toBeInTheDocument();
     expect(screen.getByText('Product Kit [COMING SOON]')).toBeInTheDocument();
     expect(screen.getByText('On-Premise Chat [COMING SOON]')).toBeInTheDocument();
     expect(screen.getByText('Your own Data Application')).toBeInTheDocument();
@@ -144,11 +144,13 @@ describe('ApplicationsPage', () => {
   it('disables AI Data Liaison Install button when Ontology Forge is not installed', () => {
     renderPage();
 
-    // AI Data Liaison Install button (second) should be disabled
+    // AI Data Liaison (second) and AI Agents (third) Install buttons should be disabled
     const installButtons = screen.getAllByRole('button', { name: 'Install' });
     expect(installButtons[1]).toBeDisabled();
-    // "Requires" note should be visible
-    expect(screen.getByText(/Requires Ontology Forge/)).toBeInTheDocument();
+    expect(installButtons[2]).toBeDisabled();
+    // "Requires" notes should be visible for both
+    const requiresNotes = screen.getAllByText(/Requires Ontology Forge/);
+    expect(requiresNotes).toHaveLength(2);
   });
 
   it('enables AI Data Liaison Install button when Ontology Forge is installed', async () => {
