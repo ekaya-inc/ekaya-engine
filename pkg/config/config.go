@@ -84,6 +84,22 @@ type Config struct {
 
 	// MCP server configuration
 	MCP MCPConfig `yaml:"mcp"`
+
+	// Tunnel configuration (MCP Tunnel app — outbound WebSocket to ekaya-tunnel relay)
+	Tunnel TunnelConfig `yaml:"tunnel"`
+}
+
+// TunnelConfig holds configuration for the MCP Tunnel outbound WebSocket connection.
+type TunnelConfig struct {
+	// ServerURL is the ekaya-tunnel relay server URL.
+	// The engine connects to {ServerURL}/tunnel/connect via WebSocket.
+	ServerURL string `yaml:"server_url" env:"TUNNEL_SERVER_URL" env-default:"https://mcp.ekaya.ai"`
+
+	// TLSCertFile is the client TLS certificate for mTLS (Phase 3, empty for Phase 1).
+	TLSCertFile string `yaml:"tls_cert_file" env:"TUNNEL_TLS_CERT_FILE" env-default:""`
+
+	// TLSKeyFile is the client TLS private key for mTLS (Phase 3, empty for Phase 1).
+	TLSKeyFile string `yaml:"tls_key_file" env:"TUNNEL_TLS_KEY_FILE" env-default:""`
 }
 
 // OAuthConfig holds OAuth client configuration.

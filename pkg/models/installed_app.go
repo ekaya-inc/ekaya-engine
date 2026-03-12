@@ -13,6 +13,7 @@ const (
 	AppIDAIDataLiaison = "ai-data-liaison"
 	AppIDAIAgents      = "ai-agents"
 	AppIDFileLoader    = "file-loader"
+	AppIDMCPTunnel     = "mcp-tunnel"
 )
 
 // KnownAppIDs is the set of valid app identifiers.
@@ -22,6 +23,7 @@ var KnownAppIDs = map[string]bool{
 	AppIDAIDataLiaison: true,
 	AppIDAIAgents:      true,
 	AppIDFileLoader:    true,
+	AppIDMCPTunnel:     true,
 }
 
 // InstalledApp represents an application installed for a project.

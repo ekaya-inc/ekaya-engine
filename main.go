@@ -35,6 +35,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 	etlservice "github.com/ekaya-inc/ekaya-engine/pkg/services/etl"
+	"github.com/ekaya-inc/ekaya-engine/pkg/tunnel"
 	"github.com/ekaya-inc/ekaya-engine/ui"
 	_ "github.com/jackc/pgx/v5/stdlib" // PostgreSQL driver for database/sql (migrations)
 )
@@ -464,6 +465,27 @@ func main() {
 	etlHandler := handlers.NewETLHandler(etlService, logger)
 	etlHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
+	// Create tunnel manager for mcp-tunnel app (outbound WebSocket to ekaya-tunnel)
+	tunnelManager := tunnel.NewManager(
+		db,
+		agentAPIKeyService,
+		cfg.Tunnel.ServerURL,
+		cfg.BaseURL,
+		tunnel.ClientConfig{
+			TLSCertFile: cfg.Tunnel.TLSCertFile,
+			TLSKeyFile:  cfg.Tunnel.TLSKeyFile,
+		},
+		logger,
+	)
+
+	// Wire tunnel lifecycle hook into installed app handler
+	tunnelHook := tunnel.NewLifecycleHook(tunnelManager, logger)
+	installedAppHandler.SetLifecycleHook(tunnelHook)
+
+	// Register tunnel status handler (protected)
+	tunnelStatusHandler := handlers.NewTunnelStatusHandler(tunnelManager, logger)
+	tunnelStatusHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
 	// Register audit page handler (protected) - audit visibility UI
 	auditPageRepo := repositories.NewAuditPageRepository()
 	mcpAuditRepo := repositories.NewMCPAuditRepository()
@@ -657,6 +679,11 @@ func main() {
 		}
 	}
 
+	// Start tunnel manager (connects to ekaya-tunnel for projects with mcp-tunnel activated)
+	if err := tunnelManager.Start(ctx); err != nil {
+		logger.Error("Failed to start tunnel manager", zap.Error(err))
+	}
+
 	// Channel to signal shutdown complete
 	shutdownComplete := make(chan struct{})
 
@@ -677,15 +704,18 @@ func main() {
 			logger.Error("HTTP server shutdown error", zap.Error(err))
 		}
 
-		// 2. Stop retention scheduler
+		// 2. Shutdown tunnel manager (close all WebSocket connections)
+		tunnelManager.Shutdown()
+
+		// 3. Stop retention scheduler
 		retentionCancel()
 
-		// 3. Shutdown DAG service (cancels DAGs, releases ownership)
+		// 4. Shutdown DAG service (cancels DAGs, releases ownership)
 		if err := ontologyDAGService.Shutdown(shutdownCtx); err != nil {
 			logger.Error("DAG service shutdown error", zap.Error(err))
 		}
 
-		// 4. Close conversation recorder (drain pending writes)
+		// 5. Close conversation recorder (drain pending writes)
 		convRecorder.Close()
 
 		close(shutdownComplete)

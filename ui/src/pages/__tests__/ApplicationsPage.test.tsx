@@ -98,6 +98,7 @@ describe('ApplicationsPage', () => {
 
     expect(screen.getByText('AI Data Liaison')).toBeInTheDocument();
     expect(screen.getByText('Ontology Forge')).toBeInTheDocument();
+    expect(screen.getByText('MCP Tunnel')).toBeInTheDocument();
     // AI Agents tile is temporarily hidden
     expect(screen.queryByText('AI Agents and Automation')).not.toBeInTheDocument();
     expect(screen.getByText('Product Kit [COMING SOON]')).toBeInTheDocument();
@@ -119,11 +120,12 @@ describe('ApplicationsPage', () => {
   it('renders Install buttons for installable apps when not installed', () => {
     renderPage();
 
-    // AI Data Liaison + Ontology Forge + Spreadsheet Loader have Install buttons (AI Agents tile is temporarily hidden)
+    // Ontology Forge + AI Data Liaison + Spreadsheet Loader + MCP Tunnel have Install buttons (AI Agents tile is temporarily hidden)
     const installButtons = screen.getAllByRole('button', { name: 'Install' });
-    expect(installButtons).toHaveLength(3);
+    expect(installButtons).toHaveLength(4);
+    // Ontology Forge + AI Data Liaison + MCP Tunnel have Learn More buttons
     const learnMoreButtons = screen.getAllByRole('button', { name: /Learn More/i });
-    expect(learnMoreButtons).toHaveLength(2);
+    expect(learnMoreButtons).toHaveLength(3);
   });
 
   it('renders Installed badge, Learn More, and Configure button when AI Data Liaison is installed', () => {
@@ -137,9 +139,9 @@ describe('ApplicationsPage', () => {
     // Learn More should still be visible for installed apps that have a learnMoreUrl
     const learnMoreButtons = screen.getAllByRole('button', { name: /Learn More/i });
     expect(learnMoreButtons.length).toBeGreaterThanOrEqual(2);
-    // Ontology Forge + Spreadsheet Loader still have Install buttons
+    // Ontology Forge + Spreadsheet Loader + MCP Tunnel still have Install buttons
     const installButtons = screen.getAllByRole('button', { name: 'Install' });
-    expect(installButtons).toHaveLength(2);
+    expect(installButtons).toHaveLength(3);
   });
 
   it('disables AI Data Liaison Install button when Ontology Forge is not installed', () => {

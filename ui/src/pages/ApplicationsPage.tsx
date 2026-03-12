@@ -6,6 +6,7 @@ import {
   Check,
   ExternalLink,
   FileSpreadsheet,
+  Globe,
   Hammer,
   Handshake,
   Loader2,
@@ -131,6 +132,17 @@ const applications: ApplicationInfo[] = [
     pricingBadge: 'free',
   },
   {
+    id: 'mcp-tunnel',
+    title: 'MCP Tunnel',
+    subtitle: 'Give your MCP Server a public URL accessible from outside your firewall — no port forwarding or TLS configuration required',
+    icon: Globe,
+    color: 'green',
+    available: true,
+    installable: true,
+    pricingBadge: 'free',
+    learnMoreUrl: 'https://try.ekaya.ai/',
+  },
+  {
     id: 'product-kit',
     title: 'Product Kit [COMING SOON]',
     subtitle: 'Enable AI Features in your existing SaaS Product',
@@ -199,9 +211,13 @@ const ApplicationsPage = () => {
     }
   };
 
-  const handleLearnMore = (path: string, base: 'marketing' | 'central' = 'marketing') => {
+  const handleLearnMore = (urlOrPath: string, base: 'marketing' | 'central' = 'marketing') => {
+    if (urlOrPath.startsWith('http')) {
+      window.open(urlOrPath, '_blank', 'noopener,noreferrer');
+      return;
+    }
     const origin = base === 'central' ? centralOrigin : marketingOrigin;
-    window.open(`${origin}${path}`, '_blank', 'noopener,noreferrer');
+    window.open(`${origin}${urlOrPath}`, '_blank', 'noopener,noreferrer');
   };
 
   const handleContactSupport = () => {
