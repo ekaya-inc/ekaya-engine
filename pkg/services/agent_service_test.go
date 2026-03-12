@@ -17,31 +17,36 @@ import (
 const agentServiceTestEncryptionKey = "0123456789abcdef0123456789abcdef"
 
 type mockAgentRepository struct {
-	agents          map[uuid.UUID]*models.Agent
-	agentsByProj    map[uuid.UUID][]*models.Agent
-	queryAccess     map[uuid.UUID][]uuid.UUID
-	hasAccess       map[uuid.UUID]map[uuid.UUID]bool
-	createErr       error
-	getErr          error
-	listErr         error
-	updateAPIKeyErr error
-	deleteErr       error
-	setAccessErr    error
-	getAccessErr    error
-	hasAccessErr    error
-	findErr         error
+	agents           map[uuid.UUID]*models.Agent
+	agentsByProj     map[uuid.UUID][]*models.Agent
+	queryAccess      map[uuid.UUID][]uuid.UUID
+	batchQueryAccess map[uuid.UUID][]uuid.UUID
+	hasAccess        map[uuid.UUID]map[uuid.UUID]bool
+	createErr        error
+	getErr           error
+	listErr          error
+	updateAPIKeyErr  error
+	deleteErr        error
+	setAccessErr     error
+	getAccessErr     error
+	batchAccessErr   error
+	hasAccessErr     error
+	findErr          error
+	getAccessCalls   int
+	batchAccessCalls int
 }
 
 func newMockAgentRepository() *mockAgentRepository {
 	return &mockAgentRepository{
-		agents:       make(map[uuid.UUID]*models.Agent),
-		agentsByProj: make(map[uuid.UUID][]*models.Agent),
-		queryAccess:  make(map[uuid.UUID][]uuid.UUID),
-		hasAccess:    make(map[uuid.UUID]map[uuid.UUID]bool),
+		agents:           make(map[uuid.UUID]*models.Agent),
+		agentsByProj:     make(map[uuid.UUID][]*models.Agent),
+		queryAccess:      make(map[uuid.UUID][]uuid.UUID),
+		batchQueryAccess: make(map[uuid.UUID][]uuid.UUID),
+		hasAccess:        make(map[uuid.UUID]map[uuid.UUID]bool),
 	}
 }
 
-func (m *mockAgentRepository) Create(ctx context.Context, agent *models.Agent) error {
+func (m *mockAgentRepository) Create(ctx context.Context, agent *models.Agent, queryIDs []uuid.UUID) error {
 	if m.createErr != nil {
 		return m.createErr
 	}
@@ -49,6 +54,16 @@ func (m *mockAgentRepository) Create(ctx context.Context, agent *models.Agent) e
 	cloned := *agent
 	m.agents[agent.ID] = &cloned
 	m.agentsByProj[agent.ProjectID] = append(m.agentsByProj[agent.ProjectID], &cloned)
+	if len(queryIDs) > 0 {
+		clonedQueryIDs := append([]uuid.UUID(nil), queryIDs...)
+		m.queryAccess[agent.ID] = clonedQueryIDs
+		m.batchQueryAccess[agent.ID] = clonedQueryIDs
+		lookup := make(map[uuid.UUID]bool, len(queryIDs))
+		for _, queryID := range queryIDs {
+			lookup[queryID] = true
+		}
+		m.hasAccess[agent.ID] = lookup
+	}
 	return nil
 }
 
@@ -130,6 +145,7 @@ func (m *mockAgentRepository) SetQueryAccess(ctx context.Context, agentID uuid.U
 
 	cloned := append([]uuid.UUID(nil), queryIDs...)
 	m.queryAccess[agentID] = cloned
+	m.batchQueryAccess[agentID] = cloned
 	lookup := make(map[uuid.UUID]bool, len(queryIDs))
 	for _, queryID := range queryIDs {
 		lookup[queryID] = true
@@ -143,7 +159,22 @@ func (m *mockAgentRepository) GetQueryAccess(ctx context.Context, agentID uuid.U
 		return nil, m.getAccessErr
 	}
 
+	m.getAccessCalls++
 	return append([]uuid.UUID(nil), m.queryAccess[agentID]...), nil
+}
+
+func (m *mockAgentRepository) GetQueryAccessByAgentIDs(ctx context.Context, agentIDs []uuid.UUID) (map[uuid.UUID][]uuid.UUID, error) {
+	if m.batchAccessErr != nil {
+		return nil, m.batchAccessErr
+	}
+
+	m.batchAccessCalls++
+
+	result := make(map[uuid.UUID][]uuid.UUID, len(agentIDs))
+	for _, agentID := range agentIDs {
+		result[agentID] = append([]uuid.UUID(nil), m.batchQueryAccess[agentID]...)
+	}
+	return result, nil
 }
 
 func (m *mockAgentRepository) HasQueryAccess(ctx context.Context, agentID, queryID uuid.UUID) (bool, error) {
@@ -181,7 +212,9 @@ func TestAgentServiceCreateRequiresAtLeastOneQuery(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, agent)
 	assert.Empty(t, key)
-	assert.Contains(t, err.Error(), "at least one query")
+	var validationErr *AgentValidationError
+	require.ErrorAs(t, err, &validationErr)
+	assert.Equal(t, "at least one query must be selected", validationErr.Error())
 }
 
 func TestAgentServiceCreateAndValidateKey(t *testing.T) {
@@ -243,5 +276,43 @@ func TestAgentServiceUpdateQueryAccessRequiresAtLeastOneQuery(t *testing.T) {
 
 	err := svc.UpdateQueryAccess(context.Background(), uuid.New(), uuid.New(), nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "at least one query")
+	var validationErr *AgentValidationError
+	require.ErrorAs(t, err, &validationErr)
+	assert.Equal(t, "at least one query must be selected", validationErr.Error())
+}
+
+func TestAgentServiceCreateRequiresName(t *testing.T) {
+	svc, _ := setupAgentServiceTest(t)
+
+	agent, key, err := svc.Create(context.Background(), uuid.New(), "   ", []uuid.UUID{uuid.New()})
+	require.Error(t, err)
+	assert.Nil(t, agent)
+	assert.Empty(t, key)
+
+	var validationErr *AgentValidationError
+	require.ErrorAs(t, err, &validationErr)
+	assert.Equal(t, "name is required", validationErr.Error())
+}
+
+func TestAgentServiceListUsesBatchQueryAccess(t *testing.T) {
+	svc, repo := setupAgentServiceTest(t)
+	projectID := uuid.New()
+	agentA := &models.Agent{ID: uuid.New(), ProjectID: projectID, Name: "a"}
+	agentB := &models.Agent{ID: uuid.New(), ProjectID: projectID, Name: "b"}
+	repo.agents[agentA.ID] = agentA
+	repo.agents[agentB.ID] = agentB
+	repo.agentsByProj[projectID] = []*models.Agent{agentA, agentB}
+
+	queryA := uuid.New()
+	queryB := uuid.New()
+	repo.batchQueryAccess[agentA.ID] = []uuid.UUID{queryA}
+	repo.batchQueryAccess[agentB.ID] = []uuid.UUID{queryB}
+
+	agents, err := svc.List(context.Background(), projectID)
+	require.NoError(t, err)
+	require.Len(t, agents, 2)
+	assert.Equal(t, 1, repo.batchAccessCalls)
+	assert.Equal(t, 0, repo.getAccessCalls)
+	assert.Equal(t, []uuid.UUID{queryA}, agents[0].QueryIDs)
+	assert.Equal(t, []uuid.UUID{queryB}, agents[1].QueryIDs)
 }

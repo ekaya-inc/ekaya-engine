@@ -156,7 +156,7 @@ func TestAgentRepository_CreateListGetDelete(t *testing.T) {
 		APIKeyEncrypted: "encrypted-key",
 	}
 
-	require.NoError(t, tc.agentRepo.Create(ctx, agent))
+	require.NoError(t, tc.agentRepo.Create(ctx, agent, nil))
 	require.NotEqual(t, uuid.Nil, agent.ID)
 
 	retrieved, err := tc.agentRepo.GetByID(ctx, tc.projectID, agent.ID)
@@ -190,7 +190,7 @@ func TestAgentRepository_SetQueryAccess_OnlyAllowsApprovedQueries(t *testing.T) 
 		Name:            "finance-bot",
 		APIKeyEncrypted: "encrypted-key",
 	}
-	require.NoError(t, tc.agentRepo.Create(ctx, agent))
+	require.NoError(t, tc.agentRepo.Create(ctx, agent, nil))
 
 	require.NoError(t, tc.agentRepo.SetQueryAccess(ctx, agent.ID, []uuid.UUID{allowedQuery.ID}))
 
@@ -209,4 +209,60 @@ func TestAgentRepository_SetQueryAccess_OnlyAllowsApprovedQueries(t *testing.T) 
 	err = tc.agentRepo.SetQueryAccess(ctx, agent.ID, []uuid.UUID{pendingQuery.ID})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, apperrors.ErrNotFound)
+}
+
+func TestAgentRepository_CreateWithQueryAccess_IsAtomic(t *testing.T) {
+	tc := setupAgentRepositoryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	pendingQuery := tc.createPendingQuery(ctx, "Pending query")
+	agent := &models.Agent{
+		ProjectID:       tc.projectID,
+		Name:            "ops-bot",
+		APIKeyEncrypted: "encrypted-key",
+	}
+
+	err := tc.agentRepo.Create(ctx, agent, []uuid.UUID{pendingQuery.ID})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperrors.ErrNotFound)
+
+	scope, ok := database.GetTenantScope(ctx)
+	require.True(t, ok)
+	var count int
+	err = scope.Conn.QueryRow(ctx, `SELECT COUNT(*) FROM engine_agents WHERE project_id = $1 AND name = $2`, tc.projectID, "ops-bot").Scan(&count)
+	require.NoError(t, err)
+	assert.Equal(t, 0, count)
+}
+
+func TestAgentRepository_GetQueryAccessByAgentIDs(t *testing.T) {
+	tc := setupAgentRepositoryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	queryA := tc.createApprovedQuery(ctx, "Query A")
+	queryB := tc.createApprovedQuery(ctx, "Query B")
+
+	agentA := &models.Agent{
+		ProjectID:       tc.projectID,
+		Name:            "agent-a",
+		APIKeyEncrypted: "encrypted-a",
+	}
+	agentB := &models.Agent{
+		ProjectID:       tc.projectID,
+		Name:            "agent-b",
+		APIKeyEncrypted: "encrypted-b",
+	}
+
+	require.NoError(t, tc.agentRepo.Create(ctx, agentA, []uuid.UUID{queryA.ID}))
+	require.NoError(t, tc.agentRepo.Create(ctx, agentB, []uuid.UUID{queryB.ID}))
+
+	access, err := tc.agentRepo.GetQueryAccessByAgentIDs(ctx, []uuid.UUID{agentA.ID, agentB.ID})
+	require.NoError(t, err)
+	assert.Equal(t, []uuid.UUID{queryA.ID}, access[agentA.ID])
+	assert.Equal(t, []uuid.UUID{queryB.ID}, access[agentB.ID])
 }

@@ -23,6 +23,7 @@ type mockAgentService struct {
 	createFn            func(ctx context.Context, projectID uuid.UUID, name string, queryIDs []uuid.UUID) (*models.Agent, string, error)
 	listFn              func(ctx context.Context, projectID uuid.UUID) ([]*services.AgentWithQueries, error)
 	getFn               func(ctx context.Context, projectID, agentID uuid.UUID) (*services.AgentWithQueries, error)
+	ensureExistsFn      func(ctx context.Context, projectID, agentID uuid.UUID) error
 	getKeyFn            func(ctx context.Context, projectID, agentID uuid.UUID) (string, error)
 	updateQueryAccessFn func(ctx context.Context, projectID, agentID uuid.UUID, queryIDs []uuid.UUID) error
 	rotateKeyFn         func(ctx context.Context, projectID, agentID uuid.UUID) (string, error)
@@ -45,6 +46,13 @@ func (m *mockAgentService) List(ctx context.Context, projectID uuid.UUID) ([]*se
 
 func (m *mockAgentService) Get(ctx context.Context, projectID, agentID uuid.UUID) (*services.AgentWithQueries, error) {
 	return m.getFn(ctx, projectID, agentID)
+}
+
+func (m *mockAgentService) EnsureExists(ctx context.Context, projectID, agentID uuid.UUID) error {
+	if m.ensureExistsFn == nil {
+		return nil
+	}
+	return m.ensureExistsFn(ctx, projectID, agentID)
 }
 
 func (m *mockAgentService) GetKey(ctx context.Context, projectID, agentID uuid.UUID) (string, error) {
@@ -117,6 +125,20 @@ func TestAgentHandlerCreateReturnsPlaintextKey(t *testing.T) {
 				UpdatedAt: createdAt,
 			}, "generated-api-key", nil
 		},
+		getFn: func(ctx context.Context, gotProjectID, gotAgentID uuid.UUID) (*services.AgentWithQueries, error) {
+			assert.Equal(t, projectID, gotProjectID)
+			assert.Equal(t, agentID, gotAgentID)
+			return &services.AgentWithQueries{
+				Agent: models.Agent{
+					ID:        agentID,
+					ProjectID: projectID,
+					Name:      "sales-bot",
+					CreatedAt: createdAt,
+					UpdatedAt: createdAt,
+				},
+				QueryIDs: queryIDs,
+			}, nil
+		},
 	}, zap.NewNop())
 
 	reqBody := `{"name":"sales-bot","query_ids":["` + queryIDs[0].String() + `"]}`
@@ -139,11 +161,81 @@ func TestAgentHandlerCreateReturnsPlaintextKey(t *testing.T) {
 	assert.Equal(t, "generated-api-key", data["api_key"])
 }
 
-func TestAgentHandlerGetKeySupportsMaskedAndRevealModes(t *testing.T) {
+func TestAgentHandlerCreateReturnsPersistedQueryIDsAndRFC3339Timestamps(t *testing.T) {
 	projectID := uuid.New()
 	agentID := uuid.New()
+	queryID := uuid.MustParse("00000000-0000-0000-0000-000000000111")
+	createdAt := time.Date(2026, time.March, 12, 10, 11, 12, 0, time.UTC)
+
 	handler := NewAgentHandler(&mockAgentService{
+		createFn: func(ctx context.Context, gotProjectID uuid.UUID, name string, gotQueryIDs []uuid.UUID) (*models.Agent, string, error) {
+			assert.Equal(t, projectID, gotProjectID)
+			assert.Equal(t, []uuid.UUID{queryID, queryID}, gotQueryIDs)
+			return &models.Agent{
+				ID:        agentID,
+				ProjectID: projectID,
+				Name:      name,
+				CreatedAt: createdAt,
+				UpdatedAt: createdAt,
+			}, "generated-api-key", nil
+		},
+		getFn: func(ctx context.Context, gotProjectID, gotAgentID uuid.UUID) (*services.AgentWithQueries, error) {
+			assert.Equal(t, projectID, gotProjectID)
+			assert.Equal(t, agentID, gotAgentID)
+			return &services.AgentWithQueries{
+				Agent: models.Agent{
+					ID:        agentID,
+					ProjectID: projectID,
+					Name:      "sales-bot",
+					CreatedAt: createdAt,
+					UpdatedAt: createdAt,
+				},
+				QueryIDs: []uuid.UUID{queryID},
+			}, nil
+		},
+	}, zap.NewNop())
+
+	reqBody := `{"name":"sales-bot","query_ids":["` + queryID.String() + `","` + queryID.String() + `"]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/agents", strings.NewReader(reqBody))
+	req.SetPathValue("pid", projectID.String())
+
+	rec := httptest.NewRecorder()
+	handler.Create(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			ID        string   `json:"id"`
+			Name      string   `json:"name"`
+			QueryIDs  []string `json:"query_ids"`
+			CreatedAt string   `json:"created_at"`
+			UpdatedAt string   `json:"updated_at"`
+			APIKey    string   `json:"api_key"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.True(t, resp.Success)
+	assert.Equal(t, []string{queryID.String()}, resp.Data.QueryIDs)
+	assert.Equal(t, createdAt.Format(time.RFC3339), resp.Data.CreatedAt)
+	assert.Equal(t, createdAt.Format(time.RFC3339), resp.Data.UpdatedAt)
+}
+
+func TestAgentHandlerGetKeySupportsMaskedAndRevealModesWithoutDecryptingMaskedReads(t *testing.T) {
+	projectID := uuid.New()
+	agentID := uuid.New()
+	getKeyCalls := 0
+	ensureExistsCalls := 0
+	handler := NewAgentHandler(&mockAgentService{
+		ensureExistsFn: func(ctx context.Context, gotProjectID, gotAgentID uuid.UUID) error {
+			assert.Equal(t, projectID, gotProjectID)
+			assert.Equal(t, agentID, gotAgentID)
+			ensureExistsCalls++
+			return nil
+		},
 		getKeyFn: func(ctx context.Context, gotProjectID, gotAgentID uuid.UUID) (string, error) {
+			getKeyCalls++
 			assert.Equal(t, projectID, gotProjectID)
 			assert.Equal(t, agentID, gotAgentID)
 			return "super-secret-key", nil
@@ -160,6 +252,8 @@ func TestAgentHandlerGetKeySupportsMaskedAndRevealModes(t *testing.T) {
 	require.Equal(t, http.StatusOK, maskedRec.Code)
 	assert.Contains(t, maskedRec.Body.String(), `"key":"****"`)
 	assert.Contains(t, maskedRec.Body.String(), `"masked":true`)
+	assert.Equal(t, 0, getKeyCalls)
+	assert.Equal(t, 1, ensureExistsCalls)
 
 	revealReq := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/agents/"+agentID.String()+"/key?reveal=true", nil)
 	revealReq.SetPathValue("pid", projectID.String())
@@ -171,6 +265,8 @@ func TestAgentHandlerGetKeySupportsMaskedAndRevealModes(t *testing.T) {
 	require.Equal(t, http.StatusOK, revealRec.Code)
 	assert.Contains(t, revealRec.Body.String(), `"key":"super-secret-key"`)
 	assert.Contains(t, revealRec.Body.String(), `"masked":false`)
+	assert.Equal(t, 1, getKeyCalls)
+	assert.Equal(t, 1, ensureExistsCalls)
 }
 
 func TestAgentHandlerUpdateAndDelete(t *testing.T) {
@@ -246,4 +342,25 @@ func TestAgentHandlerRotateKeyHandlesServiceErrors(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Contains(t, rec.Body.String(), "rotate")
+}
+
+func TestAgentHandlerCreateMapsValidationErrorsToBadRequest(t *testing.T) {
+	projectID := uuid.New()
+	queryID := uuid.New()
+	handler := NewAgentHandler(&mockAgentService{
+		createFn: func(ctx context.Context, gotProjectID uuid.UUID, name string, queryIDs []uuid.UUID) (*models.Agent, string, error) {
+			return nil, "", &services.AgentValidationError{Message: "name is required"}
+		},
+	}, zap.NewNop())
+
+	reqBody := `{"name":" ","query_ids":["` + queryID.String() + `"]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/agents", strings.NewReader(reqBody))
+	req.SetPathValue("pid", projectID.String())
+
+	rec := httptest.NewRecorder()
+	handler.Create(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"error":"invalid_request"`)
+	assert.Contains(t, rec.Body.String(), "name is required")
 }
