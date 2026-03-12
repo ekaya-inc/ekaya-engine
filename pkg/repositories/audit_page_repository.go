@@ -88,14 +88,17 @@ func (r *auditPageRepository) ListQueryExecutions(ctx context.Context, projectID
 		return nil, 0, fmt.Errorf("failed to count query executions: %w", err)
 	}
 
-	// Data query with join to engine_queries for query name and engine_users for email
+	// Data query with joins to resolve human users and named agents for display.
 	dataQuery := fmt.Sprintf(`
 		SELECT e.id, e.project_id, e.query_id, e.sql, e.executed_at, e.row_count,
-		       e.execution_time_ms, e.user_id, u.email, e.source, e.is_modifying, e.success,
+		       e.execution_time_ms, e.user_id,
+		       COALESCE(u.email, CASE WHEN a.name IS NOT NULL THEN 'agent:' || a.name ELSE NULL END),
+		       e.source, e.is_modifying, e.success,
 		       e.error_message, q.natural_language_prompt
 		FROM engine_query_executions e
 		LEFT JOIN engine_queries q ON q.id = e.query_id AND q.deleted_at IS NULL
 		LEFT JOIN engine_users u ON u.project_id = e.project_id AND u.user_id::text = e.user_id
+		LEFT JOIN engine_agents a ON a.project_id = e.project_id AND e.user_id = 'agent:' || a.id::text
 		WHERE %s
 		ORDER BY e.executed_at DESC
 		LIMIT $%d OFFSET $%d`, where, argIdx, argIdx+1)
