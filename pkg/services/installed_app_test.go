@@ -259,6 +259,33 @@ func TestInstalledAppService_Install_AlreadyInstalled(t *testing.T) {
 	assert.Contains(t, err.Error(), "already installed")
 }
 
+func TestInstalledAppService_Install_PersistsMCPTunnelEndpoints(t *testing.T) {
+	projectID := uuid.New()
+	repo := newMockInstalledAppRepository()
+	cc := &mockCentralClient{
+		installResp: &central.AppActionResponse{
+			Status:          "installed",
+			RegistrationURL: "wss://mcp.ekaya.ai/tunnel/connect",
+			Endpoint:        "https://mcp.ekaya.ai/mcp/proj-1",
+		},
+	}
+	svc := newTestInstalledAppServiceWithCentral(repo, cc)
+
+	result, err := svc.Install(testAuthContext(), projectID, models.AppIDMCPTunnel, "user@example.com")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.App)
+
+	assert.Equal(t, "installed", result.Status)
+	assert.Equal(t, "wss://mcp.ekaya.ai/tunnel/connect", result.App.Settings[models.MCPTunnelSettingRegistrationURL])
+	assert.Equal(t, "https://mcp.ekaya.ai/mcp/proj-1", result.App.Settings[models.MCPTunnelSettingEndpoint])
+
+	app := repo.apps[repo.key(projectID, models.AppIDMCPTunnel)]
+	require.NotNil(t, app)
+	assert.Equal(t, "wss://mcp.ekaya.ai/tunnel/connect", app.Settings[models.MCPTunnelSettingRegistrationURL])
+	assert.Equal(t, "https://mcp.ekaya.ai/mcp/proj-1", app.Settings[models.MCPTunnelSettingEndpoint])
+}
+
 func TestInstalledAppService_Uninstall_MCPServerRejected(t *testing.T) {
 	projectID := uuid.New()
 	repo := newMockInstalledAppRepository()

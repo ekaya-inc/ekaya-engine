@@ -4,6 +4,7 @@ import {
   BookOpen,
   Handshake,
   Database,
+  Globe,
   Layers,
   Lightbulb,
   ListTree,
@@ -33,7 +34,7 @@ import type {
   AIOption,
   OntologyWorkflowStatus,
 } from '../types';
-import { APP_ID_AI_DATA_LIAISON, APP_ID_AI_AGENTS, APP_ID_FILE_LOADER, APP_ID_MCP_SERVER, APP_ID_ONTOLOGY_FORGE } from '../types';
+import { APP_ID_AI_DATA_LIAISON, APP_ID_AI_AGENTS, APP_ID_FILE_LOADER, APP_ID_MCP_SERVER, APP_ID_MCP_TUNNEL, APP_ID_ONTOLOGY_FORGE } from '../types';
 
 type TileColor = 'blue' | 'green' | 'purple' | 'orange' | 'gray' | 'indigo' | 'cyan' | 'amber';
 
@@ -269,8 +270,24 @@ const ProjectDashboard = () => {
       });
     }
 
+    // Add MCP Tunnel tile if installed
+    const mcpTunnelApp = installedApps.find((app) => app.app_id === APP_ID_MCP_TUNNEL);
+    if (mcpTunnelApp) {
+      const tunnelActivated = mcpTunnelApp.activated_at != null;
+      tiles.push({
+        title: 'MCP Tunnel',
+        description: tunnelActivated
+          ? 'Your MCP Server has a public URL accessible from outside your firewall.'
+          : 'Open MCP Tunnel to activate it and create a public URL for your MCP Server.',
+        icon: Globe,
+        path: `/projects/${pid}/mcp-tunnel`,
+        disabled: false,
+        color: tunnelActivated ? 'green' : 'amber',
+      });
+    }
+
     return tiles;
-  }, [pid, isConnected, installedApps]);
+  }, [pid, installedApps]);
 
   const handleTileClick = (tile: Tile): void => {
     if (!tile.disabled) {

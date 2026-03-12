@@ -294,7 +294,7 @@ func TestInstallApp_Success(t *testing.T) {
 		assert.Contains(t, r.URL.Path, "install")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"installed","redirectUrl":"https://example.com/redirect"}`))
+		_, _ = w.Write([]byte(`{"status":"installed","redirectUrl":"https://example.com/redirect","registration_url":"wss://mcp.ekaya.ai/tunnel/connect","endpoint":"https://mcp.ekaya.ai/mcp/proj-1"}`))
 	}))
 	defer server.Close()
 
@@ -303,6 +303,8 @@ func TestInstallApp_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "installed", resp.Status)
 	assert.Equal(t, "https://example.com/redirect", resp.RedirectUrl)
+	assert.Equal(t, "wss://mcp.ekaya.ai/tunnel/connect", resp.RegistrationURL)
+	assert.Equal(t, "https://mcp.ekaya.ai/mcp/proj-1", resp.Endpoint)
 }
 
 func TestInstallApp_HTTP500(t *testing.T) {

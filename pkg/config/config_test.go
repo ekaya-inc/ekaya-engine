@@ -211,6 +211,54 @@ engine_database:
 	if cfg.BaseURL != "https://localhost:8443" {
 		t.Errorf("expected BaseURL=https://localhost:8443 (auto-derived with TLS), got %s", cfg.BaseURL)
 	}
+
+	if cfg.Tunnel.LocalBaseURL != "https://127.0.0.1:8443" {
+		t.Errorf("expected Tunnel.LocalBaseURL=https://127.0.0.1:8443 (auto-derived with TLS), got %s", cfg.Tunnel.LocalBaseURL)
+	}
+}
+
+func TestLoad_TunnelLocalBaseURLAutoDerive(t *testing.T) {
+	setupConfigTest(t, `
+bind_addr: "0.0.0.0"
+port: "5678"
+env: "test"
+engine_database:
+  pg_host: "localhost"
+`)
+
+	os.Unsetenv("TUNNEL_LOCAL_BASE_URL")
+
+	cfg, err := Load("test-version")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	if cfg.Tunnel.LocalBaseURL != "http://127.0.0.1:5678" {
+		t.Errorf("expected Tunnel.LocalBaseURL=http://127.0.0.1:5678 (auto-derived), got %s", cfg.Tunnel.LocalBaseURL)
+	}
+}
+
+func TestLoad_TunnelLocalBaseURLExplicit(t *testing.T) {
+	setupConfigTest(t, `
+bind_addr: "0.0.0.0"
+port: "5678"
+env: "test"
+tunnel:
+  local_base_url: "https://engine-internal.example.com:7443"
+engine_database:
+  pg_host: "localhost"
+`)
+
+	os.Unsetenv("TUNNEL_LOCAL_BASE_URL")
+
+	cfg, err := Load("test-version")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	if cfg.Tunnel.LocalBaseURL != "https://engine-internal.example.com:7443" {
+		t.Errorf("expected explicit Tunnel.LocalBaseURL to be preserved, got %s", cfg.Tunnel.LocalBaseURL)
+	}
 }
 
 func TestLoad_MissingConfigFile(t *testing.T) {

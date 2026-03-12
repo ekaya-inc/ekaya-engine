@@ -48,8 +48,10 @@ type ProjectInfo struct {
 
 // AppActionResponse is the response from app lifecycle endpoints (install, activate, uninstall).
 type AppActionResponse struct {
-	Status      string `json:"status"`                // e.g. "installed", "activated", "pending_activation"
-	RedirectUrl string `json:"redirectUrl,omitempty"` // if present, redirect user here
+	Status          string `json:"status"`                     // e.g. "installed", "activated", "pending_activation"
+	RedirectUrl     string `json:"redirectUrl,omitempty"`      // if present, redirect user here
+	RegistrationURL string `json:"registration_url,omitempty"` // mcp-tunnel registration URL
+	Endpoint        string `json:"endpoint,omitempty"`         // mcp-tunnel public endpoint
 }
 
 // ProjectURLs contains URLs for navigating to ekaya-central pages.

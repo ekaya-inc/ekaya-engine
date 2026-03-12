@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -85,6 +86,27 @@ type Config struct {
 
 	// MCP server configuration
 	MCP MCPConfig `yaml:"mcp"`
+
+	// Tunnel configuration (MCP Tunnel app — outbound WebSocket to ekaya-tunnel relay)
+	Tunnel TunnelConfig `yaml:"tunnel"`
+}
+
+// TunnelConfig holds configuration for the MCP Tunnel outbound WebSocket connection.
+type TunnelConfig struct {
+	// ServerURL is the ekaya-tunnel relay server URL.
+	// The engine connects to {ServerURL}/tunnel/connect via WebSocket.
+	ServerURL string `yaml:"server_url" env:"TUNNEL_SERVER_URL" env-default:"https://mcp.ekaya.ai"`
+
+	// LocalBaseURL is the internal URL the tunnel client uses to relay requests
+	// back into this engine instance. It defaults to the local bind address and
+	// port so tunnel traffic does not depend on the public BaseURL.
+	LocalBaseURL string `yaml:"local_base_url" env:"TUNNEL_LOCAL_BASE_URL" env-default:""`
+
+	// TLSCertFile is the client TLS certificate for mTLS (Phase 3, empty for Phase 1).
+	TLSCertFile string `yaml:"tls_cert_file" env:"TUNNEL_TLS_CERT_FILE" env-default:""`
+
+	// TLSKeyFile is the client TLS private key for mTLS (Phase 3, empty for Phase 1).
+	TLSKeyFile string `yaml:"tls_key_file" env:"TUNNEL_TLS_KEY_FILE" env-default:""`
 }
 
 // OAuthConfig holds OAuth client configuration.
@@ -234,6 +256,15 @@ func Load(version string) (*Config, error) {
 		}).String()
 	}
 
+	// Derive the internal tunnel relay target if not explicitly configured.
+	if cfg.Tunnel.LocalBaseURL == "" {
+		cfg.Tunnel.LocalBaseURL = deriveTunnelLocalBaseURL(
+			cfg.BindAddr,
+			cfg.Port,
+			cfg.TLSCertPath != "" && cfg.TLSKeyPath != "",
+		)
+	}
+
 	return cfg, nil
 }
 
@@ -266,6 +297,27 @@ func (c *Config) validateTLS() error {
 	}
 
 	return nil
+}
+
+func deriveTunnelLocalBaseURL(bindAddr, port string, useTLS bool) string {
+	host := strings.TrimSpace(bindAddr)
+	switch host {
+	case "", "0.0.0.0", "::", "[::]":
+		host = "127.0.0.1"
+	}
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+	}
+
+	scheme := "http"
+	if useTLS {
+		scheme = "https"
+	}
+
+	return (&url.URL{
+		Scheme: scheme,
+		Host:   net.JoinHostPort(host, port),
+	}).String()
 }
 
 // parseJWKSEndpoints parses the JWKS endpoints string into a map.
