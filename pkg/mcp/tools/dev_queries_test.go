@@ -544,9 +544,10 @@ func TestListQuerySuggestions_ToolDescription(t *testing.T) {
 	require.NotNil(t, listTool, "list_query_suggestions tool should be found")
 
 	// Verify description mentions key points
-	assert.Contains(t, listTool.Description, "pending")
-	assert.Contains(t, listTool.Description, "suggestion")
 	assert.Contains(t, listTool.Description, "review")
+	assert.Contains(t, listTool.Description, "rejected")
+	assert.Contains(t, listTool.Description, "suggestion")
+	assert.Contains(t, listTool.Description, "list_approved_queries")
 
 	// Verify optional parameters exist
 	assert.Contains(t, listTool.InputSchema.Properties, "status")
@@ -554,6 +555,111 @@ func TestListQuerySuggestions_ToolDescription(t *testing.T) {
 
 	// No required parameters (all are optional)
 	assert.Empty(t, listTool.InputSchema.Required, "all parameters should be optional")
+}
+
+func TestRegisterDevQueryTools_Annotations(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &DevQueryToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			MCPConfigService: &mockMCPConfigService{
+				config: &models.ToolGroupConfig{Enabled: true},
+			},
+			Logger: zap.NewNop(),
+		},
+		ProjectService: &mockProjectService{},
+		QueryService:   &mockQueryService{},
+	}
+
+	RegisterDevQueryTools(mcpServer, deps)
+
+	tests := []struct {
+		name        string
+		readOnly    bool
+		destructive bool
+		idempotent  bool
+		openWorld   bool
+	}{
+		{name: "list_query_suggestions", readOnly: true, destructive: false, idempotent: true, openWorld: false},
+		{name: "approve_query_suggestion", readOnly: false, destructive: false, idempotent: true, openWorld: false},
+		{name: "reject_query_suggestion", readOnly: false, destructive: false, idempotent: true, openWorld: false},
+		{name: "create_approved_query", readOnly: false, destructive: false, idempotent: true, openWorld: false},
+		{name: "update_approved_query", readOnly: false, destructive: false, idempotent: true, openWorld: false},
+		{name: "delete_approved_query", readOnly: false, destructive: false, idempotent: true, openWorld: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tool := mcpServer.GetTool(tt.name)
+			require.NotNil(t, tool, "tool should be registered")
+			require.NotNil(t, tool.Tool.Annotations.ReadOnlyHint)
+			require.NotNil(t, tool.Tool.Annotations.DestructiveHint)
+			require.NotNil(t, tool.Tool.Annotations.IdempotentHint)
+			require.NotNil(t, tool.Tool.Annotations.OpenWorldHint)
+
+			assert.Equal(t, tt.readOnly, *tool.Tool.Annotations.ReadOnlyHint)
+			assert.Equal(t, tt.destructive, *tool.Tool.Annotations.DestructiveHint)
+			assert.Equal(t, tt.idempotent, *tool.Tool.Annotations.IdempotentHint)
+			assert.Equal(t, tt.openWorld, *tool.Tool.Annotations.OpenWorldHint)
+		})
+	}
+}
+
+func TestListQuerySuggestions_StatusDescription(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &DevQueryToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			MCPConfigService: &mockMCPConfigService{
+				config: &models.ToolGroupConfig{Enabled: true},
+			},
+			Logger: zap.NewNop(),
+		},
+		ProjectService: &mockProjectService{},
+		QueryService:   &mockQueryService{},
+	}
+
+	RegisterDevQueryTools(mcpServer, deps)
+
+	tool := mcpServer.GetTool("list_query_suggestions")
+	require.NotNil(t, tool, "list_query_suggestions should be registered")
+
+	statusProp, ok := tool.Tool.InputSchema.Properties["status"].(map[string]any)
+	require.True(t, ok, "status property should be present")
+
+	description, ok := statusProp["description"].(string)
+	require.True(t, ok, "status property should include a description")
+	assert.Contains(t, description, "pending")
+	assert.Contains(t, description, "rejected")
+	assert.NotContains(t, description, "approved")
+}
+
+func TestParseQuerySuggestionStatus(t *testing.T) {
+	t.Run("defaults to pending", func(t *testing.T) {
+		status, result := parseQuerySuggestionStatus(nil)
+		assert.Equal(t, "pending", status)
+		assert.Nil(t, result)
+	})
+
+	t.Run("accepts rejected", func(t *testing.T) {
+		status, result := parseQuerySuggestionStatus(map[string]any{"status": "rejected"})
+		assert.Equal(t, "rejected", status)
+		assert.Nil(t, result)
+	})
+
+	t.Run("rejects approved", func(t *testing.T) {
+		status, result := parseQuerySuggestionStatus(map[string]any{"status": "approved"})
+		assert.Empty(t, status)
+		require.NotNil(t, result)
+		assert.True(t, result.IsError)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+		require.NoError(t, err)
+
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "status must be one of: pending, rejected")
+	})
 }
 
 func TestQuerySuggestionInfo_OmitsEmptyFields(t *testing.T) {
@@ -593,6 +699,29 @@ func TestQuerySuggestionInfo_OmitsEmptyFields(t *testing.T) {
 	if changes, ok := parsed["changes"].([]any); ok {
 		assert.Empty(t, changes, "changes should be empty when no changes")
 	}
+}
+
+func TestQuerySuggestionContext_PrefersRejectionReason(t *testing.T) {
+	reason := "Rejected because it scans too much data"
+	query := &models.Query{
+		RejectionReason: &reason,
+		SuggestionContext: map[string]any{
+			"context": "Original suggestion context",
+			"reason":  "Fallback reason",
+		},
+	}
+
+	assert.Equal(t, reason, querySuggestionContext(query))
+}
+
+func TestQuerySuggestionContext_FallsBackToSuggestionContext(t *testing.T) {
+	query := &models.Query{
+		SuggestionContext: map[string]any{
+			"reason": "Fallback reason",
+		},
+	}
+
+	assert.Equal(t, "Fallback reason", querySuggestionContext(query))
 }
 
 func TestBuildQuerySuggestionInfoNormalizesCreatedAtToUTCRFC3339(t *testing.T) {

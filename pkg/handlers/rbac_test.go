@@ -388,6 +388,10 @@ func (m *mockQueryServiceForRBAC) ListPending(ctx context.Context, projectID uui
 	return nil, nil
 }
 
+func (m *mockQueryServiceForRBAC) ListRejected(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error) {
+	return nil, nil
+}
+
 func TestRBAC_QueriesHandler(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()

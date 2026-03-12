@@ -56,6 +56,11 @@ func TestDetectSQLType(t *testing.T) {
 			sql:      "WITH updated AS (UPDATE users SET name = 'new' RETURNING *) SELECT * FROM updated",
 			expected: SQLTypeUnknown,
 		},
+		{
+			name:     "data-modifying CTE with MERGE",
+			sql:      "WITH merged AS (MERGE INTO users AS target USING incoming_users AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET name = source.name OUTPUT inserted.id) SELECT * FROM merged",
+			expected: SQLTypeUnknown,
+		},
 
 		// INSERT statements
 		{
@@ -96,6 +101,11 @@ func TestDetectSQLType(t *testing.T) {
 			name:     "DELETE with RETURNING",
 			sql:      "DELETE FROM users WHERE id = 1 RETURNING id",
 			expected: SQLTypeDelete,
+		},
+		{
+			name:     "MERGE statement",
+			sql:      "MERGE INTO users AS target USING incoming_users AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET name = source.name",
+			expected: SQLTypeMerge,
 		},
 
 		// CALL statements (stored procedures)
@@ -195,6 +205,7 @@ func TestIsModifyingStatement(t *testing.T) {
 		{"INSERT", SQLTypeInsert, true},
 		{"UPDATE", SQLTypeUpdate, true},
 		{"DELETE", SQLTypeDelete, true},
+		{"MERGE", SQLTypeMerge, true},
 		{"CALL", SQLTypeCall, true},
 		{"DDL", SQLTypeDDL, false},
 		{"UNKNOWN", SQLTypeUnknown, false},
@@ -297,6 +308,22 @@ func TestValidateSQLType(t *testing.T) {
 			expectedType:       SQLTypeCall,
 			expectError:        false,
 		},
+		// MERGE requires flag
+		{
+			name:               "MERGE without flag",
+			sql:                "MERGE INTO users AS target USING incoming_users AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET name = source.name",
+			allowsModification: false,
+			expectedType:       SQLTypeMerge,
+			expectError:        true,
+			errorContains:      "modifies data",
+		},
+		{
+			name:               "MERGE with flag",
+			sql:                "MERGE INTO users AS target USING incoming_users AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET name = source.name",
+			allowsModification: true,
+			expectedType:       SQLTypeMerge,
+			expectError:        false,
+		},
 		// DDL is always blocked
 		{
 			name:               "DDL without flag",
@@ -327,6 +354,14 @@ func TestValidateSQLType(t *testing.T) {
 		{
 			name:               "Data-modifying CTE",
 			sql:                "WITH deleted AS (DELETE FROM users RETURNING *) SELECT * FROM deleted",
+			allowsModification: true,
+			expectedType:       SQLTypeUnknown,
+			expectError:        true,
+			errorContains:      "unrecognized SQL statement",
+		},
+		{
+			name:               "Data-modifying MERGE CTE",
+			sql:                "WITH merged AS (MERGE INTO users AS target USING incoming_users AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET name = source.name OUTPUT inserted.id) SELECT * FROM merged",
 			allowsModification: true,
 			expectedType:       SQLTypeUnknown,
 			expectError:        true,
@@ -397,6 +432,12 @@ func TestShouldAutoCorrectAllowsModification(t *testing.T) {
 			allowsModification: true,
 			shouldCorrect:      false,
 		},
+		{
+			name:               "MERGE with flag",
+			sqlType:            SQLTypeMerge,
+			allowsModification: true,
+			shouldCorrect:      false,
+		},
 		// DDL and Unknown - technically won't reach here due to validation error
 		{
 			name:               "DDL with flag",
@@ -416,6 +457,103 @@ func TestShouldAutoCorrectAllowsModification(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := ShouldAutoCorrectAllowsModification(tt.sqlType, tt.allowsModification)
 			assert.Equal(t, tt.shouldCorrect, result)
+		})
+	}
+}
+
+func TestValidateExplainableReadOnlySQL(t *testing.T) {
+	tests := []struct {
+		name          string
+		sql           string
+		expectedType  SQLStatementType
+		expectError   bool
+		errorContains string
+	}{
+		{
+			name:         "SELECT allowed",
+			sql:          "SELECT * FROM users",
+			expectedType: SQLTypeSelect,
+		},
+		{
+			name:         "read-only CTE allowed",
+			sql:          "WITH recent AS (SELECT * FROM users) SELECT * FROM recent",
+			expectedType: SQLTypeSelect,
+		},
+		{
+			name:          "INSERT rejected",
+			sql:           "INSERT INTO users (name) VALUES ('test')",
+			expectedType:  SQLTypeInsert,
+			expectError:   true,
+			errorContains: "read-only SELECT",
+		},
+		{
+			name:          "UPDATE rejected",
+			sql:           "UPDATE users SET name = 'new'",
+			expectedType:  SQLTypeUpdate,
+			expectError:   true,
+			errorContains: "read-only SELECT",
+		},
+		{
+			name:          "DELETE rejected",
+			sql:           "DELETE FROM users WHERE id = 1",
+			expectedType:  SQLTypeDelete,
+			expectError:   true,
+			errorContains: "read-only SELECT",
+		},
+		{
+			name:          "CALL rejected",
+			sql:           "CALL process_orders()",
+			expectedType:  SQLTypeCall,
+			expectError:   true,
+			errorContains: "read-only SELECT",
+		},
+		{
+			name:          "MERGE rejected",
+			sql:           "MERGE INTO users AS target USING incoming_users AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET name = source.name",
+			expectedType:  SQLTypeMerge,
+			expectError:   true,
+			errorContains: "read-only SELECT",
+		},
+		{
+			name:          "DDL rejected",
+			sql:           "DROP TABLE users",
+			expectedType:  SQLTypeDDL,
+			expectError:   true,
+			errorContains: "DDL statements",
+		},
+		{
+			name:          "data modifying CTE rejected",
+			sql:           "WITH deleted AS (DELETE FROM users RETURNING *) SELECT * FROM deleted",
+			expectedType:  SQLTypeUnknown,
+			expectError:   true,
+			errorContains: "read-only SELECT",
+		},
+		{
+			name:          "data modifying MERGE CTE rejected",
+			sql:           "WITH merged AS (MERGE INTO users AS target USING incoming_users AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET name = source.name OUTPUT inserted.id) SELECT * FROM merged",
+			expectedType:  SQLTypeUnknown,
+			expectError:   true,
+			errorContains: "read-only SELECT",
+		},
+		{
+			name:          "unknown rejected",
+			sql:           "EXPLAIN SELECT * FROM users",
+			expectedType:  SQLTypeUnknown,
+			expectError:   true,
+			errorContains: "read-only SELECT",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sqlType, err := ValidateExplainableReadOnlySQL(tt.sql)
+			assert.Equal(t, tt.expectedType, sqlType)
+			if tt.expectError {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errorContains)
+			} else {
+				require.NoError(t, err)
+			}
 		})
 	}
 }
@@ -449,6 +587,11 @@ func TestContainsModifyingCTE(t *testing.T) {
 		{
 			name:     "lowercase DELETE in CTE",
 			sql:      "with deleted as (delete from users where id = 1 returning *) select * from deleted",
+			expected: true,
+		},
+		{
+			name:     "MERGE in CTE",
+			sql:      "WITH merged AS (MERGE INTO users AS target USING incoming_users AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET name = source.name OUTPUT inserted.id) SELECT * FROM merged",
 			expected: true,
 		},
 		{

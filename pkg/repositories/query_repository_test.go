@@ -1582,6 +1582,83 @@ func TestQueryRepository_ListPendingByDatasource(t *testing.T) {
 	}
 }
 
+func TestQueryRepository_ListRejected(t *testing.T) {
+	tc := setupQueryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	rejectedQuery1 := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Rejected query 1",
+		SQLQuery:              "SELECT 1",
+		Dialect:               "postgres",
+		IsEnabled:             false,
+		Status:                "rejected",
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
+	}
+	if err := tc.repo.Create(ctx, rejectedQuery1); err != nil {
+		t.Fatalf("Create rejected query 1 failed: %v", err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	rejectedQuery2 := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Rejected query 2",
+		SQLQuery:              "SELECT 2",
+		Dialect:               "postgres",
+		IsEnabled:             false,
+		Status:                "rejected",
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
+	}
+	if err := tc.repo.Create(ctx, rejectedQuery2); err != nil {
+		t.Fatalf("Create rejected query 2 failed: %v", err)
+	}
+
+	pendingQuery := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Pending query",
+		SQLQuery:              "SELECT 3",
+		Dialect:               "postgres",
+		IsEnabled:             false,
+		Status:                "pending",
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
+	}
+	if err := tc.repo.Create(ctx, pendingQuery); err != nil {
+		t.Fatalf("Create pending query failed: %v", err)
+	}
+
+	rejected, err := tc.repo.ListRejected(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("ListRejected failed: %v", err)
+	}
+
+	if len(rejected) != 2 {
+		t.Fatalf("expected 2 rejected queries, got %d", len(rejected))
+	}
+
+	if rejected[0].NaturalLanguagePrompt != "Rejected query 2" {
+		t.Errorf("expected first rejected query to be 'Rejected query 2', got %q", rejected[0].NaturalLanguagePrompt)
+	}
+
+	for _, q := range rejected {
+		if q.Status != "rejected" {
+			t.Errorf("expected only rejected queries, got status %q", q.Status)
+		}
+		if q.ID == pendingQuery.ID {
+			t.Error("pending query should not be in rejected list")
+		}
+	}
+}
+
 func TestQueryRepository_CountPending(t *testing.T) {
 	tc := setupQueryTest(t)
 	tc.cleanup()

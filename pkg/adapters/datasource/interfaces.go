@@ -156,8 +156,8 @@ type QueryExecutor interface {
 	// Returns nil if valid, error with details if invalid.
 	ValidateQuery(ctx context.Context, sqlQuery string) error
 
-	// ExplainQuery returns EXPLAIN ANALYZE output for a SQL query.
-	// Provides performance insights including execution plan, timing, and hints.
+	// ExplainQuery returns a plan-only explanation for a read-only SQL query.
+	// Implementations must not execute the underlying query.
 	ExplainQuery(ctx context.Context, sqlQuery string) (*ExplainResult, error)
 
 	// QuoteIdentifier safely quotes a SQL identifier (table, column, schema name)
@@ -189,10 +189,8 @@ type QueryExecutionResult struct {
 	RowCount int              `json:"row_count"`
 }
 
-// ExplainResult holds the results from EXPLAIN ANALYZE output.
+// ExplainResult holds the results from a safe, plan-only explain operation.
 type ExplainResult struct {
 	Plan             string   `json:"plan"`              // Full execution plan as text
-	ExecutionTimeMs  float64  `json:"execution_time_ms"` // Actual execution time in milliseconds
-	PlanningTimeMs   float64  `json:"planning_time_ms"`  // Query planning time in milliseconds
 	PerformanceHints []string `json:"performance_hints"` // Suggestions for optimization
 }

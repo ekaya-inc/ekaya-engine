@@ -970,21 +970,27 @@ func registerValidateTool(s *server.MCPServer, deps *MCPToolDeps) {
 	})
 }
 
-// registerExplainQueryTool adds the explain_query tool for query performance analysis.
+type explainQueryResponse struct {
+	StatementType    string   `json:"statement_type"`
+	Plan             string   `json:"plan"`
+	PerformanceHints []string `json:"performance_hints"`
+}
+
+// registerExplainQueryTool adds the explain_query tool for safe, plan-only query analysis.
 func registerExplainQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 	tool := mcp.NewTool(
 		"explain_query",
 		mcp.WithDescription(
-			"Analyze SQL query performance using EXPLAIN ANALYZE. "+
-				"Returns execution plan, timing information, and optimization hints. "+
-				"Note: This executes the query to gather actual performance data.",
+			"Analyze a read-only SQL query plan using EXPLAIN without executing the query. "+
+				"Returns the query plan text and optimization hints. "+
+				"Only SELECT statements and read-only WITH queries are allowed.",
 		),
 		mcp.WithString(
 			"sql",
 			mcp.Required(),
-			mcp.Description("SQL query to analyze (typically a SELECT statement)"),
+			mcp.Description("Read-only SQL query to analyze (SELECT or read-only WITH query)"),
 		),
-		mcp.WithReadOnlyHintAnnotation(false), // EXPLAIN ANALYZE executes the query
+		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(false),
@@ -1006,6 +1012,11 @@ func registerExplainQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 			return NewErrorResult("invalid_parameters", err.Error()), nil
 		}
 
+		sqlType, err := services.ValidateExplainableReadOnlySQL(sql)
+		if err != nil {
+			return NewErrorResult("invalid_sql_type", err.Error()), nil
+		}
+
 		// Get datasource config and create executor
 		dsType, dsConfig, err := getDefaultDatasourceConfig(tenantCtx, deps, projectID)
 		if err != nil {
@@ -1018,22 +1029,15 @@ func registerExplainQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 		}
 		defer executor.Close()
 
-		// Execute EXPLAIN ANALYZE
+		// Execute safe, plan-only EXPLAIN
 		explainResult, err := executor.ExplainQuery(tenantCtx, sql)
 		if err != nil {
 			return HandleServiceError(err, "explain_query_failed")
 		}
 
-		// Format response
-		result := struct {
-			Plan             string   `json:"plan"`
-			ExecutionTimeMs  float64  `json:"execution_time_ms"`
-			PlanningTimeMs   float64  `json:"planning_time_ms"`
-			PerformanceHints []string `json:"performance_hints"`
-		}{
+		result := explainQueryResponse{
+			StatementType:    string(sqlType),
 			Plan:             explainResult.Plan,
-			ExecutionTimeMs:  explainResult.ExecutionTimeMs,
-			PlanningTimeMs:   explainResult.PlanningTimeMs,
 			PerformanceHints: explainResult.PerformanceHints,
 		}
 

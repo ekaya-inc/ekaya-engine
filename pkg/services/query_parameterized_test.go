@@ -479,6 +479,10 @@ func (m *mockQueryRepository) ListPending(ctx context.Context, projectID uuid.UU
 	return nil, nil
 }
 
+func (m *mockQueryRepository) ListRejected(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error) {
+	return nil, nil
+}
+
 func (m *mockQueryRepository) ListPendingByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.Query, error) {
 	return nil, nil
 }
@@ -1135,6 +1139,16 @@ func (m *mockQueryRepoForApproval) ListPending(ctx context.Context, projectID uu
 	return pending, nil
 }
 
+func (m *mockQueryRepoForApproval) ListRejected(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error) {
+	var rejected []*models.Query
+	for _, q := range m.queries {
+		if q.Status == "rejected" {
+			rejected = append(rejected, q)
+		}
+	}
+	return rejected, nil
+}
+
 func (m *mockQueryRepoForApproval) ListPendingByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.Query, error) {
 	return nil, nil
 }
@@ -1411,6 +1425,29 @@ func TestListPending(t *testing.T) {
 	pending, err := svc.ListPending(context.Background(), projectID)
 	require.NoError(t, err)
 	assert.Len(t, pending, 2, "Should return only pending queries")
+}
+
+func TestListRejected(t *testing.T) {
+	projectID := uuid.New()
+
+	mockRepo := newMockQueryRepoForApproval()
+
+	mockRepo.queries[uuid.New()] = &models.Query{ProjectID: projectID, Status: "pending"}
+	mockRepo.queries[uuid.New()] = &models.Query{ProjectID: projectID, Status: "rejected"}
+	mockRepo.queries[uuid.New()] = &models.Query{ProjectID: projectID, Status: "rejected"}
+	mockRepo.queries[uuid.New()] = &models.Query{ProjectID: projectID, Status: "approved"}
+
+	svc := &queryService{
+		logger:    zap.NewNop(),
+		queryRepo: mockRepo,
+	}
+
+	rejected, err := svc.ListRejected(context.Background(), projectID)
+	require.NoError(t, err)
+	assert.Len(t, rejected, 2, "Should return only rejected suggestions")
+	for _, query := range rejected {
+		assert.Equal(t, "rejected", query.Status)
+	}
 }
 
 // TestDirectCreate_CreatesApprovedQuery tests that DirectCreate creates a query with approved status.

@@ -312,13 +312,13 @@ func (e *QueryExecutor) ValidateQuery(ctx context.Context, sqlQuery string) erro
 	return nil
 }
 
-// ExplainQuery returns EXPLAIN ANALYZE output for a SQL query with performance insights.
+// ExplainQuery returns a plan-only EXPLAIN output for a SQL query with performance insights.
 func (e *QueryExecutor) ExplainQuery(ctx context.Context, sqlQuery string) (*datasource.ExplainResult, error) {
-	// Use EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) to get detailed execution plan
-	explainSQL := "EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) " + sqlQuery
+	// Use plan-only EXPLAIN so the query is never executed.
+	explainSQL := "EXPLAIN (FORMAT TEXT) " + sqlQuery
 	rows, err := e.pool.Query(ctx, explainSQL)
 	if err != nil {
-		return nil, fmt.Errorf("EXPLAIN ANALYZE failed: %w", err)
+		return nil, fmt.Errorf("EXPLAIN failed: %w", err)
 	}
 	defer rows.Close()
 
@@ -336,31 +336,18 @@ func (e *QueryExecutor) ExplainQuery(ctx context.Context, sqlQuery string) (*dat
 		return nil, fmt.Errorf("error reading EXPLAIN output: %w", err)
 	}
 
-	// Parse the plan to extract timing and generate hints
 	result := &datasource.ExplainResult{
 		Plan: strings.Join(planLines, "\n"),
 	}
 
-	// Extract execution and planning times from the plan
-	var executionTime, planningTime float64
-	for _, line := range planLines {
-		if strings.Contains(line, "Execution Time:") {
-			fmt.Sscanf(line, " Execution Time: %f ms", &executionTime)
-		} else if strings.Contains(line, "Planning Time:") {
-			fmt.Sscanf(line, " Planning Time: %f ms", &planningTime)
-		}
-	}
-	result.ExecutionTimeMs = executionTime
-	result.PlanningTimeMs = planningTime
-
 	// Generate performance hints based on plan analysis
-	result.PerformanceHints = generatePerformanceHints(planLines, executionTime)
+	result.PerformanceHints = generatePerformanceHints(planLines)
 
 	return result, nil
 }
 
 // generatePerformanceHints analyzes the EXPLAIN plan and provides optimization suggestions.
-func generatePerformanceHints(planLines []string, executionTimeMs float64) []string {
+func generatePerformanceHints(planLines []string) []string {
 	var hints []string
 	planText := strings.Join(planLines, "\n")
 
@@ -387,18 +374,6 @@ func generatePerformanceHints(planLines []string, executionTimeMs float64) []str
 	// Check for bitmap heap scans (often indicates partial index usage)
 	if strings.Contains(planText, "Bitmap Heap Scan") {
 		hints = append(hints, "Bitmap heap scan detected - query may benefit from more selective conditions or better index coverage")
-	}
-
-	// Check for high buffer usage
-	if strings.Contains(planText, "Buffers: shared read=") {
-		hints = append(hints, "High buffer usage detected - query is reading significant data from disk/memory")
-	}
-
-	// Check for slow execution time
-	if executionTimeMs > 1000 {
-		hints = append(hints, fmt.Sprintf("Query execution took %.2f ms - consider optimization if this is a frequent query", executionTimeMs))
-	} else if executionTimeMs > 100 {
-		hints = append(hints, "Query execution is moderately slow - review plan for optimization opportunities")
 	}
 
 	// If no specific hints, provide a positive message

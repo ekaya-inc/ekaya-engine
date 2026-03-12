@@ -43,7 +43,7 @@ type querySuggestionInfo struct {
 	SQL             string   `json:"sql"`
 	SuggestedBy     string   `json:"suggested_by"`
 	CreatedAt       string   `json:"created_at"`
-	Context         string   `json:"context,omitempty"`
+	Context         string   `json:"context,omitempty"` // Suggestion context or rejection reason
 	ParentQueryID   string   `json:"parent_query_id,omitempty"`
 	ParentQueryName string   `json:"parent_query_name,omitempty"`
 	Changes         []string `json:"changes,omitempty"` // For updates: which fields changed
@@ -57,17 +57,42 @@ type listQuerySuggestionsResponse struct {
 	Count       int                   `json:"count"`
 }
 
+func parseQuerySuggestionStatus(args map[string]any) (string, *mcp.CallToolResult) {
+	status := "pending"
+	if statusVal, ok := args["status"].(string); ok && statusVal != "" {
+		switch statusVal {
+		case "pending", "rejected":
+			status = statusVal
+		default:
+			return "", NewErrorResultWithDetails("invalid_parameters",
+				"status must be one of: pending, rejected",
+				map[string]any{
+					"parameter":    "status",
+					"valid_values": []string{"pending", "rejected"},
+					"actual_value": statusVal,
+				})
+		}
+	}
+
+	return status, nil
+}
+
 // registerListQuerySuggestionsTool registers the list_query_suggestions tool.
 func registerListQuerySuggestionsTool(mcpServer *server.MCPServer, deps *DevQueryToolDeps) {
 	tool := mcp.NewTool(
 		"list_query_suggestions",
-		mcp.WithDescription(`List all pending query suggestions awaiting review.
+		mcp.WithDescription(`List query suggestions awaiting review or previously rejected.
 Returns both new query suggestions and update suggestions for existing queries.
+Approved suggestions graduate to list_approved_queries.
 Use approve_query_suggestion or reject_query_suggestion to process suggestions.`),
 		mcp.WithString("status",
-			mcp.Description("Filter by status: pending, approved, rejected (default: pending)")),
+			mcp.Description("Filter by status: pending or rejected (default: pending)")),
 		mcp.WithString("datasource_id",
 			mcp.Description("Filter by datasource UUID")),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
 	)
 
 	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -85,20 +110,9 @@ Use approve_query_suggestion or reject_query_suggestion to process suggestions.`
 		args, _ := request.Params.Arguments.(map[string]any)
 
 		// Parse optional status filter
-		status := "pending" // default
-		if statusVal, ok := args["status"].(string); ok && statusVal != "" {
-			switch statusVal {
-			case "pending", "approved", "rejected":
-				status = statusVal
-			default:
-				return NewErrorResultWithDetails("invalid_parameters",
-					"status must be one of: pending, approved, rejected",
-					map[string]any{
-						"parameter":    "status",
-						"valid_values": []string{"pending", "approved", "rejected"},
-						"actual_value": statusVal,
-					}), nil
-			}
+		status, invalidStatusResult := parseQuerySuggestionStatus(args)
+		if invalidStatusResult != nil {
+			return invalidStatusResult, nil
 		}
 
 		// Parse optional datasource_id filter
@@ -116,21 +130,21 @@ Use approve_query_suggestion or reject_query_suggestion to process suggestions.`
 			datasourceID = &parsed
 		}
 
-		// For now, only "pending" status is directly supported by the service layer.
-		// Other statuses would need additional repository methods.
 		var queries []*models.Query
-		if status == "pending" {
+		switch status {
+		case "pending":
 			queries, err = deps.QueryService.ListPending(tenantCtx, projectID)
-			if err != nil {
-				deps.Logger.Error("Failed to list pending queries",
-					zap.String("project_id", projectID.String()),
-					zap.Error(err))
-				return nil, fmt.Errorf("failed to list pending queries: %w", err)
-			}
-		} else {
-			// For approved/rejected, we would need a different repository method.
-			// For now, return empty list as those statuses are not yet implemented.
-			queries = []*models.Query{}
+		case "rejected":
+			queries, err = deps.QueryService.ListRejected(tenantCtx, projectID)
+		default:
+			return nil, fmt.Errorf("unsupported query suggestion status: %s", status)
+		}
+		if err != nil {
+			deps.Logger.Error("Failed to list query suggestions",
+				zap.String("project_id", projectID.String()),
+				zap.String("status", status),
+				zap.Error(err))
+			return nil, fmt.Errorf("failed to list query suggestions: %w", err)
 		}
 
 		// Filter by datasource_id if provided
@@ -168,15 +182,6 @@ Use approve_query_suggestion or reject_query_suggestion to process suggestions.`
 				info.SuggestedBy = *q.SuggestedBy
 			} else {
 				info.SuggestedBy = "unknown"
-			}
-
-			// Extract context from suggestion_context
-			if q.SuggestionContext != nil {
-				if contextVal, ok := q.SuggestionContext["context"].(string); ok {
-					info.Context = contextVal
-				} else if reasonVal, ok := q.SuggestionContext["reason"].(string); ok {
-					info.Context = reasonVal
-				}
 			}
 
 			// Determine type and populate parent info for updates
@@ -220,9 +225,29 @@ func buildQuerySuggestionInfo(q *models.Query, _ map[uuid.UUID]*models.Query) qu
 		Name:         q.NaturalLanguagePrompt,
 		SQL:          q.SQLQuery,
 		CreatedAt:    jsonutil.FormatUTCTime(q.CreatedAt),
+		Context:      querySuggestionContext(q),
 		DatasourceID: q.DatasourceID.String(),
 		Status:       q.Status,
 	}
+}
+
+func querySuggestionContext(q *models.Query) string {
+	if q.RejectionReason != nil && *q.RejectionReason != "" {
+		return *q.RejectionReason
+	}
+
+	if q.SuggestionContext == nil {
+		return ""
+	}
+
+	if contextVal, ok := q.SuggestionContext["context"].(string); ok {
+		return contextVal
+	}
+	if reasonVal, ok := q.SuggestionContext["reason"].(string); ok {
+		return reasonVal
+	}
+
+	return ""
 }
 
 // calculateChanges determines which fields changed between the parent query and the suggestion.
@@ -332,6 +357,10 @@ Use list_query_suggestions first to see pending suggestions.`),
 		mcp.WithString("suggestion_id",
 			mcp.Required(),
 			mcp.Description("UUID of the pending suggestion to approve")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
 	)
 
 	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -472,6 +501,10 @@ Use list_query_suggestions first to see pending suggestions.`),
 		mcp.WithString("reason",
 			mcp.Required(),
 			mcp.Description("Explanation for why the suggestion was rejected")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
 	)
 
 	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -632,6 +665,10 @@ If datasource_id is not provided, the project's default datasource will be used.
 			mcp.Description("Tags for organizing queries (e.g., [\"billing\", \"reporting\"])"),
 			mcp.WithStringItems(),
 		),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
 	)
 
 	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -921,6 +958,10 @@ Use this for admin-initiated updates that bypass the suggestion workflow.`),
 		),
 		mcp.WithBoolean("is_enabled",
 			mcp.Description("Enable or disable the query")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
 	)
 
 	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1131,6 +1172,10 @@ Any pending update suggestions for this query will be automatically rejected wit
 		mcp.WithString("query_id",
 			mcp.Required(),
 			mcp.Description("UUID of the query to delete")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
 	)
 
 	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {

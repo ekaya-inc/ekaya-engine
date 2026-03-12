@@ -13,6 +13,7 @@ const (
 	SQLTypeInsert  SQLStatementType = "INSERT"
 	SQLTypeUpdate  SQLStatementType = "UPDATE"
 	SQLTypeDelete  SQLStatementType = "DELETE"
+	SQLTypeMerge   SQLStatementType = "MERGE"
 	SQLTypeCall    SQLStatementType = "CALL"
 	SQLTypeDDL     SQLStatementType = "DDL"     // CREATE, ALTER, DROP, TRUNCATE
 	SQLTypeUnknown SQLStatementType = "UNKNOWN" // Unrecognized or blocked statement types
@@ -20,7 +21,7 @@ const (
 
 // modifyingCTEPattern matches CTEs that contain data-modifying operations.
 // Example: WITH deleted AS (DELETE FROM ...) SELECT * FROM deleted
-var modifyingCTEPattern = regexp.MustCompile(`(?i)\bAS\s*\(\s*(INSERT|UPDATE|DELETE)\b`)
+var modifyingCTEPattern = regexp.MustCompile(`(?i)\bAS\s*\(\s*(INSERT|UPDATE|DELETE|MERGE)\b`)
 
 // DetectSQLType determines the type of SQL statement based on the first keyword.
 // Returns SQLTypeDDL for DDL statements (CREATE, ALTER, DROP, TRUNCATE) which are blocked.
@@ -52,6 +53,9 @@ func DetectSQLType(sql string) SQLStatementType {
 	case strings.HasPrefix(normalized, "DELETE"):
 		return SQLTypeDelete
 
+	case strings.HasPrefix(normalized, "MERGE"):
+		return SQLTypeMerge
+
 	case strings.HasPrefix(normalized, "CALL"):
 		return SQLTypeCall
 
@@ -81,10 +85,10 @@ func containsModifyingCTE(sql string) bool {
 }
 
 // IsModifyingStatement returns true if the SQL statement type can modify data.
-// This includes INSERT, UPDATE, DELETE, and CALL (stored procedures).
+// This includes INSERT, UPDATE, DELETE, MERGE, and CALL (stored procedures).
 func IsModifyingStatement(sqlType SQLStatementType) bool {
 	switch sqlType {
-	case SQLTypeInsert, SQLTypeUpdate, SQLTypeDelete, SQLTypeCall:
+	case SQLTypeInsert, SQLTypeUpdate, SQLTypeDelete, SQLTypeMerge, SQLTypeCall:
 		return true
 	default:
 		return false
@@ -107,7 +111,7 @@ func (e *SQLTypeError) Error() string {
 // Rules:
 //   - DDL statements (CREATE, ALTER, DROP, TRUNCATE) are never allowed
 //   - Unknown statement types are not allowed
-//   - Modifying statements (INSERT, UPDATE, DELETE, CALL) require allowsModification=true
+//   - Modifying statements (INSERT, UPDATE, DELETE, MERGE, CALL) require allowsModification=true
 //   - SELECT statements do not require allowsModification flag
 func ValidateSQLType(sql string, allowsModification bool) (SQLStatementType, error) {
 	sqlType := DetectSQLType(sql)
@@ -124,7 +128,7 @@ func ValidateSQLType(sql string, allowsModification bool) (SQLStatementType, err
 	if sqlType == SQLTypeUnknown {
 		return sqlType, &SQLTypeError{
 			Type:    sqlType,
-			Message: "unrecognized SQL statement type; only SELECT, INSERT, UPDATE, DELETE, and CALL are allowed",
+			Message: "unrecognized SQL statement type; only SELECT, INSERT, UPDATE, DELETE, MERGE, and CALL are allowed",
 		}
 	}
 
@@ -144,4 +148,29 @@ func ValidateSQLType(sql string, allowsModification bool) (SQLStatementType, err
 // This allows users to toggle the flag off when changing from a modifying query to SELECT.
 func ShouldAutoCorrectAllowsModification(sqlType SQLStatementType, allowsModification bool) bool {
 	return !IsModifyingStatement(sqlType) && allowsModification
+}
+
+// ValidateExplainableReadOnlySQL validates that explain_query only accepts read-only SQL.
+func ValidateExplainableReadOnlySQL(sql string) (SQLStatementType, error) {
+	sqlType := DetectSQLType(sql)
+
+	switch sqlType {
+	case SQLTypeSelect:
+		return sqlType, nil
+	case SQLTypeDDL:
+		return sqlType, &SQLTypeError{
+			Type:    sqlType,
+			Message: "DDL statements (CREATE, ALTER, DROP, TRUNCATE) are not allowed in explain_query",
+		}
+	case SQLTypeInsert, SQLTypeUpdate, SQLTypeDelete, SQLTypeMerge, SQLTypeCall:
+		return sqlType, &SQLTypeError{
+			Type:    sqlType,
+			Message: "explain_query only accepts read-only SELECT statements and read-only WITH queries",
+		}
+	default:
+		return sqlType, &SQLTypeError{
+			Type:    sqlType,
+			Message: "explain_query only accepts read-only SELECT statements and read-only WITH queries",
+		}
+	}
 }

@@ -1046,14 +1046,11 @@ func TestQueryExecutor_ExplainQuery_Valid(t *testing.T) {
 		t.Error("expected non-empty execution plan")
 	}
 
-	// Execution time should be non-negative (0 is ok for very fast queries)
-	if result.ExecutionTimeMs < 0 {
-		t.Errorf("expected non-negative execution time, got %.2f", result.ExecutionTimeMs)
+	if strings.Contains(result.Plan, "Execution Time:") {
+		t.Error("expected safe explain plan without execution timing output")
 	}
-
-	// Planning time should be non-negative
-	if result.PlanningTimeMs < 0 {
-		t.Errorf("expected non-negative planning time, got %.2f", result.PlanningTimeMs)
+	if strings.Contains(result.Plan, "Planning Time:") {
+		t.Error("expected safe explain plan without planning timing output")
 	}
 
 	// Should have at least one hint
@@ -1085,12 +1082,11 @@ func TestQueryExecutor_ExplainQuery_Complex(t *testing.T) {
 		t.Error("expected non-empty execution plan")
 	}
 
-	// Execution and planning times should be non-negative (can be 0 for very fast queries)
-	if result.ExecutionTimeMs < 0 {
-		t.Errorf("expected non-negative execution time, got %.2f", result.ExecutionTimeMs)
+	if strings.Contains(result.Plan, "Execution Time:") {
+		t.Error("expected safe explain plan without execution timing output")
 	}
-	if result.PlanningTimeMs < 0 {
-		t.Errorf("expected non-negative planning time, got %.2f", result.PlanningTimeMs)
+	if strings.Contains(result.Plan, "Planning Time:") {
+		t.Error("expected safe explain plan without planning timing output")
 	}
 
 	// Should have hints
@@ -1108,8 +1104,8 @@ func TestQueryExecutor_ExplainQuery_InvalidSQL(t *testing.T) {
 		t.Error("expected invalid SQL to fail")
 	}
 
-	if !strings.Contains(err.Error(), "EXPLAIN ANALYZE failed") {
-		t.Errorf("expected error to mention EXPLAIN ANALYZE failure, got: %v", err)
+	if !strings.Contains(err.Error(), "EXPLAIN failed") {
+		t.Errorf("expected error to mention EXPLAIN failure, got: %v", err)
 	}
 }
 
@@ -1142,11 +1138,6 @@ func TestQueryExecutor_ExplainQuery_WithJoin(t *testing.T) {
 
 	if result.Plan == "" {
 		t.Error("expected non-empty execution plan")
-	}
-
-	// Should have timing information
-	if result.ExecutionTimeMs < 0 {
-		t.Errorf("expected non-negative execution time, got %.2f", result.ExecutionTimeMs)
 	}
 
 	// Should have hints

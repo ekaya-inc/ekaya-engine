@@ -407,19 +407,25 @@ func (e *QueryExecutor) ValidateQuery(ctx context.Context, sqlQuery string) erro
 	return nil
 }
 
-// ExplainQuery returns execution plan output for a SQL query with performance insights.
+// ExplainQuery returns plan-only output for a SQL query with performance insights.
 // Uses SQL Server's SET SHOWPLAN_TEXT ON to get execution plan without executing the query.
 func (e *QueryExecutor) ExplainQuery(ctx context.Context, sqlQuery string) (*datasource.ExplainResult, error) {
+	conn, err := e.db.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to acquire connection for showplan: %w", err)
+	}
+	defer conn.Close()
+
 	// Use SHOWPLAN_TEXT which shows plan without executing
 	// This is simpler and more reliable than STATISTICS PROFILE
-	_, err := e.db.ExecContext(ctx, "SET SHOWPLAN_TEXT ON")
+	_, err = conn.ExecContext(ctx, "SET SHOWPLAN_TEXT ON")
 	if err != nil {
 		return nil, fmt.Errorf("failed to enable showplan: %w", err)
 	}
-	defer e.db.ExecContext(ctx, "SET SHOWPLAN_TEXT OFF")
+	defer conn.ExecContext(ctx, "SET SHOWPLAN_TEXT OFF")
 
 	// Execute the query - this will return the plan, not the results
-	rows, err := e.db.QueryContext(ctx, sqlQuery)
+	rows, err := conn.QueryContext(ctx, sqlQuery)
 	if err != nil {
 		return nil, fmt.Errorf("EXPLAIN query failed: %w", err)
 	}
@@ -459,11 +465,7 @@ func (e *QueryExecutor) ExplainQuery(ctx context.Context, sqlQuery string) (*dat
 	}
 
 	// Build the result
-	result := &datasource.ExplainResult{
-		Plan:            "",
-		ExecutionTimeMs: 0, // SHOWPLAN_TEXT doesn't provide timing
-		PlanningTimeMs:  0,
-	}
+	result := &datasource.ExplainResult{}
 
 	if len(planLines) > 0 {
 		result.Plan = "SQL Server Execution Plan:\n" + strings.Join(planLines, "\n")
@@ -472,13 +474,13 @@ func (e *QueryExecutor) ExplainQuery(ctx context.Context, sqlQuery string) (*dat
 	}
 
 	// Generate performance hints
-	result.PerformanceHints = generateMSSQLPerformanceHints(planLines, 0)
+	result.PerformanceHints = generateMSSQLPerformanceHints(planLines)
 
 	return result, nil
 }
 
 // generateMSSQLPerformanceHints analyzes the execution plan and provides optimization suggestions.
-func generateMSSQLPerformanceHints(planLines []string, executionTimeMs float64) []string {
+func generateMSSQLPerformanceHints(planLines []string) []string {
 	var hints []string
 	planText := ""
 	if len(planLines) > 0 {
@@ -510,13 +512,6 @@ func generateMSSQLPerformanceHints(planLines []string, executionTimeMs float64) 
 	// Check for sorts
 	if containsIgnoreCase(planText, "Sort") {
 		hints = append(hints, "Sort operation detected - consider adding an index to avoid sorting")
-	}
-
-	// Check for high cost operations
-	if executionTimeMs > 1000 {
-		hints = append(hints, fmt.Sprintf("Query execution cost is high (%.2f ms) - consider optimization if this is a frequent query", executionTimeMs))
-	} else if executionTimeMs > 100 {
-		hints = append(hints, "Query execution cost is moderate - review plan for optimization opportunities")
 	}
 
 	// If no specific hints, provide a positive message
