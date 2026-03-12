@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -116,14 +116,17 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	createdAgent, err := h.agentService.Get(r.Context(), projectID, agent.ID)
+	if err != nil {
+		h.handleServiceError(w, err, "Failed to get created agent")
+		return
+	}
+
 	response := ApiResponse{
 		Success: true,
 		Data: createAgentResponse{
-			agentResponse: buildAgentResponse(&services.AgentWithQueries{
-				Agent:    *agent,
-				QueryIDs: queryIDs,
-			}),
-			APIKey: apiKey,
+			agentResponse: buildAgentResponse(createdAgent),
+			APIKey:        apiKey,
 		},
 	}
 
@@ -224,18 +227,22 @@ func (h *AgentHandler) GetKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	key, err := h.agentService.GetKey(r.Context(), projectID, agentID)
-	if err != nil {
-		h.handleServiceError(w, err, "Failed to get agent key")
-		return
-	}
-
 	reveal := r.URL.Query().Get("reveal") == "true"
 	responseKey := "****"
 	masked := true
 	if reveal {
+		key, err := h.agentService.GetKey(r.Context(), projectID, agentID)
+		if err != nil {
+			h.handleServiceError(w, err, "Failed to get agent key")
+			return
+		}
 		responseKey = key
 		masked = false
+	} else {
+		if err := h.agentService.EnsureExists(r.Context(), projectID, agentID); err != nil {
+			h.handleServiceError(w, err, "Failed to get agent")
+			return
+		}
 	}
 
 	if err := WriteJSON(w, http.StatusOK, ApiResponse{
@@ -308,8 +315,9 @@ func (h *AgentHandler) handleServiceError(w http.ResponseWriter, err error, defa
 	case errors.Is(err, apperrors.ErrNotFound):
 		h.writeError(w, http.StatusNotFound, "not_found", "Agent not found")
 	default:
-		if strings.Contains(err.Error(), "at least one query") || strings.Contains(err.Error(), "name is required") {
-			h.writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		var validationErr *services.AgentValidationError
+		if errors.As(err, &validationErr) {
+			h.writeError(w, http.StatusBadRequest, "invalid_request", validationErr.Error())
 			return
 		}
 		h.logger.Error(defaultMessage, zap.Error(err))
@@ -350,7 +358,7 @@ func buildAgentResponse(agent *services.AgentWithQueries) agentResponse {
 		ID:        agent.ID.String(),
 		Name:      agent.Name,
 		QueryIDs:  queryIDs,
-		CreatedAt: agent.CreatedAt.UTC().Format(http.TimeFormat),
-		UpdatedAt: agent.UpdatedAt.UTC().Format(http.TimeFormat),
+		CreatedAt: agent.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt: agent.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 }

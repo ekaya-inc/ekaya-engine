@@ -33,6 +33,7 @@ type AgentService interface {
 	Create(ctx context.Context, projectID uuid.UUID, name string, queryIDs []uuid.UUID) (*models.Agent, string, error)
 	List(ctx context.Context, projectID uuid.UUID) ([]*AgentWithQueries, error)
 	Get(ctx context.Context, projectID, agentID uuid.UUID) (*AgentWithQueries, error)
+	EnsureExists(ctx context.Context, projectID, agentID uuid.UUID) error
 	GetKey(ctx context.Context, projectID, agentID uuid.UUID) (string, error)
 	UpdateQueryAccess(ctx context.Context, projectID, agentID uuid.UUID, queryIDs []uuid.UUID) error
 	RotateKey(ctx context.Context, projectID, agentID uuid.UUID) (string, error)
@@ -43,6 +44,15 @@ type AgentService interface {
 type AgentWithQueries struct {
 	models.Agent
 	QueryIDs []uuid.UUID `json:"query_ids"`
+}
+
+// AgentValidationError represents a request that violates agent business rules.
+type AgentValidationError struct {
+	Message string
+}
+
+func (e *AgentValidationError) Error() string {
+	return e.Message
 }
 
 type agentService struct {
@@ -67,10 +77,10 @@ func NewAgentService(
 func (s *agentService) Create(ctx context.Context, projectID uuid.UUID, name string, queryIDs []uuid.UUID) (*models.Agent, string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil, "", fmt.Errorf("name is required")
+		return nil, "", &AgentValidationError{Message: "name is required"}
 	}
 	if len(queryIDs) == 0 {
-		return nil, "", fmt.Errorf("at least one query must be selected")
+		return nil, "", &AgentValidationError{Message: "at least one query must be selected"}
 	}
 
 	plainKey, encryptedKey, err := s.generateEncryptedKey()
@@ -84,18 +94,7 @@ func (s *agentService) Create(ctx context.Context, projectID uuid.UUID, name str
 		APIKeyEncrypted: encryptedKey,
 	}
 
-	if err := s.repo.Create(ctx, agent); err != nil {
-		return nil, "", err
-	}
-
-	if err := s.repo.SetQueryAccess(ctx, agent.ID, uniqueQueryIDs(queryIDs)); err != nil {
-		cleanupErr := s.repo.Delete(ctx, projectID, agent.ID)
-		if cleanupErr != nil {
-			s.logger.Error("failed to cleanup agent after SetQueryAccess failure",
-				zap.String("project_id", projectID.String()),
-				zap.String("agent_id", agent.ID.String()),
-				zap.Error(cleanupErr))
-		}
+	if err := s.repo.Create(ctx, agent, uniqueQueryIDs(queryIDs)); err != nil {
 		return nil, "", err
 	}
 
@@ -108,15 +107,21 @@ func (s *agentService) List(ctx context.Context, projectID uuid.UUID) ([]*AgentW
 		return nil, err
 	}
 
+	agentIDs := make([]uuid.UUID, 0, len(agents))
+	for _, agent := range agents {
+		agentIDs = append(agentIDs, agent.ID)
+	}
+
+	queryAccessByAgentID, err := s.repo.GetQueryAccessByAgentIDs(ctx, agentIDs)
+	if err != nil {
+		return nil, err
+	}
+
 	result := make([]*AgentWithQueries, 0, len(agents))
 	for _, agent := range agents {
-		queryIDs, err := s.repo.GetQueryAccess(ctx, agent.ID)
-		if err != nil {
-			return nil, err
-		}
 		result = append(result, &AgentWithQueries{
 			Agent:    *agent,
-			QueryIDs: queryIDs,
+			QueryIDs: queryAccessByAgentID[agent.ID],
 		})
 	}
 
@@ -140,6 +145,11 @@ func (s *agentService) Get(ctx context.Context, projectID, agentID uuid.UUID) (*
 	}, nil
 }
 
+func (s *agentService) EnsureExists(ctx context.Context, projectID, agentID uuid.UUID) error {
+	_, err := s.repo.GetByID(ctx, projectID, agentID)
+	return err
+}
+
 func (s *agentService) GetKey(ctx context.Context, projectID, agentID uuid.UUID) (string, error) {
 	agent, err := s.repo.GetByID(ctx, projectID, agentID)
 	if err != nil {
@@ -156,7 +166,7 @@ func (s *agentService) GetKey(ctx context.Context, projectID, agentID uuid.UUID)
 
 func (s *agentService) UpdateQueryAccess(ctx context.Context, projectID, agentID uuid.UUID, queryIDs []uuid.UUID) error {
 	if len(queryIDs) == 0 {
-		return fmt.Errorf("at least one query must be selected")
+		return &AgentValidationError{Message: "at least one query must be selected"}
 	}
 
 	if _, err := s.repo.GetByID(ctx, projectID, agentID); err != nil {

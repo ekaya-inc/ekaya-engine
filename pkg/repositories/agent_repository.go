@@ -17,30 +17,59 @@ import (
 
 // AgentRepository provides data access for named AI agents.
 type AgentRepository interface {
-	Create(ctx context.Context, agent *models.Agent) error
+	Create(ctx context.Context, agent *models.Agent, queryIDs []uuid.UUID) error
 	GetByID(ctx context.Context, projectID, agentID uuid.UUID) (*models.Agent, error)
 	ListByProject(ctx context.Context, projectID uuid.UUID) ([]*models.Agent, error)
 	UpdateAPIKey(ctx context.Context, agentID uuid.UUID, encryptedKey string) error
 	Delete(ctx context.Context, projectID, agentID uuid.UUID) error
 	SetQueryAccess(ctx context.Context, agentID uuid.UUID, queryIDs []uuid.UUID) error
 	GetQueryAccess(ctx context.Context, agentID uuid.UUID) ([]uuid.UUID, error)
+	GetQueryAccessByAgentIDs(ctx context.Context, agentIDs []uuid.UUID) (map[uuid.UUID][]uuid.UUID, error)
 	HasQueryAccess(ctx context.Context, agentID, queryID uuid.UUID) (bool, error)
 	FindByAPIKey(ctx context.Context, projectID uuid.UUID) ([]*models.Agent, error)
 }
 
 type agentRepository struct{}
 
+type agentExecer interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+}
+
 // NewAgentRepository creates a new AgentRepository.
 func NewAgentRepository() AgentRepository {
 	return &agentRepository{}
 }
 
-func (r *agentRepository) Create(ctx context.Context, agent *models.Agent) error {
+func (r *agentRepository) Create(ctx context.Context, agent *models.Agent, queryIDs []uuid.UUID) error {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return fmt.Errorf("no tenant scope in context")
 	}
 
+	tx, err := scope.Conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // best effort cleanup
+
+	if err := r.insertAgent(ctx, tx, agent); err != nil {
+		return err
+	}
+
+	if len(queryIDs) > 0 {
+		if err := r.setQueryAccessTx(ctx, tx, agent.ID, queryIDs); err != nil {
+			return err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit agent create: %w", err)
+	}
+
+	return nil
+}
+
+func (r *agentRepository) insertAgent(ctx context.Context, execer agentExecer, agent *models.Agent) error {
 	now := time.Now().UTC()
 	if agent.ID == uuid.Nil {
 		agent.ID = uuid.New()
@@ -52,7 +81,7 @@ func (r *agentRepository) Create(ctx context.Context, agent *models.Agent) error
 		INSERT INTO engine_agents (id, project_id, name, api_key_encrypted, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6)`
 
-	_, err := scope.Conn.Exec(ctx, query,
+	_, err := execer.Exec(ctx, query,
 		agent.ID,
 		agent.ProjectID,
 		agent.Name,
@@ -194,6 +223,18 @@ func (r *agentRepository) SetQueryAccess(ctx context.Context, agentID uuid.UUID,
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // best effort cleanup
 
+	if err := r.setQueryAccessTx(ctx, tx, agentID, queryIDs); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit agent query access: %w", err)
+	}
+
+	return nil
+}
+
+func (r *agentRepository) setQueryAccessTx(ctx context.Context, tx pgx.Tx, agentID uuid.UUID, queryIDs []uuid.UUID) error {
 	if _, err := tx.Exec(ctx, `DELETE FROM engine_agent_queries WHERE agent_id = $1`, agentID); err != nil {
 		return fmt.Errorf("failed to clear agent query access: %w", err)
 	}
@@ -219,10 +260,6 @@ func (r *agentRepository) SetQueryAccess(ctx context.Context, agentID uuid.UUID,
 		if tag.RowsAffected() == 0 {
 			return fmt.Errorf("%w: %s", apperrors.ErrNotFound, queryID.String())
 		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit agent query access: %w", err)
 	}
 
 	return nil
@@ -260,6 +297,45 @@ func (r *agentRepository) GetQueryAccess(ctx context.Context, agentID uuid.UUID)
 	}
 
 	return queryIDs, nil
+}
+
+func (r *agentRepository) GetQueryAccessByAgentIDs(ctx context.Context, agentIDs []uuid.UUID) (map[uuid.UUID][]uuid.UUID, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	result := make(map[uuid.UUID][]uuid.UUID, len(agentIDs))
+	if len(agentIDs) == 0 {
+		return result, nil
+	}
+
+	rows, err := scope.Conn.Query(ctx, `
+		SELECT agent_id, query_id
+		FROM engine_agent_queries
+		WHERE agent_id = ANY($1)
+		ORDER BY agent_id ASC, query_id ASC`,
+		agentIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to batch get agent query access: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var agentID uuid.UUID
+		var queryID uuid.UUID
+		if err := rows.Scan(&agentID, &queryID); err != nil {
+			return nil, fmt.Errorf("failed to scan agent query access: %w", err)
+		}
+		result[agentID] = append(result[agentID], queryID)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate batched agent query access: %w", err)
+	}
+
+	return result, nil
 }
 
 func (r *agentRepository) HasQueryAccess(ctx context.Context, agentID, queryID uuid.UUID) (bool, error) {
