@@ -79,8 +79,8 @@ func (r *agentRepository) insertAgent(ctx context.Context, execer agentExecer, a
 	agent.UpdatedAt = now
 
 	query := `
-		INSERT INTO engine_agents (id, project_id, name, api_key_encrypted, created_at, updated_at, last_access_at, mcp_call_count)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+		INSERT INTO engine_agents (id, project_id, name, api_key_encrypted, created_at, updated_at, last_access_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`
 
 	_, err := execer.Exec(ctx, query,
 		agent.ID,
@@ -90,7 +90,6 @@ func (r *agentRepository) insertAgent(ctx context.Context, execer agentExecer, a
 		agent.CreatedAt,
 		agent.UpdatedAt,
 		agent.LastAccessAt,
-		agent.MCPCallCount,
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -110,9 +109,16 @@ func (r *agentRepository) GetByID(ctx context.Context, projectID, agentID uuid.U
 	}
 
 	query := `
-		SELECT id, project_id, name, api_key_encrypted, created_at, updated_at, last_access_at, mcp_call_count
-		FROM engine_agents
-		WHERE project_id = $1 AND id = $2`
+		SELECT a.id, a.project_id, a.name, a.api_key_encrypted, a.created_at, a.updated_at, a.last_access_at,
+		       COALESCE(audit.total_mcp_calls, 0)
+		FROM engine_agents a
+		LEFT JOIN LATERAL (
+			SELECT COUNT(*)::bigint AS total_mcp_calls
+			FROM engine_mcp_audit_log l
+			WHERE l.project_id = a.project_id
+			  AND l.user_id = 'agent:' || a.id::text
+		) audit ON true
+		WHERE a.project_id = $1 AND a.id = $2`
 
 	var agent models.Agent
 	err := scope.Conn.QueryRow(ctx, query, projectID, agentID).Scan(
@@ -142,10 +148,17 @@ func (r *agentRepository) ListByProject(ctx context.Context, projectID uuid.UUID
 	}
 
 	query := `
-		SELECT id, project_id, name, api_key_encrypted, created_at, updated_at, last_access_at, mcp_call_count
-		FROM engine_agents
-		WHERE project_id = $1
-		ORDER BY created_at ASC, name ASC`
+		SELECT a.id, a.project_id, a.name, a.api_key_encrypted, a.created_at, a.updated_at, a.last_access_at,
+		       COALESCE(audit.total_mcp_calls, 0)
+		FROM engine_agents a
+		LEFT JOIN LATERAL (
+			SELECT COUNT(*)::bigint AS total_mcp_calls
+			FROM engine_mcp_audit_log l
+			WHERE l.project_id = a.project_id
+			  AND l.user_id = 'agent:' || a.id::text
+		) audit ON true
+		WHERE a.project_id = $1
+		ORDER BY a.created_at ASC, a.name ASC`
 
 	rows, err := scope.Conn.Query(ctx, query, projectID)
 	if err != nil {
@@ -380,7 +393,7 @@ func (r *agentRepository) RecordAccess(ctx context.Context, agentID uuid.UUID) e
 
 	query := `
 		UPDATE engine_agents
-		SET last_access_at = $2, mcp_call_count = mcp_call_count + 1
+		SET last_access_at = $2
 		WHERE id = $1`
 
 	_, err := scope.Conn.Exec(ctx, query, agentID, time.Now().UTC())

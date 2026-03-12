@@ -37,6 +37,7 @@ func (r *auditPageRepository) ListQueryExecutions(ctx context.Context, projectID
 	}
 
 	limit, offset := normalizePageParams(filters.Limit, filters.Offset)
+	userDisplayExpr := "COALESCE(u.email, CASE WHEN ag.name IS NOT NULL THEN 'agent:' || ag.name ELSE NULL END)"
 
 	// Build WHERE conditions
 	conditions := []string{"e.project_id = $1"}
@@ -44,8 +45,8 @@ func (r *auditPageRepository) ListQueryExecutions(ctx context.Context, projectID
 	argIdx := 2
 
 	if filters.UserID != "" {
-		conditions = append(conditions, fmt.Sprintf("e.user_id = $%d", argIdx))
-		args = append(args, filters.UserID)
+		conditions = append(conditions, fmt.Sprintf("(%s ILIKE $%d OR e.user_id ILIKE $%d)", userDisplayExpr, argIdx, argIdx))
+		args = append(args, "%"+filters.UserID+"%")
 		argIdx++
 	}
 	if filters.Since != nil {
@@ -80,9 +81,13 @@ func (r *auditPageRepository) ListQueryExecutions(ctx context.Context, projectID
 	}
 
 	where := strings.Join(conditions, " AND ")
+	baseFrom := `
+		FROM engine_query_executions e
+		LEFT JOIN engine_users u ON u.project_id = e.project_id AND u.user_id::text = e.user_id
+		LEFT JOIN engine_agents ag ON ag.project_id = e.project_id AND e.user_id = 'agent:' || ag.id::text`
 
 	// Count query
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM engine_query_executions e WHERE %s`, where)
+	countQuery := fmt.Sprintf(`SELECT COUNT(*) %s WHERE %s`, baseFrom, where)
 	var total int
 	if err := scope.Conn.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("failed to count query executions: %w", err)
@@ -92,16 +97,14 @@ func (r *auditPageRepository) ListQueryExecutions(ctx context.Context, projectID
 	dataQuery := fmt.Sprintf(`
 		SELECT e.id, e.project_id, e.query_id, e.sql, e.executed_at, e.row_count,
 		       e.execution_time_ms, e.user_id,
-		       COALESCE(u.email, CASE WHEN a.name IS NOT NULL THEN 'agent:' || a.name ELSE NULL END),
+		       %s,
 		       e.source, e.is_modifying, e.success,
 		       e.error_message, q.natural_language_prompt
-		FROM engine_query_executions e
+		%s
 		LEFT JOIN engine_queries q ON q.id = e.query_id AND q.deleted_at IS NULL
-		LEFT JOIN engine_users u ON u.project_id = e.project_id AND u.user_id::text = e.user_id
-		LEFT JOIN engine_agents a ON a.project_id = e.project_id AND e.user_id = 'agent:' || a.id::text
 		WHERE %s
 		ORDER BY e.executed_at DESC
-		LIMIT $%d OFFSET $%d`, where, argIdx, argIdx+1)
+		LIMIT $%d OFFSET $%d`, userDisplayExpr, baseFrom, where, argIdx, argIdx+1)
 
 	args = append(args, limit, offset)
 
@@ -142,14 +145,13 @@ func (r *auditPageRepository) ListOntologyChanges(ctx context.Context, projectID
 	conditions := []string{"a.project_id = $1"}
 	args := []any{projectID}
 	argIdx := 2
+	baseFrom := `
+		FROM engine_audit_log a
+		LEFT JOIN engine_users u ON u.project_id = a.project_id AND u.user_id = a.user_id`
 
 	if filters.UserID != "" {
-		conditions = append(conditions, fmt.Sprintf("a.user_id = $%d", argIdx))
-		uid, err := uuid.Parse(filters.UserID)
-		if err != nil {
-			return nil, 0, fmt.Errorf("invalid user_id: %w", err)
-		}
-		args = append(args, uid)
+		conditions = append(conditions, fmt.Sprintf("(u.email ILIKE $%d OR a.user_id::text ILIKE $%d)", argIdx, argIdx))
+		args = append(args, "%"+filters.UserID+"%")
 		argIdx++
 	}
 	if filters.Since != nil {
@@ -181,7 +183,7 @@ func (r *auditPageRepository) ListOntologyChanges(ctx context.Context, projectID
 	where := strings.Join(conditions, " AND ")
 
 	// Count
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM engine_audit_log a WHERE %s`, where)
+	countQuery := fmt.Sprintf(`SELECT COUNT(*) %s WHERE %s`, baseFrom, where)
 	var total int
 	if err := scope.Conn.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("failed to count ontology changes: %w", err)
@@ -190,11 +192,10 @@ func (r *auditPageRepository) ListOntologyChanges(ctx context.Context, projectID
 	// Data with join to engine_users for email
 	dataQuery := fmt.Sprintf(`
 		SELECT a.id, a.project_id, a.entity_type, a.entity_id, a.action, a.source, a.user_id, u.email, a.changed_fields, a.created_at
-		FROM engine_audit_log a
-		LEFT JOIN engine_users u ON u.project_id = a.project_id AND u.user_id = a.user_id
+		%s
 		WHERE %s
 		ORDER BY a.created_at DESC
-		LIMIT $%d OFFSET $%d`, where, argIdx, argIdx+1)
+		LIMIT $%d OFFSET $%d`, baseFrom, where, argIdx, argIdx+1)
 
 	args = append(args, limit, offset)
 

@@ -66,13 +66,13 @@ func (tc *auditPageTestContext) setupFixtures() {
 	_, err = scope.Conn.Exec(ctx, `
 		INSERT INTO engine_users (project_id, user_id, role, email)
 		VALUES ($1, $2, 'admin', $3)
-	`, tc.projectID, tc.userID, "human@example.com")
+	`, tc.projectID, tc.userID, "orange.chicken.511@example.com")
 	require.NoError(tc.t, err)
 
 	_, err = scope.Conn.Exec(ctx, `
 		INSERT INTO engine_agents (id, project_id, name, api_key_encrypted)
 		VALUES ($1, $2, $3, $4)
-	`, tc.agentID, tc.projectID, "sales-bot", []byte("encrypted-key"))
+	`, tc.agentID, tc.projectID, "support-bot", []byte("encrypted-key"))
 	require.NoError(tc.t, err)
 
 	_, err = scope.Conn.Exec(ctx, `
@@ -98,6 +98,7 @@ func (tc *auditPageTestContext) cleanup() {
 	defer scope.Close()
 
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_query_executions WHERE project_id = $1`, tc.projectID)
+	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_audit_log WHERE project_id = $1`, tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_agents WHERE project_id = $1`, tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_users WHERE project_id = $1`, tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_projects WHERE id = $1`, tc.projectID)
@@ -131,7 +132,67 @@ func TestAuditPageRepository_ListQueryExecutions_ResolvesAgentNames(t *testing.T
 	require.NotNil(t, humanRow)
 	require.NotNil(t, agentRow)
 	require.NotNil(t, humanRow.UserEmail)
-	assert.Equal(t, "human@example.com", *humanRow.UserEmail)
+	assert.Equal(t, "orange.chicken.511@example.com", *humanRow.UserEmail)
 	require.NotNil(t, agentRow.UserEmail)
-	assert.Equal(t, "agent:sales-bot", *agentRow.UserEmail)
+	assert.Equal(t, "agent:support-bot", *agentRow.UserEmail)
+}
+
+func TestAuditPageRepository_ListQueryExecutions_FiltersByUserSubstring(t *testing.T) {
+	tc := setupAuditPageTest(t)
+	tc.setupFixtures()
+	t.Cleanup(tc.cleanup)
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	humanRows, total, err := tc.repo.ListQueryExecutions(ctx, tc.projectID, models.QueryExecutionFilters{
+		UserID: "chicken",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, total)
+	require.Len(t, humanRows, 1)
+	require.NotNil(t, humanRows[0].UserEmail)
+	assert.Equal(t, "orange.chicken.511@example.com", *humanRows[0].UserEmail)
+
+	agentRows, total, err := tc.repo.ListQueryExecutions(ctx, tc.projectID, models.QueryExecutionFilters{
+		UserID: "sup",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, total)
+	require.Len(t, agentRows, 1)
+	require.NotNil(t, agentRows[0].UserEmail)
+	assert.Equal(t, "agent:support-bot", *agentRows[0].UserEmail)
+}
+
+func TestAuditPageRepository_ListOntologyChanges_FiltersByUserSubstring(t *testing.T) {
+	tc := setupAuditPageTest(t)
+	tc.setupFixtures()
+	t.Cleanup(tc.cleanup)
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	scope, ok := database.GetTenantScope(ctx)
+	require.True(t, ok)
+
+	_, err := scope.Conn.Exec(ctx, `
+		INSERT INTO engine_audit_log (
+			id, project_id, entity_type, entity_id, action, source, user_id, created_at
+		) VALUES
+			($1, $2, 'entity', $3, 'update', 'manual', $4, $5),
+			($6, $2, 'entity', $7, 'update', 'manual', $8, $9)
+	`,
+		uuid.New(), tc.projectID, uuid.New(), tc.userID, time.Now().UTC().Add(-time.Minute),
+		uuid.New(), uuid.New(), uuid.New(), time.Now().UTC(),
+	)
+	require.NoError(t, err)
+
+	rows, total, err := tc.repo.ListOntologyChanges(ctx, tc.projectID, models.OntologyChangeFilters{
+		UserID: "chicken",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, total)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].UserEmail)
+	assert.Equal(t, "orange.chicken.511@example.com", *rows[0].UserEmail)
 }

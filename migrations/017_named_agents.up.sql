@@ -12,7 +12,6 @@ CREATE TABLE engine_agents (
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     last_access_at timestamptz,
-    mcp_call_count bigint NOT NULL DEFAULT 0,
     CONSTRAINT engine_agents_project_name_unique UNIQUE (project_id, name)
 );
 

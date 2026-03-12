@@ -542,7 +542,7 @@ const AIAgentsPage = () => {
                 <span>Agent</span>
                 <span>Created</span>
                 <span>Last Access</span>
-                <span>MCP Calls</span>
+                <span>Total MCP Calls</span>
                 <span className="w-10" />
               </div>
               <div className="divide-y divide-border-light">
@@ -555,7 +555,7 @@ const AIAgentsPage = () => {
                     <div className="min-w-0">
                       <div className="truncate font-medium text-text-primary">{agent.name}</div>
                       <div className="text-xs text-text-tertiary">
-                        {agent.query_ids.length} query{agent.query_ids.length === 1 ? '' : 'ies'}
+                        {agent.query_ids.length} {agent.query_ids.length === 1 ? 'query' : 'queries'}
                       </div>
                     </div>
                     <div className="text-sm tabular-nums text-text-secondary">

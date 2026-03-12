@@ -5,6 +5,7 @@ package repositories
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -103,6 +104,7 @@ func (tc *agentRepositoryTestContext) cleanup() {
 	defer scope.Close()
 
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_agent_queries WHERE agent_id IN (SELECT id FROM engine_agents WHERE project_id = $1)`, tc.projectID)
+	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_mcp_audit_log WHERE project_id = $1`, tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_agents WHERE project_id = $1`, tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_queries WHERE project_id = $1`, tc.projectID)
 }
@@ -265,4 +267,47 @@ func TestAgentRepository_GetQueryAccessByAgentIDs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []uuid.UUID{queryA.ID}, access[agentA.ID])
 	assert.Equal(t, []uuid.UUID{queryB.ID}, access[agentB.ID])
+}
+
+func TestAgentRepository_ListAndGetUseTotalMCPAuditEventCount(t *testing.T) {
+	tc := setupAgentRepositoryTest(t)
+	tc.cleanup()
+	t.Cleanup(tc.cleanup)
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	agent := &models.Agent{
+		ProjectID:       tc.projectID,
+		Name:            "sales-bot",
+		APIKeyEncrypted: "encrypted-key",
+	}
+	require.NoError(t, tc.agentRepo.Create(ctx, agent, nil))
+
+	scope, ok := database.GetTenantScope(ctx)
+	require.True(t, ok)
+
+	_, err := scope.Conn.Exec(ctx, `
+		INSERT INTO engine_mcp_audit_log (
+			id, project_id, user_id, user_email, event_type, tool_name,
+			was_successful, security_level, created_at
+		) VALUES
+			($1, $2, $3, $4, 'tool_call', 'list_approved_queries', true, 'normal', $5),
+			($6, $2, $3, $4, 'tool_error', 'execute_approved_query', false, 'warning', $7),
+			($8, $2, $3, $4, 'mcp_auth_failure', NULL, false, 'warning', $9)
+	`,
+		uuid.New(), tc.projectID, "agent:"+agent.ID.String(), agent.Name, time.Now().UTC().Add(-2*time.Minute),
+		uuid.New(), time.Now().UTC().Add(-time.Minute),
+		uuid.New(), time.Now().UTC(),
+	)
+	require.NoError(t, err)
+
+	listed, err := tc.agentRepo.ListByProject(ctx, tc.projectID)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	assert.Equal(t, int64(3), listed[0].MCPCallCount)
+
+	retrieved, err := tc.agentRepo.GetByID(ctx, tc.projectID, agent.ID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), retrieved.MCPCallCount)
 }

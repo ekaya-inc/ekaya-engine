@@ -217,6 +217,32 @@ describe('AIAgentsPage', () => {
     expect(nameField.tagName).toBe('DIV');
   });
 
+  it('renders query counts with correct singular and plural labels', async () => {
+    setupPageMocks({
+      agents: [
+        {
+          id: 'agent-1',
+          name: 'support-bot',
+          query_ids: ['query-1', 'query-2'],
+          created_at: '2024-01-01T00:00:00Z',
+          mcp_call_count: 2,
+        },
+        {
+          id: 'agent-2',
+          name: 'data-bot',
+          query_ids: ['query-1'],
+          created_at: '2024-01-01T00:00:00Z',
+          mcp_call_count: 0,
+        },
+      ],
+    });
+
+    await renderPage();
+
+    expect(screen.getByText('2 queries')).toBeInTheDocument();
+    expect(screen.getByText('1 query')).toBeInTheDocument();
+  });
+
   it('requires exact delete phrase before delete is enabled', async () => {
     setupPageMocks({
       agents: [
