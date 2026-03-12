@@ -25,7 +25,7 @@ import {
 import { Input } from '../components/ui/Input';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
-import type { Datasource, MCPConfigResponse } from '../types';
+import type { MCPConfigResponse } from '../types';
 
 const AIAgentsPage = () => {
   const navigate = useNavigate();
@@ -37,7 +37,7 @@ const AIAgentsPage = () => {
   const [loading, setLoading] = useState(true);
 
   // Checklist state
-  const [datasource, setDatasource] = useState<Datasource | null>(null);
+  const [ontologyForgeReady, setOntologyForgeReady] = useState(false);
   const [hasQueries, setHasQueries] = useState(false);
 
   // Uninstall dialog state
@@ -50,9 +50,10 @@ const AIAgentsPage = () => {
 
     setLoading(true);
     try {
-      const [configRes, keyRes, datasourcesRes] = await Promise.all([
+      const [configRes, keyRes, ontologyForgeRes, datasourcesRes] = await Promise.all([
         engineApi.getMCPConfig(pid),
         engineApi.getAgentAPIKey(pid, true),
+        engineApi.getInstalledApp(pid, 'ontology-forge').catch(() => null),
         engineApi.listDataSources(pid),
       ]);
 
@@ -62,11 +63,10 @@ const AIAgentsPage = () => {
       if (keyRes.success && keyRes.data) {
         setAgentApiKey(keyRes.data.key);
       }
-
-      const ds: Datasource | null = datasourcesRes.data?.datasources?.[0] ?? null;
-      setDatasource(ds);
+      setOntologyForgeReady(ontologyForgeRes?.data?.activated_at != null);
 
       // Check if any pre-approved queries exist
+      const ds = datasourcesRes.data?.datasources?.[0] ?? null;
       if (ds) {
         try {
           const queriesRes = await engineApi.listQueries(pid, ds.datasource_id);
@@ -95,16 +95,16 @@ const AIAgentsPage = () => {
   const getChecklistItems = (): ChecklistItem[] => {
     const items: ChecklistItem[] = [];
 
-    // 1. Datasource configured
+    // 1. Ontology Forge set up (same pattern as AI Data Liaison)
     items.push({
-      id: 'datasource',
-      title: 'Datasource configured',
-      description: datasource
-        ? `Connected to ${datasource.name} (${datasource.type})`
-        : 'Connect a database to enable AI Agents',
-      status: loading ? 'loading' : datasource ? 'complete' : 'pending',
-      link: `/projects/${pid}/datasource`,
-      linkText: datasource ? 'Manage' : 'Configure',
+      id: 'ontology-forge',
+      title: 'Ontology Forge set up',
+      description: ontologyForgeReady
+        ? 'Ontology Forge is configured and ready'
+        : 'Set up Ontology Forge to extract your business semantic layer',
+      status: loading ? 'loading' : ontologyForgeReady ? 'complete' : 'pending',
+      link: `/projects/${pid}/ontology-forge`,
+      linkText: ontologyForgeReady ? 'Manage' : 'Set up',
     });
 
     // 2. Pre-Approved Queries created
@@ -113,13 +113,14 @@ const AIAgentsPage = () => {
       title: 'Pre-Approved Queries created',
       description: hasQueries
         ? 'Queries available for agents to execute'
-        : datasource
+        : ontologyForgeReady
           ? 'Create queries that agents can run'
-          : 'Configure datasource first',
+          : 'Complete step 1 first',
       status: loading ? 'loading' : hasQueries ? 'complete' : 'pending',
       linkText: hasQueries ? 'Manage' : 'Configure',
+      disabled: !ontologyForgeReady && !hasQueries,
     };
-    if (datasource) {
+    if (ontologyForgeReady) {
       queriesItem.link = `/projects/${pid}/queries`;
     }
     items.push(queriesItem);
