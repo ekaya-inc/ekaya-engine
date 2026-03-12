@@ -185,7 +185,7 @@ func (s *installedAppService) Install(ctx context.Context, projectID uuid.UUID, 
 	}
 
 	// No redirect needed — save to DB immediately
-	app, err := s.saveInstall(ctx, projectID, appID, userID)
+	app, err := s.saveInstall(ctx, projectID, appID, userID, installSettings(appID, centralResp))
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +310,7 @@ func (s *installedAppService) CompleteCallback(ctx context.Context, projectID uu
 	// Complete the action locally
 	switch action {
 	case "install":
-		if _, err := s.saveInstall(ctx, projectID, appID, userID); err != nil {
+		if _, err := s.saveInstall(ctx, projectID, appID, userID, nil); err != nil {
 			return fmt.Errorf("failed to complete install: %w", err)
 		}
 	case "activate":
@@ -418,22 +418,43 @@ func (s *installedAppService) EnsureInstalled(ctx context.Context, projectID uui
 		return nil
 	}
 
-	if _, err := s.saveInstall(ctx, projectID, appID, "central-provision"); err != nil {
+	if _, err := s.saveInstall(ctx, projectID, appID, "central-provision", nil); err != nil {
 		return fmt.Errorf("failed to install app from provision: %w", err)
 	}
 
 	return nil
 }
 
+func installSettings(appID string, centralResp *central.AppActionResponse) map[string]any {
+	settings := make(map[string]any)
+
+	if appID != models.AppIDMCPTunnel || centralResp == nil {
+		return settings
+	}
+
+	if centralResp.RegistrationURL != "" {
+		settings[models.MCPTunnelSettingRegistrationURL] = centralResp.RegistrationURL
+	}
+	if centralResp.Endpoint != "" {
+		settings[models.MCPTunnelSettingEndpoint] = centralResp.Endpoint
+	}
+
+	return settings
+}
+
 // saveInstall creates the installed app record in the database.
-func (s *installedAppService) saveInstall(ctx context.Context, projectID uuid.UUID, appID string, userID string) (*models.InstalledApp, error) {
+func (s *installedAppService) saveInstall(ctx context.Context, projectID uuid.UUID, appID string, userID string, settings map[string]any) (*models.InstalledApp, error) {
+	if settings == nil {
+		settings = make(map[string]any)
+	}
+
 	app := &models.InstalledApp{
 		ID:          uuid.New(),
 		ProjectID:   projectID,
 		AppID:       appID,
 		InstalledAt: time.Now(),
 		InstalledBy: userID,
-		Settings:    make(map[string]any),
+		Settings:    settings,
 	}
 
 	if err := s.repo.Install(ctx, app); err != nil {

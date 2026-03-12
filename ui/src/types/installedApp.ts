@@ -11,6 +11,7 @@ export const APP_ID_ONTOLOGY_FORGE = 'ontology-forge';
 export const APP_ID_AI_DATA_LIAISON = 'ai-data-liaison';
 export const APP_ID_AI_AGENTS = 'ai-agents';
 export const APP_ID_FILE_LOADER = 'file-loader';
+export const APP_ID_MCP_TUNNEL = 'mcp-tunnel';
 
 /**
  * Installed application record
@@ -30,4 +31,16 @@ export interface InstalledApp {
  */
 export interface InstalledAppsResponse {
   apps: InstalledApp[];
+}
+
+export type TunnelConnectionStatus =
+  | 'disconnected'
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting';
+
+export interface TunnelStatusResponse {
+  tunnel_status: TunnelConnectionStatus;
+  public_url?: string;
+  connected_since?: string;
 }

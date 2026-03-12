@@ -408,6 +408,25 @@ func (s *mcpConfigService) buildResponse(ctx context.Context, projectID uuid.UUI
 		models.AppIDMCPServer: true, // always available
 	}
 	if s.installedAppService != nil {
+		tunnelInstalled, err := s.installedAppService.IsInstalled(ctx, projectID, models.AppIDMCPTunnel)
+		if err != nil {
+			s.logger.Warn("failed to check app installation",
+				zap.String("project_id", projectID.String()),
+				zap.String("app_id", models.AppIDMCPTunnel),
+				zap.Error(err),
+			)
+		} else if tunnelInstalled {
+			settings, err := s.installedAppService.GetSettings(ctx, projectID, models.AppIDMCPTunnel)
+			if err != nil {
+				s.logger.Warn("failed to get mcp-tunnel settings",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err),
+				)
+			} else if endpoint := getStringSetting(settings, models.MCPTunnelSettingEndpoint); endpoint != "" {
+				serverURL = endpoint
+			}
+		}
+
 		for _, appID := range []string{models.AppIDOntologyForge, models.AppIDAIDataLiaison} {
 			installed, err := s.installedAppService.IsInstalled(ctx, projectID, appID)
 			if err != nil {
@@ -444,6 +463,20 @@ func (s *mcpConfigService) buildResponse(ctx context.Context, projectID uuid.UUI
 		AppNames:       AppDisplayNames,
 		EnabledTools:   enabledTools,
 	}
+}
+
+func getStringSetting(settings map[string]any, key string) string {
+	value, ok := settings[key]
+	if !ok {
+		return ""
+	}
+
+	str, ok := value.(string)
+	if !ok {
+		return ""
+	}
+
+	return str
 }
 
 // filterAndConvertToolSpecs converts ToolSpec slice to EnabledToolInfo slice,

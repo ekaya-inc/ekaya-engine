@@ -66,6 +66,7 @@ import type {
   TestConnectionResponse,
   TestQueryRequest,
   TestSQLResult,
+  TunnelStatusResponse,
   UpdateGlossaryTermRequest,
   UpdateMCPConfigRequest,
   UpdateProjectKnowledgeRequest,
@@ -971,6 +972,18 @@ class EngineApiService {
     appId: string
   ): Promise<ApiResponse<InstalledApp>> {
     return this.makeRequest<InstalledApp>(`/${projectId}/apps/${appId}`);
+  }
+
+  /**
+   * Get the current MCP Tunnel connection status for a project
+   * GET /api/projects/{projectId}/apps/mcp-tunnel/status
+   */
+  async getTunnelStatus(
+    projectId: string
+  ): Promise<ApiResponse<TunnelStatusResponse>> {
+    return this.makeRequest<TunnelStatusResponse>(
+      `/${projectId}/apps/mcp-tunnel/status`
+    );
   }
 
   /**

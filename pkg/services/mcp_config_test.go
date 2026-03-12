@@ -1032,6 +1032,7 @@ func TestMCPConfigService_Update_AllowOntologyMaintenance(t *testing.T) {
 // mockInstalledAppServiceForMCP is a mock implementation of InstalledAppService for testing.
 type mockInstalledAppServiceForMCP struct {
 	installed map[string]bool // appID -> installed
+	apps      map[string]*models.InstalledApp
 	err       error
 }
 
@@ -1063,7 +1064,10 @@ func (m *mockInstalledAppServiceForMCP) CompleteCallback(ctx context.Context, pr
 }
 
 func (m *mockInstalledAppServiceForMCP) GetSettings(ctx context.Context, projectID uuid.UUID, appID string) (map[string]any, error) {
-	return nil, nil
+	if m.apps == nil || m.apps[appID] == nil {
+		return nil, nil
+	}
+	return m.apps[appID].Settings, nil
 }
 
 func (m *mockInstalledAppServiceForMCP) UpdateSettings(ctx context.Context, projectID uuid.UUID, appID string, settings map[string]any) error {
@@ -1071,7 +1075,10 @@ func (m *mockInstalledAppServiceForMCP) UpdateSettings(ctx context.Context, proj
 }
 
 func (m *mockInstalledAppServiceForMCP) GetApp(ctx context.Context, projectID uuid.UUID, appID string) (*models.InstalledApp, error) {
-	return nil, nil
+	if m.apps == nil {
+		return nil, nil
+	}
+	return m.apps[appID], nil
 }
 
 func (m *mockInstalledAppServiceForMCP) EnsureInstalled(ctx context.Context, projectID uuid.UUID, appID string) error {
@@ -1248,6 +1255,44 @@ func TestMCPConfigService_Get_NilInstalledAppService_FiltersNonMCPServerTools(t 
 
 	// AI Data Liaison tools should be filtered (fail closed)
 	assert.NotContains(t, toolNames, "list_query_suggestions", "should NOT include list_query_suggestions with nil service")
+}
+
+func TestMCPConfigService_Get_UsesMCPTunnelEndpoint(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	configRepo := &mockMCPConfigRepository{
+		config: models.DefaultMCPConfig(projectID),
+	}
+	queryService := &mockQueryServiceForMCP{hasEnabledQueries: true}
+	projectService := &mockProjectServiceForMCP{defaultDatasourceID: datasourceID}
+	installedAppService := &mockInstalledAppServiceForMCP{
+		installed: map[string]bool{
+			models.AppIDMCPTunnel: true,
+		},
+		apps: map[string]*models.InstalledApp{
+			models.AppIDMCPTunnel: {
+				AppID: models.AppIDMCPTunnel,
+				Settings: map[string]any{
+					models.MCPTunnelSettingEndpoint: "https://mcp.ekaya.ai/mcp/proj-1",
+				},
+			},
+		},
+	}
+
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		installedAppService,
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	resp, err := svc.Get(context.Background(), projectID)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "https://mcp.ekaya.ai/mcp/proj-1", resp.ServerURL)
 }
 
 func TestMCPConfigService_Get_IncludesPerRoleToolLists(t *testing.T) {

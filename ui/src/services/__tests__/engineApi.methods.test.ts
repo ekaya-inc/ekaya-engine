@@ -1398,3 +1398,34 @@ describe('engineApi MCP config methods', () => {
     });
   });
 });
+
+describe('engineApi installed app methods', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('getTunnelStatus', () => {
+    it('sends GET to /{projectId}/apps/mcp-tunnel/status', async () => {
+      const responseData = {
+        data: {
+          tunnel_status: 'connected',
+          public_url: 'https://mcp.ekaya.ai/mcp/proj-1',
+          connected_since: '2026-03-12T10:00:00Z',
+        },
+      };
+      mockJsonResponse(responseData);
+
+      const result = await engineApi.getTunnelStatus('proj-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/apps/mcp-tunnel/status',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        })
+      );
+      const callArgs = mockFetchWithAuth.mock.calls[0]?.[1] as RequestInit;
+      expect(callArgs.method).toBeUndefined();
+      expect(result).toEqual(responseData);
+    });
+  });
+});

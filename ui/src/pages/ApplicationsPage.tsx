@@ -6,6 +6,7 @@ import {
   Check,
   ExternalLink,
   FileSpreadsheet,
+  Globe,
   Hammer,
   Handshake,
   Loader2,
@@ -25,6 +26,7 @@ import {
 } from '../components/ui/Card';
 import { useProject } from '../contexts/ProjectContext';
 import { useInstalledApps, useInstallApp } from '../hooks/useInstalledApps';
+import { APP_ID_MCP_TUNNEL } from '../types';
 import { cn } from '../utils/cn';
 
 /** Map ekaya-central origins to marketing site origins */
@@ -134,6 +136,17 @@ const applications: ApplicationInfo[] = [
     pricingBadge: 'free',
   },
   {
+    id: 'mcp-tunnel',
+    title: 'MCP Tunnel',
+    subtitle: 'Give your MCP Server a public URL accessible from outside your firewall — no port forwarding or TLS configuration required',
+    icon: Globe,
+    color: 'green',
+    available: true,
+    installable: true,
+    pricingBadge: 'free',
+    learnMoreUrl: 'https://try.ekaya.ai/',
+  },
+  {
     id: 'product-kit',
     title: 'Product Kit [COMING SOON]',
     subtitle: 'Enable AI Features in your existing SaaS Product',
@@ -176,7 +189,7 @@ const ApplicationsPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
   const { urls } = useProject();
-  const { isInstalled, refetch } = useInstalledApps(pid);
+  const { apps, isInstalled, refetch } = useInstalledApps(pid);
   const { install, isLoading: isInstalling } = useInstallApp(pid);
   const [installingAppId, setInstallingAppId] = useState<string | null>(null);
   const marketingOrigin = getMarketingOrigin(urls.projectsPageUrl);
@@ -197,14 +210,22 @@ const ApplicationsPage = () => {
     setInstallingAppId(null);
     if (result) {
       await refetch();
+      if (appId === APP_ID_MCP_TUNNEL) {
+        navigate(`/projects/${pid}/mcp-tunnel`);
+        return;
+      }
       // Return to project dashboard so the user sees the app tile appear
       navigate(`/projects/${pid}`);
     }
   };
 
-  const handleLearnMore = (path: string, base: 'marketing' | 'central' = 'marketing') => {
+  const handleLearnMore = (urlOrPath: string, base: 'marketing' | 'central' = 'marketing') => {
+    if (urlOrPath.startsWith('http')) {
+      window.open(urlOrPath, '_blank', 'noopener,noreferrer');
+      return;
+    }
     const origin = base === 'central' ? centralOrigin : marketingOrigin;
-    window.open(`${origin}${path}`, '_blank', 'noopener,noreferrer');
+    window.open(`${origin}${urlOrPath}`, '_blank', 'noopener,noreferrer');
   };
 
   const handleContactSupport = () => {
@@ -241,16 +262,24 @@ const ApplicationsPage = () => {
     // Installable apps - show Install/Installed state
     if (app.installable) {
       const appIsInstalled = isInstalled(app.id);
+      const installedApp = apps.find((installed) => installed.app_id === app.id);
       const isCurrentlyInstalling = installingAppId === app.id && isInstalling;
 
       if (appIsInstalled) {
+        const activationRequired =
+          app.id === APP_ID_MCP_TUNNEL && installedApp?.activated_at == null;
         // Installed state - show "Installed" badge, Learn More, and Configure button
         const learnMoreUrl = app.learnMoreUrl;
         return (
           <CardFooter className="pt-0 flex gap-2">
-            <span className="text-xs text-green-600 font-medium flex items-center gap-1">
+            <span
+              className={cn(
+                'text-xs font-medium flex items-center gap-1',
+                activationRequired ? 'text-amber-600' : 'text-green-600'
+              )}
+            >
               <Check className="h-3 w-3" />
-              Installed
+              {activationRequired ? 'Activation required' : 'Installed'}
             </span>
             {learnMoreUrl ? (
               <Button
