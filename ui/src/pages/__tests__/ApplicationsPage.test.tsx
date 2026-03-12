@@ -98,8 +98,7 @@ describe('ApplicationsPage', () => {
 
     expect(screen.getByText('AI Data Liaison')).toBeInTheDocument();
     expect(screen.getByText('Ontology Forge')).toBeInTheDocument();
-    // AI Agents tile is temporarily hidden
-    expect(screen.queryByText('AI Agents and Automation')).not.toBeInTheDocument();
+    expect(screen.getByText('AI Agents and Automation')).toBeInTheDocument();
     expect(screen.getByText('Product Kit [COMING SOON]')).toBeInTheDocument();
     expect(screen.getByText('On-Premise Chat [COMING SOON]')).toBeInTheDocument();
     expect(screen.getByText('Your own Data Application')).toBeInTheDocument();
@@ -119,11 +118,11 @@ describe('ApplicationsPage', () => {
   it('renders Install buttons for installable apps when not installed', () => {
     renderPage();
 
-    // AI Data Liaison + Ontology Forge + Spreadsheet Loader have Install buttons (AI Agents tile is temporarily hidden)
+    // AI Data Liaison + Ontology Forge + AI Agents + Spreadsheet Loader have Install buttons
     const installButtons = screen.getAllByRole('button', { name: 'Install' });
-    expect(installButtons).toHaveLength(3);
+    expect(installButtons).toHaveLength(4);
     const learnMoreButtons = screen.getAllByRole('button', { name: /Learn More/i });
-    expect(learnMoreButtons).toHaveLength(2);
+    expect(learnMoreButtons).toHaveLength(3);
   });
 
   it('renders Installed badge, Learn More, and Configure button when AI Data Liaison is installed', () => {
@@ -137,9 +136,9 @@ describe('ApplicationsPage', () => {
     // Learn More should still be visible for installed apps that have a learnMoreUrl
     const learnMoreButtons = screen.getAllByRole('button', { name: /Learn More/i });
     expect(learnMoreButtons.length).toBeGreaterThanOrEqual(2);
-    // Ontology Forge + Spreadsheet Loader still have Install buttons
+    // Ontology Forge + AI Agents + Spreadsheet Loader still have Install buttons
     const installButtons = screen.getAllByRole('button', { name: 'Install' });
-    expect(installButtons).toHaveLength(2);
+    expect(installButtons).toHaveLength(3);
   });
 
   it('disables AI Data Liaison Install button when Ontology Forge is not installed', () => {
