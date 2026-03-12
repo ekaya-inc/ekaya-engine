@@ -16,3 +16,4 @@ export * from './glossary';
 export * from './installedApp';
 export * from './projectKnowledge';
 export * from './audit';
+export * from './agent';

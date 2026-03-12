@@ -292,6 +292,113 @@ describe('engineApi schema operation methods', () => {
   });
 });
 
+describe('engineApi AI agent methods', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('sends POST to /{projectId}/agents for createAgent', async () => {
+    const responseData = { data: { id: 'agent-1', api_key: 'created-key' } };
+    mockJsonResponse(responseData);
+
+    const result = await engineApi.createAgent('proj-1', 'sales-bot', ['q-1', 'q-2']);
+
+    expect(mockFetchWithAuth).toHaveBeenCalledWith(
+      '/api/projects/proj-1/agents',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ name: 'sales-bot', query_ids: ['q-1', 'q-2'] }),
+      })
+    );
+    expect(result).toEqual(responseData);
+  });
+
+  it('sends GET to /{projectId}/agents for listAgents', async () => {
+    const responseData = { data: { agents: [] } };
+    mockJsonResponse(responseData);
+
+    const result = await engineApi.listAgents('proj-1');
+
+    expect(mockFetchWithAuth).toHaveBeenCalledWith(
+      '/api/projects/proj-1/agents',
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+      })
+    );
+    expect(result).toEqual(responseData);
+  });
+
+  it('sends GET to /{projectId}/agents/{agentId} for getAgent', async () => {
+    const responseData = { data: { id: 'agent-1', name: 'sales-bot' } };
+    mockJsonResponse(responseData);
+
+    const result = await engineApi.getAgent('proj-1', 'agent-1');
+
+    expect(mockFetchWithAuth).toHaveBeenCalledWith(
+      '/api/projects/proj-1/agents/agent-1',
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+      })
+    );
+    expect(result).toEqual(responseData);
+  });
+
+  it('sends PATCH to /{projectId}/agents/{agentId} for updateAgentQueries', async () => {
+    const responseData = { data: { id: 'agent-1', query_ids: ['q-1'] } };
+    mockJsonResponse(responseData);
+
+    const result = await engineApi.updateAgentQueries('proj-1', 'agent-1', ['q-1']);
+
+    expect(mockFetchWithAuth).toHaveBeenCalledWith(
+      '/api/projects/proj-1/agents/agent-1',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ query_ids: ['q-1'] }),
+      })
+    );
+    expect(result).toEqual(responseData);
+  });
+
+  it('sends POST to /{projectId}/agents/{agentId}/rotate-key for rotateAgentKey', async () => {
+    const responseData = { data: { api_key: 'rotated-key' } };
+    mockJsonResponse(responseData);
+
+    const result = await engineApi.rotateAgentKey('proj-1', 'agent-1');
+
+    expect(mockFetchWithAuth).toHaveBeenCalledWith(
+      '/api/projects/proj-1/agents/agent-1/rotate-key',
+      expect.objectContaining({ method: 'POST' })
+    );
+    expect(result).toEqual(responseData);
+  });
+
+  it('sends GET to /{projectId}/agents/{agentId}/key?reveal=true for getAgentKey', async () => {
+    const responseData = { data: { key: 'revealed-key', masked: false } };
+    mockJsonResponse(responseData);
+
+    const result = await engineApi.getAgentKey('proj-1', 'agent-1', true);
+
+    expect(mockFetchWithAuth).toHaveBeenCalledWith(
+      '/api/projects/proj-1/agents/agent-1/key?reveal=true',
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+      })
+    );
+    expect(result).toEqual(responseData);
+  });
+
+  it('sends DELETE to /{projectId}/agents/{agentId} for deleteAgent', async () => {
+    mock204Response();
+
+    await engineApi.deleteAgent('proj-1', 'agent-1');
+
+    expect(mockFetchWithAuth).toHaveBeenCalledWith(
+      '/api/projects/proj-1/agents/agent-1',
+      expect.objectContaining({ method: 'DELETE' })
+    );
+  });
+});
+
 describe('engineApi query CRUD methods', () => {
   beforeEach(() => {
     vi.clearAllMocks();
