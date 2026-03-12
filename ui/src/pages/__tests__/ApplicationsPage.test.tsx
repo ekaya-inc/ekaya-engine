@@ -100,8 +100,8 @@ describe('ApplicationsPage', () => {
     expect(screen.getByText('Ontology Forge')).toBeInTheDocument();
     // AI Agents tile is temporarily hidden
     expect(screen.queryByText('AI Agents and Automation')).not.toBeInTheDocument();
-    expect(screen.getByText('Product Kit [BETA]')).toBeInTheDocument();
-    expect(screen.getByText('On-Premise Chat [BETA]')).toBeInTheDocument();
+    expect(screen.getByText('Product Kit [COMING SOON]')).toBeInTheDocument();
+    expect(screen.getByText('On-Premise Chat [COMING SOON]')).toBeInTheDocument();
     expect(screen.getByText('Your own Data Application')).toBeInTheDocument();
   });
 
@@ -193,7 +193,7 @@ describe('ApplicationsPage', () => {
 
     expect(mockClick).toHaveBeenCalled();
     expect(capturedHref).toBe(
-      'mailto:sales@ekaya.ai?subject=Interest%20in%20Product%20Kit%20%5BBETA%5D%20for%20my%20Ekaya%20project'
+      'mailto:sales@ekaya.ai?subject=Interest%20in%20Product%20Kit%20%5BCOMING%20SOON%5D%20for%20my%20Ekaya%20project'
     );
   });
 
@@ -208,7 +208,7 @@ describe('ApplicationsPage', () => {
 
     expect(mockClick).toHaveBeenCalled();
     expect(capturedHref).toBe(
-      'mailto:sales@ekaya.ai?subject=Interest%20in%20On-Premise%20Chat%20%5BBETA%5D%20for%20my%20Ekaya%20project'
+      'mailto:sales@ekaya.ai?subject=Interest%20in%20On-Premise%20Chat%20%5BCOMING%20SOON%5D%20for%20my%20Ekaya%20project'
     );
   });
 

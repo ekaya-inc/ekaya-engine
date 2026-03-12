@@ -313,6 +313,12 @@ func (h *QueriesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use authenticated user's email for audit trail instead of trusting client value
+	suggestedBy := auth.GetEmailFromContext(r.Context())
+	if suggestedBy == "" {
+		suggestedBy = req.SuggestedBy // fallback to client value if no auth context
+	}
+
 	serviceReq := &services.CreateQueryRequest{
 		NaturalLanguagePrompt: req.NaturalLanguagePrompt,
 		AdditionalContext:     req.AdditionalContext,
@@ -322,7 +328,7 @@ func (h *QueriesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		OutputColumns:         req.OutputColumns,
 		Constraints:           req.Constraints,
 		Status:                req.Status,
-		SuggestedBy:           req.SuggestedBy,
+		SuggestedBy:           suggestedBy,
 	}
 
 	query, err := h.queryService.Create(r.Context(), projectID, datasourceID, serviceReq)

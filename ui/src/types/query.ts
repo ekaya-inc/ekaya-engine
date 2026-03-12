@@ -85,7 +85,7 @@ export interface Query {
   output_columns?: OutputColumn[];
   constraints?: string | null;
   status: QueryStatus;
-  suggested_by?: 'user' | 'agent' | 'admin' | null;
+  suggested_by?: string | null;
   suggestion_context?: Record<string, unknown> | null;
   parent_query_id?: string | null;
   reviewed_by?: string | null;
@@ -107,7 +107,7 @@ export interface CreateQueryRequest {
   output_columns?: OutputColumn[];
   constraints?: string;
   status?: QueryStatus;
-  suggested_by?: 'user' | 'agent' | 'admin';
+  suggested_by?: string;
 }
 
 /**
@@ -210,7 +210,7 @@ export interface PendingQuery {
   output_columns?: OutputColumn[];
   constraints?: string | null;
   status: QueryStatus;
-  suggested_by: 'user' | 'agent' | 'admin';
+  suggested_by: string;
   suggestion_context?: Record<string, unknown> | null;
   parent_query_id?: string | null;
   reviewed_by?: string | null;

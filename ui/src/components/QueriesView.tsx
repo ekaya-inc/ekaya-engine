@@ -559,7 +559,7 @@ const QueriesView = ({
         sql_query: newQuery.sql_query.trim(),
         is_enabled: isPendingCreate ? false : newQuery.is_enabled,
         allows_modification: newQuery.allows_modification,
-        ...(isPendingCreate && { status: 'pending', suggested_by: 'admin' }),
+        ...(isPendingCreate && { status: 'pending' }),
       };
 
       if (newQuery.additional_context.trim()) {
@@ -1741,13 +1741,9 @@ const QueriesView = ({
                               <span className="inline-flex items-center gap-1">
                                 <Bot className="h-3 w-3" /> AI Agent
                               </span>
-                            ) : selectedQuery.suggested_by === 'admin' ? (
-                              <span className="inline-flex items-center gap-1">
-                                <User className="h-3 w-3" /> Admin
-                              </span>
                             ) : (
                               <span className="inline-flex items-center gap-1">
-                                <User className="h-3 w-3" /> User
+                                <User className="h-3 w-3" /> {selectedQuery.suggested_by ?? 'Unknown'}
                               </span>
                             )}
                             {selectedQuery.parent_query_id && (

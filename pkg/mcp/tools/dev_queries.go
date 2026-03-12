@@ -767,7 +767,7 @@ If datasource_id is not provided, the project's default datasource will be used.
 		sqlType := services.DetectSQLType(sqlQuery)
 		isModifying := services.IsModifyingStatement(sqlType)
 
-		// Create the query via DirectCreate (status="approved", suggested_by="admin")
+		// Create the query via DirectCreate (status="approved", suggested_by=user email)
 		createReq := &services.CreateQueryRequest{
 			NaturalLanguagePrompt: name,
 			AdditionalContext:     description,

@@ -672,8 +672,12 @@ func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			"is_modifying": isModifying,
 		}
 
-		// Create query with status='pending' and suggested_by='agent'
+		// Create query with status='pending'; use authenticated user's email for audit trail
 		// Auto-set allows_modification for INSERT/UPDATE/DELETE/CALL statements
+		suggestedBy := auth.GetEmailFromContext(tenantCtx)
+		if suggestedBy == "" {
+			suggestedBy = "agent"
+		}
 		createReq := &services.CreateQueryRequest{
 			NaturalLanguagePrompt: name,
 			AdditionalContext:     description,
@@ -683,7 +687,7 @@ func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			OutputColumns:         outputColumns,
 			Tags:                  tags,
 			Status:                "pending",
-			SuggestedBy:           "agent",
+			SuggestedBy:           suggestedBy,
 			SuggestionContext:     suggestionContext,
 			AllowsModification:    isModifying,
 		}
