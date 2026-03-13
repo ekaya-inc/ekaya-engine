@@ -81,6 +81,8 @@ type QueryService interface {
 	MoveToPending(ctx context.Context, projectID, queryID uuid.UUID) error
 	// ListPending returns all pending query suggestions for a project.
 	ListPending(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error)
+	// ListRejected returns all rejected query suggestions for a project.
+	ListRejected(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error)
 }
 
 // CreateQueryRequest contains fields for creating a new query.
@@ -1363,6 +1365,15 @@ func (s *queryService) ListPending(ctx context.Context, projectID uuid.UUID) ([]
 	queries, err := s.queryRepo.ListPending(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pending queries: %w", err)
+	}
+	return queries, nil
+}
+
+// ListRejected returns all rejected query suggestions for a project.
+func (s *queryService) ListRejected(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error) {
+	queries, err := s.queryRepo.ListRejected(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list rejected queries: %w", err)
 	}
 	return queries, nil
 }

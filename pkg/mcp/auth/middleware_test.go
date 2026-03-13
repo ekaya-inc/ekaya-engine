@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
 
 // mockAuthService is a mock implementation of auth.AuthService for testing.
@@ -38,41 +39,40 @@ func (m *mockAuthService) ValidateProjectIDMatch(claims *auth.Claims, urlProject
 	return m.validateMatchErr
 }
 
-// mockAgentKeyService is a mock implementation of services.AgentAPIKeyService for testing.
+// mockAgentKeyService is a mock implementation of services.AgentKeyValidator for testing.
 type mockAgentKeyService struct {
-	validKeys  map[uuid.UUID]string // map of project ID to valid key
-	validateFn func(ctx context.Context, projectID uuid.UUID, providedKey string) (bool, error)
+	validKeys   map[uuid.UUID]string // map of project ID to valid key
+	namedAgents map[uuid.UUID]*models.Agent
+	validateFn  func(ctx context.Context, projectID uuid.UUID, providedKey string) (*models.Agent, error)
 }
 
 func newMockAgentKeyService() *mockAgentKeyService {
 	return &mockAgentKeyService{
-		validKeys: make(map[uuid.UUID]string),
+		validKeys:   make(map[uuid.UUID]string),
+		namedAgents: make(map[uuid.UUID]*models.Agent),
 	}
 }
 
-func (m *mockAgentKeyService) GenerateKey(ctx context.Context, projectID uuid.UUID) (string, error) {
-	key := "generated-key-" + projectID.String()[:8]
-	m.validKeys[projectID] = key
-	return key, nil
-}
-
-func (m *mockAgentKeyService) GetKey(ctx context.Context, projectID uuid.UUID) (string, error) {
-	return m.validKeys[projectID], nil
-}
-
-func (m *mockAgentKeyService) RegenerateKey(ctx context.Context, projectID uuid.UUID) (string, error) {
-	return m.GenerateKey(ctx, projectID)
-}
-
-func (m *mockAgentKeyService) ValidateKey(ctx context.Context, projectID uuid.UUID, providedKey string) (bool, error) {
+func (m *mockAgentKeyService) ValidateKey(ctx context.Context, projectID uuid.UUID, providedKey string) (*models.Agent, error) {
 	if m.validateFn != nil {
 		return m.validateFn(ctx, projectID, providedKey)
 	}
 	storedKey, ok := m.validKeys[projectID]
 	if !ok {
-		return false, nil
+		return nil, nil
 	}
-	return storedKey == providedKey, nil
+	if storedKey != providedKey {
+		return nil, nil
+	}
+	namedAgent, ok := m.namedAgents[projectID]
+	if !ok {
+		return nil, nil
+	}
+	return namedAgent, nil
+}
+
+func (m *mockAgentKeyService) RecordAccess(_ context.Context, _ uuid.UUID) error {
+	return nil
 }
 
 // mockTenantScopeProvider is a mock implementation of TenantScopeProvider for testing.
@@ -319,10 +319,16 @@ func TestMiddleware_WWWAuthenticateFormat(t *testing.T) {
 
 func TestMiddleware_RequireAuth_AgentAPIKey_AuthorizationHeader(t *testing.T) {
 	projectID := uuid.New()
+	agentID := uuid.New()
 	apiKey := "test-api-key-12345"
 
 	agentKeyService := newMockAgentKeyService()
 	agentKeyService.validKeys[projectID] = apiKey
+	agentKeyService.namedAgents[projectID] = &models.Agent{
+		ID:        agentID,
+		ProjectID: projectID,
+		Name:      "agent-auth-header",
+	}
 	tenantProvider := &mockTenantScopeProvider{}
 
 	middleware := NewMiddleware(nil, agentKeyService, tenantProvider, zap.NewNop())
@@ -361,17 +367,135 @@ func TestMiddleware_RequireAuth_AgentAPIKey_AuthorizationHeader(t *testing.T) {
 		t.Errorf("expected project ID %q, got %q", projectID.String(), ctxClaims.ProjectID)
 	}
 
-	if ctxClaims.Subject != "agent" {
-		t.Errorf("expected Subject 'agent', got %q", ctxClaims.Subject)
+	if ctxClaims.Subject != "agent:"+agentID.String() {
+		t.Errorf("expected named agent subject, got %q", ctxClaims.Subject)
+	}
+}
+
+func TestMiddleware_RequireAuth_AgentAPIKey_NamedAgentClaimsAndContext(t *testing.T) {
+	projectID := uuid.New()
+	agentID := uuid.New()
+	apiKey := "named-agent-key"
+
+	agentKeyService := newMockAgentKeyService()
+	agentKeyService.validKeys[projectID] = apiKey
+	agentKeyService.namedAgents[projectID] = &models.Agent{
+		ID:        agentID,
+		ProjectID: projectID,
+		Name:      "sales-bot",
+	}
+	tenantProvider := &mockTenantScopeProvider{}
+
+	middleware := NewMiddleware(nil, agentKeyService, tenantProvider, zap.NewNop())
+
+	var ctxClaims *auth.Claims
+	var ctxAgentID uuid.UUID
+	var hasAgentID bool
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctxClaims, _ = auth.GetClaims(r.Context())
+		ctxAgentID, hasAgentID = auth.GetAgentID(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	wrappedHandler := middleware.RequireAuth("pid")(handler)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp/"+projectID.String(), nil)
+	req.SetPathValue("pid", projectID.String())
+	req.Header.Set("Authorization", "api-key:"+apiKey)
+	rec := httptest.NewRecorder()
+
+	wrappedHandler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	if ctxClaims == nil {
+		t.Fatal("expected claims to be set in context")
+	}
+	if ctxClaims.Subject != "agent:"+agentID.String() {
+		t.Fatalf("expected named agent subject, got %q", ctxClaims.Subject)
+	}
+	if ctxClaims.Email != "sales-bot" {
+		t.Fatalf("expected agent name in email field, got %q", ctxClaims.Email)
+	}
+	if !hasAgentID {
+		t.Fatal("expected agent ID in context")
+	}
+	if ctxAgentID != agentID {
+		t.Fatalf("expected agent ID %s, got %s", agentID, ctxAgentID)
+	}
+}
+
+func TestMiddleware_RequireAuth_AgentAPIKey_RequiresNamedAgent(t *testing.T) {
+	projectID := uuid.New()
+	apiKey := "unassigned-agent-key"
+
+	agentKeyService := newMockAgentKeyService()
+	agentKeyService.validKeys[projectID] = apiKey
+	tenantProvider := &mockTenantScopeProvider{}
+
+	middleware := NewMiddleware(nil, agentKeyService, tenantProvider, zap.NewNop())
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("handler should not be called")
+	})
+
+	wrappedHandler := middleware.RequireAuth("pid")(handler)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp/"+projectID.String(), nil)
+	req.SetPathValue("pid", projectID.String())
+	req.Header.Set("Authorization", "api-key:"+apiKey)
+	rec := httptest.NewRecorder()
+
+	wrappedHandler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", rec.Code)
+	}
+}
+
+func TestMiddleware_RequireAuth_AgentAPIKey_RejectsZeroUUIDAgent(t *testing.T) {
+	projectID := uuid.New()
+
+	agentKeyService := newMockAgentKeyService()
+	agentKeyService.validateFn = func(ctx context.Context, pid uuid.UUID, key string) (*models.Agent, error) {
+		return &models.Agent{ProjectID: pid}, nil
+	}
+	tenantProvider := &mockTenantScopeProvider{}
+
+	middleware := NewMiddleware(nil, agentKeyService, tenantProvider, zap.NewNop())
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("handler should not be called")
+	})
+
+	wrappedHandler := middleware.RequireAuth("pid")(handler)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp/"+projectID.String(), nil)
+	req.SetPathValue("pid", projectID.String())
+	req.Header.Set("Authorization", "api-key:invalid-legacy-shape")
+	rec := httptest.NewRecorder()
+
+	wrappedHandler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", rec.Code)
 	}
 }
 
 func TestMiddleware_RequireAuth_AgentAPIKey_XAPIKeyHeader(t *testing.T) {
 	projectID := uuid.New()
+	agentID := uuid.New()
 	apiKey := "test-api-key-67890"
 
 	agentKeyService := newMockAgentKeyService()
 	agentKeyService.validKeys[projectID] = apiKey
+	agentKeyService.namedAgents[projectID] = &models.Agent{
+		ID:        agentID,
+		ProjectID: projectID,
+		Name:      "agent-x-api-key",
+	}
 	tenantProvider := &mockTenantScopeProvider{}
 
 	middleware := NewMiddleware(nil, agentKeyService, tenantProvider, zap.NewNop())
@@ -406,8 +530,8 @@ func TestMiddleware_RequireAuth_AgentAPIKey_XAPIKeyHeader(t *testing.T) {
 		t.Fatal("expected claims to be set in context")
 	}
 
-	if ctxClaims.Subject != "agent" {
-		t.Errorf("expected Subject 'agent', got %q", ctxClaims.Subject)
+	if ctxClaims.Subject != "agent:"+agentID.String() {
+		t.Errorf("expected named agent subject, got %q", ctxClaims.Subject)
 	}
 }
 
@@ -503,8 +627,8 @@ func TestMiddleware_RequireAuth_AgentAPIKey_ServiceError(t *testing.T) {
 	projectID := uuid.New()
 
 	agentKeyService := newMockAgentKeyService()
-	agentKeyService.validateFn = func(ctx context.Context, pid uuid.UUID, key string) (bool, error) {
-		return false, errors.New("database error")
+	agentKeyService.validateFn = func(ctx context.Context, pid uuid.UUID, key string) (*models.Agent, error) {
+		return nil, errors.New("database error")
 	}
 	tenantProvider := &mockTenantScopeProvider{}
 
@@ -629,10 +753,16 @@ func TestMiddleware_RequireAuth_AgentAPIKey_TenantScopeError(t *testing.T) {
 func TestMiddleware_RequireAuth_AgentAPIKey_ExtractProjectFromPath(t *testing.T) {
 	// Test when path value is not set but URL path contains project ID
 	projectID := uuid.New()
+	agentID := uuid.New()
 	apiKey := "test-api-key"
 
 	agentKeyService := newMockAgentKeyService()
 	agentKeyService.validKeys[projectID] = apiKey
+	agentKeyService.namedAgents[projectID] = &models.Agent{
+		ID:        agentID,
+		ProjectID: projectID,
+		Name:      "agent-path-extract",
+	}
 	tenantProvider := &mockTenantScopeProvider{}
 
 	middleware := NewMiddleware(nil, agentKeyService, tenantProvider, zap.NewNop())
@@ -675,10 +805,16 @@ func TestMiddleware_RequireAuth_AgentAPIKey_ExtractProjectFromPath(t *testing.T)
 
 func TestMiddleware_RequireAuth_AgentAPIKey_BearerToken(t *testing.T) {
 	projectID := uuid.New()
+	agentID := uuid.New()
 	apiKey := "8b9bc7dce2de106351ba7f7712dfbfb16d010a2478a094a8c328cdafd21f468b"
 
 	agentKeyService := newMockAgentKeyService()
 	agentKeyService.validKeys[projectID] = apiKey
+	agentKeyService.namedAgents[projectID] = &models.Agent{
+		ID:        agentID,
+		ProjectID: projectID,
+		Name:      "agent-bearer-header",
+	}
 	tenantProvider := &mockTenantScopeProvider{}
 
 	middleware := NewMiddleware(nil, agentKeyService, tenantProvider, zap.NewNop())
@@ -717,8 +853,8 @@ func TestMiddleware_RequireAuth_AgentAPIKey_BearerToken(t *testing.T) {
 		t.Errorf("expected project ID %q, got %q", projectID.String(), ctxClaims.ProjectID)
 	}
 
-	if ctxClaims.Subject != "agent" {
-		t.Errorf("expected subject 'agent', got %q", ctxClaims.Subject)
+	if ctxClaims.Subject != "agent:"+agentID.String() {
+		t.Errorf("expected named agent subject, got %q", ctxClaims.Subject)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
+	"github.com/ekaya-inc/ekaya-engine/pkg/jsonutil"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
 
@@ -721,8 +722,8 @@ func TestUpdateProjectKnowledgeTool_Success(t *testing.T) {
 			Fact:      fact.Value,
 			Category:  fact.FactType,
 			Context:   fact.Context,
-			CreatedAt: mockRepo.facts[0].CreatedAt,
-			UpdatedAt: mockRepo.facts[0].UpdatedAt,
+			CreatedAt: jsonutil.FormatUTCTime(mockRepo.facts[0].CreatedAt),
+			UpdatedAt: jsonutil.FormatUTCTime(mockRepo.facts[0].UpdatedAt),
 		}
 
 		// Verify JSON serialization works
@@ -782,7 +783,7 @@ func TestUpdateProjectKnowledgeTool_Success(t *testing.T) {
 			Fact:      latestFact.Value,
 			Category:  latestFact.FactType,
 			Context:   latestFact.Context,
-			UpdatedAt: latestFact.UpdatedAt,
+			UpdatedAt: jsonutil.FormatUTCTime(latestFact.UpdatedAt),
 		}
 
 		// Verify JSON serialization works

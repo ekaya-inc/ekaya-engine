@@ -10,6 +10,10 @@ import type {
   AIConfigTestRequest,
   AIOptionsResponse,
   AITestResult,
+  Agent,
+  AgentCreateResponse,
+  AgentKeyResponse,
+  AgentListResponse,
   ApiResponse,
   ApproveQueryResponse,
   AlertConfig,
@@ -778,31 +782,96 @@ class EngineApiService {
   }
 
   /**
-   * Get agent API key for a project
-   * GET /api/projects/{projectId}/mcp/agent-key
-   * @param reveal - If true, returns the full key; otherwise returns masked key
+   * Create a named AI agent
+   * POST /api/projects/{projectId}/agents
    */
-  async getAgentAPIKey(
+  async createAgent(
     projectId: string,
-    reveal: boolean = false
-  ): Promise<ApiResponse<{ key: string; masked: boolean }>> {
-    const query = reveal ? '?reveal=true' : '';
-    return this.makeRequest<{ key: string; masked: boolean }>(
-      `/${projectId}/mcp/agent-key${query}`
+    name: string,
+    queryIds: string[]
+  ): Promise<ApiResponse<AgentCreateResponse>> {
+    return this.makeRequest<AgentCreateResponse>(`/${projectId}/agents`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name,
+        query_ids: queryIds,
+      }),
+    });
+  }
+
+  /**
+   * List named AI agents for a project
+   * GET /api/projects/{projectId}/agents
+   */
+  async listAgents(projectId: string): Promise<ApiResponse<AgentListResponse>> {
+    return this.makeRequest<AgentListResponse>(`/${projectId}/agents`);
+  }
+
+  /**
+   * Get a single named AI agent
+   * GET /api/projects/{projectId}/agents/{agentId}
+   */
+  async getAgent(projectId: string, agentId: string): Promise<ApiResponse<Agent>> {
+    return this.makeRequest<Agent>(`/${projectId}/agents/${agentId}`);
+  }
+
+  /**
+   * Update a named AI agent's query access
+   * PATCH /api/projects/{projectId}/agents/{agentId}
+   */
+  async updateAgentQueries(
+    projectId: string,
+    agentId: string,
+    queryIds: string[]
+  ): Promise<ApiResponse<Agent>> {
+    return this.makeRequest<Agent>(`/${projectId}/agents/${agentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        query_ids: queryIds,
+      }),
+    });
+  }
+
+  /**
+   * Rotate a named AI agent's API key
+   * POST /api/projects/{projectId}/agents/{agentId}/rotate-key
+   */
+  async rotateAgentKey(
+    projectId: string,
+    agentId: string
+  ): Promise<ApiResponse<{ api_key: string }>> {
+    return this.makeRequest<{ api_key: string }>(
+      `/${projectId}/agents/${agentId}/rotate-key`,
+      { method: 'POST' }
     );
   }
 
   /**
-   * Regenerate agent API key for a project
-   * POST /api/projects/{projectId}/mcp/agent-key/regenerate
+   * Reveal or mask a named AI agent's API key
+   * GET /api/projects/{projectId}/agents/{agentId}/key
    */
-  async regenerateAgentAPIKey(
-    projectId: string
-  ): Promise<ApiResponse<{ key: string }>> {
-    return this.makeRequest<{ key: string }>(
-      `/${projectId}/mcp/agent-key/regenerate`,
-      { method: 'POST' }
+  async getAgentKey(
+    projectId: string,
+    agentId: string,
+    reveal: boolean = false
+  ): Promise<ApiResponse<AgentKeyResponse>> {
+    const query = reveal ? '?reveal=true' : '';
+    return this.makeRequest<AgentKeyResponse>(
+      `/${projectId}/agents/${agentId}/key${query}`
     );
+  }
+
+  /**
+   * Delete a named AI agent
+   * DELETE /api/projects/{projectId}/agents/{agentId}
+   */
+  async deleteAgent(
+    projectId: string,
+    agentId: string
+  ): Promise<ApiResponse<void>> {
+    return this.makeRequest<void>(`/${projectId}/agents/${agentId}`, {
+      method: 'DELETE',
+    });
   }
 
   /**

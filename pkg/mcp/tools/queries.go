@@ -15,6 +15,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/audit"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
+	"github.com/ekaya-inc/ekaya-engine/pkg/jsonutil"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
@@ -24,6 +25,7 @@ type QueryToolDeps struct {
 	BaseMCPToolDeps
 	ProjectService      services.ProjectService
 	QueryService        services.QueryService
+	AgentService        services.AgentQueryAccessService
 	Auditor             *audit.SecurityAuditor
 	QueryHistoryService services.QueryHistoryService // Optional: for query learning history
 }
@@ -148,6 +150,11 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 			return nil, fmt.Errorf("failed to list queries: %w", err)
 		}
 
+		queries, err = filterQueriesForAgent(tenantCtx, deps.AgentService, queries)
+		if err != nil {
+			return nil, fmt.Errorf("failed to filter agent queries: %w", err)
+		}
+
 		result := listApprovedQueriesResult{
 			Queries: make([]approvedQueryInfo, len(queries)),
 		}
@@ -230,9 +237,9 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			"limit",
 			mcp.Description("Max rows to return (default: 100, max: 1000)"),
 		),
-		mcp.WithReadOnlyHintAnnotation(false),    // Some queries may modify data (INSERT/UPDATE/DELETE)
-		mcp.WithDestructiveHintAnnotation(false), // Individual queries may be destructive
-		mcp.WithIdempotentHintAnnotation(false),  // Modifying queries are not idempotent
+		mcp.WithReadOnlyHintAnnotation(false),   // Some approved queries may modify customer data.
+		mcp.WithDestructiveHintAnnotation(true), // Approved queries can execute destructive statements.
+		mcp.WithIdempotentHintAnnotation(false), // Modifying queries are not idempotent
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
 
@@ -290,6 +297,15 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		if !query.IsEnabled {
 			return NewErrorResult("QUERY_NOT_APPROVED",
 				fmt.Sprintf("query %q (ID: %s) is not enabled. Only enabled queries can be executed.", query.NaturalLanguagePrompt, queryID)), nil
+		}
+
+		allowed, err := agentHasQueryAccess(tenantCtx, deps.AgentService, queryID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check agent query access: %w", err)
+		}
+		if !allowed {
+			return NewErrorResult("QUERY_ACCESS_DENIED",
+				fmt.Sprintf("agent does not have access to query %q", queryID)), nil
 		}
 
 		// Detect SQL statement type
@@ -463,6 +479,47 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		jsonResult, _ := json.Marshal(response)
 		return mcp.NewToolResultText(string(jsonResult)), nil
 	})
+}
+
+func filterQueriesForAgent(ctx context.Context, agentService services.AgentQueryAccessService, queries []*models.Query) ([]*models.Query, error) {
+	agentID, ok := auth.GetAgentID(ctx)
+	if !ok {
+		return queries, nil
+	}
+	if agentService == nil {
+		return nil, fmt.Errorf("agent service is required for named agent query filtering")
+	}
+
+	allowedQueryIDs, err := agentService.GetQueryAccess(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+
+	allowed := make(map[uuid.UUID]struct{}, len(allowedQueryIDs))
+	for _, queryID := range allowedQueryIDs {
+		allowed[queryID] = struct{}{}
+	}
+
+	filtered := make([]*models.Query, 0, len(queries))
+	for _, query := range queries {
+		if _, ok := allowed[query.ID]; ok {
+			filtered = append(filtered, query)
+		}
+	}
+
+	return filtered, nil
+}
+
+func agentHasQueryAccess(ctx context.Context, agentService services.AgentQueryAccessService, queryID uuid.UUID) (bool, error) {
+	agentID, ok := auth.GetAgentID(ctx)
+	if !ok {
+		return true, nil
+	}
+	if agentService == nil {
+		return false, fmt.Errorf("agent service is required for named agent query access checks")
+	}
+
+	return agentService.HasQueryAccess(ctx, agentID, queryID)
 }
 
 // convertQueryExecutionError converts actionable query execution errors to error results.
@@ -1380,7 +1437,7 @@ func registerGetQueryHistoryTool(s *server.MCPServer, deps *QueryToolDeps) {
 				ID:                  e.ID.String(),
 				NaturalLanguage:     e.NaturalLanguage,
 				SQL:                 e.SQL,
-				ExecutedAt:          e.ExecutedAt.Format(time.RFC3339),
+				ExecutedAt:          jsonutil.FormatUTCTime(e.ExecutedAt),
 				RowCount:            e.RowCount,
 				ExecutionDurationMs: e.ExecutionDurationMs,
 				TablesUsed:          e.TablesUsed,

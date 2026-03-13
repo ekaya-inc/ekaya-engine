@@ -220,6 +220,8 @@ func registerCreateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 			mcp.Description("Primary table this term is derived from (optional)")),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(false),
+		mcp.WithOpenWorldHintAnnotation(false),
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -538,7 +540,7 @@ func registerDeleteGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 			mcp.Description("Business term name to delete"),
 		),
 		mcp.WithReadOnlyHintAnnotation(false),
-		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)

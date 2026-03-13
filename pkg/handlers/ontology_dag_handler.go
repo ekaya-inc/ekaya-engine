@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/jsonutil"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
@@ -291,13 +291,11 @@ func (h *OntologyDAGHandler) toDAGResponse(dag *models.OntologyDAG) DAGStatusRes
 	}
 
 	if dag.StartedAt != nil {
-		startedAt := dag.StartedAt.Format(time.RFC3339)
-		resp.StartedAt = &startedAt
+		resp.StartedAt = jsonutil.FormatUTCTimePtr(dag.StartedAt)
 	}
 
 	if dag.CompletedAt != nil {
-		completedAt := dag.CompletedAt.Format(time.RFC3339)
-		resp.CompletedAt = &completedAt
+		resp.CompletedAt = jsonutil.FormatUTCTimePtr(dag.CompletedAt)
 	}
 
 	return resp

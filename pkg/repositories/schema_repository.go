@@ -323,13 +323,16 @@ func (r *schemaRepository) SoftDeleteRemovedTables(ctx context.Context, projectI
 		return 0, fmt.Errorf("no tenant scope in context")
 	}
 
+	now := time.Now()
+
 	if len(activeTableKeys) == 0 {
 		// Soft-delete ALL active tables for this datasource
 		query := `
 			UPDATE engine_schema_tables
-			SET deleted_at = NOW()
+			SET deleted_at = $3,
+			    updated_at = $3
 			WHERE project_id = $1 AND datasource_id = $2 AND deleted_at IS NULL`
-		result, err := scope.Conn.Exec(ctx, query, projectID, datasourceID)
+		result, err := scope.Conn.Exec(ctx, query, projectID, datasourceID, now)
 		if err != nil {
 			return 0, fmt.Errorf("failed to soft-delete tables: %w", err)
 		}
@@ -343,7 +346,8 @@ func (r *schemaRepository) SoftDeleteRemovedTables(ctx context.Context, projectI
 			       unnest($4::text[]) as table_name
 		)
 		UPDATE engine_schema_tables t
-		SET deleted_at = NOW()
+		SET deleted_at = $5,
+		    updated_at = $5
 		WHERE t.project_id = $1
 		  AND t.datasource_id = $2
 		  AND t.deleted_at IS NULL
@@ -359,7 +363,7 @@ func (r *schemaRepository) SoftDeleteRemovedTables(ctx context.Context, projectI
 		tableNames[i] = k.TableName
 	}
 
-	result, err := scope.Conn.Exec(ctx, query, projectID, datasourceID, schemaNames, tableNames)
+	result, err := scope.Conn.Exec(ctx, query, projectID, datasourceID, schemaNames, tableNames, now)
 	if err != nil {
 		return 0, fmt.Errorf("failed to soft-delete tables: %w", err)
 	}
@@ -373,12 +377,14 @@ func (r *schemaRepository) UpdateTableSelection(ctx context.Context, projectID, 
 		return fmt.Errorf("no tenant scope in context")
 	}
 
+	now := time.Now()
+
 	query := `
 		UPDATE engine_schema_tables
-		SET is_selected = $3, updated_at = NOW()
+		SET is_selected = $3, updated_at = $4
 		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
 
-	result, err := scope.Conn.Exec(ctx, query, projectID, tableID, isSelected)
+	result, err := scope.Conn.Exec(ctx, query, projectID, tableID, isSelected, now)
 	if err != nil {
 		return fmt.Errorf("failed to update table selection: %w", err)
 	}
@@ -793,8 +799,8 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 	}
 
 	// No soft-deleted record, do standard upsert on active records.
-	// Note: updated_at is NOT in DO UPDATE SET — the conditional trigger controls it,
-	// only bumping it when ontology-relevant fields change (data_type, is_nullable, etc.).
+	// Pass through updated_at so the conditional trigger can preserve the caller's
+	// timestamp for real ontology changes while still restoring OLD.updated_at on no-op refreshes.
 	upsertQuery := `
 		INSERT INTO engine_schema_columns (
 			id, project_id, schema_table_id, column_name, data_type,
@@ -811,7 +817,8 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 			is_unique = EXCLUDED.is_unique,
 			ordinal_position = EXCLUDED.ordinal_position,
 			default_value = EXCLUDED.default_value,
-			enum_values = EXCLUDED.enum_values
+			enum_values = EXCLUDED.enum_values,
+			updated_at = EXCLUDED.updated_at
 		RETURNING id, created_at, is_selected, distinct_count, null_count`
 
 	err = scope.Conn.QueryRow(ctx, upsertQuery,
@@ -835,13 +842,16 @@ func (r *schemaRepository) SoftDeleteRemovedColumns(ctx context.Context, tableID
 		return 0, fmt.Errorf("no tenant scope in context")
 	}
 
+	now := time.Now()
+
 	if len(activeColumnNames) == 0 {
 		// Soft-delete ALL active columns for this table
 		query := `
 			UPDATE engine_schema_columns
-			SET deleted_at = NOW()
+			SET deleted_at = $2,
+			    updated_at = $2
 			WHERE schema_table_id = $1 AND deleted_at IS NULL`
-		result, err := scope.Conn.Exec(ctx, query, tableID)
+		result, err := scope.Conn.Exec(ctx, query, tableID, now)
 		if err != nil {
 			return 0, fmt.Errorf("failed to soft-delete columns: %w", err)
 		}
@@ -851,12 +861,13 @@ func (r *schemaRepository) SoftDeleteRemovedColumns(ctx context.Context, tableID
 	// Soft-delete columns NOT in the active list
 	query := `
 		UPDATE engine_schema_columns
-		SET deleted_at = NOW()
+		SET deleted_at = $3,
+		    updated_at = $3
 		WHERE schema_table_id = $1
 		  AND deleted_at IS NULL
 		  AND column_name != ALL($2::text[])`
 
-	result, err := scope.Conn.Exec(ctx, query, tableID, activeColumnNames)
+	result, err := scope.Conn.Exec(ctx, query, tableID, activeColumnNames, now)
 	if err != nil {
 		return 0, fmt.Errorf("failed to soft-delete columns: %w", err)
 	}
@@ -870,12 +881,14 @@ func (r *schemaRepository) UpdateColumnSelection(ctx context.Context, projectID,
 		return fmt.Errorf("no tenant scope in context")
 	}
 
+	now := time.Now()
+
 	query := `
 		UPDATE engine_schema_columns
-		SET is_selected = $3, updated_at = NOW()
+		SET is_selected = $3, updated_at = $4
 		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
 
-	result, err := scope.Conn.Exec(ctx, query, projectID, columnID, isSelected)
+	result, err := scope.Conn.Exec(ctx, query, projectID, columnID, isSelected, now)
 	if err != nil {
 		return fmt.Errorf("failed to update column selection: %w", err)
 	}
@@ -1835,12 +1848,14 @@ func (r *schemaRepository) SelectAllTablesAndColumns(ctx context.Context, projec
 		return fmt.Errorf("no tenant scope in context")
 	}
 
+	now := time.Now()
+
 	// Update all tables to selected (explicit project_id filter in addition to RLS)
 	_, err := scope.Conn.Exec(ctx, `
 		UPDATE engine_schema_tables
-		SET is_selected = true, updated_at = NOW()
+		SET is_selected = true, updated_at = $3
 		WHERE project_id = $1 AND datasource_id = $2 AND deleted_at IS NULL
-	`, projectID, datasourceID)
+	`, projectID, datasourceID, now)
 	if err != nil {
 		return fmt.Errorf("failed to select all tables: %w", err)
 	}
@@ -1848,12 +1863,12 @@ func (r *schemaRepository) SelectAllTablesAndColumns(ctx context.Context, projec
 	// Update all columns to selected for the tables in this datasource
 	_, err = scope.Conn.Exec(ctx, `
 		UPDATE engine_schema_columns
-		SET is_selected = true, updated_at = NOW()
+		SET is_selected = true, updated_at = $3
 		WHERE schema_table_id IN (
 			SELECT id FROM engine_schema_tables
 			WHERE project_id = $1 AND datasource_id = $2 AND deleted_at IS NULL
 		) AND deleted_at IS NULL
-	`, projectID, datasourceID)
+	`, projectID, datasourceID, now)
 	if err != nil {
 		return fmt.Errorf("failed to select all columns: %w", err)
 	}

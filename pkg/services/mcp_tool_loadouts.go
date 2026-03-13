@@ -36,13 +36,13 @@ var AllToolsOrdered = []ToolSpec{
 	// Query tools
 	{Name: "validate", Description: "Check SQL syntax without executing"},
 	{Name: "query", Description: "Execute read-only SQL SELECT statements"},
-	{Name: "explain_query", Description: "Analyze SQL query performance using EXPLAIN ANALYZE with execution plan and optimization hints"},
+	{Name: "explain_query", Description: "Analyze a read-only SQL query plan without executing it"},
 	{Name: "list_approved_queries", Description: "List pre-approved SQL queries"},
 	{Name: "execute_approved_query", Description: "Execute a pre-approved query by ID"},
 	{Name: "suggest_approved_query", Description: "Suggest a reusable parameterized query for approval"},
 	{Name: "suggest_query_update", Description: "Suggest an update to an existing pre-approved query for review"},
 	// Query Management (Admin Tools) - grouped with other query tools
-	{Name: "list_query_suggestions", Description: "List pending query suggestions awaiting review"},
+	{Name: "list_query_suggestions", Description: "List query suggestions awaiting review or previously rejected"},
 	{Name: "approve_query_suggestion", Description: "Approve a pending query suggestion"},
 	{Name: "reject_query_suggestion", Description: "Reject a pending query suggestion with reason"},
 	{Name: "create_approved_query", Description: "Create a new pre-approved query directly (no review required)"},

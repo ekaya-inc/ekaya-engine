@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/jsonutil"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
@@ -328,7 +329,7 @@ func (h *OntologyChatHandler) toChatMessageResponse(m *models.ChatMessage) ChatM
 		Content:    m.Content,
 		ToolCalls:  m.ToolCalls,
 		ToolCallID: m.ToolCallID,
-		CreatedAt:  m.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:  jsonutil.FormatUTCTime(m.CreatedAt),
 	}
 }
 
@@ -338,6 +339,6 @@ func (h *OntologyChatHandler) toKnowledgeFactResponse(f *models.KnowledgeFact) K
 		FactType:  f.FactType,
 		Value:     f.Value,
 		Context:   f.Context,
-		CreatedAt: f.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt: jsonutil.FormatUTCTime(f.CreatedAt),
 	}
 }

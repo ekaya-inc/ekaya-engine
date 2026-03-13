@@ -161,6 +161,10 @@ func (m *mockQueryServiceForMCP) ListPending(ctx context.Context, projectID uuid
 	return nil, nil
 }
 
+func (m *mockQueryServiceForMCP) ListRejected(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error) {
+	return nil, nil
+}
+
 func (m *mockQueryServiceForMCP) DeleteWithPendingRejection(ctx context.Context, projectID, queryID uuid.UUID, reviewerID string) (int, error) {
 	return 0, nil
 }

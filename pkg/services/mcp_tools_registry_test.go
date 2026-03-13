@@ -230,6 +230,23 @@ func TestToolRegistry_ContainsAllExpectedTools(t *testing.T) {
 	}
 }
 
+func TestListQuerySuggestionsDescriptionMentionsRejected(t *testing.T) {
+	var registryDesc string
+	for _, tool := range ToolRegistry {
+		if tool.Name == "list_query_suggestions" {
+			registryDesc = tool.Description
+			break
+		}
+	}
+
+	require.NotEmpty(t, registryDesc)
+	assert.Contains(t, registryDesc, "rejected")
+
+	spec := GetToolSpec("list_query_suggestions")
+	require.NotNil(t, spec)
+	assert.Contains(t, spec.Description, "rejected")
+}
+
 func TestMergeLoadouts_Deduplication(t *testing.T) {
 	// Query and Developer Core both have validate, query, explain_query
 	tools := MergeLoadouts(LoadoutDeveloperCore, LoadoutQuery)

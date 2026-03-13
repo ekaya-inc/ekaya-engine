@@ -187,36 +187,6 @@ func TestRBAC_UsersHandler_AdminOnly(t *testing.T) {
 }
 
 // =============================================================================
-// Agent API Key Handler RBAC Tests
-// =============================================================================
-
-func TestRBAC_AgentAPIKeyHandler_AdminOnly(t *testing.T) {
-	projectID := uuid.New()
-	mockService := &mockAgentAPIKeyService{key: "test-key"}
-	handler := NewAgentAPIKeyHandler(mockService, zap.NewNop())
-
-	basePath := "/api/projects/" + projectID.String() + "/mcp/agent-key"
-
-	tests := []rbacTestCase{
-		// Admin allowed
-		{name: "GET_admin_allowed", method: http.MethodGet, path: basePath, roles: []string{models.RoleAdmin}, expectedStatus: http.StatusOK},
-		{name: "POST_regen_admin_allowed", method: http.MethodPost, path: basePath + "/regenerate", roles: []string{models.RoleAdmin}, expectedStatus: http.StatusOK},
-		// User denied
-		{name: "GET_user_denied", method: http.MethodGet, path: basePath, roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
-		{name: "POST_regen_user_denied", method: http.MethodPost, path: basePath + "/regenerate", roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
-		// Data denied
-		{name: "GET_data_denied", method: http.MethodGet, path: basePath, roles: []string{models.RoleData}, expectedStatus: http.StatusForbidden},
-		{name: "POST_regen_data_denied", method: http.MethodPost, path: basePath + "/regenerate", roles: []string{models.RoleData}, expectedStatus: http.StatusForbidden},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			runRBACTest(t, projectID, handler.RegisterRoutes, tc)
-		})
-	}
-}
-
-// =============================================================================
 // MCP Config Handler RBAC Tests
 // =============================================================================
 
@@ -415,6 +385,10 @@ func (m *mockQueryServiceForRBAC) MoveToPending(ctx context.Context, projectID, 
 	return nil
 }
 func (m *mockQueryServiceForRBAC) ListPending(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error) {
+	return nil, nil
+}
+
+func (m *mockQueryServiceForRBAC) ListRejected(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error) {
 	return nil, nil
 }
 

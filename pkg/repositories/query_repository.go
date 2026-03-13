@@ -35,6 +35,7 @@ type QueryRepository interface {
 
 	// Approval workflow
 	ListPending(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error)
+	ListRejected(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error)
 	ListPendingByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.Query, error)
 	CountPending(ctx context.Context, projectID uuid.UUID) (int, error)
 	GetPendingUpdatesForQuery(ctx context.Context, projectID, queryID uuid.UUID) ([]*models.Query, error)
@@ -378,6 +379,38 @@ func (r *queryRepository) ListPending(ctx context.Context, projectID uuid.UUID) 
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating pending queries: %w", err)
+	}
+
+	return queries, nil
+}
+
+func (r *queryRepository) ListRejected(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	sql := `SELECT ` + querySelectColumns + `
+		FROM engine_queries
+		WHERE project_id = $1 AND status = 'rejected' AND deleted_at IS NULL
+		ORDER BY created_at DESC`
+
+	rows, err := scope.Conn.Query(ctx, sql, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list rejected queries: %w", err)
+	}
+	defer rows.Close()
+
+	queries := make([]*models.Query, 0)
+	for rows.Next() {
+		q, err := scanQuery(rows)
+		if err != nil {
+			return nil, err
+		}
+		queries = append(queries, q)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rejected queries: %w", err)
 	}
 
 	return queries, nil

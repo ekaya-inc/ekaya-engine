@@ -252,7 +252,7 @@ func registerDeleteTableMetadataTool(s *server.MCPServer, deps *TableToolDeps) {
 			mcp.Description("Table name to clear metadata for"),
 		),
 		mcp.WithReadOnlyHintAnnotation(false),
-		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)

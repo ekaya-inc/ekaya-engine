@@ -6,6 +6,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -13,7 +14,7 @@ func TestComputeToolsForRole_Agent(t *testing.T) {
 	claims := &auth.Claims{
 		ProjectID: "test-project",
 	}
-	claims.Subject = "agent"
+	claims.Subject = "agent:" + uuid.New().String()
 
 	state := map[string]*models.ToolGroupConfig{
 		services.ToolGroupAgentTools: {Enabled: true},

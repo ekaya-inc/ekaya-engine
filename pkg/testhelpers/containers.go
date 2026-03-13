@@ -65,8 +65,7 @@ func setupTestDB() (*TestDB, error) {
 			"POSTGRES_USER":     "ekaya",
 			"POSTGRES_PASSWORD": "test_password",
 		},
-		WaitingFor: wait.ForLog("database system is ready to accept connections").
-			WithOccurrence(2).
+		WaitingFor: wait.ForListeningPort("5432/tcp").
 			WithStartupTimeout(60 * time.Second),
 	}
 
@@ -93,15 +92,23 @@ func setupTestDB() (*TestDB, error) {
 
 	pool, err := pgxpool.New(ctx, connStr)
 	if err != nil {
+		_ = container.Terminate(ctx)
 		return nil, fmt.Errorf("failed to create connection pool: %w", err)
 	}
 
 	// Verify connection with retry
-	for i := 0; i < 10; i++ {
-		if err := pool.Ping(ctx); err == nil {
+	var pingErr error
+	for i := 0; i < 30; i++ {
+		pingErr = pool.Ping(ctx)
+		if pingErr == nil {
 			break
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(1 * time.Second)
+	}
+	if pingErr != nil {
+		pool.Close()
+		_ = container.Terminate(ctx)
+		return nil, fmt.Errorf("failed to connect to test database: %w", pingErr)
 	}
 
 	return &TestDB{

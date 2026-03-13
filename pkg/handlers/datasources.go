@@ -10,6 +10,7 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/jsonutil"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
@@ -214,8 +215,8 @@ func (h *DatasourcesHandler) List(w http.ResponseWriter, r *http.Request) {
 			Type:             dsWithStatus.DatasourceType,
 			Provider:         dsWithStatus.Provider,
 			Config:           dsWithStatus.Config,
-			CreatedAt:        dsWithStatus.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-			UpdatedAt:        dsWithStatus.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			CreatedAt:        jsonutil.FormatUTCTime(dsWithStatus.CreatedAt),
+			UpdatedAt:        jsonutil.FormatUTCTime(dsWithStatus.UpdatedAt),
 			DecryptionFailed: dsWithStatus.DecryptionFailed,
 			ErrorMessage:     dsWithStatus.ErrorMessage,
 		}
@@ -292,8 +293,8 @@ func (h *DatasourcesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Type:         ds.DatasourceType,
 		Provider:     ds.Provider,
 		Config:       ds.Config,
-		CreatedAt:    ds.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt:    ds.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:    jsonutil.FormatUTCTime(ds.CreatedAt),
+		UpdatedAt:    jsonutil.FormatUTCTime(ds.UpdatedAt),
 	}
 
 	response := ApiResponse{Success: true, Data: data}
@@ -349,8 +350,8 @@ func (h *DatasourcesHandler) Get(w http.ResponseWriter, r *http.Request) {
 		Type:         ds.DatasourceType,
 		Provider:     ds.Provider,
 		Config:       ds.Config,
-		CreatedAt:    ds.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt:    ds.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:    jsonutil.FormatUTCTime(ds.CreatedAt),
+		UpdatedAt:    jsonutil.FormatUTCTime(ds.UpdatedAt),
 	}
 
 	response := ApiResponse{Success: true, Data: data}

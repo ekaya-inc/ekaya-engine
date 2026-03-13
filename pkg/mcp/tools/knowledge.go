@@ -11,6 +11,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
+	"github.com/ekaya-inc/ekaya-engine/pkg/jsonutil"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
@@ -59,7 +60,7 @@ func registerUpdateProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 		),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
 
@@ -153,8 +154,8 @@ func registerUpdateProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 			Fact:      fact,
 			Category:  category,
 			Context:   context,
-			CreatedAt: knowledgeFact.CreatedAt,
-			UpdatedAt: knowledgeFact.UpdatedAt,
+			CreatedAt: jsonutil.FormatUTCTime(knowledgeFact.CreatedAt),
+			UpdatedAt: jsonutil.FormatUTCTime(knowledgeFact.UpdatedAt),
 		}
 
 		jsonResult, err := json.Marshal(result)
@@ -181,7 +182,7 @@ func registerDeleteProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 			mcp.Description("UUID of the knowledge fact to delete"),
 		),
 		mcp.WithReadOnlyHintAnnotation(false),
-		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
@@ -249,8 +250,8 @@ type updateProjectKnowledgeResponse struct {
 	Fact      string `json:"fact"`
 	Category  string `json:"category"`
 	Context   string `json:"context,omitempty"`
-	CreatedAt any    `json:"created_at"`
-	UpdatedAt any    `json:"updated_at"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 // deleteProjectKnowledgeResponse is the response format for delete_project_knowledge tool.

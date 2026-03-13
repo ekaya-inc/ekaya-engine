@@ -43,7 +43,7 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "escalate_ontology_question", Description: "Mark a question as requiring human domain knowledge (e.g., 'Business rule not documented in code')", ToolGroup: ToolGroupDeveloper},
 	{Name: "dismiss_ontology_question", Description: "Mark a question as not worth pursuing (e.g., 'Column appears unused, legacy')", ToolGroup: ToolGroupDeveloper},
 	{Name: "search_schema", Description: "Full-text search across tables and columns using pattern matching with relevance ranking", ToolGroup: ToolGroupDeveloper},
-	{Name: "explain_query", Description: "Analyze SQL query performance using EXPLAIN ANALYZE with execution plan and optimization hints", ToolGroup: ToolGroupDeveloper},
+	{Name: "explain_query", Description: "Analyze a read-only SQL query plan without executing it", ToolGroup: ToolGroupDeveloper},
 	{Name: "refresh_schema", Description: "Refresh schema from datasource and auto-select new tables/columns", ToolGroup: ToolGroupDeveloper},
 	{Name: "scan_data_changes", Description: "Scan data for changes like new enum values and potential FK patterns", ToolGroup: ToolGroupDeveloper},
 	{Name: "list_pending_changes", Description: "List pending ontology changes detected from schema or data analysis", ToolGroup: ToolGroupDeveloper},
@@ -72,7 +72,7 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "record_query_feedback", Description: "Record whether a generated query was helpful", ToolGroup: ToolGroupUser},
 
 	// Dev query tools (developer group) - direct query management for administrators
-	{Name: "list_query_suggestions", Description: "List pending query suggestions awaiting review", ToolGroup: ToolGroupDeveloper},
+	{Name: "list_query_suggestions", Description: "List query suggestions awaiting review or previously rejected", ToolGroup: ToolGroupDeveloper},
 	{Name: "approve_query_suggestion", Description: "Approve a pending query suggestion", ToolGroup: ToolGroupDeveloper},
 	{Name: "reject_query_suggestion", Description: "Reject a pending query suggestion with reason", ToolGroup: ToolGroupDeveloper},
 	{Name: "create_approved_query", Description: "Create a new pre-approved query directly (no review required)", ToolGroup: ToolGroupDeveloper},

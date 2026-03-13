@@ -11,6 +11,7 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/jsonutil"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
@@ -801,7 +802,7 @@ func (h *SchemaHandler) toRelationshipDetailResponse(rel *models.RelationshipDet
 		InferenceMethod:  rel.InferenceMethod,
 		IsValidated:      rel.IsValidated,
 		IsApproved:       rel.IsApproved,
-		CreatedAt:        rel.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt:        rel.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:        jsonutil.FormatUTCTime(rel.CreatedAt),
+		UpdatedAt:        jsonutil.FormatUTCTime(rel.UpdatedAt),
 	}
 }

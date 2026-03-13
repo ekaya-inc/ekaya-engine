@@ -112,13 +112,16 @@ const applications: ApplicationInfo[] = [
   },
   {
     id: 'ai-agents',
-    title: 'AI Agents and Automation',
-    subtitle: 'Connect AI coding agents and automation tools to your data via API key authentication',
+    title: 'AI Agents',
+    subtitle: 'Connect autonomous AI agents and processes to your data via API key authentication',
     icon: Bot,
     color: 'orange',
     available: true,
     installable: true,
-    learnMoreUrl: '/ai-agents/',
+    learnMoreUrl: '/apps/ai-agents',
+    learnMoreBase: 'central',
+    requires: 'ontology-forge',
+    pricingBadge: 'free',
   },
   {
     id: 'file-loader',
@@ -342,7 +345,7 @@ const ApplicationsPage = () => {
 
       {/* Application tiles - 2 column grid with smaller tiles */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {applications.filter(app => app.id !== 'ai-agents').map((app) => {
+        {applications.map((app) => {
           const Icon = app.icon;
           const colors = getColorClasses(app.color);
           const appIsInstalled = app.installable === true && isInstalled(app.id);

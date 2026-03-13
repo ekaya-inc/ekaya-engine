@@ -170,7 +170,7 @@ func CheckToolAccess(ctx context.Context, deps ToolAccessDeps, toolName string) 
 // Agent auth gets agent tools, user role gets limited tools, admin/data get full developer tools.
 func computeToolsForRole(claims *auth.Claims, state map[string]*models.ToolGroupConfig) []services.ToolSpec {
 	// Agent authentication (API key)
-	if claims.Subject == "agent" {
+	if auth.IsAgentClaims(claims) {
 		return services.ComputeEnabledToolsFromConfig(state, true)
 	}
 
@@ -235,7 +235,7 @@ func checkAppInstallation(ctx context.Context, deps ToolAccessDeps, claims *auth
 	}
 
 	// Agent auth requires ai-agents app to be installed
-	if claims.Subject == "agent" {
+	if auth.IsAgentClaims(claims) {
 		installed, err := appService.IsInstalled(ctx, projectID, models.AppIDAIAgents)
 		if err != nil {
 			deps.GetLogger().Error("Failed to check ai-agents app installation",
@@ -278,10 +278,10 @@ func AcquireToolAccess(ctx context.Context, deps ToolAccessDeps, toolName string
 	}
 
 	// Inject MCP provenance context
-	// Get user ID from claims (may be "agent" for API key auth)
+	// Get user ID from claims (may be agent auth, which has no user UUID provenance)
 	claims, _ := auth.GetClaims(ctx)
 	userID := uuid.Nil
-	if claims != nil && claims.Subject != "agent" {
+	if claims != nil && !auth.IsAgentClaims(claims) {
 		// Parse user ID for JWT-authenticated requests
 		if parsed, err := uuid.Parse(claims.Subject); err == nil {
 			userID = parsed

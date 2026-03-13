@@ -92,7 +92,12 @@ func softDeleteColumn(t *testing.T, ctx context.Context, columnID uuid.UUID) {
 		t.Fatal("Failed to get tenant scope for soft delete")
 	}
 
-	_, err := scope.Conn.Exec(ctx, `UPDATE engine_schema_columns SET deleted_at = NOW() WHERE id = $1`, columnID)
+	now := time.Now()
+	_, err := scope.Conn.Exec(ctx, `
+		UPDATE engine_schema_columns
+		SET deleted_at = $2, updated_at = $2
+		WHERE id = $1
+	`, columnID, now)
 	require.NoError(t, err)
 }
 
@@ -105,7 +110,12 @@ func softDeleteTable(t *testing.T, ctx context.Context, tableID uuid.UUID) {
 		t.Fatal("Failed to get tenant scope for soft delete")
 	}
 
-	_, err := scope.Conn.Exec(ctx, `UPDATE engine_schema_tables SET deleted_at = NOW() WHERE id = $1`, tableID)
+	now := time.Now()
+	_, err := scope.Conn.Exec(ctx, `
+		UPDATE engine_schema_tables
+		SET deleted_at = $2, updated_at = $2
+		WHERE id = $1
+	`, tableID, now)
 	require.NoError(t, err)
 }
 

@@ -566,6 +566,63 @@ engine_database:
 // 3. Testing true read permissions would require OS-specific setups that are fragile
 // The file existence checks (tested above) are sufficient for config validation.
 
+func TestParseJWKSEndpoints(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected map[string]string
+	}{
+		{
+			name:     "empty string",
+			input:    "",
+			expected: map[string]string{},
+		},
+		{
+			name:  "simple pair",
+			input: "https://auth.example.com=https://auth.example.com/.well-known/jwks.json",
+			expected: map[string]string{
+				"https://auth.example.com": "https://auth.example.com/.well-known/jwks.json",
+			},
+		},
+		{
+			name:  "URL with equals in query parameter",
+			input: "https://auth.ekaya.ai=https://auth.ekaya.ai/.well-known/jwks.json?v=2",
+			expected: map[string]string{
+				"https://auth.ekaya.ai": "https://auth.ekaya.ai/.well-known/jwks.json?v=2",
+			},
+		},
+		{
+			name:  "multiple pairs with equals in URLs",
+			input: "https://a.com=https://a.com/jwks?v=1,https://b.com=https://b.com/jwks?v=2&flag=true",
+			expected: map[string]string{
+				"https://a.com": "https://a.com/jwks?v=1",
+				"https://b.com": "https://b.com/jwks?v=2&flag=true",
+			},
+		},
+		{
+			name:  "whitespace is trimmed",
+			input: " https://auth.com = https://auth.com/jwks ",
+			expected: map[string]string{
+				"https://auth.com": "https://auth.com/jwks",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseJWKSEndpoints(tt.input)
+			if len(result) != len(tt.expected) {
+				t.Fatalf("expected %d endpoints, got %d: %v", len(tt.expected), len(result), result)
+			}
+			for k, v := range tt.expected {
+				if result[k] != v {
+					t.Errorf("for key %q: expected %q, got %q", k, v, result[k])
+				}
+			}
+		})
+	}
+}
+
 func TestValidateTLS_TLSFromEnv(t *testing.T) {
 	tmpDir := t.TempDir()
 	tls := setupTLSFiles(t, tmpDir, true, true)

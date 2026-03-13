@@ -106,8 +106,10 @@ func joinPath(base string, elem ...string) (string, error) {
 //     If provided but invalid, returns 400 error.
 //     If not provided, uses default config.AuthServerURL.
 //   - project_id: Optional project ID to include in authorization_endpoint.
-//     When provided, the authorization_endpoint will include ?project_id={value}
-//     which tells ekaya-central to skip project selection UI.
+//     When provided, the authorization_endpoint will include both
+//     ?project_id={value} and resource={resource-url}. project_id tells
+//     ekaya-central to skip project selection UI, while resource identifies
+//     the protected MCP resource being authorized.
 func (h *WellKnownHandler) OAuthDiscovery(w http.ResponseWriter, r *http.Request) {
 	authURL := r.URL.Query().Get("auth_url")
 	projectID := r.URL.Query().Get("project_id")
@@ -173,7 +175,7 @@ func (h *WellKnownHandler) OAuthDiscovery(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Build authorization endpoint, including project_id if provided
+	// Build authorization endpoint, including project_id and resource if provided
 	authEndpoint, err := joinPath(authBaseURL.String(), "authorize")
 	if err != nil {
 		h.logger.Error("Failed to build authorization endpoint URL", zap.Error(err))
@@ -184,8 +186,18 @@ func (h *WellKnownHandler) OAuthDiscovery(w http.ResponseWriter, r *http.Request
 	}
 	authEndpointURL, _ := url.Parse(authEndpoint)
 	if projectID != "" {
+		resource, err := joinPath(baseURL.String(), "mcp", projectID)
+		if err != nil {
+			h.logger.Error("Failed to build resource URL for authorization endpoint", zap.Error(err))
+			if err := ErrorResponse(w, http.StatusInternalServerError, "server_error", "Failed to build OAuth URLs"); err != nil {
+				h.logger.Error("Failed to write error response", zap.Error(err))
+			}
+			return
+		}
+
 		q := authEndpointURL.Query()
 		q.Set("project_id", projectID)
+		q.Set("resource", resource)
 		authEndpointURL.RawQuery = q.Encode()
 	}
 

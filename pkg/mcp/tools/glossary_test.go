@@ -158,6 +158,30 @@ func TestRegisterGlossaryTools(t *testing.T) {
 	assert.True(t, toolNames["get_glossary_sql"], "get_glossary_sql tool should be registered")
 }
 
+func TestCreateGlossaryTermTool_Annotations(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &GlossaryToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			Logger: zap.NewNop(),
+		},
+	}
+
+	RegisterGlossaryTools(mcpServer, deps)
+
+	tool := mcpServer.GetTool("create_glossary_term")
+	require.NotNil(t, tool, "create_glossary_term should be registered")
+	require.NotNil(t, tool.Tool.Annotations.ReadOnlyHint)
+	require.NotNil(t, tool.Tool.Annotations.DestructiveHint)
+	require.NotNil(t, tool.Tool.Annotations.IdempotentHint)
+	require.NotNil(t, tool.Tool.Annotations.OpenWorldHint)
+
+	assert.False(t, *tool.Tool.Annotations.ReadOnlyHint)
+	assert.False(t, *tool.Tool.Annotations.DestructiveHint)
+	assert.False(t, *tool.Tool.Annotations.IdempotentHint)
+	assert.False(t, *tool.Tool.Annotations.OpenWorldHint)
+}
+
 // TestCheckGlossaryToolsEnabled tests the checkGlossaryToolsEnabled function.
 func TestCheckGlossaryToolsEnabled(t *testing.T) {
 	tests := []struct {

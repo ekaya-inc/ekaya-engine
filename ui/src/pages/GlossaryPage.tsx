@@ -369,7 +369,7 @@ const GlossaryPage = () => {
             {isGenerating ? (
               <>
                 <div className="mb-4">
-                  <Loader2 className="h-16 w-16 mx-auto text-cyan-500 animate-spin" />
+                  <Loader2 className="h-16 w-16 mx-auto text-brand-purple animate-spin" />
                 </div>
                 <h2 className="text-xl font-semibold mb-2">Generating Glossary Terms</h2>
                 <p className="text-sm text-muted-foreground mb-2">
@@ -496,10 +496,10 @@ const GlossaryPage = () => {
 
       {/* Generation in-progress banner */}
       {isGenerating && (
-        <Card className="mb-6 border-cyan-500/30 bg-cyan-500/5">
+        <Card className="mb-6 border-brand-purple/30 bg-brand-purple/5">
           <CardContent className="py-4">
             <div className="flex items-center gap-3">
-              <Loader2 className="h-5 w-5 text-cyan-500 animate-spin flex-shrink-0" />
+              <Loader2 className="h-5 w-5 text-brand-purple animate-spin flex-shrink-0" />
               <div>
                 <p className="text-sm font-medium text-text-primary">
                   Generating glossary terms...
@@ -517,11 +517,11 @@ const GlossaryPage = () => {
       <Card className="mb-6">
         <CardHeader>
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-cyan-500/10">
-              <BookOpen className="h-5 w-5 text-cyan-500" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-purple/10">
+              <BookOpen className="h-5 w-5 text-brand-purple" />
             </div>
             <div>
-              <CardTitle>Summary</CardTitle>
+              <CardTitle>Glossary</CardTitle>
               <CardDescription>
                 {terms.length} {terms.length === 1 ? 'term' : 'terms'}
               </CardDescription>

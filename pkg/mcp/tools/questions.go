@@ -14,6 +14,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/jsonutil"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
@@ -355,7 +356,7 @@ func registerListOntologyQuestionsTool(s *server.MCPServer, deps *QuestionToolDe
 				"category":   q.Category,
 				"priority":   q.Priority,
 				"status":     string(q.Status),
-				"created_at": q.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+				"created_at": jsonutil.FormatUTCTime(q.CreatedAt),
 			}
 
 			// Add optional fields if present
@@ -375,7 +376,7 @@ func registerListOntologyQuestionsTool(s *server.MCPServer, deps *QuestionToolDe
 				questionInfo["answer"] = q.Answer
 			}
 			if q.AnsweredAt != nil {
-				questionInfo["answered_at"] = q.AnsweredAt.Format("2006-01-02T15:04:05Z07:00")
+				questionInfo["answered_at"] = jsonutil.FormatUTCTime(*q.AnsweredAt)
 			}
 
 			// Suggest probe_column for categories where verifying actual data values is helpful
@@ -452,7 +453,7 @@ func registerResolveOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 		),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
 
@@ -518,7 +519,7 @@ func registerResolveOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 		response := map[string]interface{}{
 			"question_id": questionID.String(),
 			"status":      "answered",
-			"resolved_at": time.Now().Format("2006-01-02T15:04:05Z07:00"),
+			"resolved_at": jsonutil.FormatUTCTime(time.Now()),
 		}
 
 		if resolutionNotes != "" {
@@ -557,7 +558,7 @@ func registerSkipOntologyQuestionTool(s *server.MCPServer, deps *QuestionToolDep
 		),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
 
@@ -622,7 +623,7 @@ func registerSkipOntologyQuestionTool(s *server.MCPServer, deps *QuestionToolDep
 			"question_id": questionID.String(),
 			"status":      "skipped",
 			"reason":      reason,
-			"skipped_at":  time.Now().Format("2006-01-02T15:04:05Z07:00"),
+			"skipped_at":  jsonutil.FormatUTCTime(time.Now()),
 		}
 
 		jsonResult, err := json.Marshal(response)
@@ -657,7 +658,7 @@ func registerEscalateOntologyQuestionTool(s *server.MCPServer, deps *QuestionToo
 		),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
 
@@ -722,7 +723,7 @@ func registerEscalateOntologyQuestionTool(s *server.MCPServer, deps *QuestionToo
 			"question_id":  questionID.String(),
 			"status":       "escalated",
 			"reason":       reason,
-			"escalated_at": time.Now().Format("2006-01-02T15:04:05Z07:00"),
+			"escalated_at": jsonutil.FormatUTCTime(time.Now()),
 		}
 
 		jsonResult, err := json.Marshal(response)
@@ -757,7 +758,7 @@ func registerDismissOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 		),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
 
@@ -822,7 +823,7 @@ func registerDismissOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 			"question_id":  questionID.String(),
 			"status":       "dismissed",
 			"reason":       reason,
-			"dismissed_at": time.Now().Format("2006-01-02T15:04:05Z07:00"),
+			"dismissed_at": jsonutil.FormatUTCTime(time.Now()),
 		}
 
 		jsonResult, err := json.Marshal(response)
