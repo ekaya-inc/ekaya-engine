@@ -1,17 +1,19 @@
 # FIX: Unhide Glossary Tile on Project Dashboard
 
-**Status:** PENDING
+**Status:** FIXED
 
 ## What Was Done
 
-The Glossary tile was commented out from the Intelligence section of the Project Dashboard (`ui/src/pages/ProjectDashboard.tsx`, lines ~146-152). The tile config object is preserved in a comment block with a pointer back to this file.
+The Glossary tile was restored in the Intelligence section of the Project Dashboard in `ui/src/pages/ProjectDashboard.tsx`.
 
-## What To Do
+The implementation:
 
-Uncomment the Glossary tile in `ui/src/pages/ProjectDashboard.tsx` inside the `intelligenceTiles` array. Search for `HIDDEN: Glossary tile temporarily removed` to find the exact location.
+- re-added the `Glossary` tile to the `intelligenceTiles` array
+- restored the `BookOpen` icon import used by that tile
+- kept the tile in the Ontology Forge grouping with the existing purple color scheme
 
 ## Checklist
 
-- [ ] Uncomment the Glossary tile in `ProjectDashboard.tsx`
-- [ ] Remove the `HIDDEN` comment marker
-- [ ] Verify the tile renders correctly on the dashboard
+- [x] Uncomment the Glossary tile in `ProjectDashboard.tsx`
+- [x] Remove the `HIDDEN` comment marker
+- [x] Verify the dashboard code compiles with the restored tile
