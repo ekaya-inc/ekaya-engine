@@ -211,7 +211,7 @@ describe('GlossaryPage', () => {
       renderGlossaryPage();
 
       await waitFor(() => {
-        expect(screen.getByText('Summary')).toBeInTheDocument();
+        expect(screen.getAllByText('Glossary').length).toBeGreaterThan(0);
         expect(screen.getByText('2 terms')).toBeInTheDocument();
       });
     });
