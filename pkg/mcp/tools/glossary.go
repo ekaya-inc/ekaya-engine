@@ -540,7 +540,7 @@ func registerDeleteGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 			mcp.Description("Business term name to delete"),
 		),
 		mcp.WithReadOnlyHintAnnotation(false),
-		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)

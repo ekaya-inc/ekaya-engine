@@ -182,7 +182,7 @@ func registerDeleteProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 			mcp.Description("UUID of the knowledge fact to delete"),
 		),
 		mcp.WithReadOnlyHintAnnotation(false),
-		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)

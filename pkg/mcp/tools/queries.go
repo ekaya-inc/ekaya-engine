@@ -237,9 +237,9 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			"limit",
 			mcp.Description("Max rows to return (default: 100, max: 1000)"),
 		),
-		mcp.WithReadOnlyHintAnnotation(false),    // Some queries may modify data (INSERT/UPDATE/DELETE)
-		mcp.WithDestructiveHintAnnotation(false), // Individual queries may be destructive
-		mcp.WithIdempotentHintAnnotation(false),  // Modifying queries are not idempotent
+		mcp.WithReadOnlyHintAnnotation(false),   // Some approved queries may modify customer data.
+		mcp.WithDestructiveHintAnnotation(true), // Approved queries can execute destructive statements.
+		mcp.WithIdempotentHintAnnotation(false), // Modifying queries are not idempotent
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
 
