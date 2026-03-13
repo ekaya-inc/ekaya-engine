@@ -581,11 +581,11 @@ func TestRegisterDevQueryTools_Annotations(t *testing.T) {
 		openWorld   bool
 	}{
 		{name: "list_query_suggestions", readOnly: true, destructive: false, idempotent: true, openWorld: false},
-		{name: "approve_query_suggestion", readOnly: false, destructive: false, idempotent: true, openWorld: false},
-		{name: "reject_query_suggestion", readOnly: false, destructive: false, idempotent: true, openWorld: false},
-		{name: "create_approved_query", readOnly: false, destructive: false, idempotent: true, openWorld: false},
+		{name: "approve_query_suggestion", readOnly: false, destructive: false, idempotent: false, openWorld: false},
+		{name: "reject_query_suggestion", readOnly: false, destructive: false, idempotent: false, openWorld: false},
+		{name: "create_approved_query", readOnly: false, destructive: false, idempotent: false, openWorld: false},
 		{name: "update_approved_query", readOnly: false, destructive: false, idempotent: true, openWorld: false},
-		{name: "delete_approved_query", readOnly: false, destructive: false, idempotent: true, openWorld: false},
+		{name: "delete_approved_query", readOnly: false, destructive: false, idempotent: false, openWorld: false},
 	}
 
 	for _, tt := range tests {
