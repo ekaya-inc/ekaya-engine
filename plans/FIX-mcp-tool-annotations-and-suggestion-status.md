@@ -1,6 +1,6 @@
 # FIX: MCP tool annotations and invalid suggestion status filter
 
-**Status:** Open
+**Status:** Complete
 **Date:** 2026-03-12
 
 ## Problem 1: Read-only MCP tools missing annotations
@@ -22,10 +22,10 @@ mcp.WithOpenWorldHintAnnotation(false),
 
 In `pkg/mcp/tools/dev_queries.go`:
 
-- [ ] Audit every tool registration in the file and add appropriate annotations
-- [ ] Read-only tools (e.g. `list_query_suggestions`) should get `ReadOnly=true, Destructive=false, Idempotent=true, OpenWorld=false`
-- [ ] Mutating tools (e.g. `approve_query_suggestion`, `reject_query_suggestion`) should get `ReadOnly=false, Destructive=false, Idempotent=true, OpenWorld=false`
-- [ ] Audit other tool files (`knowledge.go`, `glossary.go`, etc.) for the same missing annotations
+- [x] Audit every tool registration in the file and add appropriate annotations
+- [x] Read-only tools (e.g. `list_query_suggestions`) now use `ReadOnly=true, Destructive=false, Idempotent=true, OpenWorld=false`
+- [x] Mutating tools now use caller-visible annotations. Under the current policy, `approve_query_suggestion`, `reject_query_suggestion`, `create_approved_query`, and `delete_approved_query` are `Idempotent=false`, while `update_approved_query` remains `Idempotent=true`
+- [x] Audit other tool files (`knowledge.go`, `glossary.go`, etc.) for the same missing annotations
 
 ---
 
@@ -43,6 +43,6 @@ Two issues:
 
 ### Fix
 
-- [ ] Update the `status` parameter description in `pkg/mcp/tools/dev_queries.go` (line 68) to only document `pending` and `rejected` as valid values, since approved suggestions graduate to the approved queries list
-- [ ] Implement `rejected` status filtering in the handler so it actually works (add a repository method if needed, or remove it from the docs)
-- [ ] Consider returning an error or warning when an unsupported status value is passed, rather than silently returning empty results
+- [x] Update the `status` parameter description in `pkg/mcp/tools/dev_queries.go` to only document `pending` and `rejected` as valid values, since approved suggestions graduate to the approved queries list
+- [x] Implement `rejected` status filtering in the handler so it actually works
+- [x] Return `invalid_parameters` when an unsupported status value is passed, rather than silently returning empty results
