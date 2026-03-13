@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"go.uber.org/zap"
@@ -250,10 +251,20 @@ func TestWellKnownHandler_OAuthDiscovery_WithProjectID(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	// Authorization endpoint should include project_id
-	expectedAuthEndpoint := "https://auth.example.com/authorize?project_id=" + projectID
-	if metadata.AuthorizationEndpoint != expectedAuthEndpoint {
-		t.Errorf("expected authorization_endpoint '%s', got '%s'", expectedAuthEndpoint, metadata.AuthorizationEndpoint)
+	// Authorization endpoint should include project_id and resource
+	authEndpoint, err := url.Parse(metadata.AuthorizationEndpoint)
+	if err != nil {
+		t.Fatalf("failed to parse authorization endpoint: %v", err)
+	}
+	if authEndpoint.Scheme != "https" || authEndpoint.Host != "auth.example.com" || authEndpoint.Path != "/authorize" {
+		t.Fatalf("unexpected authorization endpoint: %s", metadata.AuthorizationEndpoint)
+	}
+	if got := authEndpoint.Query().Get("project_id"); got != projectID {
+		t.Errorf("expected project_id %q, got %q", projectID, got)
+	}
+	expectedResource := "http://localhost:3443/mcp/" + projectID
+	if got := authEndpoint.Query().Get("resource"); got != expectedResource {
+		t.Errorf("expected resource %q, got %q", expectedResource, got)
 	}
 
 	// Verify cache header is private for dynamic response
@@ -338,10 +349,20 @@ func TestWellKnownHandler_OAuthDiscovery_WithPathBasedProjectID(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	// Authorization endpoint should include project_id extracted from path
-	expectedAuthEndpoint := "https://auth.example.com/authorize?project_id=" + projectID
-	if metadata.AuthorizationEndpoint != expectedAuthEndpoint {
-		t.Errorf("expected authorization_endpoint '%s', got '%s'", expectedAuthEndpoint, metadata.AuthorizationEndpoint)
+	// Authorization endpoint should include project_id and resource extracted from path
+	authEndpoint, err := url.Parse(metadata.AuthorizationEndpoint)
+	if err != nil {
+		t.Fatalf("failed to parse authorization endpoint: %v", err)
+	}
+	if authEndpoint.Scheme != "https" || authEndpoint.Host != "auth.example.com" || authEndpoint.Path != "/authorize" {
+		t.Fatalf("unexpected authorization endpoint: %s", metadata.AuthorizationEndpoint)
+	}
+	if got := authEndpoint.Query().Get("project_id"); got != projectID {
+		t.Errorf("expected project_id %q, got %q", projectID, got)
+	}
+	expectedResource := "http://localhost:3443/mcp/" + projectID
+	if got := authEndpoint.Query().Get("resource"); got != expectedResource {
+		t.Errorf("expected resource %q, got %q", expectedResource, got)
 	}
 
 	// Verify cache header is private for path-based response
