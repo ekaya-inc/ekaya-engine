@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   Bot,
+  BookOpen,
   Handshake,
   Database,
   Layers,
@@ -180,15 +181,14 @@ const ProjectDashboard = () => {
         disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
         color: 'purple', // Ontology Forge color
       },
-      // HIDDEN: Glossary tile temporarily removed from dashboard (see plans/FIX-unhide-glossary-tile.md)
-      // {
-      //   title: 'Glossary',
-      //   description: 'Business terms and their SQL definitions for consistent reporting.',
-      //   icon: BookOpen,
-      //   path: `/projects/${pid}/glossary`,
-      //   disabled: !isConnected || !hasSelectedTables || !activeAIConfig,
-      //   color: 'purple', // Ontology Forge color
-      // },
+      {
+        title: 'Glossary',
+        description: 'Business terms and their SQL definitions for consistent reporting.',
+        icon: BookOpen,
+        path: `/projects/${pid}/glossary`,
+        disabled: !isConnected || !hasSelectedTables || !activeAIConfig,
+        color: 'purple', // Ontology Forge color
+      },
     ];
 
     // Add Audit Log tile if AI Data Liaison is installed
