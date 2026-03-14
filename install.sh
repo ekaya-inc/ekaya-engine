@@ -157,11 +157,32 @@ generate_secret() {
   fi
 }
 
+expand_path() {
+  case "$1" in
+    "~")
+      printf '%s\n' "$HOME"
+      ;;
+    "~/"*)
+      printf '%s/%s\n' "$HOME" "${1#"~/"}"
+      ;;
+    *)
+      printf '%s\n' "$1"
+      ;;
+  esac
+}
+
+normalize_path_settings() {
+  INSTALL_DIR=$(expand_path "$INSTALL_DIR")
+  CONFIG_DIR=$(expand_path "$CONFIG_DIR")
+  TLS_CERT_PATH=$(expand_path "${TLS_CERT_PATH:-}")
+  TLS_KEY_PATH=$(expand_path "${TLS_KEY_PATH:-}")
+}
+
 prompt_install_dir() {
   echo ""
   printf "${BOLD}Enter server installation directory${NC} [%s]: " "$INSTALL_DIR"
   read -r INSTALL_DIR_ANSWER < /dev/tty || true
-  INSTALL_DIR="${INSTALL_DIR_ANSWER:-$INSTALL_DIR}"
+  INSTALL_DIR=$(expand_path "${INSTALL_DIR_ANSWER:-$INSTALL_DIR}")
 }
 
 url_scheme() {
@@ -410,7 +431,7 @@ setup_config() {
         fi
         printf ": "
         read -r TLS_CERT_PATH_INPUT < /dev/tty || true
-        TLS_CERT_PATH="${TLS_CERT_PATH_INPUT:-$DEFAULT_TLS_CERT_PATH}"
+        TLS_CERT_PATH=$(expand_path "${TLS_CERT_PATH_INPUT:-$DEFAULT_TLS_CERT_PATH}")
         if [ -z "$TLS_CERT_PATH" ]; then
           error "TLS certificate path is required for HTTPS deployments."
           continue
@@ -431,7 +452,7 @@ setup_config() {
         fi
         printf ": "
         read -r TLS_KEY_PATH_INPUT < /dev/tty || true
-        TLS_KEY_PATH="${TLS_KEY_PATH_INPUT:-$DEFAULT_TLS_KEY_PATH}"
+        TLS_KEY_PATH=$(expand_path "${TLS_KEY_PATH_INPUT:-$DEFAULT_TLS_KEY_PATH}")
         if [ -z "$TLS_KEY_PATH" ]; then
           error "TLS key path is required for HTTPS deployments."
           continue
@@ -486,6 +507,8 @@ main() {
   printf "${BOLD}Ekaya Engine Installer${NC}\n"
   echo "=============================="
   echo ""
+
+  normalize_path_settings
 
   detect_os
   detect_arch
@@ -576,16 +599,29 @@ main() {
 
   success "Installed ekaya-engine to ${INSTALL_DIR}/${BINARY_NAME}"
 
-  # Verify the installed binary is on PATH (not one from a different location)
+  # Verify the installed binary is the one that will be resolved from PATH
+  hash -r 2>/dev/null || true
   _found_path=$(command -v ekaya-engine 2>/dev/null || true)
+  _install_dir_on_path="false"
+  case ":$PATH:" in
+    *:"$INSTALL_DIR":*)
+      _install_dir_on_path="true"
+      ;;
+  esac
+
   case "$_found_path" in
     "${INSTALL_DIR}/"*)
       success "ekaya-engine is on your PATH"
       ;;
     *)
-      warn "ekaya-engine is not on your PATH"
-      warn "Add this to your shell profile:"
-      echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
+      if [ "$_install_dir_on_path" = "true" ] && [ -n "$_found_path" ]; then
+        warn "Another ekaya-engine is earlier on your PATH: $_found_path"
+        warn "The newly installed binary is at ${INSTALL_DIR}/${BINARY_NAME}"
+      else
+        warn "ekaya-engine is not on your PATH"
+        warn "Add this to your shell profile:"
+        echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
+      fi
       ;;
   esac
 
