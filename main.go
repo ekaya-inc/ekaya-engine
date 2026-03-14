@@ -61,6 +61,8 @@ func main() {
 	}
 	defer func() { _ = logger.Sync() }()
 
+	logger.Info("Using config.yaml", zap.String("path", cfg.ConfigPath))
+
 	// Log startup configuration
 	logger.Info("Configuration loaded",
 		zap.String("env", cfg.Env),

@@ -39,6 +39,24 @@ func setupConfigTest(t *testing.T, yamlContent string, dir ...string) string {
 	return tmpDir
 }
 
+func assertSamePath(t *testing.T, got, want string) {
+	t.Helper()
+
+	normalizedGot := got
+	if resolved, err := filepath.EvalSymlinks(got); err == nil {
+		normalizedGot = resolved
+	}
+
+	normalizedWant := want
+	if resolved, err := filepath.EvalSymlinks(want); err == nil {
+		normalizedWant = resolved
+	}
+
+	if normalizedGot != normalizedWant {
+		t.Errorf("expected path %s, got %s", want, got)
+	}
+}
+
 // tlsTestFiles holds paths to TLS test files created by setupTLSFiles.
 type tlsTestFiles struct {
 	CertPath string
@@ -69,7 +87,7 @@ func setupTLSFiles(t *testing.T, dir string, createCert, createKey bool) tlsTest
 }
 
 func TestLoad_EnvOverridesYAML(t *testing.T) {
-	setupConfigTest(t, `
+	tmpDir := setupConfigTest(t, `
 port: "3443"
 env: "test"
 engine_database:
@@ -114,6 +132,9 @@ engine_database:
 	if cfg.EngineDatabase.Host != "db.example.com" {
 		t.Errorf("expected EngineDatabase.Host=db.example.com (from yaml), got %s", cfg.EngineDatabase.Host)
 	}
+
+	expectedConfigPath := filepath.Join(tmpDir, "config.yaml")
+	assertSamePath(t, cfg.ConfigPath, expectedConfigPath)
 }
 
 func TestLoad_BaseURLAutoDerive(t *testing.T) {
@@ -250,6 +271,8 @@ engine_database:
 	if cfg.EngineDatabase.Host != "home-host" {
 		t.Errorf("expected Host=home-host (from ~/.ekaya/config.yaml), got %s", cfg.EngineDatabase.Host)
 	}
+	expectedConfigPath := filepath.Join(ekayaDir, "config.yaml")
+	assertSamePath(t, cfg.ConfigPath, expectedConfigPath)
 }
 
 func TestLoad_CWDTakesPrecedenceOverHomeDir(t *testing.T) {
@@ -301,6 +324,8 @@ engine_database:
 	if cfg.EngineDatabase.Host != "cwd-host" {
 		t.Errorf("expected Host=cwd-host (from CWD config.yaml), got %s", cfg.EngineDatabase.Host)
 	}
+	expectedConfigPath := filepath.Join(cwdDir, "config.yaml")
+	assertSamePath(t, cfg.ConfigPath, expectedConfigPath)
 }
 
 func TestLoad_DatasourceConfigDefaults(t *testing.T) {
