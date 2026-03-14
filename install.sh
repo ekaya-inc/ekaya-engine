@@ -7,7 +7,7 @@ set -e
 # Environment variable overrides:
 #   INSTALL_DIR   - where to install the binary (default: /usr/local/bin)
 #   VERSION       - specific version to install (default: latest)
-#   CONFIG_DIR    - where to create config.yaml (default: ~/.ekaya)
+#   CONFIG_DIR    - where to create the system config.yaml (default: ~/.ekaya)
 
 OWNER="ekaya-inc"
 REPO="ekaya-engine"
@@ -157,157 +157,78 @@ generate_secret() {
   fi
 }
 
-setup_config() {
-  info "Setting up ekaya-engine configuration"
+prompt_install_dir() {
   echo ""
-  echo "Ekaya Engine needs a PostgreSQL database to store its metadata."
-  echo "Please provide your PostgreSQL connection details."
-  echo ""
+  printf "${BOLD}Enter server installation directory${NC} [%s]: " "$INSTALL_DIR"
+  read -r INSTALL_DIR_ANSWER < /dev/tty || true
+  INSTALL_DIR="${INSTALL_DIR_ANSWER:-$INSTALL_DIR}"
+}
 
-  printf "${BOLD}PostgreSQL host${NC} [localhost]: "
-  read -r PG_HOST < /dev/tty || true
-  PG_HOST="${PG_HOST:-localhost}"
+url_scheme() {
+  printf '%s' "$1" | sed -nE 's#^([A-Za-z][A-Za-z0-9+.-]*)://.*#\1#p'
+}
 
-  printf "${BOLD}PostgreSQL port${NC} [5432]: "
-  read -r PG_PORT < /dev/tty || true
-  PG_PORT="${PG_PORT:-5432}"
+url_host() {
+  printf '%s' "$1" \
+    | sed -E 's#^[A-Za-z][A-Za-z0-9+.-]*://##; s#/.*$##' \
+    | sed -E 's#:[0-9]+$##'
+}
 
-  printf "${BOLD}PostgreSQL user${NC} [ekaya]: "
-  read -r PG_USER < /dev/tty || true
-  PG_USER="${PG_USER:-ekaya}"
-
-  printf "${BOLD}PostgreSQL database${NC} [ekaya_engine]: "
-  read -r PG_DATABASE < /dev/tty || true
-  PG_DATABASE="${PG_DATABASE:-ekaya_engine}"
-
-  printf "${BOLD}PostgreSQL SSL mode (disable/require/verify-full)${NC} [disable]: "
-  read -r PG_SSLMODE < /dev/tty || true
-  PG_SSLMODE="${PG_SSLMODE:-disable}"
-
-  echo ""
-  printf "${BOLD}PostgreSQL password${NC}: "
-  if command -v stty > /dev/null 2>&1; then
-    stty -echo 2>/dev/null || true
-    read -r PG_PASSWORD < /dev/tty || true
-    stty echo 2>/dev/null || true
-    printf "\n"
-  else
-    read -r PG_PASSWORD < /dev/tty || true
-  fi
-
-  if [ -z "$PG_PASSWORD" ]; then
-    warn "No password set. PostgreSQL may reject connections without a password."
-  fi
-
-  echo ""
-  info "Generating secrets"
-  echo ""
-  echo "Ekaya Engine requires two secrets:"
-  echo "  1. Credential encryption key — encrypts datasource passwords stored in the database"
-  echo "  2. OAuth session secret — signs temporary login cookies"
-  echo ""
-
-  DEFAULT_CRED_KEY=$(generate_secret)
-  DEFAULT_SESSION_SECRET=$(generate_secret)
-
-  printf "${BOLD}Credential encryption key (auto-generated)${NC} [%s]: " "$DEFAULT_CRED_KEY"
-  read -r CRED_KEY < /dev/tty || true
-  CRED_KEY="${CRED_KEY:-$DEFAULT_CRED_KEY}"
-
-  printf "${BOLD}OAuth session secret (auto-generated)${NC} [%s]: " "$DEFAULT_SESSION_SECRET"
-  read -r SESSION_SECRET < /dev/tty || true
-  SESSION_SECRET="${SESSION_SECRET:-$DEFAULT_SESSION_SECRET}"
-
-  echo ""
-  printf "${BOLD}Server port${NC} [3443]: "
-  read -r SERVER_PORT < /dev/tty || true
-  SERVER_PORT="${SERVER_PORT:-3443}"
-
-  echo ""
-  echo "Ekaya Engine needs a base URL — this is the address users will use"
-  echo "to access the server in their browser."
-  echo ""
-  printf "${BOLD}Base URL hostname${NC} [localhost]: "
-  read -r BASE_HOST < /dev/tty || true
-  BASE_HOST="${BASE_HOST:-localhost}"
-
-  TLS_CERT_PATH=""
-  TLS_KEY_PATH=""
-
-  case "$BASE_HOST" in
-    localhost|127.0.0.1)
-      BASE_URL="http://${BASE_HOST}:${SERVER_PORT}"
+is_local_host() {
+  case "$1" in
+    localhost|127.0.0.1|::1|\[::1\])
+      return 0
       ;;
     *)
-      BASE_URL="https://${BASE_HOST}:${SERVER_PORT}"
-      echo ""
-      echo "Non-localhost deployments require TLS certificates for HTTPS."
-      echo "OAuth 2.1 with PKCE needs the browser Web Crypto API, which only"
-      echo "works in secure contexts (HTTPS or localhost)."
-      echo ""
-
-      while true; do
-        printf "${BOLD}Path to TLS certificate (PEM)${NC}: "
-        read -r TLS_CERT_PATH < /dev/tty || true
-        if [ -z "$TLS_CERT_PATH" ]; then
-          error "TLS certificate path is required for non-localhost deployments."
-          continue
-        fi
-        if [ ! -f "$TLS_CERT_PATH" ]; then
-          error "File not found: $TLS_CERT_PATH"
-          continue
-        fi
-        # Resolve to absolute path
-        TLS_CERT_PATH="$(cd "$(dirname "$TLS_CERT_PATH")" && pwd)/$(basename "$TLS_CERT_PATH")"
-        break
-      done
-
-      while true; do
-        printf "${BOLD}Path to TLS private key (PEM)${NC}: "
-        read -r TLS_KEY_PATH < /dev/tty || true
-        if [ -z "$TLS_KEY_PATH" ]; then
-          error "TLS key path is required for non-localhost deployments."
-          continue
-        fi
-        if [ ! -f "$TLS_KEY_PATH" ]; then
-          error "File not found: $TLS_KEY_PATH"
-          continue
-        fi
-        # Resolve to absolute path
-        TLS_KEY_PATH="$(cd "$(dirname "$TLS_KEY_PATH")" && pwd)/$(basename "$TLS_KEY_PATH")"
-        break
-      done
-
-      success "TLS certificate: $TLS_CERT_PATH"
-      success "TLS private key: $TLS_KEY_PATH"
+      return 1
       ;;
   esac
+}
 
-  echo ""
-  info "Base URL: $BASE_URL"
+prompt_postgres_password() {
+  while true; do
+    printf "${BOLD}PostgreSQL password${NC}: "
+    if command -v stty > /dev/null 2>&1; then
+      stty -echo 2>/dev/null || true
+      if ! read -r PG_PASSWORD < /dev/tty; then
+        stty echo 2>/dev/null || true
+        printf "\n"
+        error "PostgreSQL password is required."
+        exit 1
+      fi
+      stty echo 2>/dev/null || true
+      printf "\n"
+    else
+      if ! read -r PG_PASSWORD < /dev/tty; then
+        error "PostgreSQL password is required."
+        exit 1
+      fi
+    fi
 
-  # Create config directory
-  mkdir -p "$CONFIG_DIR"
+    if [ -n "$PG_PASSWORD" ]; then
+      break
+    fi
 
-  # Build the optional TLS lines
-  if [ -n "$TLS_CERT_PATH" ] && [ -n "$TLS_KEY_PATH" ]; then
-    TLS_LINES="tls_cert_path: \"${TLS_CERT_PATH}\"
-tls_key_path: \"${TLS_KEY_PATH}\""
-  else
-    TLS_LINES=""
-  fi
+    error "PostgreSQL password is required."
+  done
+}
+
+write_config_file() {
+  _cfg="$1"
+  _cfg_dir=$(dirname "$_cfg")
+
+  mkdir -p "$_cfg_dir"
 
   # Write config.yaml directly using printf to safely handle special
   # characters in passwords (avoids shell expansion of $, `, \, etc.)
-  _cfg="$CONFIG_DIR/config.yaml"
   {
     printf '# ekaya-engine configuration\n'
     printf '# Generated by install.sh\n'
     printf '\n'
     printf 'port: %s\n' "$SERVER_PORT"
     printf 'env: "local"\n'
+    printf 'base_url: "%s"\n' "$BASE_URL"
     if [ -n "$TLS_LINES" ]; then
-      printf 'base_url: "%s"\n' "$BASE_URL"
       printf '%s\n' "$TLS_LINES"
     fi
     printf '\n'
@@ -329,7 +250,231 @@ tls_key_path: \"${TLS_KEY_PATH}\""
     printf '  log_errors: true\n'
   } > "$_cfg"
 
-  success "Configuration written to $CONFIG_DIR/config.yaml"
+  success "Configuration written to $_cfg"
+}
+
+setup_config() {
+  info "Setting up ekaya-engine configuration"
+  echo ""
+  SYSTEM_CONFIG_PATH="${CONFIG_DIR}/config.yaml"
+  LOCAL_CONFIG_PATH="$(pwd)/config.yaml"
+
+  if [ -f "$SYSTEM_CONFIG_PATH" ]; then
+    echo "Your Ekaya system configuration already exists in: $SYSTEM_CONFIG_PATH"
+  else
+    echo "Your Ekaya system configuration will be: $SYSTEM_CONFIG_PATH"
+  fi
+  echo "Local config.yaml files override the system configuration."
+
+  while true; do
+    printf "Where do you want the config.yaml file to be installed (system, local, both) [both]: "
+    read -r CONFIG_INSTALL_TARGET < /dev/tty || true
+    CONFIG_INSTALL_TARGET="${CONFIG_INSTALL_TARGET:-both}"
+    CONFIG_INSTALL_TARGET=$(printf '%s' "$CONFIG_INSTALL_TARGET" | tr '[:upper:]' '[:lower:]')
+
+    case "$CONFIG_INSTALL_TARGET" in
+      system|local|both)
+        break
+        ;;
+      *)
+        error "Please enter system, local, or both."
+        ;;
+    esac
+  done
+
+  echo ""
+  echo "Ekaya Engine needs a PostgreSQL database to store its metadata."
+  echo "Please provide your PostgreSQL connection details."
+  echo ""
+
+  DEFAULT_PG_HOST="${PGHOST:-localhost}"
+  DEFAULT_PG_PORT="${PGPORT:-5432}"
+  DEFAULT_PG_USER="${PGUSER:-ekaya}"
+  DEFAULT_PG_DATABASE="${PGDATABASE:-ekaya_engine}"
+  DEFAULT_PG_SSLMODE="${PGSSLMODE:-disable}"
+
+  printf "${BOLD}PostgreSQL host${NC} [%s]: " "$DEFAULT_PG_HOST"
+  read -r PG_HOST < /dev/tty || true
+  PG_HOST="${PG_HOST:-$DEFAULT_PG_HOST}"
+
+  printf "${BOLD}PostgreSQL port${NC} [%s]: " "$DEFAULT_PG_PORT"
+  read -r PG_PORT < /dev/tty || true
+  PG_PORT="${PG_PORT:-$DEFAULT_PG_PORT}"
+
+  printf "${BOLD}PostgreSQL user${NC} [%s]: " "$DEFAULT_PG_USER"
+  read -r PG_USER < /dev/tty || true
+  PG_USER="${PG_USER:-$DEFAULT_PG_USER}"
+
+  printf "${BOLD}PostgreSQL database${NC} [%s]: " "$DEFAULT_PG_DATABASE"
+  read -r PG_DATABASE < /dev/tty || true
+  PG_DATABASE="${PG_DATABASE:-$DEFAULT_PG_DATABASE}"
+
+  printf "${BOLD}PostgreSQL SSL mode (disable/require/verify-full)${NC} [%s]: " "$DEFAULT_PG_SSLMODE"
+  read -r PG_SSLMODE < /dev/tty || true
+  PG_SSLMODE="${PG_SSLMODE:-$DEFAULT_PG_SSLMODE}"
+
+  echo ""
+  prompt_postgres_password
+
+  echo ""
+  info "Generating secrets"
+  echo ""
+  echo "Ekaya Engine requires two secrets:"
+  echo "  1. Credential encryption key — encrypts datasource passwords stored in the database"
+  echo "  2. OAuth session secret — signs temporary login cookies"
+  echo ""
+
+  if [ -n "${PROJECT_CREDENTIALS_KEY:-}" ]; then
+    DEFAULT_CRED_KEY="$PROJECT_CREDENTIALS_KEY"
+    CRED_KEY_PROMPT="Credential encryption key"
+  else
+    DEFAULT_CRED_KEY=$(generate_secret)
+    CRED_KEY_PROMPT="Credential encryption key (auto-generated)"
+  fi
+
+  if [ -n "${OAUTH_SESSION_SECRET:-}" ]; then
+    DEFAULT_SESSION_SECRET="$OAUTH_SESSION_SECRET"
+    SESSION_SECRET_PROMPT="OAuth session secret"
+  else
+    DEFAULT_SESSION_SECRET=$(generate_secret)
+    SESSION_SECRET_PROMPT="OAuth session secret (auto-generated)"
+  fi
+
+  printf "${BOLD}%s${NC} [%s]: " "$CRED_KEY_PROMPT" "$DEFAULT_CRED_KEY"
+  read -r CRED_KEY < /dev/tty || true
+  CRED_KEY="${CRED_KEY:-$DEFAULT_CRED_KEY}"
+
+  printf "${BOLD}%s${NC} [%s]: " "$SESSION_SECRET_PROMPT" "$DEFAULT_SESSION_SECRET"
+  read -r SESSION_SECRET < /dev/tty || true
+  SESSION_SECRET="${SESSION_SECRET:-$DEFAULT_SESSION_SECRET}"
+
+  echo ""
+  DEFAULT_SERVER_PORT="${PORT:-3443}"
+
+  printf "${BOLD}Server port${NC} [%s]: " "$DEFAULT_SERVER_PORT"
+  read -r SERVER_PORT < /dev/tty || true
+  SERVER_PORT="${SERVER_PORT:-$DEFAULT_SERVER_PORT}"
+
+  echo ""
+  echo "Ekaya Engine needs a base URL — this is the address users will use"
+  echo "to access the server in their browser."
+  echo ""
+  DEFAULT_BASE_URL="${BASE_URL:-http://localhost:${SERVER_PORT}}"
+
+  while true; do
+    printf "${BOLD}Base URL${NC} [%s]: " "$DEFAULT_BASE_URL"
+    read -r BASE_URL_INPUT < /dev/tty || true
+    BASE_URL="${BASE_URL_INPUT:-$DEFAULT_BASE_URL}"
+    BASE_URL_SCHEME=$(url_scheme "$BASE_URL")
+    BASE_HOST=$(url_host "$BASE_URL")
+
+    if [ -z "$BASE_URL_SCHEME" ] || [ -z "$BASE_HOST" ]; then
+      error "Base URL must include a scheme and host, for example http://localhost:${SERVER_PORT}."
+      continue
+    fi
+
+    case "$BASE_URL_SCHEME" in
+      http|https)
+        ;;
+      *)
+        error "Base URL must start with http:// or https://."
+        continue
+        ;;
+    esac
+
+    if ! is_local_host "$BASE_HOST" && [ "$BASE_URL_SCHEME" != "https" ]; then
+      error "Non-localhost deployments must use an https:// base URL."
+      continue
+    fi
+
+    break
+  done
+
+  DEFAULT_TLS_CERT_PATH="${TLS_CERT_PATH:-}"
+  DEFAULT_TLS_KEY_PATH="${TLS_KEY_PATH:-}"
+  TLS_CERT_PATH=""
+  TLS_KEY_PATH=""
+
+  case "$BASE_URL_SCHEME" in
+    https)
+      echo ""
+      echo "HTTPS deployments require TLS certificates."
+      echo "OAuth 2.1 with PKCE needs the browser Web Crypto API, which only"
+      echo "works in secure contexts (HTTPS or localhost)."
+      echo ""
+
+      while true; do
+        printf "${BOLD}Path to TLS certificate (PEM)${NC}"
+        if [ -n "$DEFAULT_TLS_CERT_PATH" ]; then
+          printf " [%s]" "$DEFAULT_TLS_CERT_PATH"
+        fi
+        printf ": "
+        read -r TLS_CERT_PATH_INPUT < /dev/tty || true
+        TLS_CERT_PATH="${TLS_CERT_PATH_INPUT:-$DEFAULT_TLS_CERT_PATH}"
+        if [ -z "$TLS_CERT_PATH" ]; then
+          error "TLS certificate path is required for HTTPS deployments."
+          continue
+        fi
+        if [ ! -f "$TLS_CERT_PATH" ]; then
+          error "File not found: $TLS_CERT_PATH"
+          continue
+        fi
+        # Resolve to absolute path
+        TLS_CERT_PATH="$(cd "$(dirname "$TLS_CERT_PATH")" && pwd)/$(basename "$TLS_CERT_PATH")"
+        break
+      done
+
+      while true; do
+        printf "${BOLD}Path to TLS private key (PEM)${NC}"
+        if [ -n "$DEFAULT_TLS_KEY_PATH" ]; then
+          printf " [%s]" "$DEFAULT_TLS_KEY_PATH"
+        fi
+        printf ": "
+        read -r TLS_KEY_PATH_INPUT < /dev/tty || true
+        TLS_KEY_PATH="${TLS_KEY_PATH_INPUT:-$DEFAULT_TLS_KEY_PATH}"
+        if [ -z "$TLS_KEY_PATH" ]; then
+          error "TLS key path is required for HTTPS deployments."
+          continue
+        fi
+        if [ ! -f "$TLS_KEY_PATH" ]; then
+          error "File not found: $TLS_KEY_PATH"
+          continue
+        fi
+        # Resolve to absolute path
+        TLS_KEY_PATH="$(cd "$(dirname "$TLS_KEY_PATH")" && pwd)/$(basename "$TLS_KEY_PATH")"
+        break
+      done
+
+      success "TLS certificate: $TLS_CERT_PATH"
+      success "TLS private key: $TLS_KEY_PATH"
+      ;;
+  esac
+
+  echo ""
+  info "Base URL: $BASE_URL"
+
+  # Build the optional TLS lines
+  if [ -n "$TLS_CERT_PATH" ] && [ -n "$TLS_KEY_PATH" ]; then
+    TLS_LINES="tls_cert_path: \"${TLS_CERT_PATH}\"
+tls_key_path: \"${TLS_KEY_PATH}\""
+  else
+    TLS_LINES=""
+  fi
+
+  case "$CONFIG_INSTALL_TARGET" in
+    system)
+      write_config_file "$SYSTEM_CONFIG_PATH"
+      ;;
+    local)
+      write_config_file "$LOCAL_CONFIG_PATH"
+      ;;
+    both)
+      write_config_file "$SYSTEM_CONFIG_PATH"
+      if [ "$LOCAL_CONFIG_PATH" != "$SYSTEM_CONFIG_PATH" ]; then
+        write_config_file "$LOCAL_CONFIG_PATH"
+      fi
+      ;;
+  esac
 }
 
 # --------------------------------------------------------------------------
@@ -412,6 +557,8 @@ main() {
     exit 1
   fi
 
+  prompt_install_dir
+
   # Check if we can write to INSTALL_DIR
   if [ ! -d "$INSTALL_DIR" ]; then
     mkdir -p "$INSTALL_DIR" 2>/dev/null || {
@@ -450,8 +597,9 @@ main() {
   case "$SETUP_ANSWER" in
     [nN]*)
       echo ""
-      info "Skipping configuration. To set up later, create ${CONFIG_DIR}/config.yaml"
-      echo "  from config.yaml.example and edit with your PostgreSQL details."
+      info "Skipping configuration. To set up later, create ./config.yaml or ${CONFIG_DIR}/config.yaml"
+      echo "  Local config.yaml files override the system configuration."
+      echo "  Start from config.yaml.example and edit with your PostgreSQL details."
       ;;
     *)
       setup_config
