@@ -1,360 +1,375 @@
-# Plan: Incorporate Project Knowledge Tags into Prompts
+# PLAN: Deterministic Project Knowledge Retrieval for LLM Requests
 
 ## Problem Statement
 
-Currently, project knowledge facts are stored with a single `fact_type` category (e.g., "business_rule", "terminology"). This limits our ability to:
-1. Apply domain-specific facts to relevant LLM prompts
-2. Build context-aware prompts that incorporate learned knowledge
-3. Efficiently retrieve facts relevant to specific analysis tasks
+Project Knowledge is critical because users expect that when they tell Ekaya something important about their project, that fact is remembered and used throughout the system.
 
-## Proposed Solution
+Today, we do not do that reliably. Project knowledge can be stored, but later LLM requests for ontology and glossary work do not have a consistent mechanism to pull in the relevant facts. The result is that important business context gets lost between the moment it is captured and the moment the system needs it.
 
-Replace the single `fact_type` with a multi-tag system where:
-- Each fact has 1+ tags from a predefined set of 20-30 semantic tags
-- LLM outputs tags from this set when creating/updating facts
-- Prompt builders query facts by relevant tags and inject them as context
-- Example: Column feature extraction for potential currency columns includes all facts tagged `money`
+We do not currently have pgvector in the metadata store and we are not hosting an embedding model. That means we cannot rely on embedding generation plus vector similarity search to retrieve relevant project knowledge for every LLM request.
+
+We need a simple, deterministic retrieval system that:
+- stores project knowledge as reusable atomic facts
+- classifies those facts into a pre-created tag taxonomy
+- classifies later incoming request text into the same tags
+- injects only the matching project knowledge into LLM prompts
+
+This is intentionally a deterministic substitute for vector retrieval. The design must strongly prefer recall over precision because missing a relevant project fact is worse than including a few extra facts.
+
+## Core Design
+
+The tag system is no longer "LLM-generated tags." The LLM is used only to break freeform project knowledge input into individual facts. Tag assignment is deterministic.
+
+### Write-Time Flow: Project Knowledge Upsert
+
+When project knowledge is added or updated:
+
+1. Accept freeform input from the user, MCP tool, or any internal write path
+2. Run an internal LLM call that rewrites the input into one or more atomic facts
+3. Run each atomic fact through deterministic classifiers
+4. Assign zero or more tags from a pre-created tag taxonomy
+5. Persist the atomic facts and their tags into `engine_project_knowledge`
+
+Example:
+
+Input:
+`Fiscal Year end is June 30th and we do a trailing four quarter average for calculating X`
+
+Potential extracted facts:
+- `Fiscal year ends on June 30`
+- `X is calculated using a trailing four quarter average`
+
+Then deterministic classifiers tag them, for example:
+- `Fiscal year ends on June 30` -> `fiscal`, `temporal`
+- `X is calculated using a trailing four quarter average` -> `calculation`, `aggregation`, `fiscal`, `metric`
+
+### Read-Time Flow: Every LLM Request
+
+Before any LLM call:
+
+1. Collect the incoming text relevant to the request
+2. Run that text through the same deterministic classifiers
+3. Produce zero or more retrieval tags
+4. Fetch project knowledge facts whose tags overlap those retrieval tags
+5. Inject the matching facts into a standard project-knowledge section in the final prompt
+
+The same mechanism should be used for:
+- ontology extraction and refinement
+- glossary generation and enrichment
+- future Text2SQL requests
+
+The important property is consistency: every LLM request should have a defined project-knowledge retrieval step, even if that step returns no facts.
+
+## Design Principles
+
+1. **Deterministic tag assignment**
+   - Tags are assigned by code, not by the LLM
+   - The same classifier rules are used at write time and read time
+
+2. **LLM only for fact extraction**
+   - The LLM may split or normalize freeform project knowledge input into atomic facts
+   - The LLM should not emit internal tags or choose retrieval categories
+
+3. **Internal taxonomy**
+   - Tags are an internal retrieval mechanism, not a user-facing concept
+   - Users should not need to learn or manage the tag system
+
+4. **Recall-first retrieval**
+   - False negatives are deadly
+   - The tag taxonomy and classifiers should be broad enough to catch relevant context
+   - Mild over-inclusion is acceptable if it avoids missing critical facts
+
+5. **No "send everything" fallback**
+   - We should not dump all project knowledge into every prompt
+   - Retrieval must remain selective and deterministic
+
+6. **Universal request-time integration**
+   - This is infrastructure, not a few ad hoc prompt edits
+   - Any code path that calls the LLM should be able to invoke the same retrieval mechanism
 
 ## Current State
 
-**Table:** `engine_project_knowledge`
-- `fact_type` (varchar) - single category: "business_rule", "terminology", "convention", etc.
-- `key` (varchar) - unique identifier within project+fact_type
-- `value` (text) - the fact content
+Project knowledge is stored in `engine_project_knowledge`, but there is no shared mechanism that guarantees relevant facts are pulled into later prompts.
 
-**Files:**
-- Model: `pkg/models/ontology_chat.go:207-228`
-- Repository: `pkg/repositories/knowledge_repository.go`
-- Service: `pkg/services/knowledge.go`
-- Seeding: `pkg/services/knowledge_seeding.go`
-- Prompts: `pkg/services/incremental_dag_prompts.go`
+Relevant existing areas:
+- `pkg/models/ontology_chat.go`
+- `pkg/repositories/knowledge_repository.go`
+- `pkg/services/knowledge.go`
+- `pkg/services/knowledge_seeding.go`
+- `pkg/services/incremental_dag_prompts.go`
+- `pkg/services/glossary_service.go`
 
-## Design
+## Proposed Architecture
 
-### 1. Tag Taxonomy (20-30 Tags)
+### 1. Atomic Fact Extraction
 
-**Category: Financial**
-- `money` - Currency, amounts, pricing
-- `billing` - Invoices, charges, payments
-- `accounting` - Revenue, costs, ledger entries
+**Goal:** Store project knowledge as reusable facts, not as large undifferentiated blocks of prose.
 
-**Category: Time & Dates**
-- `temporal` - Timestamps, durations, schedules
-- `fiscal` - Fiscal years, quarters, periods
-- `lifecycle` - Created/updated/deleted patterns
+Requirements:
+- Freeform project knowledge input can yield multiple stored facts
+- Fact extraction uses an internal LLM call
+- The LLM output format should be tightly constrained: an array of fact strings plus optional normalized wording
+- Facts should preserve provenance and source context
 
-**Category: Identity & Relationships**
-- `user` - Users, accounts, profiles
-- `organization` - Companies, teams, tenants
-- `hierarchy` - Parent-child, org structures
+Non-goal:
+- The LLM does not assign tags
 
-**Category: Status & State**
-- `status` - State machines, workflow states
-- `boolean` - Flags, toggles, yes/no
-- `enumeration` - Fixed value sets
+### 2. Deterministic Tag Taxonomy
 
-**Category: Classification**
-- `category` - Types, classifications
-- `geography` - Countries, regions, addresses
-- `product` - Products, SKUs, inventory
+We need a finite, pre-created set of tags that classifier functions can assign consistently.
 
-**Category: Technical**
-- `identifier` - IDs, keys, references
-- `measurement` - Quantities, metrics
-- `percentage` - Rates, ratios
+The taxonomy should start broad and practical rather than perfect. Candidate initial tags:
 
-**Category: Domain-Specific**
-- `terminology` - Domain-specific terms
-- `business_rule` - Validation rules, constraints
-- `convention` - Naming patterns, standards
-- `calculation` - Formulas, derived values
+**Business semantics**
+- `terminology`
+- `business_rule`
+- `calculation`
+- `aggregation`
+- `metric`
 
-**Category: Data Quality**
-- `nullability` - NULL handling rules
-- `cardinality` - One-to-many, uniqueness
-- `format` - Data formats, patterns
+**Time**
+- `temporal`
+- `fiscal`
+- `lifecycle`
 
-### 2. Schema Changes
+**Financial**
+- `money`
+- `billing`
+- `accounting`
+- `percentage`
 
-```sql
--- Migration: Add tags column, migrate fact_type to tags
-ALTER TABLE engine_project_knowledge
-ADD COLUMN tags text[] NOT NULL DEFAULT '{}';
+**Identity and entities**
+- `user`
+- `organization`
+- `product`
+- `identifier`
 
--- Migrate existing fact_types to tags array
-UPDATE engine_project_knowledge
-SET tags = ARRAY[fact_type]
-WHERE fact_type IS NOT NULL;
+**Structure and relationships**
+- `hierarchy`
+- `cardinality`
+- `status`
+- `enumeration`
 
--- Create GIN index for efficient tag queries
-CREATE INDEX idx_project_knowledge_tags
-ON engine_project_knowledge USING GIN (tags);
+**Data shape**
+- `format`
+- `measurement`
+- `geography`
 
--- Keep fact_type for backwards compatibility initially
--- Future: Remove fact_type column after migration verified
-```
+This taxonomy is internal and can evolve, but only through code changes and tests. It should not be open-ended or user-defined.
 
-### 3. Model Changes
+### 3. Deterministic Classifiers
 
-**File:** `pkg/models/ontology_chat.go`
+We need classifier functions that map text to zero or more tags using deterministic rules.
 
-```go
-// Predefined knowledge tags
-var ValidKnowledgeTags = []string{
-    // Financial
-    "money", "billing", "accounting",
-    // Time
-    "temporal", "fiscal", "lifecycle",
-    // Identity
-    "user", "organization", "hierarchy",
-    // Status
-    "status", "boolean", "enumeration",
-    // Classification
-    "category", "geography", "product",
-    // Technical
-    "identifier", "measurement", "percentage",
-    // Domain
-    "terminology", "business_rule", "convention", "calculation",
-    // Data Quality
-    "nullability", "cardinality", "format",
-}
+Classifier inputs:
+- atomic fact text at write time
+- request text or prompt input text at read time
+- optional request kind, which can supply default tags
 
-type KnowledgeFact struct {
-    // ... existing fields ...
-    Tags     []string  `json:"tags"`      // Replace FactType
-    FactType string    `json:"fact_type"` // Deprecated, kept for migration
-}
+Classifier techniques should be deterministic:
+- case-normalized phrase matching
+- synonym dictionaries
+- exact business keyword lists
+- regex for common patterns
+- request-kind defaults
+- explicit caller-provided tags when deterministic code already knows context
 
-func ValidateTags(tags []string) error {
-    validSet := make(map[string]bool)
-    for _, t := range ValidKnowledgeTags {
-        validSet[t] = true
-    }
-    for _, tag := range tags {
-        if !validSet[tag] {
-            return fmt.Errorf("invalid tag: %s", tag)
-        }
-    }
-    return nil
-}
-```
+The system should use the same tag definitions and core matching logic for both stored facts and incoming request text.
 
-### 4. Repository Changes
+Example classifier rules:
+- `fiscal`: phrases like `fiscal year`, `year end`, `quarter`, `Q1`, `Q2`, `Q3`, `Q4`, `trailing four quarter`, `TTM`
+- `calculation`: phrases like `calculated`, `formula`, `average`, `sum`, `ratio`, `derived`, `minus`, `divided by`
+- `money`: phrases like `revenue`, `expense`, `amount`, `price`, `cost`, currency symbols, currency codes
+- `business_rule`: phrases like `must`, `should`, `cannot`, `only`, `required`, `never`
+- `terminology`: phrases like `means`, `refers to`, `we call`, `is called`, `aka`
 
-**File:** `pkg/repositories/knowledge_repository.go`
+### 4. Shared Retrieval Contract for LLM Calls
 
-Add method to query by tags:
+Any LLM call path should be able to invoke the same project-knowledge retrieval layer.
+
+Example shape:
 
 ```go
-// GetByTags returns facts matching ANY of the provided tags
-func (r *knowledgeRepository) GetByTags(
-    ctx context.Context,
-    projectID uuid.UUID,
-    tags []string,
-) ([]*models.KnowledgeFact, error) {
-    query := `
-        SELECT id, project_id, fact_type, key, value, context, tags,
-               source, last_edit_source, created_by, updated_by,
-               created_at, updated_at
-        FROM engine_project_knowledge
-        WHERE project_id = $1
-          AND tags && $2  -- Array overlap operator
-          AND deleted_at IS NULL
-        ORDER BY created_at`
-    // ...
+type KnowledgeInjectionRequest struct {
+    ProjectID    uuid.UUID
+    RequestKind  string   // e.g. ontology_entity_discovery, glossary_enrichment, text2sql_generation
+    InputTexts   []string // text that should be classified for retrieval
+    ExplicitTags []string // optional deterministic caller-provided tags
 }
 ```
 
-Update Upsert to handle tags array.
+Expected behavior:
+- classify `InputTexts` into retrieval tags
+- union those tags with request-kind defaults and `ExplicitTags`
+- fetch matching project knowledge facts
+- format them into a consistent `## Relevant Project Knowledge` section
+- return empty content when no facts match
 
-### 5. Service Changes
+This mechanism should be invoked before the final prompt is sent to the LLM.
 
-**File:** `pkg/services/knowledge.go`
+### 5. Retrieval Budgeting and Ranking
 
-```go
-// StoreWithTags stores a fact with semantic tags
-func (s *knowledgeService) StoreWithTags(
-    ctx context.Context,
-    projectID uuid.UUID,
-    tags []string,
-    key, value, contextInfo string,
-    source string,
-) error {
-    if err := models.ValidateTags(tags); err != nil {
-        return err
-    }
-    // ... store logic
-}
+Tag overlap alone may return too many facts for broad tags.
 
-// GetByTags retrieves facts matching any of the tags
-func (s *knowledgeService) GetByTags(
-    ctx context.Context,
-    projectID uuid.UUID,
-    tags []string,
-) ([]*models.KnowledgeFact, error) {
-    return s.repo.GetByTags(ctx, projectID, tags)
-}
-```
+We need deterministic selection rules so we do not send all matching project knowledge:
+- prefer facts matching multiple tags over single-tag matches
+- prefer exact phrase hits when available
+- prefer facts matching request-kind defaults plus text-derived tags
+- impose a per-request token or fact-count budget
+- keep ordering stable and explainable
 
-### 6. LLM Tag Extraction
+The ranking can stay simple, but it must be deterministic.
 
-When LLM creates knowledge facts (e.g., from project overview), include tag selection in the prompt.
+### 6. Observability for Misses
 
-**File:** `pkg/services/knowledge_seeding.go`
+Because false negatives are dangerous, this system needs feedback loops:
+- log facts that receive zero tags at write time
+- log LLM requests that resolve to zero retrieval tags
+- log high-volume tag matches that exceed the prompt budget
+- build a regression corpus from real examples that were missed or over-included
 
-Update extraction prompt:
+Zero-tag facts may be allowed initially, but they should be treated as coverage gaps in the taxonomy/classifier system, not as a healthy steady state.
 
-```go
-const knowledgeExtractionSystemMessage = `
-You are extracting business facts from a project overview.
+## Integration Scenarios
 
-For each fact, output:
-- key: A unique identifier for this fact
-- value: The fact content
-- tags: Array of 1-3 tags from this list: [money, billing, accounting, temporal, fiscal, lifecycle, user, organization, hierarchy, status, boolean, enumeration, category, geography, product, identifier, measurement, percentage, terminology, business_rule, convention, calculation, nullability, cardinality, format]
+### 1. Ontology
 
-Choose tags that describe WHAT the fact is about, not its source.
-Example: "Revenue is calculated as gross_amount minus refunds" -> tags: ["money", "calculation"]
-`
-```
+Use project-knowledge retrieval for all ontology LLM requests that need business context, including:
+- column feature extraction
+- entity discovery
+- relationship enrichment
+- ontology refinement or clarification prompts
+- any later ontology-question-related prompt that benefits from business rules or terminology
 
-Update response struct:
+Examples:
+- `Fiscal year ends June 30` should influence ontology prompts that reason about fiscal periods or quarter boundaries
+- `Revenue excludes refunds` should influence ontology prompts that classify revenue-like columns
 
-```go
-type ExtractedFact struct {
-    Key   string   `json:"key"`
-    Value string   `json:"value"`
-    Tags  []string `json:"tags"`
-}
-```
+### 2. Glossary
 
-### 7. Prompt Builder Integration
+Use the same retrieval mechanism for glossary work:
+- glossary term discovery
+- glossary term enrichment
+- SQL definition generation for glossary terms
+- future glossary suggestion flows
 
-**File:** `pkg/services/incremental_dag_prompts.go` (new helper)
+Examples:
+- project terminology should bias term naming
+- stored calculations and business rules should influence generated definitions
 
-```go
-// Tag-to-context mapping for prompt builders
-var promptTagMapping = map[string][]string{
-    "column_monetary":     {"money", "billing", "accounting"},
-    "column_temporal":     {"temporal", "fiscal", "lifecycle"},
-    "column_identifier":   {"identifier", "user", "organization"},
-    "column_status":       {"status", "boolean", "enumeration"},
-    "column_category":     {"category", "product", "geography"},
-    "entity_discovery":    {"user", "organization", "hierarchy", "terminology"},
-    "relationship":        {"cardinality", "hierarchy"},
-}
+### 3. Future Text2SQL
 
-// GetKnowledgeForPromptContext retrieves relevant facts for a prompt context
-func GetKnowledgeForPromptContext(
-    ctx context.Context,
-    knowledgeSvc KnowledgeService,
-    projectID uuid.UUID,
-    promptContext string,
-) (string, error) {
-    tags, ok := promptTagMapping[promptContext]
-    if !ok {
-        return "", nil
-    }
+Future Text2SQL should reuse this exact infrastructure rather than inventing a parallel memory or retrieval path.
 
-    facts, err := knowledgeSvc.GetByTags(ctx, projectID, tags)
-    if err != nil {
-        return "", err
-    }
+Use cases:
+- ambiguity resolution
+- business-rule-aware SQL generation
+- terminology normalization
+- fiscal/metric interpretation
 
-    if len(facts) == 0 {
-        return "", nil
-    }
+Project knowledge retrieval should happen before SQL generation so that relevant facts are already in the prompt context.
 
-    var sb strings.Builder
-    sb.WriteString("\n## Relevant Domain Knowledge\n")
-    for _, fact := range facts {
-        sb.WriteString(fmt.Sprintf("- %s: %s\n", fact.Key, fact.Value))
-    }
-    return sb.String(), nil
-}
-```
+### 4. Project Knowledge Creation and Editing
 
-### 8. Integration Points
+All project-knowledge write paths must use the same fact-extraction and deterministic-tagging flow:
+- manual UI edits
+- MCP tool upserts
+- internal seeding flows
+- any future API write path
 
-Update these prompt builders to inject knowledge:
+No write path should be able to create a new project-knowledge fact without routing through the canonical extraction/tagging pipeline.
 
-1. **Column Feature Extraction** (`pkg/services/column_feature_extraction.go`)
-   - When classifying monetary columns, include `money`, `billing` facts
-   - When classifying temporal columns, include `temporal`, `fiscal` facts
+## Implementation Plan
 
-2. **Entity Discovery** (`pkg/services/entity_discovery.go`)
-   - Include `user`, `organization`, `hierarchy`, `terminology` facts
+### Phase 1: Tag Taxonomy and Classifier Design
 
-3. **Relationship Enrichment** (`pkg/services/incremental_dag_prompts.go`)
-   - Include `cardinality`, `hierarchy` facts
+1. [ ] Finalize the initial internal tag taxonomy
+2. [ ] Define deterministic classifier rules for each tag
+3. [ ] Document representative positive examples and tricky edge cases for each classifier
+4. [ ] Bias taxonomy/rules toward recall, not minimalism
+5. [ ] Decide how request-kind defaults participate in retrieval
 
-4. **MCP Tools** (`pkg/mcp/tools/`)
-   - `update_project_knowledge` tool updated to accept tags
-   - New tag suggestions in tool description
+### Phase 2: Storage Model and Write Path
 
-## Implementation Tasks
+6. [ ] Add `tags` storage to `engine_project_knowledge`
+7. [ ] Update the project knowledge model to store tags
+8. [ ] Introduce a canonical project-knowledge upsert flow in `pkg/services/knowledge.go`
+9. [ ] Add the internal LLM-based fact extraction step for freeform project-knowledge input
+10. [ ] Run each extracted fact through deterministic classifiers before persistence
+11. [ ] Persist extracted facts plus tags on every write path
+12. [ ] Ensure MCP/manual/project-overview ingestion all use the canonical flow
 
-### Phase 1: Schema & Model (Foundation)
-1. [ ] Create migration to add `tags` column
-2. [ ] Create migration to populate `tags` from existing `fact_type`
-3. [ ] Add GIN index for tag queries
-4. [ ] Update `KnowledgeFact` model with `Tags` field
-5. [ ] Add `ValidKnowledgeTags` constant and validation function
-6. [ ] Update repository `Upsert` to handle tags
-7. [ ] Add repository `GetByTags` method
+### Phase 3: Deterministic Retrieval Infrastructure
 
-### Phase 2: Service Layer
-8. [ ] Add `StoreWithTags` to knowledge service
-9. [ ] Add `GetByTags` to knowledge service
-10. [ ] Update existing `Store` to map old fact_types to tags (backwards compat)
+13. [ ] Add a shared classifier package or service for classifying arbitrary text into project-knowledge tags
+14. [ ] Add a shared retrieval function for "tags -> matching facts"
+15. [ ] Add a shared `KnowledgeInjectionRequest` contract for LLM call sites
+16. [ ] Add deterministic ranking and prompt-budgeting rules for matched facts
+17. [ ] Standardize the injected prompt section format
 
-### Phase 3: LLM Tag Extraction
-11. [ ] Update knowledge seeding prompt to include tag taxonomy
-12. [ ] Update extraction response struct to include tags
-13. [ ] Update parsing to extract tags from LLM response
-14. [ ] Validate tags before storing
+### Phase 4: Ontology Integration
 
-### Phase 4: Prompt Integration
-15. [ ] Create `GetKnowledgeForPromptContext` helper
-16. [ ] Define `promptTagMapping` for each prompt context
-17. [ ] Integrate into column feature extraction prompts
-18. [ ] Integrate into entity discovery prompts
-19. [ ] Integrate into relationship enrichment prompts
+18. [ ] Integrate retrieval into ontology column feature extraction
+19. [ ] Integrate retrieval into ontology entity discovery
+20. [ ] Integrate retrieval into ontology relationship enrichment
+21. [ ] Audit remaining ontology LLM call sites and route them through the shared retrieval mechanism
 
-### Phase 5: MCP Tools
-20. [ ] Update `update_project_knowledge` MCP tool to accept tags
-21. [ ] Update tool description with valid tag list
-22. [ ] Update `get_context` to return facts with tags
+### Phase 5: Glossary Integration
 
-### Phase 6: Cleanup
-23. [ ] Remove deprecated `FactType` field after migration verified
-24. [ ] Update tests
+22. [ ] Integrate retrieval into glossary term discovery
+23. [ ] Integrate retrieval into glossary enrichment
+24. [ ] Integrate retrieval into glossary SQL-definition generation
+
+### Phase 6: Future Text2SQL Readiness
+
+25. [ ] Define the request kinds Text2SQL will use with this retrieval system
+26. [ ] Ensure Text2SQL planning assumes reuse of this infrastructure rather than a separate project-knowledge retrieval layer
+
+### Phase 7: MCP and Tooling
+
+27. [ ] Update `update_project_knowledge` MCP behavior so writes route through the canonical extraction/tagging path
+28. [ ] Keep internal tags hidden from normal users unless there is a deliberate debugging/admin reason to expose them
+29. [ ] Add debugging support to inspect extracted facts and assigned tags when needed
+
+### Phase 8: Observability and Hardening
+
+30. [ ] Log zero-tag facts after write-time classification
+31. [ ] Log zero-tag request classifications before LLM calls
+32. [ ] Add regression fixtures for known high-value project-knowledge examples
+33. [ ] Add regression fixtures for request-time retrieval examples across ontology and glossary
+34. [ ] Tune taxonomy and classifiers based on misses before expanding scope
 
 ## Testing Strategy
 
-1. **Unit Tests**
-   - Tag validation
-   - Repository GetByTags with various tag combinations
-   - Prompt context mapping
+### Unit Tests
 
-2. **Integration Tests**
-   - End-to-end: Store fact with tags, retrieve by tags
-   - LLM extraction produces valid tags
+- classifier tests for every tag
+- normalization tests
+- phrase, synonym, and regex matching tests
+- ranking/budgeting tests for matched fact selection
+- fact extraction response parsing tests
 
-3. **Manual Testing**
-   - Run ontology extraction with project overview
-   - Verify facts are tagged appropriately
-   - Verify column classification uses relevant facts
+### Integration Tests
 
-## Rollback Plan
+- project-knowledge upsert: freeform input -> extracted facts -> deterministic tags -> stored rows
+- ontology LLM request: request text -> retrieval tags -> matched facts -> injected prompt section
+- glossary LLM request: request text -> retrieval tags -> matched facts -> injected prompt section
+- MCP write path uses the same extraction/tagging flow
 
-1. Tags column is additive; `fact_type` remains populated
-2. Can revert to `fact_type`-based queries if issues arise
-3. Migration down script restores original schema
+### Recall-Focused Regression Tests
+
+Add real examples where missing context would be unacceptable, such as:
+- `Fiscal year ends June 30`
+- `Revenue excludes refunds`
+- `X uses a trailing four quarter average`
+- domain-specific terminology definitions
+
+The goal is not only "does classification run" but "does relevant knowledge get pulled into the right requests."
 
 ## Open Questions
 
-1. Should tags be hierarchical? (e.g., `money.currency` vs flat `money`)
-2. Should we support user-defined tags or strict predefined set?
-3. How many tags per fact is reasonable? (Suggest: 1-3)
-4. Should we weight tags differently for relevance scoring?
+1. Should zero-tag facts be stored with warnings, or rejected until classifier coverage improves?
+2. Do we need a tiny set of "always include" facts for universally important project-wide context?
+3. What is the initial fact-count or token budget for injected project knowledge per request kind?
+4. How do we version and regression-test taxonomy changes so classifier improvements do not break prior behavior?
+5. Do we want deterministic exact-term matching in addition to tags for especially important domain terminology?

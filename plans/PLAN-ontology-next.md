@@ -46,20 +46,7 @@ WHERE is_joinable = true AND project_id = '<project-id>';
 3. Selective DAG execution (only re-process changed/new items)
 4. MCP `update_ontology` tool for ad-hoc corrections
 
-### 3. Question Generation During Extraction - MEDIUM PRIORITY
-
-**Problem:** DAG completes without generating any clarifying questions. `OntologyQuestionService.CreateQuestions` exists but is never called from any DAG step.
-
-**Question categories:** terminology, enumeration, relationship, business_rules, temporal, data_quality
-
-**What's needed:**
-- Add question extraction to LLM response parsing in DAG steps
-- Call `CreateQuestions` after relevant DAG steps (column feature extraction, relationship discovery, glossary)
-- Add deterministic question generation for data patterns (high NULL rates, cryptic enum values, ambiguous relationships)
-
-**Files:** `pkg/services/dag/` (step implementations), LLM prompts, `pkg/services/ontology_question.go`
-
-### 4. Column Types in Entity Relationships - LOW PRIORITY
+### 3. Column Types in Entity Relationships - LOW PRIORITY
 
 **Problem:** `SchemaRelationship` model has `SourceColumnID` and `TargetColumnID` but no denormalized column type fields. API consumers must join to `engine_schema_columns` to get types.
 
@@ -73,12 +60,10 @@ WHERE is_joinable = true AND project_id = '<project-id>';
 |----------|------|------|-----------------|
 | 1 | Verify BUG-9 stats collection fix | VERIFY | Small (just needs extraction run) |
 | 2 | Ontology refresh: event queue + fingerprinting | FEATURE | Large |
-| 3 | Question generation during extraction | FEATURE | Large |
-| 4 | Column types in relationship responses | ENHANCEMENT | Small |
+| 3 | Column types in relationship responses | ENHANCEMENT | Small |
 
 ## Success Criteria
 
 - [ ] Stats collection: <10% joinable columns with NULL distinct_count after fresh extraction
 - [ ] Refresh: Can refresh ontology without losing user corrections
-- [ ] Questions: DAG generates clarifying questions during extraction
 - [ ] Relationship API includes column types without extra lookups
