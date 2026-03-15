@@ -1,5 +1,3 @@
-//go:build postgres || all_adapters
-
 package postgres
 
 import (

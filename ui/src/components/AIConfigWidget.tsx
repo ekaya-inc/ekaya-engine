@@ -360,6 +360,9 @@ const AIConfigWidget = ({ projectId, disabled = false, onConfigChange }: AIConfi
                               if (preset.label === 'Anthropic' && !aiConfig.llmModel) {
                                 updateAiConfig('llmModel', 'claude-haiku-4-5');
                               }
+                              if (preset.label === 'OpenAI' && !aiConfig.llmModel) {
+                                updateAiConfig('llmModel', 'gpt-4o-mini');
+                              }
                             }}
                             className={`w-full px-3 py-2 text-sm text-left hover:bg-surface-hover flex items-center justify-between ${
                               selectedProvider === preset.label ? 'bg-surface-secondary text-text-primary' : 'text-text-primary'
@@ -412,7 +415,7 @@ const AIConfigWidget = ({ projectId, disabled = false, onConfigChange }: AIConfi
                   </label>
                   <input
                     type="text"
-                    placeholder="gpt-4o, claude-haiku-4-5, llama3.1"
+                    placeholder="gpt-4o-mini, claude-haiku-4-5, llama3.1"
                     value={aiConfig.llmModel}
                     onChange={(e) => updateAiConfig('llmModel', e.target.value)}
                     disabled={activeAIConfig === 'byok'}

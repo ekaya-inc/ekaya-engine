@@ -34,11 +34,12 @@ type MCPConfig struct {
 // Secrets (passwords, keys) must only come from environment variables.
 type Config struct {
 	// Server configuration
-	BindAddr string `yaml:"bind_addr" env:"BIND_ADDR" env-default:"127.0.0.1"`
-	Port     string `yaml:"port" env:"PORT" env-default:"3443"`
-	Env      string `yaml:"env" env:"ENVIRONMENT" env-default:"local"`
-	BaseURL  string `yaml:"base_url" env:"BASE_URL" env-default:""` // Auto-derived from Port if empty
-	Version  string `yaml:"-"`                                      // Set at load time, not from config
+	BindAddr   string `yaml:"bind_addr" env:"BIND_ADDR" env-default:"127.0.0.1"`
+	Port       string `yaml:"port" env:"PORT" env-default:"3443"`
+	Env        string `yaml:"env" env:"ENVIRONMENT" env-default:"local"`
+	BaseURL    string `yaml:"base_url" env:"BASE_URL" env-default:""` // Auto-derived from Port if empty
+	Version    string `yaml:"-"`                                      // Set at load time, not from config
+	ConfigPath string `yaml:"-"`                                      // Resolved config.yaml path used at load time
 
 	// TLS configuration (optional - if both provided, server uses HTTPS)
 	TLSCertPath string `yaml:"tls_cert_path" env:"TLS_CERT_PATH" env-default:""`
@@ -165,7 +166,11 @@ func (c *EmbeddedAIConfig) IsAvailable() bool {
 func resolveConfigPath() (string, error) {
 	// Check CWD first
 	if _, err := os.Stat("config.yaml"); err == nil {
-		return "config.yaml", nil
+		absPath, err := filepath.Abs("config.yaml")
+		if err != nil {
+			return "", fmt.Errorf("resolve config.yaml path: %w", err)
+		}
+		return absPath, nil
 	}
 
 	// Fall back to ~/.ekaya/config.yaml
@@ -173,7 +178,11 @@ func resolveConfigPath() (string, error) {
 	if err == nil {
 		homePath := filepath.Join(home, ".ekaya", "config.yaml")
 		if _, err := os.Stat(homePath); err == nil {
-			return homePath, nil
+			absPath, err := filepath.Abs(homePath)
+			if err != nil {
+				return "", fmt.Errorf("resolve config.yaml path: %w", err)
+			}
+			return absPath, nil
 		}
 	}
 
@@ -195,6 +204,7 @@ func Load(version string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg.ConfigPath = configPath
 
 	// Load config from YAML file with environment variable overrides
 	if err := cleanenv.ReadConfig(configPath, cfg); err != nil {

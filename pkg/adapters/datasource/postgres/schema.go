@@ -1,5 +1,3 @@
-//go:build postgres || all_adapters
-
 package postgres
 
 import (
@@ -428,7 +426,6 @@ func (d *SchemaDiscoverer) CheckValueOverlap(ctx context.Context,
 	sourceSchema, sourceTable, sourceColumn,
 	targetSchema, targetTable, targetColumn string,
 	sampleLimit int) (*datasource.ValueOverlapResult, error) {
-
 	// Build qualified table names (handles empty schema)
 	srcTableRef := qualifiedTableName(sourceSchema, sourceTable)
 	tgtTableRef := qualifiedTableName(targetSchema, targetTable)
@@ -474,7 +471,6 @@ func (d *SchemaDiscoverer) CheckValueOverlap(ctx context.Context,
 func (d *SchemaDiscoverer) AnalyzeJoin(ctx context.Context,
 	sourceSchema, sourceTable, sourceColumn,
 	targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
-
 	// Quote identifiers to prevent SQL injection
 	srcTableRef := qualifiedTableName(sourceSchema, sourceTable)
 	tgtTableRef := qualifiedTableName(targetSchema, targetTable)

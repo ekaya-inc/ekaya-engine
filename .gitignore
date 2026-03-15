@@ -71,5 +71,7 @@ certs/*
 !certs/README.md
 !certs/.gitkeep
 
+# Executable
 ekaya/
+.ekaya-engine-runtime.json
 
