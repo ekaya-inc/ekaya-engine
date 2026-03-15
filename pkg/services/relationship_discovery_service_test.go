@@ -874,6 +874,136 @@ func TestRelationshipDiscoveryService_VerifyLLMCallsSlice(t *testing.T) {
 	assert.Equal(t, 1, result.RelationshipsRejected, "should reject 1 relationship (status->users.id)")
 }
 
+func TestLLMRelationshipDiscoveryService_CreateSchemaRelationshipFromValidationReconcilesEnumMetadata(t *testing.T) {
+	logger := zap.NewNop()
+	projectID := uuid.New()
+	productsTableID := uuid.New()
+	distributionCentersTableID := uuid.New()
+	distributionCenterIDColID := uuid.New()
+	targetIDColID := uuid.New()
+
+	enumPath := string(models.ClassificationPathEnum)
+	enumPurpose := models.PurposeEnum
+	enumSemanticType := "enum"
+	attributeRole := models.RoleAttribute
+	confidence := 0.91
+	description := "Distribution center bucket"
+
+	sourceTable := &models.SchemaTable{
+		ID:         productsTableID,
+		ProjectID:  projectID,
+		SchemaName: "public",
+		TableName:  "products",
+	}
+	targetTable := &models.SchemaTable{
+		ID:         distributionCentersTableID,
+		ProjectID:  projectID,
+		SchemaName: "public",
+		TableName:  "distribution_centers",
+	}
+	sourceColumn := &models.SchemaColumn{
+		ID:            distributionCenterIDColID,
+		ProjectID:     projectID,
+		SchemaTableID: productsTableID,
+		ColumnName:    "distribution_center_id",
+		DataType:      "integer",
+	}
+	targetColumn := &models.SchemaColumn{
+		ID:            targetIDColID,
+		ProjectID:     projectID,
+		SchemaTableID: distributionCentersTableID,
+		ColumnName:    "id",
+		DataType:      "integer",
+		IsPrimaryKey:  true,
+	}
+
+	mockSchemaRepo := &mockSchemaRepoForRelDiscovery{}
+	mockColumnMetadataRepo := &mockColumnMetadataRepoForRelDiscovery{
+		metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+			distributionCenterIDColID: {
+				ProjectID:          projectID,
+				SchemaColumnID:     distributionCenterIDColID,
+				ClassificationPath: &enumPath,
+				Purpose:            &enumPurpose,
+				SemanticType:       &enumSemanticType,
+				Role:               &attributeRole,
+				Description:        &description,
+				Confidence:         &confidence,
+				NeedsEnumAnalysis:  true,
+				Features: models.ColumnMetadataFeatures{
+					EnumFeatures: &models.EnumFeatures{
+						Values: []models.ColumnEnumValue{{Value: "1", Label: "DC 1"}},
+					},
+				},
+			},
+		},
+	}
+
+	svc := &llmRelationshipDiscoveryService{
+		schemaRepo:         mockSchemaRepo,
+		columnMetadataRepo: mockColumnMetadataRepo,
+		logger:             logger,
+	}
+
+	validated := &ValidatedRelationship{
+		Candidate: &RelationshipCandidate{
+			SourceTable:         "products",
+			SourceColumn:        "distribution_center_id",
+			SourceColumnID:      distributionCenterIDColID,
+			SourceDistinctCount: 10,
+			SourceMatched:       10,
+			TargetTable:         "distribution_centers",
+			TargetColumn:        "id",
+			TargetColumnID:      targetIDColID,
+			TargetDistinctCount: 10,
+		},
+		Result: &RelationshipValidationResult{
+			IsValidFK:   true,
+			Confidence:  confidence,
+			Cardinality: models.CardinalityNTo1,
+			Reasoning:   "Matches the distribution centers lookup table",
+		},
+	}
+
+	err := svc.createSchemaRelationshipFromValidation(
+		context.Background(),
+		projectID,
+		validated,
+		map[string]*models.SchemaTable{
+			"products":             sourceTable,
+			"distribution_centers": targetTable,
+		},
+		map[uuid.UUID]*models.SchemaColumn{
+			distributionCenterIDColID: sourceColumn,
+			targetIDColID:             targetColumn,
+		},
+	)
+
+	require.NoError(t, err)
+	require.Len(t, mockSchemaRepo.createdRels, 1)
+	assert.Equal(t, models.RelationshipTypeInferred, mockSchemaRepo.createdRels[0].RelationshipType)
+	assert.Equal(t, models.CardinalityNTo1, mockSchemaRepo.createdRels[0].Cardinality)
+
+	reconciled := mockColumnMetadataRepo.metadataByColumnID[distributionCenterIDColID]
+	require.NotNil(t, reconciled)
+	require.NotNil(t, reconciled.ClassificationPath)
+	assert.Equal(t, string(models.ClassificationPathNumeric), *reconciled.ClassificationPath)
+	require.NotNil(t, reconciled.Purpose)
+	assert.Equal(t, models.PurposeIdentifier, *reconciled.Purpose)
+	require.NotNil(t, reconciled.SemanticType)
+	assert.Equal(t, models.PurposeIdentifier, *reconciled.SemanticType)
+	require.NotNil(t, reconciled.Role)
+	assert.Equal(t, models.RoleForeignKey, *reconciled.Role)
+	assert.False(t, reconciled.NeedsEnumAnalysis)
+	assert.False(t, reconciled.NeedsFKResolution)
+	assert.Nil(t, reconciled.Features.EnumFeatures)
+	require.NotNil(t, reconciled.Features.IdentifierFeatures)
+	assert.Equal(t, models.IdentifierTypeForeignKey, reconciled.Features.IdentifierFeatures.IdentifierType)
+	assert.Equal(t, "distribution_centers", reconciled.Features.IdentifierFeatures.FKTargetTable)
+	assert.Equal(t, "id", reconciled.Features.IdentifierFeatures.FKTargetColumn)
+	assert.Equal(t, description, *reconciled.Description)
+}
+
 // ============================================================================
 // Mock implementations for integration tests
 // ============================================================================
@@ -963,7 +1093,12 @@ func (m *mockColumnMetadataRepoForRelDiscovery) Upsert(_ context.Context, _ *mod
 	return nil
 }
 
-func (m *mockColumnMetadataRepoForRelDiscovery) UpsertFromExtraction(_ context.Context, _ *models.ColumnMetadata) error {
+func (m *mockColumnMetadataRepoForRelDiscovery) UpsertFromExtraction(_ context.Context, meta *models.ColumnMetadata) error {
+	if m.metadataByColumnID == nil {
+		m.metadataByColumnID = make(map[uuid.UUID]*models.ColumnMetadata)
+	}
+	copied := *meta
+	m.metadataByColumnID[meta.SchemaColumnID] = &copied
 	return nil
 }
 

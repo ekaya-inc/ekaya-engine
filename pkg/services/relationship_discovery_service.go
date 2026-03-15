@@ -205,7 +205,7 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 
 			if vr.Result.IsValidFK {
 				// Create the schema relationship
-				if err := s.createSchemaRelationshipFromValidation(ctx, projectID, vr, tableByName); err != nil {
+				if err := s.createSchemaRelationshipFromValidation(ctx, projectID, vr, tableByName, columnByID); err != nil {
 					s.logger.Warn("Failed to create relationship",
 						zap.String("source", fmt.Sprintf("%s.%s", vr.Candidate.SourceTable, vr.Candidate.SourceColumn)),
 						zap.String("target", fmt.Sprintf("%s.%s", vr.Candidate.TargetTable, vr.Candidate.TargetColumn)),
@@ -268,6 +268,7 @@ func (s *llmRelationshipDiscoveryService) createSchemaRelationshipFromValidation
 	projectID uuid.UUID,
 	vr *ValidatedRelationship,
 	tableByName map[string]*models.SchemaTable,
+	columnByID map[uuid.UUID]*models.SchemaColumn,
 ) error {
 	candidate := vr.Candidate
 	result := vr.Result
@@ -313,5 +314,19 @@ func (s *llmRelationshipDiscoveryService) createSchemaRelationshipFromValidation
 		metrics.MatchRate = float64(candidate.SourceMatched) / float64(candidate.SourceDistinctCount)
 	}
 
-	return s.schemaRepo.UpsertRelationshipWithMetrics(ctx, rel, metrics)
+	if err := s.schemaRepo.UpsertRelationshipWithMetrics(ctx, rel, metrics); err != nil {
+		return err
+	}
+
+	sourceColumn := columnByID[candidate.SourceColumnID]
+	targetColumn := columnByID[candidate.TargetColumnID]
+	return reconcileRelationshipBackedColumnMetadata(
+		ctx,
+		s.columnMetadataRepo,
+		projectID,
+		sourceColumn,
+		targetTable,
+		targetColumn,
+		result.Confidence,
+	)
 }

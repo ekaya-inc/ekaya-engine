@@ -257,6 +257,120 @@ func TestRelationshipBootstrapService_BootstrapDiscoversDeclaredFKRelationshipsF
 	assert.True(t, rel.IsValidated)
 }
 
+func TestRelationshipBootstrapService_BootstrapReconcilesEnumMetadataForDeclaredFK(t *testing.T) {
+	logger := zap.NewNop()
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	productsTableID := uuid.New()
+	distributionCentersTableID := uuid.New()
+	distributionCenterIDColID := uuid.New()
+	targetIDColID := uuid.New()
+
+	enumPath := string(models.ClassificationPathEnum)
+	enumPurpose := models.PurposeEnum
+	enumSemanticType := "enum"
+	attributeRole := models.RoleAttribute
+	confidence := 0.95
+	description := "Distribution center bucket"
+
+	mockSchemaRepo := &mockSchemaRepoForBootstrap{
+		tables: []*models.SchemaTable{
+			{ID: productsTableID, ProjectID: projectID, DatasourceID: datasourceID, SchemaName: "public", TableName: "products"},
+			{ID: distributionCentersTableID, ProjectID: projectID, DatasourceID: datasourceID, SchemaName: "public", TableName: "distribution_centers"},
+		},
+		columns: []*models.SchemaColumn{
+			{ID: distributionCenterIDColID, ProjectID: projectID, SchemaTableID: productsTableID, ColumnName: "distribution_center_id", DataType: "integer"},
+			{ID: targetIDColID, ProjectID: projectID, SchemaTableID: distributionCentersTableID, ColumnName: "id", DataType: "integer", IsPrimaryKey: true},
+		},
+	}
+
+	mockColumnMetadataRepo := &mockColumnMetadataRepoForBootstrap{
+		metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+			distributionCenterIDColID: {
+				ProjectID:          projectID,
+				SchemaColumnID:     distributionCenterIDColID,
+				ClassificationPath: &enumPath,
+				Purpose:            &enumPurpose,
+				SemanticType:       &enumSemanticType,
+				Role:               &attributeRole,
+				Description:        &description,
+				Confidence:         &confidence,
+				NeedsEnumAnalysis:  true,
+				Features: models.ColumnMetadataFeatures{
+					EnumFeatures: &models.EnumFeatures{
+						Values: []models.ColumnEnumValue{{Value: "1", Label: "DC 1"}},
+					},
+				},
+			},
+		},
+	}
+
+	mockDatasourceSvc := &mockDatasourceServiceForBootstrap{
+		datasource: &models.Datasource{
+			ID:             datasourceID,
+			ProjectID:      projectID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{},
+		},
+	}
+
+	mockAdapterFactory := &mockAdapterFactoryForBootstrap{
+		schemaDiscoverer: &mockSchemaDiscovererForBootstrap{
+			supportsFKs: true,
+			foreignKeys: []datasource.ForeignKeyMetadata{
+				{
+					ConstraintName: "products_distribution_center_id_fkey",
+					SourceSchema:   "public",
+					SourceTable:    "products",
+					SourceColumn:   "distribution_center_id",
+					TargetSchema:   "public",
+					TargetTable:    "distribution_centers",
+					TargetColumn:   "id",
+				},
+			},
+			joinResults: map[string]*datasource.JoinAnalysis{
+				"public.products.distribution_center_id->public.distribution_centers.id": {
+					JoinCount:     100,
+					SourceMatched: 100,
+					TargetMatched: 10,
+				},
+			},
+		},
+	}
+
+	svc := NewRelationshipBootstrapService(
+		mockDatasourceSvc,
+		mockAdapterFactory,
+		mockSchemaRepo,
+		mockColumnMetadataRepo,
+		logger,
+	)
+
+	result, err := svc.Bootstrap(context.Background(), projectID, datasourceID, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	reconciled := mockColumnMetadataRepo.metadataByColumnID[distributionCenterIDColID]
+	require.NotNil(t, reconciled)
+	require.NotNil(t, reconciled.ClassificationPath)
+	assert.Equal(t, string(models.ClassificationPathNumeric), *reconciled.ClassificationPath)
+	require.NotNil(t, reconciled.Purpose)
+	assert.Equal(t, models.PurposeIdentifier, *reconciled.Purpose)
+	require.NotNil(t, reconciled.SemanticType)
+	assert.Equal(t, models.PurposeIdentifier, *reconciled.SemanticType)
+	require.NotNil(t, reconciled.Role)
+	assert.Equal(t, models.RoleForeignKey, *reconciled.Role)
+	assert.False(t, reconciled.NeedsEnumAnalysis)
+	assert.False(t, reconciled.NeedsFKResolution)
+	assert.Nil(t, reconciled.Features.EnumFeatures)
+	require.NotNil(t, reconciled.Features.IdentifierFeatures)
+	assert.Equal(t, models.IdentifierTypeForeignKey, reconciled.Features.IdentifierFeatures.IdentifierType)
+	assert.Equal(t, "distribution_centers", reconciled.Features.IdentifierFeatures.FKTargetTable)
+	assert.Equal(t, "id", reconciled.Features.IdentifierFeatures.FKTargetColumn)
+	assert.Equal(t, description, *reconciled.Description)
+}
+
 func TestRelationshipBootstrapService_BootstrapPrefersDeclaredFKOverColumnFeaturesForSameColumns(t *testing.T) {
 	logger := zap.NewNop()
 	projectID := uuid.New()
@@ -594,7 +708,12 @@ func (m *mockColumnMetadataRepoForBootstrap) Upsert(_ context.Context, _ *models
 	return nil
 }
 
-func (m *mockColumnMetadataRepoForBootstrap) UpsertFromExtraction(_ context.Context, _ *models.ColumnMetadata) error {
+func (m *mockColumnMetadataRepoForBootstrap) UpsertFromExtraction(_ context.Context, meta *models.ColumnMetadata) error {
+	if m.metadataByColumnID == nil {
+		m.metadataByColumnID = make(map[uuid.UUID]*models.ColumnMetadata)
+	}
+	copied := *meta
+	m.metadataByColumnID[meta.SchemaColumnID] = &copied
 	return nil
 }
 

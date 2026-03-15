@@ -323,6 +323,17 @@ func (s *relationshipBootstrapService) bootstrapColumnFeatureRelationships(
 		if err := s.schemaRepo.UpsertRelationshipWithMetrics(ctx, rel, metrics); err != nil {
 			return createdCount, fmt.Errorf("upsert column_features relationship: %w", err)
 		}
+		if err := reconcileRelationshipBackedColumnMetadata(
+			ctx,
+			s.columnMetadataRepo,
+			projectID,
+			sourceColumn,
+			targetTable,
+			targetColumn,
+			confidence,
+		); err != nil {
+			return createdCount, fmt.Errorf("reconcile relationship-backed column metadata: %w", err)
+		}
 
 		createdCount++
 	}
@@ -382,6 +393,17 @@ func (s *relationshipBootstrapService) refreshDeclaredFKRelationships(
 		relationship.IsValidated = true
 		if err := s.schemaRepo.UpsertRelationship(ctx, relationship); err != nil {
 			return updatedCount, fmt.Errorf("update declared FK relationship: %w", err)
+		}
+		if err := reconcileRelationshipBackedColumnMetadata(
+			ctx,
+			s.columnMetadataRepo,
+			relationship.ProjectID,
+			sourceColumn,
+			targetTable,
+			targetColumn,
+			relationship.Confidence,
+		); err != nil {
+			return updatedCount, fmt.Errorf("reconcile declared FK column metadata: %w", err)
 		}
 
 		updatedCount++
