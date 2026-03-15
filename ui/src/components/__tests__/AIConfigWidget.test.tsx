@@ -98,7 +98,7 @@ describe('AIConfigWidget', () => {
       await userEvent.type(apiKeyInput, 'sk-test-key-123');
 
       // Fill in model
-      const modelInput = screen.getByPlaceholderText('gpt-4o, claude-haiku-4-5, llama3.1');
+      const modelInput = screen.getByPlaceholderText('gpt-4o-mini, claude-haiku-4-5, llama3.1');
       await userEvent.type(modelInput, 'gpt-4o');
 
       // Click "Test Connection" to enable the save button
@@ -180,7 +180,7 @@ describe('AIConfigWidget', () => {
       // Provider button should now show Anthropic
       // The dropdown should be closed and the model should be auto-filled
       await waitFor(() => {
-        const modelInput = screen.getByPlaceholderText('gpt-4o, claude-haiku-4-5, llama3.1');
+        const modelInput = screen.getByPlaceholderText('gpt-4o-mini, claude-haiku-4-5, llama3.1');
         expect(modelInput).toHaveValue('claude-haiku-4-5');
       });
     });
@@ -351,7 +351,7 @@ describe('AIConfigWidget', () => {
       );
       await userEvent.type(screen.getByPlaceholderText('sk-...'), 'sk-key');
       await userEvent.type(
-        screen.getByPlaceholderText('gpt-4o, claude-haiku-4-5, llama3.1'),
+        screen.getByPlaceholderText('gpt-4o-mini, claude-haiku-4-5, llama3.1'),
         'gpt-4o'
       );
 
