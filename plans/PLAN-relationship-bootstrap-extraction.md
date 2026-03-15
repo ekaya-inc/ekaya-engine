@@ -1,6 +1,6 @@
 # PLAN: Relationship Bootstrap Extraction
 
-**Status:** DRAFT
+**Status:** FIXED
 **Date:** 2026-03-15
 **Parent:** `MASTER-PLAN-relationship-extraction-cleanup.md`
 
@@ -138,12 +138,12 @@ Likely tests:
 
 ## Checklist
 
-- [ ] Create a focused bootstrap service for early relationship materialization
-- [ ] Move `column_features` relationship creation into that bootstrap service
-- [ ] Remove duplicate ColumnFeatures creation from the late LLM discovery service
-- [ ] Move persisted joinability/stat writeback out of the deprecated relationship service
-- [ ] Extract shared active helpers from `deterministic_relationship_service.go`
-- [ ] Rewire `FKDiscovery` to the new bootstrap service
+- [x] Create a focused bootstrap service for early relationship materialization
+- [x] Move `column_features` relationship creation into that bootstrap service
+- [x] Remove duplicate ColumnFeatures creation from the late LLM discovery service
+- [x] Move persisted joinability/stat writeback out of the deprecated relationship service
+- [x] Extract shared active helpers from `deterministic_relationship_service.go`
+- [x] Rewire `FKDiscovery` to the new bootstrap service
 
 ## Expected Automated Checks
 
