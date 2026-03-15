@@ -202,8 +202,6 @@ func Run(version string) error {
 		ontologyChatRepo, knowledgeRepo,
 		schemaRepo, ontologyDAGRepo, projectService,
 		llmFactory, datasourceService, adapterFactory, logger)
-	deterministicRelationshipService := services.NewDeterministicRelationshipService(
-		datasourceService, projectService, adapterFactory, schemaRepo, columnMetadataRepo, logger)
 	relationshipBootstrapService := services.NewRelationshipBootstrapService(
 		datasourceService, adapterFactory, schemaRepo, columnMetadataRepo, logger)
 	ontologyFinalizationService := services.NewOntologyFinalizationService(
@@ -239,8 +237,7 @@ func Run(version string) error {
 		ontologyQuestionService, logger)
 	ontologyDAGService.SetColumnFeatureExtractionMethods(columnFeatureExtractionService)
 	ontologyDAGService.SetFKDiscoveryMethods(services.NewFKDiscoveryAdapter(relationshipBootstrapService))
-	ontologyDAGService.SetPKMatchDiscoveryMethods(services.NewPKMatchDiscoveryAdapter(deterministicRelationshipService))
-	// LLM-validated relationship discovery (replaces threshold-based PKMatch when configured)
+	// LLM-validated relationship discovery powers the legacy PKMatch DAG stage label.
 	relationshipCandidateCollector := services.NewRelationshipCandidateCollector(
 		schemaRepo, columnMetadataRepo, adapterFactory, datasourceService, logger)
 	relationshipValidator := services.NewRelationshipValidator(

@@ -80,22 +80,3 @@ func (b *BaseNode) ReportProgress(ctx context.Context, current, total int, messa
 func (b *BaseNode) Logger() *zap.Logger {
 	return b.logger
 }
-
-// ExecutionContext provides context for node execution.
-// This is passed to nodes to provide access to common data.
-type ExecutionContext struct {
-	DAG          *models.OntologyDAG
-	NodeID       uuid.UUID
-	ProjectID    uuid.UUID
-	DatasourceID uuid.UUID
-}
-
-// NewExecutionContext creates an execution context from a DAG and node.
-func NewExecutionContext(dag *models.OntologyDAG, node *models.DAGNode) *ExecutionContext {
-	return &ExecutionContext{
-		DAG:          dag,
-		NodeID:       node.ID,
-		ProjectID:    dag.ProjectID,
-		DatasourceID: dag.DatasourceID,
-	}
-}

@@ -52,9 +52,9 @@ func TestNodeExecutorInterfaces_AreWellDefined(t *testing.T) {
 	var fkm dag.FKDiscoveryMethods = &testFKDiscovery{}
 	assert.NotNil(t, fkm)
 
-	// PKMatchDiscoveryMethods
-	var pkm dag.PKMatchDiscoveryMethods = &testPKMatchDiscovery{}
-	assert.NotNil(t, pkm)
+	// LLMRelationshipDiscoveryMethods
+	var rdm dag.LLMRelationshipDiscoveryMethods = &testLLMRelationshipDiscovery{}
+	assert.NotNil(t, rdm)
 
 	// OntologyFinalizationMethods
 	var ofm dag.OntologyFinalizationMethods = &testFinalization{}
@@ -101,32 +101,6 @@ func TestDAGNodeStatus_ValidStatuses(t *testing.T) {
 	}
 }
 
-func TestNewExecutionContext(t *testing.T) {
-	projectID := uuid.New()
-	datasourceID := uuid.New()
-	dagID := uuid.New()
-	nodeID := uuid.New()
-
-	dagRecord := &models.OntologyDAG{
-		ID:           dagID,
-		ProjectID:    projectID,
-		DatasourceID: datasourceID,
-	}
-
-	node := &models.DAGNode{
-		ID:       nodeID,
-		DAGID:    dagID,
-		NodeName: string(models.DAGNodeKnowledgeSeeding),
-	}
-
-	ctx := dag.NewExecutionContext(dagRecord, node)
-
-	assert.Equal(t, dagRecord, ctx.DAG)
-	assert.Equal(t, nodeID, ctx.NodeID)
-	assert.Equal(t, projectID, ctx.ProjectID)
-	assert.Equal(t, datasourceID, ctx.DatasourceID)
-}
-
 // Test implementations to verify interfaces compile correctly
 
 type testFKDiscovery struct{}
@@ -135,9 +109,9 @@ func (t *testFKDiscovery) DiscoverFKRelationships(_ context.Context, _, _ uuid.U
 	return nil, nil
 }
 
-type testPKMatchDiscovery struct{}
+type testLLMRelationshipDiscovery struct{}
 
-func (t *testPKMatchDiscovery) DiscoverPKMatchRelationships(_ context.Context, _, _ uuid.UUID, _ dag.ProgressCallback) (*dag.PKMatchDiscoveryResult, error) {
+func (t *testLLMRelationshipDiscovery) DiscoverRelationships(_ context.Context, _, _ uuid.UUID, _ dag.ProgressCallback) (*dag.LLMRelationshipDiscoveryResult, error) {
 	return nil, nil
 }
 

@@ -32,31 +32,6 @@ func (a *FKDiscoveryAdapter) DiscoverFKRelationships(ctx context.Context, projec
 	}, nil
 }
 
-// PKMatchDiscoveryAdapter adapts DeterministicRelationshipService for pk_match discovery.
-type PKMatchDiscoveryAdapter struct {
-	svc DeterministicRelationshipService
-}
-
-// NewPKMatchDiscoveryAdapter creates a new adapter.
-func NewPKMatchDiscoveryAdapter(svc DeterministicRelationshipService) dag.PKMatchDiscoveryMethods {
-	return &PKMatchDiscoveryAdapter{svc: svc}
-}
-
-func (a *PKMatchDiscoveryAdapter) DiscoverPKMatchRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback dag.ProgressCallback) (*dag.PKMatchDiscoveryResult, error) {
-	// Convert dag.ProgressCallback to services.RelationshipProgressCallback
-	var svcCallback RelationshipProgressCallback
-	if progressCallback != nil {
-		svcCallback = RelationshipProgressCallback(progressCallback)
-	}
-	result, err := a.svc.DiscoverPKMatchRelationships(ctx, projectID, datasourceID, svcCallback)
-	if err != nil {
-		return nil, err
-	}
-	return &dag.PKMatchDiscoveryResult{
-		InferredRelationships: result.InferredRelationships,
-	}, nil
-}
-
 // LLMRelationshipDiscoveryAdapter adapts LLMRelationshipDiscoveryService for the dag package.
 // This is the new LLM-validated relationship discovery that replaces the threshold-based approach.
 type LLMRelationshipDiscoveryAdapter struct {

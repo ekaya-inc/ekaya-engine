@@ -143,27 +143,3 @@ func TestBaseNode_Name(t *testing.T) {
 	node := NewBaseNode(models.DAGNodeColumnEnrichment, &mockBaseNodeDAGRepo{}, zap.NewNop())
 	assert.Equal(t, models.DAGNodeColumnEnrichment, node.Name())
 }
-
-func TestNewExecutionContext(t *testing.T) {
-	projectID := uuid.New()
-	datasourceID := uuid.New()
-	dagID := uuid.New()
-	nodeID := uuid.New()
-
-	dag := &models.OntologyDAG{
-		ID:           dagID,
-		ProjectID:    projectID,
-		DatasourceID: datasourceID,
-	}
-
-	dagNode := &models.DAGNode{
-		ID: nodeID,
-	}
-
-	execCtx := NewExecutionContext(dag, dagNode)
-
-	assert.Equal(t, dag, execCtx.DAG)
-	assert.Equal(t, nodeID, execCtx.NodeID)
-	assert.Equal(t, projectID, execCtx.ProjectID)
-	assert.Equal(t, datasourceID, execCtx.DatasourceID)
-}

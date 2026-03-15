@@ -1430,6 +1430,16 @@ func splitEnumDescription(desc string) []string {
 	return []string{label, description}
 }
 
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
+}
+
 // toEnumValues converts a slice of strings to EnumValue objects without descriptions.
 func toEnumValues(values []string) []models.EnumValue {
 	if len(values) == 0 {
