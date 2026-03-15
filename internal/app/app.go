@@ -237,7 +237,7 @@ func Run(version string) error {
 		ontologyQuestionService, logger)
 	ontologyDAGService.SetColumnFeatureExtractionMethods(columnFeatureExtractionService)
 	ontologyDAGService.SetFKDiscoveryMethods(services.NewFKDiscoveryAdapter(relationshipBootstrapService))
-	// LLM-validated relationship discovery powers the legacy PKMatch DAG stage label.
+	// LLM-validated relationship discovery powers the RelationshipDiscovery DAG stage.
 	relationshipCandidateCollector := services.NewRelationshipCandidateCollector(
 		schemaRepo, columnMetadataRepo, adapterFactory, datasourceService, logger)
 	relationshipValidator := services.NewRelationshipValidator(

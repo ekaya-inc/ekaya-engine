@@ -121,7 +121,7 @@ func TestOntologyDAGHandler_StartExtraction_Success(t *testing.T) {
 					{ID: uuid.New(), NodeName: "ColumnFeatureExtraction", NodeOrder: 2, Status: models.DAGNodeStatusPending},
 					{ID: uuid.New(), NodeName: "FKDiscovery", NodeOrder: 3, Status: models.DAGNodeStatusPending},
 					{ID: uuid.New(), NodeName: "TableFeatureExtraction", NodeOrder: 4, Status: models.DAGNodeStatusPending},
-					{ID: uuid.New(), NodeName: "PKMatchDiscovery", NodeOrder: 5, Status: models.DAGNodeStatusPending},
+					{ID: uuid.New(), NodeName: "RelationshipDiscovery", NodeOrder: 5, Status: models.DAGNodeStatusPending},
 				},
 			}, nil
 		},
@@ -359,7 +359,7 @@ func TestOntologyDAGHandler_GetStatus_Success(t *testing.T) {
 					{ID: uuid.New(), NodeName: "ColumnFeatureExtraction", NodeOrder: 2, Status: models.DAGNodeStatusRunning, Progress: &models.DAGNodeProgress{Current: 5, Total: 15, Message: "Processing table users"}},
 					{ID: uuid.New(), NodeName: "FKDiscovery", NodeOrder: 3, Status: models.DAGNodeStatusPending},
 					{ID: uuid.New(), NodeName: "TableFeatureExtraction", NodeOrder: 4, Status: models.DAGNodeStatusPending},
-					{ID: uuid.New(), NodeName: "PKMatchDiscovery", NodeOrder: 5, Status: models.DAGNodeStatusPending},
+					{ID: uuid.New(), NodeName: "RelationshipDiscovery", NodeOrder: 5, Status: models.DAGNodeStatusPending},
 				},
 			}, nil
 		},
@@ -668,7 +668,7 @@ func TestOntologyDAGHandler_CompletedDAG(t *testing.T) {
 					{ID: uuid.New(), NodeName: "ColumnFeatureExtraction", NodeOrder: 2, Status: models.DAGNodeStatusCompleted},
 					{ID: uuid.New(), NodeName: "FKDiscovery", NodeOrder: 3, Status: models.DAGNodeStatusCompleted},
 					{ID: uuid.New(), NodeName: "TableFeatureExtraction", NodeOrder: 4, Status: models.DAGNodeStatusCompleted},
-					{ID: uuid.New(), NodeName: "PKMatchDiscovery", NodeOrder: 5, Status: models.DAGNodeStatusCompleted},
+					{ID: uuid.New(), NodeName: "RelationshipDiscovery", NodeOrder: 5, Status: models.DAGNodeStatusCompleted},
 				},
 			}, nil
 		},
@@ -735,7 +735,7 @@ func TestOntologyDAGHandler_FailedDAG(t *testing.T) {
 					{ID: uuid.New(), NodeName: "ColumnFeatureExtraction", NodeOrder: 2, Status: models.DAGNodeStatusFailed, ErrorMessage: &errMsg},
 					{ID: uuid.New(), NodeName: "FKDiscovery", NodeOrder: 3, Status: models.DAGNodeStatusPending},
 					{ID: uuid.New(), NodeName: "TableFeatureExtraction", NodeOrder: 4, Status: models.DAGNodeStatusPending},
-					{ID: uuid.New(), NodeName: "PKMatchDiscovery", NodeOrder: 5, Status: models.DAGNodeStatusPending},
+					{ID: uuid.New(), NodeName: "RelationshipDiscovery", NodeOrder: 5, Status: models.DAGNodeStatusPending},
 				},
 			}, nil
 		},

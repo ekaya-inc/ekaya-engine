@@ -123,7 +123,6 @@ func (s *ontologyDAGService) SetFKDiscoveryMethods(methods dag.FKDiscoveryMethod
 }
 
 // SetLLMRelationshipDiscoveryMethods sets the LLM-validated relationship discovery methods interface.
-// This powers the legacy PKMatchDiscovery DAG stage with LLM validation.
 func (s *ontologyDAGService) SetLLMRelationshipDiscoveryMethods(methods dag.LLMRelationshipDiscoveryMethods) {
 	s.llmRelationshipDiscoveryMethods = methods
 }
@@ -674,7 +673,7 @@ func (s *ontologyDAGService) getNodeExecutor(nodeName models.DAGNodeName, nodeID
 		node.SetCurrentNodeID(nodeID)
 		return node, nil
 
-	case models.DAGNodePKMatchDiscovery:
+	case models.DAGNodeRelationshipDiscovery:
 		if s.llmRelationshipDiscoveryMethods == nil {
 			return nil, fmt.Errorf("LLM relationship discovery methods not set")
 		}

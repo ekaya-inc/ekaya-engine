@@ -168,12 +168,12 @@ const (
 // Inference methods for discovered relationships.
 // Some methods are reserved for future inference algorithms.
 const (
-	InferenceMethodNamingPattern  = "naming_pattern"  // Reserved: column name pattern matching (e.g., user_id -> users.id)
-	InferenceMethodValueOverlap   = "value_overlap"   // Active: statistical value overlap analysis
-	InferenceMethodTypeMatch      = "type_match"      // Reserved: type-compatible column matching
-	InferenceMethodFK             = "fk"              // Active: declared datasource FK imported during schema sync
-	InferenceMethodColumnFeatures = "column_features" // Active: FK derived from ColumnFeatureExtraction Phase 4
-	InferenceMethodPKMatch        = "pk_match"        // Active: FK inferred from PK-match discovery
+	InferenceMethodNamingPattern         = "naming_pattern"         // Reserved: column name pattern matching (e.g., user_id -> users.id)
+	InferenceMethodValueOverlap          = "value_overlap"          // Active: statistical value overlap analysis
+	InferenceMethodTypeMatch             = "type_match"             // Reserved: type-compatible column matching
+	InferenceMethodFK                    = "fk"                     // Active: declared datasource FK imported during schema sync
+	InferenceMethodColumnFeatures        = "column_features"        // Active: FK derived from ColumnFeatureExtraction Phase 4
+	InferenceMethodRelationshipDiscovery = "relationship_discovery" // Active: FK inferred from LLM relationship discovery
 )
 
 // Rejection reasons for relationship candidates

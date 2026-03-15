@@ -205,8 +205,6 @@ func TestRelationshipDiscoveryNode_Execute_ProgressCallback(t *testing.T) {
 }
 
 func TestRelationshipDiscoveryNode_Name(t *testing.T) {
-	// Note: RelationshipDiscoveryNode uses DAGNodePKMatchDiscovery as its name
-	// (it replaces the old PKMatchDiscoveryNode)
 	node := NewRelationshipDiscoveryNode(&mockRelationshipDiscoveryDAGRepo{}, &mockLLMRelationshipDiscoveryMethods{}, zap.NewNop())
-	assert.Equal(t, models.DAGNodePKMatchDiscovery, node.Name())
+	assert.Equal(t, models.DAGNodeRelationshipDiscovery, node.Name())
 }

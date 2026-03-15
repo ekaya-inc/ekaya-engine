@@ -31,7 +31,7 @@ func TestDAGNodes_AllNodesHaveCorrectOrder(t *testing.T) {
 		models.DAGNodeColumnFeatureExtraction,
 		models.DAGNodeFKDiscovery,
 		models.DAGNodeTableFeatureExtraction,
-		models.DAGNodePKMatchDiscovery,
+		models.DAGNodeRelationshipDiscovery,
 		models.DAGNodeColumnEnrichment,
 		models.DAGNodeOntologyFinalization,
 	}

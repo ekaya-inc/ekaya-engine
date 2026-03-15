@@ -289,7 +289,7 @@ func (s *llmRelationshipDiscoveryService) createSchemaRelationshipFromValidation
 	// - Unique/PK source with 1:1 mapping → 1:1
 	cardinality := result.Cardinality
 
-	inferenceMethod := models.InferenceMethodPKMatch
+	inferenceMethod := models.InferenceMethodRelationshipDiscovery
 	rel := &models.SchemaRelationship{
 		ProjectID:        projectID,
 		SourceTableID:    sourceTable.ID,

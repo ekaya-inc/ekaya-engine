@@ -497,7 +497,6 @@ export type DAGNodeName =
   | 'KnowledgeSeeding'
   | 'FKDiscovery'
   | 'TableFeatureExtraction'
-  | 'PKMatchDiscovery'
   | 'RelationshipDiscovery'
   | 'ColumnFeatureExtraction'
   | 'ColumnEnrichment'
@@ -660,13 +659,9 @@ export const DAGNodeDescriptions: Record<DAGNodeName, { title: string; descripti
     title: 'Extracting Table Features',
     description: 'Analyzing table metadata and usage patterns',
   },
-  PKMatchDiscovery: {
-    title: 'Discovering Primary Key Matches',
-    description: 'Discovering relationships via primary key matching',
-  },
   RelationshipDiscovery: {
     title: 'Discovering Relationships',
-    description: 'Discovering foreign key relationships',
+    description: 'Validating inferred foreign key relationships',
   },
   ColumnFeatureExtraction: {
     title: 'Extracting Column Features',
