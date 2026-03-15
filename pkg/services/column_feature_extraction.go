@@ -433,7 +433,11 @@ func (s *columnFeatureExtractionService) refreshColumnDiscoveryStats(
 
 		stats, err := discoverer.AnalyzeColumnStats(ctx, table.SchemaName, table.TableName, columnNames)
 		if err != nil {
-			return fmt.Errorf("analyze column stats for %s.%s: %w", table.SchemaName, table.TableName, err)
+			s.logger.Warn("Failed to analyze column stats; leaving existing stats unchanged for table",
+				zap.String("schema_name", table.SchemaName),
+				zap.String("table_name", table.TableName),
+				zap.Error(err))
+			continue
 		}
 
 		statsByName := make(map[string]datasource.ColumnStats, len(stats))

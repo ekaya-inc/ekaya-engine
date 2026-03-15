@@ -62,11 +62,21 @@ func (s *relationshipBootstrapService) Bootstrap(
 	}
 
 	tableByID := make(map[uuid.UUID]*models.SchemaTable, len(tables))
-	tableByName := make(map[string]*models.SchemaTable, len(tables)*2)
+	tableByQualifiedName := make(map[string]*models.SchemaTable, len(tables))
+	uniqueTableByName := make(map[string]*models.SchemaTable, len(tables))
+	ambiguousTableNames := make(map[string]struct{})
 	for _, table := range tables {
 		tableByID[table.ID] = table
-		tableByName[fmt.Sprintf("%s.%s", table.SchemaName, table.TableName)] = table
-		tableByName[table.TableName] = table
+		tableByQualifiedName[fmt.Sprintf("%s.%s", table.SchemaName, table.TableName)] = table
+		if _, isAmbiguous := ambiguousTableNames[table.TableName]; isAmbiguous {
+			continue
+		}
+		if existing, ok := uniqueTableByName[table.TableName]; ok && existing.ID != table.ID {
+			delete(uniqueTableByName, table.TableName)
+			ambiguousTableNames[table.TableName] = struct{}{}
+			continue
+		}
+		uniqueTableByName[table.TableName] = table
 	}
 
 	columns, err := s.schemaRepo.ListColumnsByDatasource(ctx, projectID, datasourceID)
@@ -85,10 +95,14 @@ func (s *relationshipBootstrapService) Bootstrap(
 	if s.columnMetadataRepo != nil && len(columnIDs) > 0 {
 		metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, columnIDs)
 		if err != nil {
-			return nil, fmt.Errorf("get column metadata: %w", err)
-		}
-		for _, metadata := range metadataList {
-			metadataByColumnID[metadata.SchemaColumnID] = metadata
+			s.logger.Warn("Failed to load column metadata; skipping column_features bootstrap",
+				zap.String("project_id", projectID.String()),
+				zap.String("datasource_id", datasourceID.String()),
+				zap.Error(err))
+		} else {
+			for _, metadata := range metadataList {
+				metadataByColumnID[metadata.SchemaColumnID] = metadata
+			}
 		}
 	}
 
@@ -114,7 +128,9 @@ func (s *relationshipBootstrapService) Bootstrap(
 		projectID,
 		columns,
 		tableByID,
-		tableByName,
+		tableByQualifiedName,
+		uniqueTableByName,
+		ambiguousTableNames,
 		metadataByColumnID,
 		declaredFKKeys,
 		discoverer,
@@ -157,7 +173,9 @@ func (s *relationshipBootstrapService) bootstrapColumnFeatureRelationships(
 	projectID uuid.UUID,
 	columns []*models.SchemaColumn,
 	tableByID map[uuid.UUID]*models.SchemaTable,
-	tableByName map[string]*models.SchemaTable,
+	tableByQualifiedName map[string]*models.SchemaTable,
+	uniqueTableByName map[string]*models.SchemaTable,
+	ambiguousTableNames map[string]struct{},
 	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata,
 	declaredFKKeys map[string]struct{},
 	discoverer datasource.SchemaDiscoverer,
@@ -201,15 +219,13 @@ func (s *relationshipBootstrapService) bootstrapColumnFeatureRelationships(
 			continue
 		}
 
-		targetTableKey := identifier.FKTargetTable
-		if !strings.Contains(targetTableKey, ".") {
-			targetTableKey = fmt.Sprintf("%s.%s", sourceTable.SchemaName, targetTableKey)
-		}
-
-		targetTable := tableByName[targetTableKey]
-		if targetTable == nil {
-			targetTable = tableByName[identifier.FKTargetTable]
-		}
+		targetTable := resolveBootstrapTargetTable(
+			sourceTable,
+			identifier.FKTargetTable,
+			tableByQualifiedName,
+			uniqueTableByName,
+			ambiguousTableNames,
+		)
 		if targetTable == nil {
 			s.logger.Debug("Skipping column_features relationship with missing target table",
 				zap.String("source_column_id", sourceColumn.ID.String()),
@@ -372,4 +388,30 @@ func buildDeclaredFKRelationshipSet(relationships []*models.SchemaRelationship) 
 
 func relationshipColumnKey(sourceColumnID, targetColumnID uuid.UUID) string {
 	return fmt.Sprintf("%s->%s", sourceColumnID, targetColumnID)
+}
+
+func resolveBootstrapTargetTable(
+	sourceTable *models.SchemaTable,
+	targetTableName string,
+	tableByQualifiedName map[string]*models.SchemaTable,
+	uniqueTableByName map[string]*models.SchemaTable,
+	ambiguousTableNames map[string]struct{},
+) *models.SchemaTable {
+	if targetTableName == "" {
+		return nil
+	}
+	if strings.Contains(targetTableName, ".") {
+		return tableByQualifiedName[targetTableName]
+	}
+
+	if sourceTable != nil {
+		if targetTable := tableByQualifiedName[fmt.Sprintf("%s.%s", sourceTable.SchemaName, targetTableName)]; targetTable != nil {
+			return targetTable
+		}
+	}
+
+	if _, isAmbiguous := ambiguousTableNames[targetTableName]; isAmbiguous {
+		return nil
+	}
+	return uniqueTableByName[targetTableName]
 }

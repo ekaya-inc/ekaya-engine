@@ -1055,13 +1055,14 @@ func (m *mockAdapterFactoryForFeatureExtraction) NewSchemaDiscoverer(ctx context
 type mockSchemaDiscovererForFeatureExtraction struct {
 	datasource.SchemaDiscoverer
 
-	columnStatsByTable     map[string][]datasource.ColumnStats
-	distinctValuesByColumn map[string][]string
-	analyzeColumnStatsErr  error
-	distinctValuesErr      error
-	analyzeCalls           []featureExtractionAnalyzeCall
-	distinctValueCalls     []featureExtractionDistinctValuesCall
-	closed                 bool
+	columnStatsByTable           map[string][]datasource.ColumnStats
+	distinctValuesByColumn       map[string][]string
+	analyzeColumnStatsErr        error
+	analyzeColumnStatsErrByTable map[string]error
+	distinctValuesErr            error
+	analyzeCalls                 []featureExtractionAnalyzeCall
+	distinctValueCalls           []featureExtractionDistinctValuesCall
+	closed                       bool
 }
 
 type featureExtractionAnalyzeCall struct {
@@ -1087,6 +1088,11 @@ func (m *mockSchemaDiscovererForFeatureExtraction) AnalyzeColumnStats(ctx contex
 		ColumnNames: append([]string(nil), columnNames...),
 	}
 	m.analyzeCalls = append(m.analyzeCalls, call)
+	if m.analyzeColumnStatsErrByTable != nil {
+		if err, ok := m.analyzeColumnStatsErrByTable[schemaName+"."+tableName]; ok {
+			return nil, err
+		}
+	}
 	return m.columnStatsByTable[schemaName+"."+tableName], nil
 }
 
@@ -1452,6 +1458,107 @@ func TestRunPhase1DataCollection_PersistsJoinabilityWhenDistinctCountAlreadyExis
 	}
 	if joinabilityUpdate.JoinabilityReason == nil || *joinabilityUpdate.JoinabilityReason != models.JoinabilityUniqueValues {
 		t.Errorf("persisted JoinabilityReason = %v, want %s", joinabilityUpdate.JoinabilityReason, models.JoinabilityUniqueValues)
+	}
+}
+
+func TestRunPhase1DataCollection_ContinuesWhenAnalyzeColumnStatsFailsForOneTable(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	goodTableID := uuid.New()
+	failedTableID := uuid.New()
+	goodColumnID := uuid.New()
+	failedColumnID := uuid.New()
+	rowCount := int64(100)
+
+	mockRepo := &mockSchemaRepoForFeatureExtraction{
+		tables: []*models.SchemaTable{
+			{
+				ID:           goodTableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "orders",
+				RowCount:     &rowCount,
+			},
+			{
+				ID:           failedTableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "broken_orders",
+				RowCount:     &rowCount,
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            goodColumnID,
+				ProjectID:     projectID,
+				SchemaTableID: goodTableID,
+				ColumnName:    "user_id",
+				DataType:      "uuid",
+				IsSelected:    true,
+			},
+			{
+				ID:            failedColumnID,
+				ProjectID:     projectID,
+				SchemaTableID: failedTableID,
+				ColumnName:    "account_id",
+				DataType:      "uuid",
+				IsSelected:    true,
+			},
+		},
+	}
+
+	discoverer := &mockSchemaDiscovererForFeatureExtraction{
+		columnStatsByTable: map[string][]datasource.ColumnStats{
+			"public.orders": {
+				{
+					ColumnName:    "user_id",
+					RowCount:      rowCount,
+					NonNullCount:  90,
+					DistinctCount: 90,
+				},
+			},
+		},
+		analyzeColumnStatsErrByTable: map[string]error{
+			"public.broken_orders": errors.New("relation unavailable"),
+		},
+	}
+
+	svc := &columnFeatureExtractionService{
+		schemaRepo:        mockRepo,
+		datasourceService: &mockDatasourceServiceForFeatureExtraction{},
+		adapterFactory: &mockAdapterFactoryForFeatureExtraction{
+			discoverer: discoverer,
+		},
+		logger: zap.NewNop(),
+	}
+
+	result, err := svc.runPhase1DataCollection(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("runPhase1DataCollection() error = %v", err)
+	}
+
+	if len(result.Profiles) != 2 {
+		t.Fatalf("len(Profiles) = %d, want 2", len(result.Profiles))
+	}
+	if len(discoverer.analyzeCalls) != 2 {
+		t.Fatalf("AnalyzeColumnStats calls = %d, want 2", len(discoverer.analyzeCalls))
+	}
+	if !discoverer.closed {
+		t.Error("schema discoverer should be closed")
+	}
+
+	goodUpdate, ok := mockRepo.updatedColumnJoinability[goodColumnID]
+	if !ok {
+		t.Fatal("UpdateColumnJoinability was not called for the healthy table")
+	}
+	if goodUpdate.IsJoinable == nil || !*goodUpdate.IsJoinable {
+		t.Errorf("healthy table joinability = %v, want true", goodUpdate.IsJoinable)
+	}
+
+	if _, ok := mockRepo.updatedColumnJoinability[failedColumnID]; ok {
+		t.Fatal("UpdateColumnJoinability should not be called for the failed table")
 	}
 }
 

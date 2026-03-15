@@ -176,6 +176,152 @@ func TestRelationshipBootstrapService_BootstrapRecomputesDeclaredFKCardinality(t
 	assert.True(t, mockSchemaRepo.upsertedRelationships[0].IsValidated)
 }
 
+func TestRelationshipBootstrapService_BootstrapContinuesWhenColumnMetadataReadFails(t *testing.T) {
+	logger := zap.NewNop()
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ordersTableID := uuid.New()
+	accountsTableID := uuid.New()
+	accountIDColID := uuid.New()
+	ordersAccountIDColID := uuid.New()
+	fkMethod := models.InferenceMethodFK
+
+	mockSchemaRepo := &mockSchemaRepoForBootstrap{
+		tables: []*models.SchemaTable{
+			{ID: ordersTableID, ProjectID: projectID, DatasourceID: datasourceID, SchemaName: "public", TableName: "orders"},
+			{ID: accountsTableID, ProjectID: projectID, DatasourceID: datasourceID, SchemaName: "public", TableName: "accounts"},
+		},
+		columns: []*models.SchemaColumn{
+			{ID: ordersAccountIDColID, ProjectID: projectID, SchemaTableID: ordersTableID, ColumnName: "account_id", DataType: "uuid", IsUnique: true},
+			{ID: accountIDColID, ProjectID: projectID, SchemaTableID: accountsTableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+		},
+		relationships: []*models.SchemaRelationship{
+			{
+				ID:              uuid.New(),
+				ProjectID:       projectID,
+				SourceTableID:   ordersTableID,
+				SourceColumnID:  ordersAccountIDColID,
+				TargetTableID:   accountsTableID,
+				TargetColumnID:  accountIDColID,
+				Cardinality:     models.CardinalityUnknown,
+				InferenceMethod: &fkMethod,
+			},
+		},
+	}
+
+	mockDatasourceSvc := &mockDatasourceServiceForBootstrap{
+		datasource: &models.Datasource{
+			ID:             datasourceID,
+			ProjectID:      projectID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{},
+		},
+	}
+
+	mockAdapterFactory := &mockAdapterFactoryForBootstrap{
+		schemaDiscoverer: &mockSchemaDiscovererForBootstrap{
+			joinResults: map[string]*datasource.JoinAnalysis{
+				"public.orders.account_id->public.accounts.id": {
+					JoinCount:     75,
+					SourceMatched: 75,
+					TargetMatched: 75,
+				},
+			},
+		},
+	}
+
+	mockColumnMetadataRepo := &mockColumnMetadataRepoForBootstrap{
+		getBySchemaColumnIDsErr: fmt.Errorf("metadata temporarily unavailable"),
+	}
+
+	svc := NewRelationshipBootstrapService(
+		mockDatasourceSvc,
+		mockAdapterFactory,
+		mockSchemaRepo,
+		mockColumnMetadataRepo,
+		logger,
+	)
+
+	result, err := svc.Bootstrap(context.Background(), projectID, datasourceID, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, 0, result.ColumnFeatureRelationships)
+	assert.Equal(t, 1, result.DeclaredFKRelationships)
+	assert.Equal(t, 1, result.FKRelationships)
+	require.Len(t, mockSchemaRepo.upsertedRelationships, 1)
+}
+
+func TestRelationshipBootstrapService_BootstrapSkipsAmbiguousUnqualifiedTargetTable(t *testing.T) {
+	logger := zap.NewNop()
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	paymentsTableID := uuid.New()
+	adminUsersTableID := uuid.New()
+	authUsersTableID := uuid.New()
+	paymentUserIDColID := uuid.New()
+	adminUserIDColID := uuid.New()
+	authUserIDColID := uuid.New()
+
+	mockSchemaRepo := &mockSchemaRepoForBootstrap{
+		tables: []*models.SchemaTable{
+			{ID: paymentsTableID, ProjectID: projectID, DatasourceID: datasourceID, SchemaName: "public", TableName: "payments"},
+			{ID: adminUsersTableID, ProjectID: projectID, DatasourceID: datasourceID, SchemaName: "admin", TableName: "users"},
+			{ID: authUsersTableID, ProjectID: projectID, DatasourceID: datasourceID, SchemaName: "auth", TableName: "users"},
+		},
+		columns: []*models.SchemaColumn{
+			{ID: paymentUserIDColID, ProjectID: projectID, SchemaTableID: paymentsTableID, ColumnName: "user_id", DataType: "uuid"},
+			{ID: adminUserIDColID, ProjectID: projectID, SchemaTableID: adminUsersTableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+			{ID: authUserIDColID, ProjectID: projectID, SchemaTableID: authUsersTableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+		},
+	}
+
+	mockColumnMetadataRepo := &mockColumnMetadataRepoForBootstrap{
+		metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+			paymentUserIDColID: {
+				SchemaColumnID: paymentUserIDColID,
+				Features: models.ColumnMetadataFeatures{
+					IdentifierFeatures: &models.IdentifierFeatures{
+						FKTargetTable:  "users",
+						FKTargetColumn: "id",
+						FKConfidence:   0.95,
+					},
+				},
+			},
+		},
+	}
+
+	mockDatasourceSvc := &mockDatasourceServiceForBootstrap{
+		datasource: &models.Datasource{
+			ID:             datasourceID,
+			ProjectID:      projectID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{},
+		},
+	}
+
+	mockAdapterFactory := &mockAdapterFactoryForBootstrap{
+		schemaDiscoverer: &mockSchemaDiscovererForBootstrap{},
+	}
+
+	svc := NewRelationshipBootstrapService(
+		mockDatasourceSvc,
+		mockAdapterFactory,
+		mockSchemaRepo,
+		mockColumnMetadataRepo,
+		logger,
+	)
+
+	result, err := svc.Bootstrap(context.Background(), projectID, datasourceID, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, 0, result.ColumnFeatureRelationships)
+	assert.Equal(t, 0, result.DeclaredFKRelationships)
+	assert.Equal(t, 0, result.FKRelationships)
+	assert.Empty(t, mockSchemaRepo.upsertedRelationshipsWithMetrics)
+}
+
 type mockSchemaRepoForBootstrap struct {
 	repositories.SchemaRepository
 	tables                           []*models.SchemaTable
@@ -245,7 +391,8 @@ func (m *mockSchemaDiscovererForBootstrap) Close() error {
 }
 
 type mockColumnMetadataRepoForBootstrap struct {
-	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata
+	metadataByColumnID      map[uuid.UUID]*models.ColumnMetadata
+	getBySchemaColumnIDsErr error
 }
 
 func (m *mockColumnMetadataRepoForBootstrap) Upsert(_ context.Context, _ *models.ColumnMetadata) error {
@@ -265,6 +412,9 @@ func (m *mockColumnMetadataRepoForBootstrap) GetByProject(_ context.Context, _ u
 }
 
 func (m *mockColumnMetadataRepoForBootstrap) GetBySchemaColumnIDs(_ context.Context, ids []uuid.UUID) ([]*models.ColumnMetadata, error) {
+	if m.getBySchemaColumnIDsErr != nil {
+		return nil, m.getBySchemaColumnIDsErr
+	}
 	result := make([]*models.ColumnMetadata, 0, len(ids))
 	for _, id := range ids {
 		if meta, ok := m.metadataByColumnID[id]; ok {
