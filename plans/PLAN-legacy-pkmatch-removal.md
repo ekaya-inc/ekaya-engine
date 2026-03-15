@@ -1,6 +1,6 @@
 # PLAN: Legacy PK-Match Removal
 
-**Status:** DRAFT
+**Status:** COMPLETED
 **Date:** 2026-03-15
 **Parent:** `MASTER-PLAN-relationship-extraction-cleanup.md`
 
@@ -112,11 +112,11 @@ Primary files expected to change or be deleted:
 
 ## Checklist
 
-- [ ] Remove PK-match fallback wiring from ontology DAG service and app wiring
-- [ ] Remove the PK-match adapter and DAG node
-- [ ] Delete the deterministic PK-match implementation after active extraction is complete
-- [ ] Delete orphaned FK semantic-evaluation service/prompt files
-- [ ] Remove dead executor/test helpers that only supported the removed path
+- [x] Remove PK-match fallback wiring from ontology DAG service and app wiring
+- [x] Remove the PK-match adapter and DAG node
+- [x] Delete the deterministic PK-match implementation after active extraction is complete
+- [x] Delete orphaned FK semantic-evaluation service/prompt files
+- [x] Remove dead executor/test helpers that only supported the removed path
 
 ## Expected Automated Checks
 
