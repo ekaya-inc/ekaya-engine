@@ -1,6 +1,6 @@
 # PLAN: Relationship Contract Alignment
 
-**Status:** DRAFT
+**Status:** COMPLETED
 **Date:** 2026-03-15
 **Parent:** `MASTER-PLAN-relationship-extraction-cleanup.md`
 
@@ -105,10 +105,10 @@ This specifically unblocks:
 
 ## Checklist
 
-- [ ] Canonicalize the declared-FK inference-method constant to `fk`
-- [ ] Update all declared-FK readers to use the canonical value
-- [ ] Update stale comments that still describe the stored value as `foreign_key`
-- [ ] Update repository/service tests that assert the old value
+- [x] Canonicalize the declared-FK inference-method constant to `fk`
+- [x] Update all declared-FK readers to use the canonical value
+- [x] Update stale comments that still describe the stored value as `foreign_key`
+- [x] Update repository/service tests that assert the old value
 
 ## Expected Automated Checks
 
