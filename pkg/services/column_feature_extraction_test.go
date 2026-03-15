@@ -818,7 +818,8 @@ type mockSchemaRepoForFeatureExtraction struct {
 	tables  []*models.SchemaTable
 	columns []*models.SchemaColumn
 
-	updatedColumnStats map[uuid.UUID]featureExtractionColumnStatsUpdate
+	updatedColumnStats       map[uuid.UUID]featureExtractionColumnStatsUpdate
+	updatedColumnJoinability map[uuid.UUID]featureExtractionJoinabilityUpdate
 }
 
 func (m *mockSchemaRepoForFeatureExtraction) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
@@ -942,6 +943,16 @@ func (m *mockSchemaRepoForFeatureExtraction) GetJoinableColumns(ctx context.Cont
 	return nil, nil
 }
 func (m *mockSchemaRepoForFeatureExtraction) UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount, distinctCount *int64, isJoinable *bool, joinabilityReason *string) error {
+	if m.updatedColumnJoinability == nil {
+		m.updatedColumnJoinability = make(map[uuid.UUID]featureExtractionJoinabilityUpdate)
+	}
+	m.updatedColumnJoinability[columnID] = featureExtractionJoinabilityUpdate{
+		RowCount:          cloneInt64Ptr(rowCount),
+		NonNullCount:      cloneInt64Ptr(nonNullCount),
+		DistinctCount:     cloneInt64Ptr(distinctCount),
+		IsJoinable:        cloneBoolPtr(isJoinable),
+		JoinabilityReason: cloneStringPtr(joinabilityReason),
+	}
 	return nil
 }
 func (m *mockSchemaRepoForFeatureExtraction) GetPrimaryKeyColumns(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error) {
@@ -991,6 +1002,14 @@ type featureExtractionColumnStatsUpdate struct {
 	NullCount     *int64
 	MinLength     *int64
 	MaxLength     *int64
+}
+
+type featureExtractionJoinabilityUpdate struct {
+	RowCount          *int64
+	NonNullCount      *int64
+	DistinctCount     *int64
+	IsJoinable        *bool
+	JoinabilityReason *string
 }
 
 type mockDatasourceServiceForFeatureExtraction struct {
@@ -1090,6 +1109,22 @@ func (m *mockSchemaDiscovererForFeatureExtraction) Close() error {
 }
 
 func cloneInt64Ptr(v *int64) *int64 {
+	if v == nil {
+		return nil
+	}
+	value := *v
+	return &value
+}
+
+func cloneBoolPtr(v *bool) *bool {
+	if v == nil {
+		return nil
+	}
+	value := *v
+	return &value
+}
+
+func cloneStringPtr(v *string) *string {
 	if v == nil {
 		return nil
 	}
@@ -1316,6 +1351,107 @@ func TestRunPhase1DataCollection_BackfillsMissingStatsAndReroutesEnums(t *testin
 	}
 	if update.NullCount == nil || *update.NullCount != 0 {
 		t.Errorf("persisted NullCount = %v, want 0", update.NullCount)
+	}
+
+	joinabilityUpdate, ok := mockRepo.updatedColumnJoinability[columnID]
+	if !ok {
+		t.Fatal("UpdateColumnJoinability was not called for the backfilled column")
+	}
+	if joinabilityUpdate.RowCount == nil || *joinabilityUpdate.RowCount != rowCount {
+		t.Errorf("persisted RowCount = %v, want %d", joinabilityUpdate.RowCount, rowCount)
+	}
+	if joinabilityUpdate.NonNullCount == nil || *joinabilityUpdate.NonNullCount != rowCount {
+		t.Errorf("persisted NonNullCount = %v, want %d", joinabilityUpdate.NonNullCount, rowCount)
+	}
+	if joinabilityUpdate.DistinctCount == nil || *joinabilityUpdate.DistinctCount != 5 {
+		t.Errorf("persisted joinability DistinctCount = %v, want 5", joinabilityUpdate.DistinctCount)
+	}
+	if joinabilityUpdate.IsJoinable == nil || *joinabilityUpdate.IsJoinable {
+		t.Errorf("persisted IsJoinable = %v, want false", joinabilityUpdate.IsJoinable)
+	}
+	if joinabilityUpdate.JoinabilityReason == nil || *joinabilityUpdate.JoinabilityReason != models.JoinabilityLowCardinality {
+		t.Errorf("persisted JoinabilityReason = %v, want %s", joinabilityUpdate.JoinabilityReason, models.JoinabilityLowCardinality)
+	}
+}
+
+func TestRunPhase1DataCollection_PersistsJoinabilityWhenDistinctCountAlreadyExists(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	tableID := uuid.New()
+	columnID := uuid.New()
+	rowCount := int64(100)
+	existingDistinctCount := int64(90)
+
+	mockRepo := &mockSchemaRepoForFeatureExtraction{
+		tables: []*models.SchemaTable{
+			{
+				ID:           tableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "orders",
+				RowCount:     &rowCount,
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            columnID,
+				ProjectID:     projectID,
+				SchemaTableID: tableID,
+				ColumnName:    "user_id",
+				DataType:      "uuid",
+				DistinctCount: &existingDistinctCount,
+				IsSelected:    true,
+			},
+		},
+	}
+
+	discoverer := &mockSchemaDiscovererForFeatureExtraction{
+		columnStatsByTable: map[string][]datasource.ColumnStats{
+			"public.orders": {
+				{
+					ColumnName:    "user_id",
+					RowCount:      rowCount,
+					NonNullCount:  90,
+					DistinctCount: 90,
+				},
+			},
+		},
+	}
+
+	svc := &columnFeatureExtractionService{
+		schemaRepo:        mockRepo,
+		datasourceService: &mockDatasourceServiceForFeatureExtraction{},
+		adapterFactory: &mockAdapterFactoryForFeatureExtraction{
+			discoverer: discoverer,
+		},
+		logger: zap.NewNop(),
+	}
+
+	_, err := svc.runPhase1DataCollection(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("runPhase1DataCollection() error = %v", err)
+	}
+
+	if len(discoverer.analyzeCalls) != 1 {
+		t.Fatalf("AnalyzeColumnStats calls = %d, want 1", len(discoverer.analyzeCalls))
+	}
+
+	joinabilityUpdate, ok := mockRepo.updatedColumnJoinability[columnID]
+	if !ok {
+		t.Fatal("UpdateColumnJoinability was not called for the column with existing stats")
+	}
+	if joinabilityUpdate.RowCount == nil || *joinabilityUpdate.RowCount != rowCount {
+		t.Errorf("persisted RowCount = %v, want %d", joinabilityUpdate.RowCount, rowCount)
+	}
+	if joinabilityUpdate.NonNullCount == nil || *joinabilityUpdate.NonNullCount != 90 {
+		t.Errorf("persisted NonNullCount = %v, want 90", joinabilityUpdate.NonNullCount)
+	}
+	if joinabilityUpdate.IsJoinable == nil || !*joinabilityUpdate.IsJoinable {
+		t.Errorf("persisted IsJoinable = %v, want true", joinabilityUpdate.IsJoinable)
+	}
+	if joinabilityUpdate.JoinabilityReason == nil || *joinabilityUpdate.JoinabilityReason != models.JoinabilityUniqueValues {
+		t.Errorf("persisted JoinabilityReason = %v, want %s", joinabilityUpdate.JoinabilityReason, models.JoinabilityUniqueValues)
 	}
 }
 

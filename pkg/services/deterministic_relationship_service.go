@@ -6,9 +6,8 @@ package services
 // LLM validation for semantic accuracy.
 //
 // Migration path:
-// - DeterministicRelationshipService → LLMRelationshipDiscoveryService
-// - DiscoverFKRelationships → handled by LLMRelationshipDiscoveryService.preserveDBDeclaredFKs
-// - DiscoverPKMatchRelationships → handled by RelationshipCandidateCollector + RelationshipValidator
+// - FKDiscovery bootstrap → RelationshipBootstrapService
+// - PK-match discovery → RelationshipCandidateCollector + RelationshipValidator
 //
 // This file will be removed after validation in staging environments confirms the new
 // LLM-based approach produces better results.
@@ -544,67 +543,6 @@ func (s *deterministicRelationshipService) collectColumnStats(
 	return nil
 }
 
-// classifyJoinability determines if a column is suitable for join key consideration.
-func classifyJoinability(col *models.SchemaColumn, stats *datasource.ColumnStats, tableRowCount int64) (bool, string) {
-	// Primary keys are always joinable
-	if col.IsPrimaryKey {
-		return true, models.JoinabilityPK
-	}
-
-	// Exclude certain data types
-	baseType := normalizeTypeForJoin(col.DataType)
-	if isExcludedJoinType(baseType) {
-		return false, models.JoinabilityTypeExcluded
-	}
-
-	// Need stats for further classification
-	if stats == nil || tableRowCount == 0 {
-		return false, models.JoinabilityNoStats
-	}
-
-	// Check for unique values (potential FK target)
-	if stats.DistinctCount == stats.NonNullCount && stats.NonNullCount > 0 {
-		return true, models.JoinabilityUniqueValues
-	}
-
-	// Check for low cardinality (< 1% distinct)
-	distinctRatio := float64(stats.DistinctCount) / float64(tableRowCount)
-	if distinctRatio < 0.01 {
-		return false, models.JoinabilityLowCardinality
-	}
-
-	// Default: joinable if it has reasonable cardinality
-	return true, models.JoinabilityCardinalityOK
-}
-
-// normalizeTypeForJoin normalizes a column type for join type comparison.
-func normalizeTypeForJoin(t string) string {
-	t = strings.ToLower(t)
-	// Strip length/precision info
-	if idx := strings.Index(t, "("); idx > 0 {
-		t = t[:idx]
-	}
-	return strings.TrimSpace(t)
-}
-
-// isExcludedJoinType checks if a column type should be excluded from join consideration.
-func isExcludedJoinType(baseType string) bool {
-	excludedTypes := map[string]bool{
-		// Temporal types - dates/times don't represent relationships
-		"timestamp": true, "timestamptz": true, "date": true,
-		"time": true, "timetz": true, "interval": true,
-		// Boolean - too few values, causes false positives
-		"boolean": true, "bool": true,
-		// Binary/LOB types - not comparable
-		"bytea": true, "blob": true, "binary": true,
-		// Structured data types - not comparable
-		"json": true, "jsonb": true, "xml": true,
-		// Geometry types - spatial data not suitable for FK inference
-		"point": true, "line": true, "polygon": true, "geometry": true,
-	}
-	return excludedTypes[baseType]
-}
-
 func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback RelationshipProgressCallback) (*PKMatchDiscoveryResult, error) {
 	startTime := time.Now()
 	s.logger.Info("Starting PK-match relationship discovery")
@@ -1026,58 +964,6 @@ func isPKMatchExcludedType(col *models.SchemaColumn) bool {
 
 // NOTE: isLikelyFKColumn has been removed. Column classification is now handled by the
 // column_feature_extraction service. Columns with Purpose=identifier are treated as likely FK columns.
-
-// areTypesCompatibleForFK checks if source and target column types are compatible for FK relationships.
-// Supports exact match, UUID compatibility (text ↔ uuid ↔ varchar ↔ character varying),
-// and integer compatibility (int ↔ integer ↔ bigint ↔ smallint ↔ serial).
-func areTypesCompatibleForFK(sourceType, targetType string) bool {
-	source := strings.ToLower(sourceType)
-	target := strings.ToLower(targetType)
-
-	// Strip length/precision info (e.g., varchar(255) → varchar)
-	if idx := strings.Index(source, "("); idx > 0 {
-		source = source[:idx]
-	}
-	if idx := strings.Index(target, "("); idx > 0 {
-		target = target[:idx]
-	}
-	source = strings.TrimSpace(source)
-	target = strings.TrimSpace(target)
-
-	// Exact match
-	if source == target {
-		return true
-	}
-
-	// UUID compatibility: text, uuid, varchar, character varying can all store UUIDs
-	uuidTypes := map[string]bool{
-		"uuid":              true,
-		"text":              true,
-		"varchar":           true,
-		"character varying": true,
-	}
-	if uuidTypes[source] && uuidTypes[target] {
-		return true
-	}
-
-	// Integer compatibility: int, integer, bigint, smallint, serial variants
-	intTypes := map[string]bool{
-		"int":       true,
-		"int2":      true,
-		"int4":      true,
-		"int8":      true,
-		"integer":   true,
-		"bigint":    true,
-		"smallint":  true,
-		"serial":    true,
-		"bigserial": true,
-	}
-	if intTypes[source] && intTypes[target] {
-		return true
-	}
-
-	return false
-}
 
 // NOTE: isPKMatchExcludedName has been removed. Column classification is now handled by the
 // column_feature_extraction service. Columns are excluded based on their stored Purpose

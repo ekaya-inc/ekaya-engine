@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -100,37 +99,9 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 		return nil, fmt.Errorf("list columns: %w", err)
 	}
 	columnByID := make(map[uuid.UUID]*models.SchemaColumn)
-	var allColumnIDs []uuid.UUID
 	for _, c := range columns {
 		columnByID[c.ID] = c
-		allColumnIDs = append(allColumnIDs, c.ID)
 	}
-
-	// Fetch column metadata for feature analysis (if repo is available)
-	metadataByColumnID := make(map[uuid.UUID]*models.ColumnMetadata)
-	if s.columnMetadataRepo != nil && len(allColumnIDs) > 0 {
-		metadataList, err := s.columnMetadataRepo.GetBySchemaColumnIDs(ctx, allColumnIDs)
-		if err != nil {
-			s.logger.Warn("Failed to fetch column metadata, continuing without ColumnFeatures FKs",
-				zap.Error(err))
-		} else {
-			for _, meta := range metadataList {
-				metadataByColumnID[meta.SchemaColumnID] = meta
-			}
-		}
-	}
-
-	// Get schema discoverer for join analysis
-	ds, err := s.datasourceService.Get(ctx, projectID, datasourceID)
-	if err != nil {
-		return nil, fmt.Errorf("get datasource: %w", err)
-	}
-
-	discoverer, err := s.adapterFactory.NewSchemaDiscoverer(ctx, ds.DatasourceType, ds.Config, projectID, datasourceID, "")
-	if err != nil {
-		return nil, fmt.Errorf("create schema discoverer: %w", err)
-	}
-	defer discoverer.Close()
 
 	// Phase 1: Count existing DB-declared FK relationships (these are already stored in schema_relationships)
 	// DB-declared FKs are created by schema sync (inference_method = 'fk'), not this service.
@@ -148,19 +119,19 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 		zap.Int("count", result.PreservedDBFKs),
 		zap.String("project_id", projectID.String()))
 
-	// Phase 2: Process ColumnFeatures FK relationships with high confidence
+	// Phase 2: Count existing ColumnFeatures relationships created during FKDiscovery.
 	if progressCallback != nil {
-		progressCallback(0, 1, "Processing ColumnFeatures FKs")
+		progressCallback(0, 1, "Loading ColumnFeatures FKs")
 	}
 
-	preservedColumnFKs, err := s.preserveColumnFeaturesFKs(ctx, projectID, columns, tableByID, tableByName, columnByID, metadataByColumnID, discoverer)
+	existingColumnFeatureFKs, err := s.schemaRepo.GetRelationshipsByMethod(ctx, projectID, datasourceID, models.InferenceMethodColumnFeatures)
 	if err != nil {
-		return nil, fmt.Errorf("preserve ColumnFeatures FKs: %w", err)
+		return nil, fmt.Errorf("get existing ColumnFeatures FKs: %w", err)
 	}
-	result.PreservedColumnFKs = preservedColumnFKs
+	result.PreservedColumnFKs = len(existingColumnFeatureFKs)
 
-	s.logger.Info("Preserved ColumnFeatures FK relationships",
-		zap.Int("count", preservedColumnFKs),
+	s.logger.Info("Loaded existing ColumnFeatures FK relationships",
+		zap.Int("count", result.PreservedColumnFKs),
 		zap.String("project_id", projectID.String()))
 
 	// Phase 3: Collect inference candidates for remaining potential relationships
@@ -288,135 +259,6 @@ func (s *llmRelationshipDiscoveryService) buildExistingSchemaRelationshipSet(
 		set[key] = true
 	}
 	return set
-}
-
-// preserveColumnFeaturesFKs creates SchemaRelationship records for columns where Phase 4
-// (ColumnFeatureExtraction) already resolved FK targets with high confidence.
-// Writes to engine_schema_relationships (not engine_entity_relationships).
-func (s *llmRelationshipDiscoveryService) preserveColumnFeaturesFKs(
-	ctx context.Context,
-	projectID uuid.UUID,
-	columns []*models.SchemaColumn,
-	tableByID map[uuid.UUID]*models.SchemaTable,
-	tableByName map[string]*models.SchemaTable,
-	_ map[uuid.UUID]*models.SchemaColumn, // columnByID - unused, columns searched via iteration
-	metadataByColumnID map[uuid.UUID]*models.ColumnMetadata,
-	discoverer datasource.SchemaDiscoverer,
-) (int, error) {
-	// Find columns with pre-resolved FK targets from ColumnFeatureExtraction (now in ColumnMetadata)
-	type fkColumn struct {
-		col        *models.SchemaColumn
-		idFeatures *models.IdentifierFeatures
-	}
-	var fkColumns []fkColumn
-	for _, col := range columns {
-		meta := metadataByColumnID[col.ID]
-		if meta == nil {
-			continue
-		}
-		idFeatures := meta.GetIdentifierFeatures()
-		if idFeatures == nil {
-			continue
-		}
-		// Only use high-confidence FK resolutions (>= 0.8)
-		if idFeatures.FKTargetTable == "" || idFeatures.FKConfidence < 0.8 {
-			continue
-		}
-		fkColumns = append(fkColumns, fkColumn{col: col, idFeatures: idFeatures})
-	}
-
-	var createdCount int
-	for _, fk := range fkColumns {
-		col := fk.col
-		idFeatures := fk.idFeatures
-
-		// Get source table
-		sourceTable := tableByID[col.SchemaTableID]
-		if sourceTable == nil {
-			continue
-		}
-
-		// Resolve target table
-		targetTableKey := idFeatures.FKTargetTable
-		if !strings.Contains(targetTableKey, ".") {
-			// Assume same schema as source if not specified
-			targetTableKey = fmt.Sprintf("%s.%s", sourceTable.SchemaName, idFeatures.FKTargetTable)
-		}
-
-		targetTable := tableByName[targetTableKey]
-		if targetTable == nil {
-			// Try without schema
-			targetTable = tableByName[idFeatures.FKTargetTable]
-		}
-		if targetTable == nil {
-			continue
-		}
-
-		// Find target column
-		targetColName := idFeatures.FKTargetColumn
-		if targetColName == "" {
-			targetColName = "id" // Default convention
-		}
-
-		var targetCol *models.SchemaColumn
-		for _, c := range columns {
-			if c.SchemaTableID == targetTable.ID && c.ColumnName == targetColName {
-				targetCol = c
-				break
-			}
-		}
-		if targetCol == nil {
-			continue
-		}
-
-		// Compute cardinality from schema constraints + join statistics
-		cardinality := models.CardinalityNTo1
-		joinResult, err := discoverer.AnalyzeJoin(ctx,
-			sourceTable.SchemaName, sourceTable.TableName, col.ColumnName,
-			targetTable.SchemaName, targetTable.TableName, targetCol.ColumnName)
-		if err == nil {
-			cardinality = InferCardinality(col.IsPrimaryKey, col.IsUnique, joinResult)
-		}
-
-		inferenceMethod := models.InferenceMethodColumnFeatures
-		rel := &models.SchemaRelationship{
-			ProjectID:        projectID,
-			SourceTableID:    sourceTable.ID,
-			SourceColumnID:   col.ID,
-			TargetTableID:    targetTable.ID,
-			TargetColumnID:   targetCol.ID,
-			RelationshipType: models.RelationshipTypeInferred,
-			Cardinality:      cardinality,
-			Confidence:       idFeatures.FKConfidence,
-			InferenceMethod:  &inferenceMethod,
-			IsValidated:      true,
-		}
-
-		// Build metrics for upsert
-		var sourceDistinct, targetDistinct int64
-		if col.DistinctCount != nil {
-			sourceDistinct = *col.DistinctCount
-		}
-		if targetCol.DistinctCount != nil {
-			targetDistinct = *targetCol.DistinctCount
-		}
-		metrics := &models.DiscoveryMetrics{
-			MatchRate:      idFeatures.FKConfidence,
-			SourceDistinct: sourceDistinct,
-			TargetDistinct: targetDistinct,
-		}
-
-		if err := s.schemaRepo.UpsertRelationshipWithMetrics(ctx, rel, metrics); err != nil {
-			s.logger.Warn("Failed to create ColumnFeatures FK relationship",
-				zap.String("source", fmt.Sprintf("%s.%s", sourceTable.TableName, col.ColumnName)),
-				zap.String("target", fmt.Sprintf("%s.%s", targetTable.TableName, targetCol.ColumnName)),
-				zap.Error(err))
-			continue
-		}
-		createdCount++
-	}
-
-	return createdCount, nil
 }
 
 // createSchemaRelationshipFromValidation creates a SchemaRelationship from a validated candidate.

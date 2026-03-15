@@ -309,8 +309,8 @@ func (s *columnFeatureExtractionService) runPhase1DataCollection(
 		phase2Queue = append(phase2Queue, col.ID)
 	}
 
-	if err := s.hydrateMissingProfileStats(ctx, projectID, datasourceID, columns, tableByID, profiles); err != nil {
-		return nil, fmt.Errorf("hydrate missing column stats: %w", err)
+	if err := s.refreshColumnDiscoveryStats(ctx, projectID, datasourceID, columns, tableByID, profiles); err != nil {
+		return nil, fmt.Errorf("refresh column discovery stats: %w", err)
 	}
 
 	if progressCallback != nil {
@@ -388,7 +388,7 @@ func (s *columnFeatureExtractionService) buildColumnProfile(
 	return profile
 }
 
-func (s *columnFeatureExtractionService) hydrateMissingProfileStats(
+func (s *columnFeatureExtractionService) refreshColumnDiscoveryStats(
 	ctx context.Context,
 	projectID, datasourceID uuid.UUID,
 	columns []*models.SchemaColumn,
@@ -401,12 +401,7 @@ func (s *columnFeatureExtractionService) hydrateMissingProfileStats(
 
 	columnsByTableID := make(map[uuid.UUID][]*models.SchemaColumn)
 	for _, col := range columns {
-		if col.DistinctCount == nil {
-			columnsByTableID[col.SchemaTableID] = append(columnsByTableID[col.SchemaTableID], col)
-		}
-	}
-	if len(columnsByTableID) == 0 {
-		return nil
+		columnsByTableID[col.SchemaTableID] = append(columnsByTableID[col.SchemaTableID], col)
 	}
 
 	profileByColumnID := make(map[uuid.UUID]*models.ColumnDataProfile, len(profiles))
@@ -464,6 +459,17 @@ func (s *columnFeatureExtractionService) hydrateMissingProfileStats(
 			nullCount := nullCountFromColumnStats(stat)
 			if err := s.schemaRepo.UpdateColumnStats(ctx, col.ID, &distinctCount, &nullCount, stat.MinLength, stat.MaxLength); err != nil {
 				return fmt.Errorf("update column stats for %s.%s.%s: %w", table.SchemaName, table.TableName, col.ColumnName, err)
+			}
+
+			tableRowCount := stat.RowCount
+			if tableRowCount == 0 && table.RowCount != nil {
+				tableRowCount = *table.RowCount
+			}
+			isJoinable, reason := classifyJoinability(col, &stat, tableRowCount)
+			rowCount := stat.RowCount
+			nonNullCount := stat.NonNullCount
+			if err := s.schemaRepo.UpdateColumnJoinability(ctx, col.ID, &rowCount, &nonNullCount, &distinctCount, &isJoinable, &reason); err != nil {
+				return fmt.Errorf("update column joinability for %s.%s.%s: %w", table.SchemaName, table.TableName, col.ColumnName, err)
 			}
 		}
 	}

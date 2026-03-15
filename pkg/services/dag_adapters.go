@@ -12,23 +12,18 @@ import (
 // This allows the dag package to remain independent of the services package,
 // avoiding import cycles.
 
-// FKDiscoveryAdapter adapts DeterministicRelationshipService for FK discovery.
+// FKDiscoveryAdapter adapts RelationshipBootstrapService for FK discovery.
 type FKDiscoveryAdapter struct {
-	svc DeterministicRelationshipService
+	svc RelationshipBootstrapService
 }
 
 // NewFKDiscoveryAdapter creates a new adapter.
-func NewFKDiscoveryAdapter(svc DeterministicRelationshipService) dag.FKDiscoveryMethods {
+func NewFKDiscoveryAdapter(svc RelationshipBootstrapService) dag.FKDiscoveryMethods {
 	return &FKDiscoveryAdapter{svc: svc}
 }
 
 func (a *FKDiscoveryAdapter) DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback dag.ProgressCallback) (*dag.FKDiscoveryResult, error) {
-	// Convert dag.ProgressCallback to services.RelationshipProgressCallback
-	var svcCallback RelationshipProgressCallback
-	if progressCallback != nil {
-		svcCallback = RelationshipProgressCallback(progressCallback)
-	}
-	result, err := a.svc.DiscoverFKRelationships(ctx, projectID, datasourceID, svcCallback)
+	result, err := a.svc.Bootstrap(ctx, projectID, datasourceID, progressCallback)
 	if err != nil {
 		return nil, err
 	}

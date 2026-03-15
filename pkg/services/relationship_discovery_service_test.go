@@ -322,9 +322,10 @@ func (m *mockRelDiscoveryValidator) ValidateCandidates(ctx context.Context, proj
 
 var _ RelationshipValidator = (*mockRelDiscoveryValidator)(nil)
 
-// TestRelationshipDiscoveryService_ColumnFeaturesFKPreserved tests that columns with
-// ColumnFeatures containing fk_target_table are preserved without LLM validation.
-func TestRelationshipDiscoveryService_ColumnFeaturesFKPreserved(t *testing.T) {
+// TestRelationshipDiscoveryService_ExistingColumnFeaturesFKsCountedWithoutRecreation tests
+// that late discovery reads existing column_features relationships instead of materializing
+// them again from column metadata.
+func TestRelationshipDiscoveryService_ExistingColumnFeaturesFKsCountedWithoutRecreation(t *testing.T) {
 	logger := zap.NewNop()
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -356,13 +357,27 @@ func TestRelationshipDiscoveryService_ColumnFeaturesFKPreserved(t *testing.T) {
 	}
 
 	// Mock repos and services
+	columnFeaturesMethod := models.InferenceMethodColumnFeatures
 	mockSchemaRepo := &mockSchemaRepoForRelDiscovery{
 		tables: []*models.SchemaTable{
 			{ID: ordersTableID, SchemaName: "public", TableName: "orders"},
 			{ID: usersTableID, SchemaName: "public", TableName: "users"},
 		},
-		columns:       []*models.SchemaColumn{paymentUserIDCol, usersPKCol},
-		relationships: []*models.SchemaRelationship{}, // No DB-declared FKs
+		columns: []*models.SchemaColumn{paymentUserIDCol, usersPKCol},
+		relationships: []*models.SchemaRelationship{
+			{
+				ID:              uuid.New(),
+				ProjectID:       projectID,
+				SourceTableID:   ordersTableID,
+				SourceColumnID:  paymentUserIDCol.ID,
+				TargetTableID:   usersTableID,
+				TargetColumnID:  usersPKCol.ID,
+				Cardinality:     models.CardinalityNTo1,
+				Confidence:      0.95,
+				InferenceMethod: &columnFeaturesMethod,
+				IsValidated:     true,
+			},
+		},
 	}
 
 	mockDatasourceSvc := &mockDatasourceServiceForRelDiscovery{
@@ -439,10 +454,11 @@ func TestRelationshipDiscoveryService_ColumnFeaturesFKPreserved(t *testing.T) {
 
 	assert.Empty(t, llmCalls, "no LLM calls should be made for ColumnFeatures FK with high confidence")
 
-	// Verify the relationship was created from ColumnFeatures
+	// Verify late discovery counted the existing relationship and did not recreate it.
+	assert.Empty(t, mockSchemaRepo.createdRels, "late discovery should not recreate column_features relationships")
 	assert.Equal(t, 1, result.PreservedColumnFKs, "should have 1 preserved ColumnFeatures FK")
 	assert.Equal(t, 0, result.CandidatesEvaluated, "no candidates should be evaluated (FK was pre-resolved)")
-	assert.Equal(t, models.InferenceMethodFK, mockSchemaRepo.requestedMethod, "DB FK lookup should use the canonical fk inference method")
+	assert.Equal(t, []string{models.InferenceMethodFK, models.InferenceMethodColumnFeatures}, mockSchemaRepo.requestedMethods)
 }
 
 // TestRelationshipDiscoveryService_UUIDTextToUUIDPK_LLMValidates tests that text columns
@@ -864,11 +880,11 @@ func TestRelationshipDiscoveryService_VerifyLLMCallsSlice(t *testing.T) {
 
 type mockSchemaRepoForRelDiscovery struct {
 	repositories.SchemaRepository
-	tables          []*models.SchemaTable
-	columns         []*models.SchemaColumn
-	relationships   []*models.SchemaRelationship
-	createdRels     []*models.SchemaRelationship // Track relationships created via UpsertRelationshipWithMetrics
-	requestedMethod string
+	tables           []*models.SchemaTable
+	columns          []*models.SchemaColumn
+	relationships    []*models.SchemaRelationship
+	createdRels      []*models.SchemaRelationship // Track relationships created via UpsertRelationshipWithMetrics
+	requestedMethods []string
 }
 
 func (m *mockSchemaRepoForRelDiscovery) ListTablesByDatasource(_ context.Context, _, _ uuid.UUID) ([]*models.SchemaTable, error) {
@@ -888,12 +904,11 @@ func (m *mockSchemaRepoForRelDiscovery) ListRelationshipsByDatasource(_ context.
 }
 
 func (m *mockSchemaRepoForRelDiscovery) GetRelationshipsByMethod(_ context.Context, _, _ uuid.UUID, method string) ([]*models.SchemaRelationship, error) {
-	m.requestedMethod = method
+	m.requestedMethods = append(m.requestedMethods, method)
 
-	// Return DB FKs from relationships slice (filter by method='fk')
 	var result []*models.SchemaRelationship
 	for _, rel := range m.relationships {
-		if rel.InferenceMethod != nil && *rel.InferenceMethod == models.InferenceMethodFK {
+		if rel.InferenceMethod != nil && *rel.InferenceMethod == method {
 			result = append(result, rel)
 		}
 	}
