@@ -442,6 +442,7 @@ func TestRelationshipDiscoveryService_ColumnFeaturesFKPreserved(t *testing.T) {
 	// Verify the relationship was created from ColumnFeatures
 	assert.Equal(t, 1, result.PreservedColumnFKs, "should have 1 preserved ColumnFeatures FK")
 	assert.Equal(t, 0, result.CandidatesEvaluated, "no candidates should be evaluated (FK was pre-resolved)")
+	assert.Equal(t, models.InferenceMethodFK, mockSchemaRepo.requestedMethod, "DB FK lookup should use the canonical fk inference method")
 }
 
 // TestRelationshipDiscoveryService_UUIDTextToUUIDPK_LLMValidates tests that text columns
@@ -863,10 +864,11 @@ func TestRelationshipDiscoveryService_VerifyLLMCallsSlice(t *testing.T) {
 
 type mockSchemaRepoForRelDiscovery struct {
 	repositories.SchemaRepository
-	tables        []*models.SchemaTable
-	columns       []*models.SchemaColumn
-	relationships []*models.SchemaRelationship
-	createdRels   []*models.SchemaRelationship // Track relationships created via UpsertRelationshipWithMetrics
+	tables          []*models.SchemaTable
+	columns         []*models.SchemaColumn
+	relationships   []*models.SchemaRelationship
+	createdRels     []*models.SchemaRelationship // Track relationships created via UpsertRelationshipWithMetrics
+	requestedMethod string
 }
 
 func (m *mockSchemaRepoForRelDiscovery) ListTablesByDatasource(_ context.Context, _, _ uuid.UUID) ([]*models.SchemaTable, error) {
@@ -885,11 +887,13 @@ func (m *mockSchemaRepoForRelDiscovery) ListRelationshipsByDatasource(_ context.
 	return m.relationships, nil
 }
 
-func (m *mockSchemaRepoForRelDiscovery) GetRelationshipsByMethod(_ context.Context, _, _ uuid.UUID, _ string) ([]*models.SchemaRelationship, error) {
+func (m *mockSchemaRepoForRelDiscovery) GetRelationshipsByMethod(_ context.Context, _, _ uuid.UUID, method string) ([]*models.SchemaRelationship, error) {
+	m.requestedMethod = method
+
 	// Return DB FKs from relationships slice (filter by method='fk')
 	var result []*models.SchemaRelationship
 	for _, rel := range m.relationships {
-		if rel.InferenceMethod != nil && *rel.InferenceMethod == models.InferenceMethodForeignKey {
+		if rel.InferenceMethod != nil && *rel.InferenceMethod == models.InferenceMethodFK {
 			result = append(result, rel)
 		}
 	}

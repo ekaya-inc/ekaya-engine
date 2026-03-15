@@ -133,12 +133,12 @@ func (s *llmRelationshipDiscoveryService) DiscoverRelationships(
 	defer discoverer.Close()
 
 	// Phase 1: Count existing DB-declared FK relationships (these are already stored in schema_relationships)
-	// DB-declared FKs are created by schema discovery (inference_method = 'fk'), not this service.
+	// DB-declared FKs are created by schema sync (inference_method = 'fk'), not this service.
 	if progressCallback != nil {
 		progressCallback(0, 1, "Preserving DB FKs")
 	}
 
-	existingDBFKs, err := s.schemaRepo.GetRelationshipsByMethod(ctx, projectID, datasourceID, models.InferenceMethodForeignKey)
+	existingDBFKs, err := s.schemaRepo.GetRelationshipsByMethod(ctx, projectID, datasourceID, models.InferenceMethodFK)
 	if err != nil {
 		return nil, fmt.Errorf("get existing DB FKs: %w", err)
 	}

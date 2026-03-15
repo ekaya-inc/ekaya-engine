@@ -146,7 +146,7 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 	}
 
 	// Phase 2: Update existing schema FK relationships with cardinality analysis
-	// These relationships were created during schema import with inference_method='foreign_key'.
+	// These relationships were created during schema sync with inference_method='fk'.
 	// We update them with computed cardinality from join analysis.
 	schemaRels, err := s.schemaRepo.ListRelationshipsByDatasource(ctx, projectID, datasourceID)
 	if err != nil {
@@ -156,7 +156,7 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 	var schemaFKCount int
 	for i, schemaRel := range schemaRels {
 		// Only process FK relationships (skip inferred ones from Phase 1)
-		if schemaRel.InferenceMethod != nil && *schemaRel.InferenceMethod != models.InferenceMethodForeignKey {
+		if schemaRel.InferenceMethod != nil && *schemaRel.InferenceMethod != models.InferenceMethodFK {
 			continue
 		}
 

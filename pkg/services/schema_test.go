@@ -646,6 +646,15 @@ func TestSchemaService_RefreshDatasourceSchema_Success(t *testing.T) {
 	if len(repo.upsertedRelationships) != 1 {
 		t.Errorf("expected 1 relationship in repo, got %d", len(repo.upsertedRelationships))
 	}
+	if len(repo.upsertedRelationships) == 1 {
+		rel := repo.upsertedRelationships[0]
+		if rel.InferenceMethod == nil {
+			t.Fatal("expected FK relationship inference method to be set")
+		}
+		if *rel.InferenceMethod != models.InferenceMethodFK {
+			t.Errorf("expected FK inference method %q, got %q", models.InferenceMethodFK, *rel.InferenceMethod)
+		}
+	}
 }
 
 func TestSchemaService_RefreshDatasourceSchema_NoTables(t *testing.T) {

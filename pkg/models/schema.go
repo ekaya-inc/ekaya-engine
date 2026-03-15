@@ -171,7 +171,7 @@ const (
 	InferenceMethodNamingPattern  = "naming_pattern"  // Reserved: column name pattern matching (e.g., user_id -> users.id)
 	InferenceMethodValueOverlap   = "value_overlap"   // Active: statistical value overlap analysis
 	InferenceMethodTypeMatch      = "type_match"      // Reserved: type-compatible column matching
-	InferenceMethodForeignKey     = "foreign_key"     // Active: imported from database FK constraints
+	InferenceMethodFK             = "fk"              // Active: declared datasource FK imported during schema sync
 	InferenceMethodColumnFeatures = "column_features" // Active: FK derived from ColumnFeatureExtraction Phase 4
 	InferenceMethodPKMatch        = "pk_match"        // Active: FK inferred from PK-match discovery
 )

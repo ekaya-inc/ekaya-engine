@@ -446,6 +446,7 @@ func (s *schemaService) syncForeignKeys(
 
 		// Create/update relationship
 		fkType := models.RelationshipTypeFK
+		inferenceMethod := models.InferenceMethodFK
 		rel := &models.SchemaRelationship{
 			ProjectID:        projectID,
 			SourceTableID:    sourceTable.ID,
@@ -455,7 +456,7 @@ func (s *schemaService) syncForeignKeys(
 			RelationshipType: fkType,
 			Cardinality:      models.CardinalityNTo1, // FK typically represents N:1
 			Confidence:       1.0,                    // FK constraints have 100% confidence
-			InferenceMethod:  &fkType,
+			InferenceMethod:  &inferenceMethod,
 		}
 
 		if err := s.schemaRepo.UpsertRelationship(ctx, rel); err != nil {
