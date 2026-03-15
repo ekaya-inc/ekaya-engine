@@ -104,8 +104,6 @@ const (
 	DAGNodeColumnEnrichment        DAGNodeName = "ColumnEnrichment"
 	DAGNodePKMatchDiscovery        DAGNodeName = "PKMatchDiscovery"
 	DAGNodeOntologyFinalization    DAGNodeName = "OntologyFinalization"
-	DAGNodeGlossaryDiscovery       DAGNodeName = "GlossaryDiscovery"
-	DAGNodeGlossaryEnrichment      DAGNodeName = "GlossaryEnrichment"
 )
 
 // DAGNodeOrder defines the execution order for each node.

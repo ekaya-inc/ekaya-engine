@@ -25,8 +25,7 @@ func TestDAGNodes_AllNodesHaveCorrectOrder(t *testing.T) {
 
 	// NOTE: The current DAG order is designed for schema-first extraction.
 	// FKDiscovery and TableFeatureExtraction run BEFORE column enrichment.
-	// Glossary nodes (GlossaryDiscovery, GlossaryEnrichment) are not part of
-	// the main DAG — they run separately after ontology questions are answered.
+	// Glossary generation is manual and is not part of the main ontology DAG.
 	expectedOrder := []models.DAGNodeName{
 		models.DAGNodeKnowledgeSeeding,
 		models.DAGNodeColumnFeatureExtraction,
@@ -64,10 +63,6 @@ func TestNodeExecutorInterfaces_AreWellDefined(t *testing.T) {
 	// ColumnEnrichmentMethods
 	var cem dag.ColumnEnrichmentMethods = &testColumnEnrichment{}
 	assert.NotNil(t, cem)
-
-	// GlossaryDiscoveryMethods
-	var gdm dag.GlossaryDiscoveryMethods = &testGlossaryDiscovery{}
-	assert.NotNil(t, gdm)
 
 	// ColumnFeatureExtractionMethods
 	var cfm dag.ColumnFeatureExtractionMethods = &testColumnFeatureExtraction{}
@@ -156,12 +151,6 @@ type testColumnEnrichment struct{}
 
 func (t *testColumnEnrichment) EnrichProject(_ context.Context, _ uuid.UUID, _ []string, _ dag.ProgressCallback) (*dag.ColumnEnrichmentResult, error) {
 	return nil, nil
-}
-
-type testGlossaryDiscovery struct{}
-
-func (t *testGlossaryDiscovery) DiscoverGlossaryTerms(_ context.Context, _ uuid.UUID) (int, error) {
-	return 0, nil
 }
 
 type testColumnFeatureExtraction struct{}
@@ -1095,52 +1084,6 @@ func TestExecuteDAG_HeartbeatCleanupOrder(t *testing.T) {
 	// Verify heartbeat was cleaned up
 	_, exists = service.heartbeatCancel.Load(dagID)
 	assert.False(t, exists, "Heartbeat should be cleaned up after completion")
-}
-
-// ============================================================================
-// GetNodeExecutor Tests
-// ============================================================================
-
-func TestGetNodeExecutor_GlossaryDiscovery(t *testing.T) {
-	service := &ontologyDAGService{
-		dagRepo:                  &mockDAGRepository{},
-		logger:                   zap.NewNop(),
-		glossaryDiscoveryMethods: &testGlossaryDiscovery{},
-	}
-
-	nodeID := uuid.New()
-	executor, err := service.getNodeExecutor(models.DAGNodeGlossaryDiscovery, nodeID)
-
-	assert.NoError(t, err)
-	assert.NotNil(t, executor)
-	assert.IsType(t, &dag.GlossaryDiscoveryNode{}, executor)
-}
-
-func TestGetNodeExecutor_GlossaryDiscovery_NotSet(t *testing.T) {
-	service := &ontologyDAGService{
-		dagRepo: &mockDAGRepository{},
-		logger:  zap.NewNop(),
-		// glossaryDiscoveryMethods intentionally not set
-	}
-
-	nodeID := uuid.New()
-	executor, err := service.getNodeExecutor(models.DAGNodeGlossaryDiscovery, nodeID)
-
-	assert.Error(t, err)
-	assert.Nil(t, executor)
-	assert.Contains(t, err.Error(), "glossary discovery methods not set")
-}
-
-func TestSetGlossaryMethods(t *testing.T) {
-	service := &ontologyDAGService{
-		dagRepo: &mockDAGRepository{},
-		logger:  zap.NewNop(),
-	}
-
-	// Test SetGlossaryDiscoveryMethods
-	discoveryMethods := &testGlossaryDiscovery{}
-	service.SetGlossaryDiscoveryMethods(discoveryMethods)
-	assert.Equal(t, discoveryMethods, service.glossaryDiscoveryMethods)
 }
 
 // ============================================================================

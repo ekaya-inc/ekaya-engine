@@ -249,8 +249,6 @@ func Run(version string) error {
 	ontologyDAGService.SetLLMRelationshipDiscoveryMethods(services.NewLLMRelationshipDiscoveryAdapter(llmRelationshipDiscoveryService))
 	ontologyDAGService.SetFinalizationMethods(services.NewOntologyFinalizationAdapter(ontologyFinalizationService))
 	ontologyDAGService.SetColumnEnrichmentMethods(services.NewColumnEnrichmentAdapter(columnEnrichmentService))
-	ontologyDAGService.SetGlossaryDiscoveryMethods(services.NewGlossaryDiscoveryAdapter(glossaryService))
-	ontologyDAGService.SetGlossaryEnrichmentMethods(services.NewGlossaryEnrichmentAdapter(glossaryService))
 	tableFeatureExtractionSvc := services.NewTableFeatureExtractionService(
 		schemaRepo, columnMetadataRepo, tableMetadataRepo, llmFactory, llmWorkerPool, getTenantCtx, logger)
 	ontologyDAGService.SetTableFeatureExtractionMethods(tableFeatureExtractionSvc)
