@@ -243,7 +243,9 @@ func (s *columnFeatureExtractionService) runPhase1DataCollection(
 
 	tableNameByID := make(map[uuid.UUID]string, len(tables))
 	tableRowCountByID := make(map[uuid.UUID]int64, len(tables))
+	tableByID := make(map[uuid.UUID]*models.SchemaTable, len(tables))
 	for _, t := range tables {
+		tableByID[t.ID] = t
 		tableNameByID[t.ID] = t.TableName
 		if t.RowCount != nil {
 			tableRowCountByID[t.ID] = *t.RowCount
@@ -305,6 +307,10 @@ func (s *columnFeatureExtractionService) runPhase1DataCollection(
 
 		profiles = append(profiles, profile)
 		phase2Queue = append(phase2Queue, col.ID)
+	}
+
+	if err := s.hydrateMissingProfileStats(ctx, projectID, datasourceID, columns, tableByID, profiles); err != nil {
+		return nil, fmt.Errorf("hydrate missing column stats: %w", err)
 	}
 
 	if progressCallback != nil {
@@ -380,6 +386,112 @@ func (s *columnFeatureExtractionService) buildColumnProfile(
 	}
 
 	return profile
+}
+
+func (s *columnFeatureExtractionService) hydrateMissingProfileStats(
+	ctx context.Context,
+	projectID, datasourceID uuid.UUID,
+	columns []*models.SchemaColumn,
+	tableByID map[uuid.UUID]*models.SchemaTable,
+	profiles []*models.ColumnDataProfile,
+) error {
+	if s.datasourceService == nil || s.adapterFactory == nil || len(columns) == 0 {
+		return nil
+	}
+
+	columnsByTableID := make(map[uuid.UUID][]*models.SchemaColumn)
+	for _, col := range columns {
+		if col.DistinctCount == nil {
+			columnsByTableID[col.SchemaTableID] = append(columnsByTableID[col.SchemaTableID], col)
+		}
+	}
+	if len(columnsByTableID) == 0 {
+		return nil
+	}
+
+	profileByColumnID := make(map[uuid.UUID]*models.ColumnDataProfile, len(profiles))
+	for _, profile := range profiles {
+		profileByColumnID[profile.ColumnID] = profile
+	}
+
+	ds, err := s.datasourceService.Get(ctx, projectID, datasourceID)
+	if err != nil {
+		return fmt.Errorf("get datasource: %w", err)
+	}
+
+	discoverer, err := s.adapterFactory.NewSchemaDiscoverer(ctx, ds.DatasourceType, ds.Config, projectID, datasourceID, "")
+	if err != nil {
+		return fmt.Errorf("create schema discoverer: %w", err)
+	}
+	defer discoverer.Close()
+
+	for tableID, tableColumns := range columnsByTableID {
+		table := tableByID[tableID]
+		if table == nil {
+			continue
+		}
+
+		columnNames := make([]string, 0, len(tableColumns))
+		for _, col := range tableColumns {
+			columnNames = append(columnNames, col.ColumnName)
+		}
+
+		stats, err := discoverer.AnalyzeColumnStats(ctx, table.SchemaName, table.TableName, columnNames)
+		if err != nil {
+			return fmt.Errorf("analyze column stats for %s.%s: %w", table.SchemaName, table.TableName, err)
+		}
+
+		statsByName := make(map[string]datasource.ColumnStats, len(stats))
+		for _, stat := range stats {
+			statsByName[stat.ColumnName] = stat
+		}
+
+		for _, col := range tableColumns {
+			stat, ok := statsByName[col.ColumnName]
+			if !ok {
+				continue
+			}
+
+			profile := profileByColumnID[col.ID]
+			if profile == nil {
+				continue
+			}
+
+			applyColumnStatsToProfile(profile, stat)
+			profile.ClassificationPath = s.routeToClassificationPath(profile)
+
+			distinctCount := stat.DistinctCount
+			nullCount := nullCountFromColumnStats(stat)
+			if err := s.schemaRepo.UpdateColumnStats(ctx, col.ID, &distinctCount, &nullCount, stat.MinLength, stat.MaxLength); err != nil {
+				return fmt.Errorf("update column stats for %s.%s.%s: %w", table.SchemaName, table.TableName, col.ColumnName, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func applyColumnStatsToProfile(profile *models.ColumnDataProfile, stat datasource.ColumnStats) {
+	profile.RowCount = stat.RowCount
+	profile.DistinctCount = stat.DistinctCount
+	profile.NullCount = nullCountFromColumnStats(stat)
+	profile.NullRate = 0
+	if profile.RowCount > 0 {
+		profile.NullRate = float64(profile.NullCount) / float64(profile.RowCount)
+	}
+	profile.Cardinality = 0
+	if profile.RowCount > 0 && profile.DistinctCount > 0 {
+		profile.Cardinality = float64(profile.DistinctCount) / float64(profile.RowCount)
+	}
+	profile.MinLength = stat.MinLength
+	profile.MaxLength = stat.MaxLength
+}
+
+func nullCountFromColumnStats(stat datasource.ColumnStats) int64 {
+	if stat.NonNullCount >= stat.RowCount {
+		return 0
+	}
+	return stat.RowCount - stat.NonNullCount
 }
 
 // detectPatternsInSamples runs regex patterns against sample values to detect data formats.
@@ -630,6 +742,10 @@ func (s *columnFeatureExtractionService) runPhase2ColumnClassification(
 		return nil, fmt.Errorf("phase 2 requires LLM support: use NewColumnFeatureExtractionServiceWithLLM constructor")
 	}
 
+	if err := s.hydrateEnumSampleValues(ctx, projectID, profiles); err != nil {
+		return nil, fmt.Errorf("hydrate enum sample values: %w", err)
+	}
+
 	// Report initial progress
 	if progressCallback != nil {
 		progressCallback(0, len(profiles), "Classifying columns")
@@ -727,6 +843,71 @@ func (s *columnFeatureExtractionService) runPhase2ColumnClassification(
 		return result, fmt.Errorf("column classification: %w", err)
 	}
 	return result, nil
+}
+
+func (s *columnFeatureExtractionService) hydrateEnumSampleValues(
+	ctx context.Context,
+	projectID uuid.UUID,
+	profiles []*models.ColumnDataProfile,
+) error {
+	if s.schemaRepo == nil || s.datasourceService == nil || s.adapterFactory == nil {
+		return nil
+	}
+
+	enumProfiles := make([]*models.ColumnDataProfile, 0)
+	for _, profile := range profiles {
+		if profile.ClassificationPath == models.ClassificationPathEnum &&
+			len(profile.SchemaEnumValues) == 0 &&
+			len(profile.SampleValues) == 0 {
+			enumProfiles = append(enumProfiles, profile)
+		}
+	}
+	if len(enumProfiles) == 0 {
+		return nil
+	}
+
+	firstTable, err := s.schemaRepo.GetTableByID(ctx, projectID, enumProfiles[0].TableID)
+	if err != nil {
+		return fmt.Errorf("get table for enum sampling: %w", err)
+	}
+	if firstTable == nil {
+		return fmt.Errorf("get table for enum sampling: table %s not found", enumProfiles[0].TableID)
+	}
+
+	ds, err := s.datasourceService.Get(ctx, projectID, firstTable.DatasourceID)
+	if err != nil {
+		return fmt.Errorf("get datasource: %w", err)
+	}
+
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, firstTable.DatasourceID)
+	if err != nil {
+		return fmt.Errorf("list tables: %w", err)
+	}
+	tableByID := make(map[uuid.UUID]*models.SchemaTable, len(tables))
+	for _, table := range tables {
+		tableByID[table.ID] = table
+	}
+
+	discoverer, err := s.adapterFactory.NewSchemaDiscoverer(ctx, ds.DatasourceType, ds.Config, projectID, firstTable.DatasourceID, "")
+	if err != nil {
+		return fmt.Errorf("create schema discoverer: %w", err)
+	}
+	defer discoverer.Close()
+
+	for _, profile := range enumProfiles {
+		table := tableByID[profile.TableID]
+		if table == nil {
+			return fmt.Errorf("table %s not found for enum sampling", profile.TableID)
+		}
+
+		values, err := discoverer.GetDistinctValues(ctx, table.SchemaName, table.TableName, profile.ColumnName, 50)
+		if err != nil {
+			return fmt.Errorf("get distinct values for %s.%s.%s: %w", table.SchemaName, table.TableName, profile.ColumnName, err)
+		}
+		profile.SampleValues = values
+	}
+
+	return nil
 }
 
 // createQuestionsFromUncertainClassifications collects questions from columns where the
