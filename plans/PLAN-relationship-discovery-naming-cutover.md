@@ -1,6 +1,6 @@
 # PLAN: Relationship Discovery Naming Cutover
 
-**Status:** DRAFT
+**Status:** COMPLETED
 **Date:** 2026-03-15
 **Parent:** `MASTER-PLAN-relationship-extraction-cleanup.md`
 
@@ -86,6 +86,17 @@ That cutover would need to update:
 
 This plan intentionally does not prescribe the exact migration mechanism until approval is given.
 
+## Completion Summary
+
+This plan is complete.
+
+Completed work:
+
+- renamed the late DAG stage to `RelationshipDiscovery` across backend and frontend contracts
+- renamed the LLM-inferred relationship method from `pk_match` to `relationship_discovery`
+- applied a one-time local metadata cutover for existing `engine_dag_nodes` and `engine_schema_relationships` rows after explicit approval
+- removed the duplicate runtime names so the codebase no longer exposes `PKMatchDiscovery` or `pk_match` as active contracts
+
 ## File Targets
 
 Primary files expected to change if this plan is approved:
@@ -102,10 +113,10 @@ Primary files expected to change if this plan is approved:
 
 ## Checklist
 
-- [ ] Rename the late DAG stage to `RelationshipDiscovery` across backend and frontend contracts
-- [ ] Rename the LLM-inferred relationship method from `pk_match` to a clearer canonical name
-- [ ] Apply a single stored-metadata cutover if and only if Damond explicitly approves it
-- [ ] Remove any remaining duplicate runtime names after the cutover
+- [x] Rename the late DAG stage to `RelationshipDiscovery` across backend and frontend contracts
+- [x] Rename the LLM-inferred relationship method from `pk_match` to a clearer canonical name
+- [x] Apply a single stored-metadata cutover if and only if Damond explicitly approves it
+- [x] Remove any remaining duplicate runtime names after the cutover
 
 ## Expected Automated Checks
 

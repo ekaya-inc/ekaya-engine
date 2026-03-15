@@ -1,6 +1,6 @@
 # MASTER PLAN: Relationship Extraction Cleanup
 
-**Status:** DRAFT
+**Status:** COMPLETED
 **Date:** 2026-03-15
 
 ## Context
@@ -85,6 +85,19 @@ This is intentionally separate. Renaming `PKMatchDiscovery` and `pk_match` to cl
 3. Implement `PLAN-legacy-pkmatch-removal.md`
 4. Only then decide whether to implement `PLAN-relationship-discovery-naming-cutover.md`
 
+## Completion Summary
+
+This master plan is complete.
+
+Implemented child plans:
+
+1. `PLAN-relationship-contract-alignment.md`
+2. `PLAN-relationship-bootstrap-extraction.md`
+3. `PLAN-legacy-pkmatch-removal.md`
+4. `PLAN-relationship-discovery-naming-cutover.md`
+
+The naming cutover remained intentionally separate until explicit approval was given because it changed persisted labels. That approval was later given, and the cutover was completed as a follow-on step.
+
 ## Key Decisions
 
 - Do not delete `deterministic_relationship_service.go` first. It still owns active bootstrap behavior and stat persistence.
@@ -93,4 +106,4 @@ This is intentionally separate. Renaming `PKMatchDiscovery` and `pk_match` to cl
 
 ## Approval Gate
 
-If Damond wants the system to stop exposing `PKMatchDiscovery` and `pk_match` entirely, the implementation will need an explicit decision about stored historical metadata. That is intentionally separated into the optional naming-cutover plan so the cleanup can proceed safely without forcing a data rewrite.
+Damond approved the stored-metadata decision for the naming cutover, and the system no longer exposes `PKMatchDiscovery` or `pk_match` as active contracts.
