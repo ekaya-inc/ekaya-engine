@@ -18,17 +18,34 @@ This is intentionally a deterministic substitute for vector retrieval. The desig
 
 ## Core Design
 
-The tag system is no longer "LLM-generated tags." The LLM is used only to break freeform project knowledge input into individual facts. Tag assignment is deterministic.
+The tag system is no longer "LLM-generated tags." The LLM is used only to break freeform project knowledge input into individual facts and optionally emit coarse `fact_type` values. Tag assignment is deterministic and code-owned.
 
-### Write-Time Flow: Project Knowledge Upsert
+### Write-Time Flow: Project Knowledge Writes
 
-When project knowledge is added or updated:
+There are two distinct write behaviors:
+
+**A. New project-knowledge entry (freeform create/upsert)**
 
 1. Accept freeform input from the user, MCP tool, or any internal write path
-2. Run an internal LLM call that rewrites the input into one or more atomic facts
-3. Run each atomic fact through deterministic classifiers
-4. Assign zero or more tags from a pre-created tag taxonomy
-5. Persist the atomic facts and their tags into `engine_project_knowledge`
+2. Run an internal LLM call that rewrites the input into one or more atomic facts plus a coarse `fact_type` for each fact
+3. Normalize the emitted `fact_type` values to the accepted model categories
+4. Run each atomic fact through deterministic classifiers
+5. Assign zero or more tags from a pre-created tag taxonomy
+6. Persist the atomic facts, their `fact_type`, and their tags into `engine_project_knowledge`
+
+**B. Existing project-knowledge fact update by ID**
+
+1. Load the existing fact row by ID
+2. Update that exact fact row as specified by the caller
+3. Re-run deterministic tagging for the updated row
+4. Persist the updated row with its revised tags
+
+Updating by ID does **not** fan out into multiple rows. If a caller wants to add more facts, that should happen as new project-knowledge creates, not as a multi-row expansion of an existing fact ID.
+
+`project_overview` is a special singleton control record:
+- it is stored as `fact_type = project_overview`
+- it is not split into atomic facts
+- it is not treated as a normal retrievable project-knowledge fact
 
 Example:
 
@@ -43,9 +60,9 @@ Then deterministic classifiers tag them, for example:
 - `Fiscal year ends on June 30` -> `fiscal`, `temporal`
 - `X is calculated using a trailing four quarter average` -> `calculation`, `aggregation`, `fiscal`, `metric`
 
-### Read-Time Flow: Every LLM Request
+### Read-Time Flow: Eligible LLM Requests
 
-Before any LLM call:
+Before any LLM call that analyzes customer schema/content or generates ontology, glossary, SQL, or other business-facing output:
 
 1. Collect the incoming text relevant to the request
 2. Run that text through the same deterministic classifiers
@@ -58,7 +75,9 @@ The same mechanism should be used for:
 - glossary generation and enrichment
 - future Text2SQL requests
 
-The important property is consistency: every LLM request should have a defined project-knowledge retrieval step, even if that step returns no facts.
+Control-plane LLM requests that exist only to maintain project knowledge itself, such as fact extraction for new project-knowledge writes, are exempt.
+
+The important property is consistency: every eligible LLM request should have a defined project-knowledge retrieval step, even if that step returns no facts.
 
 ## Design Principles
 
@@ -83,21 +102,48 @@ The important property is consistency: every LLM request should have a defined p
    - We should not dump all project knowledge into every prompt
    - Retrieval must remain selective and deterministic
 
-6. **Universal request-time integration**
+6. **Universal request-time integration for product-plane LLM calls**
    - This is infrastructure, not a few ad hoc prompt edits
-   - Any code path that calls the LLM should be able to invoke the same retrieval mechanism
+   - Any LLM code path that analyzes project data or generates ontology/glossary/SQL should be able to invoke the same retrieval mechanism
+   - Pure control-plane maintenance calls may opt out
+
+7. **Keep coarse `fact_type`**
+   - `fact_type` remains on stored rows as a coarse category
+   - tags supplement `fact_type`; they do not replace it
+   - the fact-extraction LLM may emit `fact_type`, but code normalizes it to accepted values
+
+8. **Special-case `project_overview`**
+   - `project_overview` remains a singleton control record
+   - it is not split into atomic facts
+   - it is excluded from normal retrieval unless a caller explicitly asks for it
+
+9. **Canonical orchestration path**
+   - All project-knowledge writes should route through one canonical project-knowledge service flow
+   - Handlers, MCP tools, ontology flows, and other callers should not each implement their own extraction/tagging logic
+   - Repositories remain focused on metadata-store SQL and persistence
 
 ## Current State
 
 Project knowledge is stored in `engine_project_knowledge`, but there is no shared mechanism that guarantees relevant facts are pulled into later prompts.
 
+Today:
+- some write paths accept caller-provided `fact_type`
+- some write paths use LLM output and then map that output into a stored `fact_type`
+- some read paths inject **all** project knowledge into prompts via `GetByProject`
+- some knowledge writes bypass a single canonical orchestration path and write directly through the repository
+
 Relevant existing areas:
+- `pkg/handlers/knowledge_handler.go`
 - `pkg/models/ontology_chat.go`
 - `pkg/repositories/knowledge_repository.go`
 - `pkg/services/knowledge.go`
+- `pkg/services/knowledge_parsing.go`
 - `pkg/services/knowledge_seeding.go`
+- `pkg/services/ontology_dag_service.go`
+- `pkg/services/ontology_question.go`
 - `pkg/services/incremental_dag_prompts.go`
 - `pkg/services/glossary_service.go`
+- `pkg/services/fk_semantic_evaluation.go`
 
 ## Proposed Architecture
 
@@ -106,15 +152,28 @@ Relevant existing areas:
 **Goal:** Store project knowledge as reusable facts, not as large undifferentiated blocks of prose.
 
 Requirements:
-- Freeform project knowledge input can yield multiple stored facts
+- Freeform project knowledge creation/upsert can yield multiple stored facts
 - Fact extraction uses an internal LLM call
-- The LLM output format should be tightly constrained: an array of fact strings plus optional normalized wording
+- The LLM output format should be tightly constrained: an array of `{fact_type, value, context?}` objects
+- The emitted `fact_type` is coarse and must be normalized to accepted model values before persistence
 - Facts should preserve provenance and source context
+- Updating an existing fact by ID edits one stored fact row and does not fan out into multiple rows
+- `project_overview` is exempt and remains a singleton special record
 
 Non-goal:
 - The LLM does not assign tags
 
-### 2. Deterministic Tag Taxonomy
+### 2. Keep `fact_type` and Tags Alongside It
+
+We should keep the existing `fact_type` column because it already provides coarse categorization and supports special control semantics such as `project_overview`.
+
+Requirements:
+- `fact_type` remains stored on each normal knowledge row
+- Tags are additional internal retrieval metadata, not a replacement for `fact_type`
+- Prompt formatting, APIs, and debugging tools may continue to group by `fact_type` when useful
+- `project_overview` remains a special `fact_type` outside normal atomic retrieval
+
+### 3. Deterministic Tag Taxonomy
 
 We need a finite, pre-created set of tags that classifier functions can assign consistently.
 
@@ -157,7 +216,7 @@ The taxonomy should start broad and practical rather than perfect. Candidate ini
 
 This taxonomy is internal and can evolve, but only through code changes and tests. It should not be open-ended or user-defined.
 
-### 3. Deterministic Classifiers
+### 4. Deterministic Classifiers
 
 We need classifier functions that map text to zero or more tags using deterministic rules.
 
@@ -183,9 +242,9 @@ Example classifier rules:
 - `business_rule`: phrases like `must`, `should`, `cannot`, `only`, `required`, `never`
 - `terminology`: phrases like `means`, `refers to`, `we call`, `is called`, `aka`
 
-### 4. Shared Retrieval Contract for LLM Calls
+### 5. Shared Retrieval Contract for LLM Calls
 
-Any LLM call path should be able to invoke the same project-knowledge retrieval layer.
+Any eligible LLM call path should be able to invoke the same project-knowledge retrieval layer.
 
 Example shape:
 
@@ -202,12 +261,13 @@ Expected behavior:
 - classify `InputTexts` into retrieval tags
 - union those tags with request-kind defaults and `ExplicitTags`
 - fetch matching project knowledge facts
+- exclude special control records such as `project_overview` by default
 - format them into a consistent `## Relevant Project Knowledge` section
 - return empty content when no facts match
 
 This mechanism should be invoked before the final prompt is sent to the LLM.
 
-### 5. Retrieval Budgeting and Ranking
+### 6. Retrieval Budgeting and Ranking
 
 Tag overlap alone may return too many facts for broad tags.
 
@@ -220,7 +280,7 @@ We need deterministic selection rules so we do not send all matching project kno
 
 The ranking can stay simple, but it must be deterministic.
 
-### 6. Observability for Misses
+### 7. Observability for Misses
 
 Because false negatives are dangerous, this system needs feedback loops:
 - log facts that receive zero tags at write time
@@ -238,7 +298,9 @@ Use project-knowledge retrieval for all ontology LLM requests that need business
 - column feature extraction
 - entity discovery
 - relationship enrichment
+- FK semantic evaluation / relationship-discovery prompts
 - ontology refinement or clarification prompts
+- ontology question-answer processing when stored business context is relevant
 - any later ontology-question-related prompt that benefits from business rules or terminology
 
 Examples:
@@ -273,88 +335,105 @@ Project knowledge retrieval should happen before SQL generation so that relevant
 
 All project-knowledge write paths must use the same fact-extraction and deterministic-tagging flow:
 - manual UI edits
+- HTTP create/update/parse endpoints
 - MCP tool upserts
 - internal seeding flows
+- ontology-question answer processing
 - any future API write path
 
-No write path should be able to create a new project-knowledge fact without routing through the canonical extraction/tagging pipeline.
+`project_overview` is the one explicit exception: it remains a singleton special record and does not use the normal fact-splitting retrieval flow.
+
+No write path should be able to create a new non-`project_overview` project-knowledge fact without routing through the canonical extraction/tagging pipeline.
 
 ## Implementation Plan
 
 ### Phase 1: Tag Taxonomy and Classifier Design
 
-1. [ ] Finalize the initial internal tag taxonomy
-2. [ ] Define deterministic classifier rules for each tag
-3. [ ] Document representative positive examples and tricky edge cases for each classifier
-4. [ ] Bias taxonomy/rules toward recall, not minimalism
-5. [ ] Decide how request-kind defaults participate in retrieval
+1. [ ] Finalize the accepted coarse `fact_type` set that remains on stored rows
+2. [ ] Define special handling for `project_overview`
+3. [ ] Finalize the initial internal tag taxonomy
+4. [ ] Define deterministic classifier rules for each tag
+5. [ ] Document representative positive examples and tricky edge cases for each classifier
+6. [ ] Bias taxonomy/rules toward recall, not minimalism
+7. [ ] Decide how request-kind defaults and control-plane exemptions participate in retrieval
 
 ### Phase 2: Storage Model and Write Path
 
-6. [ ] Add `tags` storage to `engine_project_knowledge`
-7. [ ] Update the project knowledge model to store tags
-8. [ ] Introduce a canonical project-knowledge upsert flow in `pkg/services/knowledge.go`
-9. [ ] Add the internal LLM-based fact extraction step for freeform project-knowledge input
-10. [ ] Run each extracted fact through deterministic classifiers before persistence
-11. [ ] Persist extracted facts plus tags on every write path
-12. [ ] Ensure MCP/manual/project-overview ingestion all use the canonical flow
+8. [ ] Add a migration for tag storage plus efficient deterministic tag -> fact lookup
+9. [ ] Update the project knowledge model to store tags while keeping `fact_type`
+10. [ ] Introduce a canonical project-knowledge write flow in `pkg/services/knowledge.go` or an adjacent shared service
+11. [ ] Add the internal LLM-based fact extraction step for new freeform project-knowledge creates/upserts
+12. [ ] Normalize extracted `fact_type` values before persistence
+13. [ ] Run each extracted fact through deterministic classifiers before persistence
+14. [ ] Define update-by-ID behavior: update that exact fact row and reclassify its tags without multi-row fan-out
+15. [ ] Keep `project_overview` as a singleton special record outside normal extraction/retrieval
+16. [ ] Ensure HTTP create/update/parse, MCP writes, ontology-question answer processing, seeding, and future write paths all use the canonical flow as appropriate
 
 ### Phase 3: Deterministic Retrieval Infrastructure
 
-13. [ ] Add a shared classifier package or service for classifying arbitrary text into project-knowledge tags
-14. [ ] Add a shared retrieval function for "tags -> matching facts"
-15. [ ] Add a shared `KnowledgeInjectionRequest` contract for LLM call sites
-16. [ ] Add deterministic ranking and prompt-budgeting rules for matched facts
-17. [ ] Standardize the injected prompt section format
+17. [ ] Add a shared classifier package or service for classifying arbitrary text into project-knowledge tags
+18. [ ] Add a shared retrieval function for "tags -> matching facts"
+19. [ ] Exclude special control records such as `project_overview` from normal retrieval by default
+20. [ ] Add a shared `KnowledgeInjectionRequest` contract for LLM call sites
+21. [ ] Add deterministic ranking and prompt-budgeting rules for matched facts
+22. [ ] Standardize the injected prompt section format
 
 ### Phase 4: Ontology Integration
 
-18. [ ] Integrate retrieval into ontology column feature extraction
-19. [ ] Integrate retrieval into ontology entity discovery
-20. [ ] Integrate retrieval into ontology relationship enrichment
-21. [ ] Audit remaining ontology LLM call sites and route them through the shared retrieval mechanism
+23. [ ] Integrate retrieval into ontology column feature extraction
+24. [ ] Integrate retrieval into ontology entity discovery
+25. [ ] Integrate retrieval into ontology relationship enrichment and FK semantic evaluation
+26. [ ] Integrate retrieval into ontology question-answer processing where business context is relevant
+27. [ ] Audit remaining eligible ontology/data-analysis LLM call sites and route them through the shared retrieval mechanism
 
 ### Phase 5: Glossary Integration
 
-22. [ ] Integrate retrieval into glossary term discovery
-23. [ ] Integrate retrieval into glossary enrichment
-24. [ ] Integrate retrieval into glossary SQL-definition generation
+28. [ ] Integrate retrieval into glossary term discovery
+29. [ ] Integrate retrieval into glossary enrichment
+30. [ ] Integrate retrieval into glossary SQL-definition generation
 
 ### Phase 6: Future Text2SQL Readiness
 
-25. [ ] Define the request kinds Text2SQL will use with this retrieval system
-26. [ ] Ensure Text2SQL planning assumes reuse of this infrastructure rather than a separate project-knowledge retrieval layer
+31. [ ] Define the request kinds Text2SQL will use with this retrieval system
+32. [ ] Ensure Text2SQL planning assumes reuse of this infrastructure rather than a separate project-knowledge retrieval layer
 
 ### Phase 7: MCP and Tooling
 
-27. [ ] Update `update_project_knowledge` MCP behavior so writes route through the canonical extraction/tagging path
-28. [ ] Keep internal tags hidden from normal users unless there is a deliberate debugging/admin reason to expose them
-29. [ ] Add debugging support to inspect extracted facts and assigned tags when needed
+33. [ ] Update `update_project_knowledge` MCP behavior so writes route through the canonical extraction/tagging path
+34. [ ] Keep internal tags hidden from normal users unless there is a deliberate debugging/admin reason to expose them
+35. [ ] Add debugging support to inspect extracted facts, `fact_type`, and assigned tags when needed
 
 ### Phase 8: Observability and Hardening
 
-30. [ ] Log zero-tag facts after write-time classification
-31. [ ] Log zero-tag request classifications before LLM calls
-32. [ ] Add regression fixtures for known high-value project-knowledge examples
-33. [ ] Add regression fixtures for request-time retrieval examples across ontology and glossary
-34. [ ] Tune taxonomy and classifiers based on misses before expanding scope
+36. [ ] Log zero-tag facts after write-time classification
+37. [ ] Log zero-tag request classifications before eligible LLM calls
+38. [ ] Add regression fixtures for known high-value project-knowledge examples
+39. [ ] Add regression fixtures for request-time retrieval examples across ontology, glossary, and FK semantic evaluation
+40. [ ] Add regression coverage for update-by-ID semantics and `project_overview` exemption
+41. [ ] Tune taxonomy and classifiers based on misses before expanding scope
 
 ## Testing Strategy
 
 ### Unit Tests
 
 - classifier tests for every tag
+- `fact_type` normalization tests
 - normalization tests
 - phrase, synonym, and regex matching tests
 - ranking/budgeting tests for matched fact selection
 - fact extraction response parsing tests
+- update-by-ID tests that verify a fact update stays a single row
+- `project_overview` tests that verify it remains outside normal tagging/retrieval
 
 ### Integration Tests
 
 - project-knowledge upsert: freeform input -> extracted facts -> deterministic tags -> stored rows
+- project-knowledge update by ID: one stored row -> edited row -> reclassified tags on the same row
+- `project_overview`: singleton write/read path remains separate from normal project-knowledge retrieval
 - ontology LLM request: request text -> retrieval tags -> matched facts -> injected prompt section
 - glossary LLM request: request text -> retrieval tags -> matched facts -> injected prompt section
-- MCP write path uses the same extraction/tagging flow
+- FK semantic evaluation request: request text -> retrieval tags -> matched facts -> injected prompt section
+- HTTP, MCP, and internal write paths use the same canonical extraction/tagging flow
 
 ### Recall-Focused Regression Tests
 
@@ -373,3 +452,4 @@ The goal is not only "does classification run" but "does relevant knowledge get 
 3. What is the initial fact-count or token budget for injected project knowledge per request kind?
 4. How do we version and regression-test taxonomy changes so classifier improvements do not break prior behavior?
 5. Do we want deterministic exact-term matching in addition to tags for especially important domain terminology?
+6. Which LLM request kinds count as explicit control-plane exemptions from project-knowledge retrieval?
