@@ -176,6 +176,176 @@ func TestRelationshipBootstrapService_BootstrapRecomputesDeclaredFKCardinality(t
 	assert.True(t, mockSchemaRepo.upsertedRelationships[0].IsValidated)
 }
 
+func TestRelationshipBootstrapService_BootstrapDiscoversDeclaredFKRelationshipsFromDatasourceConstraints(t *testing.T) {
+	logger := zap.NewNop()
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ordersTableID := uuid.New()
+	accountsTableID := uuid.New()
+	accountIDColID := uuid.New()
+	ordersAccountIDColID := uuid.New()
+
+	mockSchemaRepo := &mockSchemaRepoForBootstrap{
+		tables: []*models.SchemaTable{
+			{ID: ordersTableID, ProjectID: projectID, DatasourceID: datasourceID, SchemaName: "public", TableName: "orders"},
+			{ID: accountsTableID, ProjectID: projectID, DatasourceID: datasourceID, SchemaName: "public", TableName: "accounts"},
+		},
+		columns: []*models.SchemaColumn{
+			{ID: ordersAccountIDColID, ProjectID: projectID, SchemaTableID: ordersTableID, ColumnName: "account_id", DataType: "uuid", IsUnique: true},
+			{ID: accountIDColID, ProjectID: projectID, SchemaTableID: accountsTableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+		},
+	}
+
+	mockDatasourceSvc := &mockDatasourceServiceForBootstrap{
+		datasource: &models.Datasource{
+			ID:             datasourceID,
+			ProjectID:      projectID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{},
+		},
+	}
+
+	mockAdapterFactory := &mockAdapterFactoryForBootstrap{
+		schemaDiscoverer: &mockSchemaDiscovererForBootstrap{
+			supportsFKs: true,
+			foreignKeys: []datasource.ForeignKeyMetadata{
+				{
+					ConstraintName: "orders_account_id_fkey",
+					SourceSchema:   "public",
+					SourceTable:    "orders",
+					SourceColumn:   "account_id",
+					TargetSchema:   "public",
+					TargetTable:    "accounts",
+					TargetColumn:   "id",
+				},
+			},
+			joinResults: map[string]*datasource.JoinAnalysis{
+				"public.orders.account_id->public.accounts.id": {
+					JoinCount:     75,
+					SourceMatched: 75,
+					TargetMatched: 75,
+				},
+			},
+		},
+	}
+
+	svc := NewRelationshipBootstrapService(
+		mockDatasourceSvc,
+		mockAdapterFactory,
+		mockSchemaRepo,
+		nil,
+		logger,
+	)
+
+	result, err := svc.Bootstrap(context.Background(), projectID, datasourceID, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, 0, result.ColumnFeatureRelationships)
+	assert.Equal(t, 1, result.DeclaredFKRelationships)
+	assert.Equal(t, 1, result.FKRelationships)
+	require.Len(t, mockSchemaRepo.upsertedRelationships, 1)
+	assert.Empty(t, mockSchemaRepo.upsertedRelationshipsWithMetrics)
+
+	rel := mockSchemaRepo.upsertedRelationships[0]
+	require.NotNil(t, rel.InferenceMethod)
+	assert.Equal(t, models.RelationshipTypeFK, rel.RelationshipType)
+	assert.Equal(t, models.InferenceMethodFK, *rel.InferenceMethod)
+	assert.Equal(t, ordersAccountIDColID, rel.SourceColumnID)
+	assert.Equal(t, accountIDColID, rel.TargetColumnID)
+	assert.Equal(t, models.Cardinality1To1, rel.Cardinality)
+	assert.True(t, rel.IsValidated)
+}
+
+func TestRelationshipBootstrapService_BootstrapPrefersDeclaredFKOverColumnFeaturesForSameColumns(t *testing.T) {
+	logger := zap.NewNop()
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ordersTableID := uuid.New()
+	accountsTableID := uuid.New()
+	accountIDColID := uuid.New()
+	ordersAccountIDColID := uuid.New()
+
+	mockSchemaRepo := &mockSchemaRepoForBootstrap{
+		tables: []*models.SchemaTable{
+			{ID: ordersTableID, ProjectID: projectID, DatasourceID: datasourceID, SchemaName: "public", TableName: "orders"},
+			{ID: accountsTableID, ProjectID: projectID, DatasourceID: datasourceID, SchemaName: "public", TableName: "accounts"},
+		},
+		columns: []*models.SchemaColumn{
+			{ID: ordersAccountIDColID, ProjectID: projectID, SchemaTableID: ordersTableID, ColumnName: "account_id", DataType: "uuid"},
+			{ID: accountIDColID, ProjectID: projectID, SchemaTableID: accountsTableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+		},
+	}
+
+	mockColumnMetadataRepo := &mockColumnMetadataRepoForBootstrap{
+		metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+			ordersAccountIDColID: {
+				SchemaColumnID: ordersAccountIDColID,
+				Features: models.ColumnMetadataFeatures{
+					IdentifierFeatures: &models.IdentifierFeatures{
+						FKTargetTable:  "accounts",
+						FKTargetColumn: "id",
+						FKConfidence:   0.95,
+					},
+				},
+			},
+		},
+	}
+
+	mockDatasourceSvc := &mockDatasourceServiceForBootstrap{
+		datasource: &models.Datasource{
+			ID:             datasourceID,
+			ProjectID:      projectID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{},
+		},
+	}
+
+	mockAdapterFactory := &mockAdapterFactoryForBootstrap{
+		schemaDiscoverer: &mockSchemaDiscovererForBootstrap{
+			supportsFKs: true,
+			foreignKeys: []datasource.ForeignKeyMetadata{
+				{
+					ConstraintName: "orders_account_id_fkey",
+					SourceSchema:   "public",
+					SourceTable:    "orders",
+					SourceColumn:   "account_id",
+					TargetSchema:   "public",
+					TargetTable:    "accounts",
+					TargetColumn:   "id",
+				},
+			},
+			joinResults: map[string]*datasource.JoinAnalysis{
+				"public.orders.account_id->public.accounts.id": {
+					JoinCount:          100,
+					SourceMatched:      100,
+					TargetMatched:      100,
+					OrphanCount:        0,
+					ReverseOrphanCount: 0,
+				},
+			},
+		},
+	}
+
+	svc := NewRelationshipBootstrapService(
+		mockDatasourceSvc,
+		mockAdapterFactory,
+		mockSchemaRepo,
+		mockColumnMetadataRepo,
+		logger,
+	)
+
+	result, err := svc.Bootstrap(context.Background(), projectID, datasourceID, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, 0, result.ColumnFeatureRelationships)
+	assert.Equal(t, 1, result.DeclaredFKRelationships)
+	assert.Equal(t, 1, result.FKRelationships)
+	require.Len(t, mockSchemaRepo.upsertedRelationships, 1)
+	assert.Empty(t, mockSchemaRepo.upsertedRelationshipsWithMetrics)
+}
+
 func TestRelationshipBootstrapService_BootstrapContinuesWhenColumnMetadataReadFails(t *testing.T) {
 	logger := zap.NewNop()
 	projectID := uuid.New()
@@ -344,13 +514,28 @@ func (m *mockSchemaRepoForBootstrap) ListRelationshipsByDatasource(_ context.Con
 }
 
 func (m *mockSchemaRepoForBootstrap) UpsertRelationship(_ context.Context, rel *models.SchemaRelationship) error {
+	if rel.ID == uuid.Nil {
+		rel.ID = uuid.New()
+	}
 	cloned := *rel
+	for i, existing := range m.upsertedRelationships {
+		if existing.SourceColumnID == cloned.SourceColumnID && existing.TargetColumnID == cloned.TargetColumnID {
+			m.upsertedRelationships[i] = &cloned
+			return nil
+		}
+	}
 	m.upsertedRelationships = append(m.upsertedRelationships, &cloned)
 	return nil
 }
 
 func (m *mockSchemaRepoForBootstrap) UpsertRelationshipWithMetrics(_ context.Context, rel *models.SchemaRelationship, _ *models.DiscoveryMetrics) error {
 	cloned := *rel
+	for i, existing := range m.upsertedRelationshipsWithMetrics {
+		if existing.SourceColumnID == cloned.SourceColumnID && existing.TargetColumnID == cloned.TargetColumnID {
+			m.upsertedRelationshipsWithMetrics[i] = &cloned
+			return nil
+		}
+	}
 	m.upsertedRelationshipsWithMetrics = append(m.upsertedRelationshipsWithMetrics, &cloned)
 	return nil
 }
@@ -375,7 +560,17 @@ func (m *mockAdapterFactoryForBootstrap) NewSchemaDiscoverer(_ context.Context, 
 
 type mockSchemaDiscovererForBootstrap struct {
 	datasource.SchemaDiscoverer
+	supportsFKs bool
+	foreignKeys []datasource.ForeignKeyMetadata
 	joinResults map[string]*datasource.JoinAnalysis
+}
+
+func (m *mockSchemaDiscovererForBootstrap) DiscoverForeignKeys(_ context.Context) ([]datasource.ForeignKeyMetadata, error) {
+	return m.foreignKeys, nil
+}
+
+func (m *mockSchemaDiscovererForBootstrap) SupportsForeignKeys() bool {
+	return m.supportsFKs
 }
 
 func (m *mockSchemaDiscovererForBootstrap) AnalyzeJoin(_ context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {

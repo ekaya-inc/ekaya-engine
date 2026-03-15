@@ -6,6 +6,12 @@
 - The metadata database is `ekaya_engine` on `localhost:5432` with user `ekaya` and `PGSSLMODE=disable`.
 - Use the existing `PG*` environment variables for database commands instead of hardcoding credentials.
 
+## Completion Gate
+
+- Before calling a coding task complete, run `make check` from the repo root.
+- If `make check` fails, do not report the task as complete. Fix the issues caused by your changes and rerun `make check`.
+- If completion is blocked by pre-existing unrelated failures or the user explicitly tells you not to run it, say that clearly instead of claiming the task is complete.
+
 ## MCP Test Environment
 
 - For MCP/UI sync work, the user manages the dev servers. Do not start or stop them unless explicitly asked.

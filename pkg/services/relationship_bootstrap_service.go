@@ -85,9 +85,11 @@ func (s *relationshipBootstrapService) Bootstrap(
 	}
 
 	columnByID := make(map[uuid.UUID]*models.SchemaColumn, len(columns))
+	columnByTableAndName := make(map[string]*models.SchemaColumn, len(columns))
 	columnIDs := make([]uuid.UUID, 0, len(columns))
 	for _, column := range columns {
 		columnByID[column.ID] = column
+		columnByTableAndName[relationshipTableColumnKey(column.SchemaTableID, column.ColumnName)] = column
 		columnIDs = append(columnIDs, column.ID)
 	}
 
@@ -110,7 +112,6 @@ func (s *relationshipBootstrapService) Bootstrap(
 	if err != nil {
 		return nil, fmt.Errorf("list schema relationships: %w", err)
 	}
-	declaredFKKeys := buildDeclaredFKRelationshipSet(existingRelationships)
 
 	ds, err := s.datasourceService.Get(ctx, projectID, datasourceID)
 	if err != nil {
@@ -122,6 +123,20 @@ func (s *relationshipBootstrapService) Bootstrap(
 		return nil, fmt.Errorf("create schema discoverer: %w", err)
 	}
 	defer discoverer.Close()
+
+	declaredFKKeys := buildDeclaredFKRelationshipSet(existingRelationships)
+	existingRelationships, declaredFKKeys, err = s.discoverDeclaredFKRelationships(
+		ctx,
+		projectID,
+		existingRelationships,
+		tableByQualifiedName,
+		columnByTableAndName,
+		declaredFKKeys,
+		discoverer,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("discover declared FK relationships: %w", err)
+	}
 
 	columnFeatureRelationships, err := s.bootstrapColumnFeatureRelationships(
 		ctx,
@@ -390,6 +405,10 @@ func relationshipColumnKey(sourceColumnID, targetColumnID uuid.UUID) string {
 	return fmt.Sprintf("%s->%s", sourceColumnID, targetColumnID)
 }
 
+func relationshipTableColumnKey(tableID uuid.UUID, columnName string) string {
+	return fmt.Sprintf("%s:%s", tableID.String(), columnName)
+}
+
 func resolveBootstrapTargetTable(
 	sourceTable *models.SchemaTable,
 	targetTableName string,
@@ -414,4 +433,92 @@ func resolveBootstrapTargetTable(
 		return nil
 	}
 	return uniqueTableByName[targetTableName]
+}
+
+func (s *relationshipBootstrapService) discoverDeclaredFKRelationships(
+	ctx context.Context,
+	projectID uuid.UUID,
+	existingRelationships []*models.SchemaRelationship,
+	tableByQualifiedName map[string]*models.SchemaTable,
+	columnByTableAndName map[string]*models.SchemaColumn,
+	declaredFKKeys map[string]struct{},
+	discoverer datasource.SchemaDiscoverer,
+) ([]*models.SchemaRelationship, map[string]struct{}, error) {
+	if !discoverer.SupportsForeignKeys() {
+		return existingRelationships, declaredFKKeys, nil
+	}
+
+	discoveredFKs, err := discoverer.DiscoverForeignKeys(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("discover foreign keys: %w", err)
+	}
+
+	relationships := make([]*models.SchemaRelationship, 0, len(existingRelationships)+len(discoveredFKs))
+	relationships = append(relationships, existingRelationships...)
+
+	for _, fk := range discoveredFKs {
+		sourceTable := tableByQualifiedName[fmt.Sprintf("%s.%s", fk.SourceSchema, fk.SourceTable)]
+		if sourceTable == nil {
+			s.logger.Warn("FK source table not found during bootstrap, skipping",
+				zap.String("constraint", fk.ConstraintName),
+				zap.String("source_table", fmt.Sprintf("%s.%s", fk.SourceSchema, fk.SourceTable)))
+			continue
+		}
+
+		targetTable := tableByQualifiedName[fmt.Sprintf("%s.%s", fk.TargetSchema, fk.TargetTable)]
+		if targetTable == nil {
+			s.logger.Warn("FK target table not found during bootstrap, skipping",
+				zap.String("constraint", fk.ConstraintName),
+				zap.String("target_table", fmt.Sprintf("%s.%s", fk.TargetSchema, fk.TargetTable)))
+			continue
+		}
+
+		sourceColumn := columnByTableAndName[relationshipTableColumnKey(sourceTable.ID, fk.SourceColumn)]
+		if sourceColumn == nil {
+			s.logger.Warn("FK source column not found during bootstrap, skipping",
+				zap.String("constraint", fk.ConstraintName),
+				zap.String("source_column", fk.SourceColumn))
+			continue
+		}
+
+		targetColumn := columnByTableAndName[relationshipTableColumnKey(targetTable.ID, fk.TargetColumn)]
+		if targetColumn == nil {
+			s.logger.Warn("FK target column not found during bootstrap, skipping",
+				zap.String("constraint", fk.ConstraintName),
+				zap.String("target_column", fk.TargetColumn))
+			continue
+		}
+
+		relKey := relationshipColumnKey(sourceColumn.ID, targetColumn.ID)
+		if _, exists := declaredFKKeys[relKey]; exists {
+			continue
+		}
+
+		fkType := models.RelationshipTypeFK
+		inferenceMethod := models.InferenceMethodFK
+		rel := &models.SchemaRelationship{
+			ProjectID:        projectID,
+			SourceTableID:    sourceTable.ID,
+			SourceColumnID:   sourceColumn.ID,
+			TargetTableID:    targetTable.ID,
+			TargetColumnID:   targetColumn.ID,
+			RelationshipType: fkType,
+			Cardinality:      models.CardinalityNTo1,
+			Confidence:       1.0,
+			InferenceMethod:  &inferenceMethod,
+		}
+
+		if err := s.schemaRepo.UpsertRelationship(ctx, rel); err != nil {
+			return nil, nil, fmt.Errorf("upsert discovered FK relationship %s: %w", fk.ConstraintName, err)
+		}
+
+		if rel.ID == uuid.Nil {
+			continue
+		}
+
+		declaredFKKeys[relKey] = struct{}{}
+		relationships = append(relationships, rel)
+	}
+
+	return relationships, declaredFKKeys, nil
 }
