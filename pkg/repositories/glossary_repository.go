@@ -115,6 +115,7 @@ func (r *glossaryRepository) Update(ctx context.Context, term *models.BusinessGl
 	}
 
 	// Set provenance fields from context
+	term.Source = prov.Source.String()
 	lastEditSource := prov.Source.String()
 	term.LastEditSource = &lastEditSource
 	// Only set UpdatedBy if there's a valid user ID (not the nil UUID)
@@ -127,8 +128,8 @@ func (r *glossaryRepository) Update(ctx context.Context, term *models.BusinessGl
 	query := `
 		UPDATE engine_business_glossary
 		SET term = $2, definition = $3, defining_sql = $4, base_table = $5,
-		    output_columns = $6, enrichment_status = $7,
-		    enrichment_error = $8, last_edit_source = $9, updated_by = $10
+		    output_columns = $6, source = $7, enrichment_status = $8,
+		    enrichment_error = $9, last_edit_source = $10, updated_by = $11
 		WHERE id = $1
 		RETURNING updated_at`
 
@@ -139,6 +140,7 @@ func (r *glossaryRepository) Update(ctx context.Context, term *models.BusinessGl
 		term.DefiningSQL,
 		nullString(term.BaseTable),
 		jsonbValue(term.OutputColumns),
+		term.Source,
 		nullString(term.EnrichmentStatus),
 		nullString(term.EnrichmentError),
 		term.LastEditSource,

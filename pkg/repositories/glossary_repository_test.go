@@ -1202,6 +1202,9 @@ func TestGlossaryRepository_Update_Provenance(t *testing.T) {
 	if term.LastEditSource == nil || *term.LastEditSource != "manual" {
 		t.Errorf("expected LastEditSource 'manual', got %v", term.LastEditSource)
 	}
+	if term.Source != "manual" {
+		t.Errorf("expected Source 'manual' after update, got %q", term.Source)
+	}
 	// Verify UpdatedBy was set
 	if term.UpdatedBy == nil || *term.UpdatedBy != tc.testUserID {
 		t.Errorf("expected UpdatedBy %v, got %v", tc.testUserID, term.UpdatedBy)
@@ -1212,9 +1215,9 @@ func TestGlossaryRepository_Update_Provenance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID failed: %v", err)
 	}
-	// Source should remain unchanged (original creation source)
-	if retrieved.Source != "inferred" {
-		t.Errorf("expected Source to remain 'inference', got %q", retrieved.Source)
+	// Source should update to reflect the latest manual edit provenance
+	if retrieved.Source != "manual" {
+		t.Errorf("expected Source to update to 'manual', got %q", retrieved.Source)
 	}
 	// LastEditSource should be set to manual
 	if retrieved.LastEditSource == nil || *retrieved.LastEditSource != "manual" {
