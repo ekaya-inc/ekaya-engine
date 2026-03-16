@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useEffect } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -78,6 +78,27 @@ describe('ProjectDashboard', () => {
     await waitFor(() => {
       expect(screen.getByText('Glossary')).toBeInTheDocument();
     });
+  });
+
+  it('shows the Audit Log tile in the Data section when AI Data Liaison is installed', async () => {
+    mockInstalledApps = ['ontology-forge', 'ai-data-liaison'];
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Audit Log')).toBeInTheDocument();
+    });
+
+    const dataSection = screen.getByRole('heading', { name: 'Data' }).closest('section');
+    const intelligenceSection = screen.getByRole('heading', { name: 'Intelligence' }).closest('section');
+
+    expect(dataSection).not.toBeNull();
+    expect(intelligenceSection).not.toBeNull();
+    const pendingQueriesTile = within(dataSection as HTMLElement).getByText('Pending Queries');
+    const auditLogTile = within(dataSection as HTMLElement).getByText('Audit Log');
+
+    expect(auditLogTile).toBeInTheDocument();
+    expect(pendingQueriesTile.compareDocumentPosition(auditLogTile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(intelligenceSection as HTMLElement).queryByText('Audit Log')).not.toBeInTheDocument();
   });
 
   it('navigates to the glossary page from the AI Data Liaison tile', async () => {

@@ -135,6 +135,15 @@ const ProjectDashboard = () => {
         disabled: !isConnected,
         color: 'green', // AI Data Liaison color
       });
+
+      tiles.push({
+        title: 'Audit Log',
+        description: 'Monitor query activity, security alerts, and governance events.',
+        icon: Shield,
+        path: `/projects/${pid}/audit`,
+        disabled: false,
+        color: 'green',
+      });
     }
 
     return tiles;
@@ -191,15 +200,6 @@ const ProjectDashboard = () => {
         icon: BookOpen,
         path: `/projects/${pid}/glossary`,
         disabled: !isConnected || !hasSelectedTables || !activeAIConfig,
-        color: 'green',
-      });
-
-      tiles.push({
-        title: 'Audit Log',
-        description: 'Monitor query activity, security alerts, and governance events.',
-        icon: Shield,
-        path: `/projects/${pid}/audit`,
-        disabled: false,
         color: 'green',
       });
     }
