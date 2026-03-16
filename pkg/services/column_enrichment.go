@@ -98,6 +98,7 @@ var _ ColumnEnrichmentService = (*columnEnrichmentService)(nil)
 // EnrichProject enriches all specified tables (or all selected tables if empty).
 func (s *columnEnrichmentService) EnrichProject(ctx context.Context, projectID uuid.UUID, tableNames []string, progressCallback dag.ProgressCallback) (*EnrichColumnsResult, error) {
 	startTime := time.Now()
+	ctx = withLoadedProjectKnowledgeFactsForPrompt(ctx, projectID, s.logger)
 	result := &EnrichColumnsResult{
 		TablesEnriched: []string{},
 		TablesFailed:   make(map[string]string),
@@ -188,6 +189,7 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 	s.logger.Debug("Enriching columns for table",
 		zap.String("project_id", projectID.String()),
 		zap.String("table", tableName))
+	ctx = withLoadedProjectKnowledgeFactsForPrompt(ctx, projectID, s.logger)
 
 	// Get table context (schema, business name, description)
 	tableCtx, err := s.getTableContext(ctx, projectID, tableName)
@@ -924,6 +926,7 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 
 	systemMsg := s.columnEnrichmentSystemMessage()
 	prompt := s.buildColumnEnrichmentPrompt(tableCtx, columns, fkInfo, enumSamples)
+	prompt = prependProjectKnowledgeToPrompt(prompt, buildRelevantProjectKnowledgeSection(ctx, projectID, s.logger))
 
 	// Retry LLM call with exponential backoff
 	retryConfig := &retry.Config{

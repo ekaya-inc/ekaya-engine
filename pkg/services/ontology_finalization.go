@@ -55,6 +55,7 @@ var _ OntologyFinalizationService = (*ontologyFinalizationService)(nil)
 
 func (s *ontologyFinalizationService) Finalize(ctx context.Context, projectID uuid.UUID) error {
 	s.logger.Info("Starting ontology finalization", zap.String("project_id", projectID.String()))
+	ctx = withLoadedProjectKnowledgeFactsForPrompt(ctx, projectID, s.logger)
 
 	// Get all tables for the project to build conventions
 	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, uuid.Nil) // uuid.Nil gets all datasources
@@ -159,6 +160,7 @@ func (s *ontologyFinalizationService) generateDomainDescription(
 
 	systemMessage := s.domainDescriptionSystemMessage()
 	prompt := s.buildDomainDescriptionPrompt(tables, insights)
+	prompt = prependProjectKnowledgeToPrompt(prompt, buildRelevantProjectKnowledgeSection(ctx, projectID, s.logger))
 
 	result, err := llmClient.GenerateResponse(ctx, prompt, systemMessage, 0.3, false)
 	if err != nil {

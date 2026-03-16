@@ -194,9 +194,11 @@ func (m *mockSchemaRepoForFinalization) DeleteInferredRelationshipsByProject(ctx
 type mockLLMClient struct {
 	responseContent string
 	generateErr     error
+	capturedPrompt  string
 }
 
 func (m *mockLLMClient) GenerateResponse(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+	m.capturedPrompt = prompt
 	if m.generateErr != nil {
 		return nil, m.generateErr
 	}
@@ -355,6 +357,35 @@ func TestOntologyFinalization_GeneratesDomainDescription(t *testing.T) {
 	// Verify domain summary was updated with LLM-generated description
 	require.NotNil(t, projectRepo.updatedDomainSummary)
 	assert.Equal(t, expectedDescription, projectRepo.updatedDomainSummary.Description)
+}
+
+func TestOntologyFinalization_IncludesRelevantProjectKnowledgeInPrompt(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withProjectKnowledgeFactsForPrompt(context.Background(), []*models.KnowledgeFact{
+		{FactType: models.FactTypeFiscalYear, Value: "Fiscal year ends on June 30"},
+	})
+
+	projectRepo := &mockProjectRepoForFinalization{}
+	schemaRepo := &mockSchemaRepoForFinalization{
+		tables: []*models.SchemaTable{
+			{ID: uuid.New(), ProjectID: projectID, TableName: "orders"},
+		},
+		columnsByTable: map[string][]*models.SchemaColumn{},
+	}
+	llmClient := &mockLLMClient{
+		responseContent: `{"description": "Test system."}`,
+	}
+	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
+
+	svc := NewOntologyFinalizationService(
+		projectRepo, schemaRepo, &mockColumnMetadataRepoForFinalization{},
+		&mockConversationRepoForFinalization{}, llmFactory, noopTenantCtxForFinalization(), zap.NewNop(),
+	)
+
+	err := svc.Finalize(ctx, projectID)
+	require.NoError(t, err)
+	assert.Contains(t, llmClient.capturedPrompt, "## Relevant Project Knowledge")
+	assert.Contains(t, llmClient.capturedPrompt, "Fiscal year ends on June 30")
 }
 
 func TestOntologyFinalization_SkipsIfNoTables(t *testing.T) {

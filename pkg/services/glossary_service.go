@@ -987,6 +987,7 @@ func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID u
 func (s *glossaryService) EnrichGlossaryTerms(ctx context.Context, projectID uuid.UUID) error {
 	s.logger.Info("Starting glossary term enrichment",
 		zap.String("project_id", projectID.String()))
+	ctx = withLoadedProjectKnowledgeFactsForPrompt(ctx, projectID, s.logger)
 
 	// Get terms that need enrichment (inferred terms without DefiningSQL)
 	allTerms, err := s.glossaryRepo.GetByProject(ctx, projectID)
@@ -1173,6 +1174,7 @@ func (s *glossaryService) tryEnrichTerm(
 	} else {
 		prompt = s.buildEnrichTermPrompt(term, project, tables, schemaColumnsByTable, columnMetadataByTable)
 	}
+	prompt = prependProjectKnowledgeToPrompt(prompt, buildRelevantProjectKnowledgeSection(ctx, projectID, s.logger))
 	systemMessage := s.enrichTermSystemMessage()
 
 	// Call LLM to generate SQL (uses tenantCtx so SavePending has its own connection)

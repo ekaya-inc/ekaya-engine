@@ -318,6 +318,50 @@ func TestValidateCandidate_ValidFK(t *testing.T) {
 	assert.Equal(t, 1, mockClient.callCount)
 }
 
+func TestValidateCandidate_IncludesRelevantProjectKnowledge(t *testing.T) {
+	mockClient := &mockValidatorLLMClient{
+		responseContent: `{
+			"is_valid_fk": true,
+			"confidence": 0.95,
+			"cardinality": "N:1",
+			"reasoning": "Looks valid.",
+			"source_role": "owner"
+		}`,
+	}
+
+	validator := NewRelationshipValidator(
+		&mockValidatorLLMClientFactory{client: mockClient},
+		nil,
+		nil,
+		&mockRelValConversationRepo{},
+		nil,
+		zap.NewNop(),
+	)
+
+	candidate := &RelationshipCandidate{
+		SourceTable:         "orders",
+		SourceColumn:        "user_id",
+		SourceDataType:      "uuid",
+		SourceDistinctCount: 10,
+		SourceMatched:       10,
+		TargetTable:         "users",
+		TargetColumn:        "id",
+		TargetDataType:      "uuid",
+		TargetIsPK:          true,
+		TargetDistinctCount: 10,
+	}
+	ctx := withProjectKnowledgeFactsForPrompt(context.Background(), []*models.KnowledgeFact{
+		{FactType: models.FactTypeFiscalYear, Value: "Fiscal year ends on June 30"},
+		{FactType: projectOverviewFactType, Value: "Retail analytics platform"},
+	})
+
+	_, err := validator.ValidateCandidate(ctx, uuid.New(), candidate)
+	require.NoError(t, err)
+	assert.Contains(t, mockClient.lastPrompt, "## Relevant Project Knowledge")
+	assert.Contains(t, mockClient.lastPrompt, "Fiscal year ends on June 30")
+	assert.NotContains(t, mockClient.lastPrompt, "Retail analytics platform")
+}
+
 func TestValidateCandidate_InvalidFK(t *testing.T) {
 	// Setup: candidate where id -> messages.nonce (bad inference)
 	// Mock LLM returns is_valid_fk=false, reasoning="nonce is not an identifier"

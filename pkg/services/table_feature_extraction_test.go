@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
@@ -573,10 +575,12 @@ type mockLLMClientForTableFeatures struct {
 	responseContent string
 	generateErr     error
 	callCount       int32
+	lastPrompt      string
 }
 
-func (m *mockLLMClientForTableFeatures) GenerateResponse(_ context.Context, _ string, _ string, _ float64, _ bool) (*llm.GenerateResponseResult, error) {
+func (m *mockLLMClientForTableFeatures) GenerateResponse(_ context.Context, prompt string, _ string, _ float64, _ bool) (*llm.GenerateResponseResult, error) {
 	atomic.AddInt32(&m.callCount, 1)
+	m.lastPrompt = prompt
 	if m.generateErr != nil {
 		return nil, m.generateErr
 	}
@@ -698,6 +702,61 @@ func TestTableFeatureExtraction_ExtractTableFeatures_Success(t *testing.T) {
 	if meta.IsEphemeral != response.IsEphemeral {
 		t.Errorf("IsEphemeral = %v, want %v", meta.IsEphemeral, response.IsEphemeral)
 	}
+}
+
+func TestTableFeatureExtraction_IncludesRelevantProjectKnowledgeInPrompt(t *testing.T) {
+	response := tableAnalysisResponse{
+		Description: "Stores user account information.",
+		UsageNotes:  "Primary table for user data.",
+		IsEphemeral: false,
+	}
+	responseJSON, _ := json.Marshal(response)
+
+	mockLLM := &mockLLMClientForTableFeatures{
+		responseContent: string(responseJSON),
+	}
+
+	tableID := uuid.New()
+	colID := uuid.New()
+	mockSchemaRepo := &mockSchemaRepoForTableFeatures{
+		tables: []*models.SchemaTable{
+			{ID: tableID, TableName: "users"},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            colID,
+				SchemaTableID: tableID,
+				ColumnName:    "id",
+				DataType:      "uuid",
+			},
+		},
+	}
+	mockColMetadataRepo := &mockColumnMetadataRepoForTableFeatures{
+		metadataList: []*models.ColumnMetadata{
+			tfeColMeta(colID, "identifier", "", "", "", nil),
+		},
+	}
+	mockMetadataRepo := &mockTableMetadataRepoForTableFeatures{}
+
+	workerPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 2}, zap.NewNop())
+	svc := NewTableFeatureExtractionService(
+		mockSchemaRepo,
+		mockColMetadataRepo,
+		mockMetadataRepo,
+		&mockLLMFactoryForTableFeatures{client: mockLLM},
+		workerPool,
+		nil,
+		zap.NewNop(),
+	)
+
+	ctx := withProjectKnowledgeFactsForPrompt(context.Background(), []*models.KnowledgeFact{
+		{FactType: models.FactTypeFiscalYear, Value: "Fiscal year ends on June 30"},
+	})
+	_, err := svc.ExtractTableFeatures(ctx, uuid.New(), uuid.New(), nil)
+
+	require.NoError(t, err)
+	assert.Contains(t, mockLLM.lastPrompt, "## Relevant Project Knowledge")
+	assert.Contains(t, mockLLM.lastPrompt, "Fiscal year ends on June 30")
 }
 
 func TestTableFeatureExtraction_ExtractTableFeatures_NoTables(t *testing.T) {
