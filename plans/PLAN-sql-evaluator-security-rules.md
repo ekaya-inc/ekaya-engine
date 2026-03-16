@@ -1,9 +1,9 @@
 Status: DRAFT
 Created: 2026-03-16
 
-# PLAN: Data Guardian Rules for SQLEvaluator
+# PLAN: Security Rules for SQLEvaluator
 
-Parent: `plans/MASTER-PLAN-sql-evaluator-data-guardian.md`
+Parent: `plans/MASTER-PLAN-sql-evaluator.md`
 
 ## Objective
 
@@ -14,7 +14,7 @@ Add a security-oriented rule layer to `SQLEvaluator` that produces structured fi
 Correctness and security are related, but they are not the same concern.
 
 - Core evaluator work should establish the shared evaluation contract first.
-- Data Guardian should plug into that contract cleanly.
+- Security rules should plug into that contract cleanly.
 
 Keeping this in a separate plan avoids blocking the core evaluator on every future security policy detail while still forcing the architecture to support those policies.
 
@@ -34,8 +34,8 @@ These are useful, but they are not currently unified behind a single SQL evaluat
 
 ## Scope
 
-- Define Data Guardian finding types.
-- Add Data Guardian rules to the evaluator pipeline.
+- Define security finding types.
+- Add security rules to the evaluator pipeline.
 - Add enforcement policy by mode.
 - Return security findings in a way callers can consume directly.
 
@@ -86,7 +86,7 @@ Suggested actions:
 
 ## Recommended Rule Sources
 
-Data Guardian should use both metadata-backed and heuristic signals.
+Security rules should use both metadata-backed and heuristic signals.
 
 Metadata-backed signals:
 
@@ -127,7 +127,7 @@ These rules should not pretend to solve all injection risks. The initial goal is
 
 ## Mode-Specific Enforcement
 
-Data Guardian should not hard-code one enforcement level for every caller.
+Security rules should not hard-code one enforcement level for every caller.
 
 Suggested initial posture:
 
@@ -156,7 +156,7 @@ This plan should leave the codebase ready to connect evaluation findings to exis
 
 ## Risks
 
-- If Data Guardian rules are embedded directly inside clients, the repo will repeat the same fragmentation problem.
+- If security rules are embedded directly inside clients, the repo will repeat the same fragmentation problem.
 - If findings are too coarse, clients will ignore them.
 - If findings are too chatty, developers will immediately add bypasses.
 
@@ -164,7 +164,7 @@ The result model needs to be structured and mode-aware so callers can make defen
 
 ## Implementation Tasks
 
-- [ ] Add structured Data Guardian finding types to the evaluator result model.
+- [ ] Add structured security finding types to the evaluator result model.
 - [ ] Integrate existing sensitive-column and sensitive-content detection into evaluator rule execution.
 - [ ] Integrate existing parameter-injection detection where parameterized execution paths exist.
 - [ ] Add basic raw-SQL risk rules for multi-statement and unsafe read-mode patterns.
@@ -176,4 +176,4 @@ The result model needs to be structured and mode-aware so callers can make defen
 
 - The evaluator can return structured security findings for both raw SQL and parameterized SQL flows.
 - Callers can distinguish between security warnings and blocking security issues.
-- The initial Data Guardian rule set reuses existing repo signals instead of duplicating them in new client code.
+- The initial security rule set reuses existing repo signals instead of duplicating them in new client code.

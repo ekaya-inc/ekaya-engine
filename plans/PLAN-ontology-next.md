@@ -14,7 +14,7 @@ Completed since the original version:
 
 Glossary and broader text-to-SQL evaluation quality now belong to the `SQLEvaluator` initiative and should be tracked in:
 
-- `plans/MASTER-PLAN-sql-evaluator-data-guardian.md`
+- `plans/MASTER-PLAN-sql-evaluator.md`
 - `plans/PLAN-sql-evaluator-core.md`
 - `plans/PLAN-sql-evaluator-client-rollout.md`
 

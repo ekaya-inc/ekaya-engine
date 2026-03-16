@@ -178,9 +178,8 @@ The following ideas explore how ETL Genius could expand beyond the initial Advis
 
 ### Security and Compliance for Pipelines
 
-- **PII flow tracking** — Trace PII columns through the entire pipeline to ensure they're properly masked, hashed, or excluded at each stage. Alert if raw PII flows to a destination that shouldn't have it
-- **Access audit for pipelines** — Track which service accounts and users have access to pipeline source and destination data. Ensure least-privilege access
-- **Data masking advisor** — Recommend masking strategies for sensitive columns in non-production environments. Generate the masking SQL (hash emails, randomize phone numbers, anonymize names) while preserving referential integrity
+**Migrated to:** `plans/guardian/DESIGN-guardian-data-protection.md` — PII Flow Tracking, Data Masking Advisor
+**Migrated to:** `plans/guardian/DESIGN-guardian-audit-visibility.md` — Pipeline Access Audit
 
 ---
 
