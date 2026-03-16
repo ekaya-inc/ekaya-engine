@@ -1874,6 +1874,79 @@ func TestRunPhase2ColumnClassification_HydratesEnumSampleValues(t *testing.T) {
 	}
 }
 
+func TestRunPhase2ColumnClassification_ContinuesWhenEnumSamplingFails(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	tableID := uuid.New()
+
+	mockRepo := &mockSchemaRepoForFeatureExtraction{
+		tables: []*models.SchemaTable{
+			{
+				ID:           tableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "orders",
+			},
+		},
+	}
+
+	discoverer := &mockSchemaDiscovererForFeatureExtraction{
+		distinctValuesErr: errors.New("distinct values failed"),
+	}
+
+	mockClient := llm.NewMockLLMClient()
+	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		return &llm.GenerateResponseResult{
+			Content: `{"is_state_machine": false, "needs_detailed_analysis": false, "confidence": 0.7, "description": "Tracks order status."}`,
+		}, nil
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.MockClient = mockClient
+
+	workerPool := llm.NewWorkerPool(llm.DefaultWorkerPoolConfig(), zap.NewNop())
+
+	profiles := []*models.ColumnDataProfile{
+		{
+			ColumnID:           uuid.New(),
+			ColumnName:         "status",
+			TableID:            tableID,
+			TableName:          "orders",
+			DataType:           "text",
+			DistinctCount:      3,
+			ClassificationPath: models.ClassificationPathEnum,
+		},
+	}
+
+	svc := &columnFeatureExtractionService{
+		schemaRepo:        mockRepo,
+		datasourceService: &mockDatasourceServiceForFeatureExtraction{},
+		adapterFactory: &mockAdapterFactoryForFeatureExtraction{
+			discoverer: discoverer,
+		},
+		llmFactory:  mockFactory,
+		workerPool:  workerPool,
+		logger:      zap.NewNop(),
+		classifiers: make(map[models.ClassificationPath]ColumnClassifier),
+	}
+
+	result, err := svc.runPhase2ColumnClassification(context.Background(), projectID, profiles, nil)
+	if err != nil {
+		t.Fatalf("runPhase2ColumnClassification() error = %v", err)
+	}
+
+	if len(result.Features) != 1 {
+		t.Fatalf("len(Features) = %d, want 1", len(result.Features))
+	}
+	if len(profiles[0].SampleValues) != 0 {
+		t.Fatalf("SampleValues length = %d, want 0", len(profiles[0].SampleValues))
+	}
+	if !discoverer.closed {
+		t.Error("schema discoverer should be closed")
+	}
+}
+
 func TestRunPhase2ColumnClassification_EnqueuesFollowUpWork(t *testing.T) {
 	projectID := uuid.New()
 

@@ -912,7 +912,12 @@ func (s *columnFeatureExtractionService) hydrateEnumSampleValues(
 
 		values, err := discoverer.GetDistinctValues(ctx, table.SchemaName, table.TableName, profile.ColumnName, 50)
 		if err != nil {
-			return fmt.Errorf("get distinct values for %s.%s.%s: %w", table.SchemaName, table.TableName, profile.ColumnName, err)
+			s.logger.Debug("Failed to sample enum values during feature extraction; continuing without samples",
+				zap.String("schema", table.SchemaName),
+				zap.String("table", table.TableName),
+				zap.String("column", profile.ColumnName),
+				zap.Error(err))
+			continue
 		}
 		profile.SampleValues = values
 	}
