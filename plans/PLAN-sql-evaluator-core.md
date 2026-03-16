@@ -3,7 +3,7 @@ Created: 2026-03-16
 
 # PLAN: SQLEvaluator Core
 
-Parent: `plans/MASTER-PLAN-sql-evaluator-data-guardian.md`
+Parent: `plans/MASTER-PLAN-sql-evaluator.md`
 
 ## Objective
 
@@ -46,7 +46,7 @@ The new evaluator should centralize reusable logic so these callers stop carryin
 
 ## Non-Goals
 
-- Full Data Guardian policy logic.
+- Full security policy logic.
 - Full persistence of evaluation outcomes.
 - Full client migration.
 

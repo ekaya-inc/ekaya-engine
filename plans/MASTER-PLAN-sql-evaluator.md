@@ -1,7 +1,7 @@
 Status: DRAFT
 Created: 2026-03-16
 
-# MASTER PLAN: SQL Evaluator and Data Guardian
+# MASTER PLAN: SQL Evaluator
 
 ## Why This Exists
 
@@ -35,7 +35,7 @@ Every internal SQL path should call the same evaluator before SQL is accepted, e
 - approved query execution
 - future text-to-SQL and analytics flows
 
-The evaluator must also be extensible enough to support a security-oriented application concept called `Data Guardian`, which adds policy findings such as:
+The evaluator must also be extensible enough to support a security rules layer that adds policy findings such as:
 
 - SQL injection risk
 - PII or sensitive-column access
@@ -45,7 +45,7 @@ The evaluator must also be extensible enough to support a security-oriented appl
 ## Definitions
 
 - `SQLEvaluator`: Shared service that evaluates `(intent, context, SQL, mode)` and returns a structured verdict with evidence.
-- `Data Guardian`: Security policy layer that plugs into the evaluator and emits risk findings plus allow/warn/block guidance.
+- `Security Rules`: Security policy layer that plugs into the evaluator and emits risk findings plus allow/warn/block guidance.
 - `Vetted Query`: SQL that has passed evaluator checks for a specific mode and context.
 - `Vetted Historical Query`: A past query execution with stored evaluator metadata that can be reused or surfaced as trusted prior art.
 
@@ -103,9 +103,9 @@ The evaluator should run in this order:
 
 The repair loop is important, but it must not be the foundation. The foundation must be deterministic rules that are testable and reusable across all callers.
 
-### Data Guardian as a Layer, Not a Side System
+### Security Rules as a Layer, Not a Side System
 
-Data Guardian should not be a separate SQL engine. It should be a rule set that plugs into the evaluator and returns structured findings. That keeps:
+Security rules should not be a separate SQL engine. They should be a rule set that plugs into the evaluator and returns structured findings. That keeps:
 
 - one request contract
 - one result contract
@@ -120,7 +120,7 @@ Caller
        -> Build evaluation context
        -> Run deterministic rules
        -> Optionally execute SQL and inspect results
-       -> Run Data Guardian rules
+       -> Run security rules
        -> Optionally attempt bounded repair
        -> Return verdict + evidence + suggested fix + security findings
        -> Optionally persist evaluation metadata
@@ -135,7 +135,7 @@ The exact structs can be refined in implementation, but the evaluator should ret
 - issues: correctness problems that should block or materially degrade trust
 - warnings: useful but non-blocking concerns
 - execution summary: row count, sample row summary, output columns, execution duration
-- security findings: Data Guardian output
+- security findings: security rules output
 - suggested fix SQL: optional
 - notes: compact explanation suitable for LLM or UI consumption
 - evidence: enum values, referenced tables, policy hits, result signals
@@ -154,7 +154,7 @@ For intent-aware modes, the issue model should be rich enough to represent evalu
 The system should be implemented in this order:
 
 1. Build and test `SQLEvaluator` core in isolation.
-2. Add Data Guardian findings to the evaluator, still with no major client migrations.
+2. Add security rule findings to the evaluator, still with no major client migrations.
 3. Add evaluation persistence so vetted outcomes can be reused and audited.
 4. Migrate internal clients one-by-one until legacy validators are removed.
 
@@ -164,7 +164,7 @@ This order matters because it keeps the early work testable and low-risk. It als
 
 - It does not build a free-form autonomous SQL agent.
 - It does not require a huge context window.
-- It does not overload the first implementation with every Data Guardian policy.
+- It does not overload the first implementation with every security policy.
 - It does not add legacy fallback paths by default.
 
 ## Design Constraints
@@ -185,7 +185,7 @@ This order matters because it keeps the early work testable and low-risk. It als
 ## Recommended Sub-Plan Order
 
 1. `plans/PLAN-sql-evaluator-core.md`
-2. `plans/PLAN-sql-evaluator-data-guardian.md`
+2. `plans/PLAN-sql-evaluator-security-rules.md`
 3. `plans/PLAN-sql-evaluator-history-vetting.md`
 4. `plans/PLAN-sql-evaluator-client-rollout.md`
 
@@ -193,7 +193,7 @@ This order matters because it keeps the early work testable and low-risk. It als
 
 - All SQL entry points route through `SQLEvaluator`.
 - Glossary generation rejects wrong enum literals, degenerate outputs, and semantically useless example SQL.
-- Data Guardian findings are available to callers and can block high-risk flows.
+- Security rule findings are available to callers and can block high-risk flows.
 - Pre-approved queries and vetted historical queries can be distinguished from unvetted SQL.
 - Query history and evaluation storage are rich enough to support future query reuse, admin review, and external-request vetting.
 

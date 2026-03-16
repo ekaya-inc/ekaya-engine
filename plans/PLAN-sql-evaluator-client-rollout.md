@@ -3,7 +3,7 @@ Created: 2026-03-16
 
 # PLAN: SQLEvaluator Client Rollout
 
-Parent: `plans/MASTER-PLAN-sql-evaluator-data-guardian.md`
+Parent: `plans/MASTER-PLAN-sql-evaluator.md`
 
 ## Objective
 
@@ -99,7 +99,7 @@ Primary touchpoints:
 Why fourth:
 
 - This is operationally important, but still lower risk than modifying SQL.
-- It benefits from both correctness and Data Guardian findings.
+- It benefits from both correctness and security rule findings.
 
 Target behavior:
 
@@ -134,7 +134,7 @@ Why last:
 
 - Highest blast radius.
 - Most security-sensitive.
-- Depends heavily on Data Guardian policy and evaluation persistence decisions.
+- Depends heavily on security policy and evaluation persistence decisions.
 
 Target behavior:
 

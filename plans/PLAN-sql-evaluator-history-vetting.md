@@ -3,7 +3,7 @@ Created: 2026-03-16
 
 # PLAN: Vetted Query History and Evaluation Persistence
 
-Parent: `plans/MASTER-PLAN-sql-evaluator-data-guardian.md`
+Parent: `plans/MASTER-PLAN-sql-evaluator.md`
 
 ## Objective
 
@@ -28,7 +28,7 @@ That means the repo cannot yet answer:
 - Has this SQL already been vetted.
 - Was it vetted for this mode.
 - Is that vetting still valid after schema or ontology changes.
-- Did the query previously pass Data Guardian rules.
+- Did the query previously pass security rules.
 
 ## Scope
 
