@@ -252,7 +252,7 @@ export function GlossaryTermEditor({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-full max-w-4xl max-h-[90vh] overflow-x-hidden overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {isEditing ? 'Edit Glossary Term' : 'Add Glossary Term'}
@@ -264,7 +264,7 @@ export function GlossaryTermEditor({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
+        <div className="min-w-0 space-y-4 py-4">
           {/* Term Name */}
           <div>
             <label
@@ -302,7 +302,7 @@ export function GlossaryTermEditor({
           </div>
 
           {/* Defining SQL */}
-          <div>
+          <div className="min-w-0">
             <label
               htmlFor="defining-sql"
               className="block text-sm font-medium text-text-primary mb-1"
