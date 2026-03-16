@@ -34,7 +34,7 @@ export interface GlossaryTerm {
  * GlossaryGenerationStatus tracks the progress of automated glossary generation.
  */
 export interface GlossaryGenerationStatus {
-  status: 'idle' | 'discovering' | 'enriching' | 'completed' | 'failed';
+  status: 'idle' | 'planning' | 'investigating' | 'qualifying' | 'writing' | 'completed' | 'no_qualified_terms' | 'failed';
   message: string;
   error?: string;
   started_at?: string;

@@ -458,7 +458,7 @@ func (h *GlossaryHandler) AutoGenerate(w http.ResponseWriter, r *http.Request) {
 
 	// Check if generation is already running
 	status := h.glossaryService.GetGenerationStatus(projectID)
-	if status.Status == "discovering" || status.Status == "enriching" {
+	if servicesIsGlossaryGenerationInProgress(status.Status) {
 		if err := ErrorResponse(w, http.StatusConflict, "generation_in_progress", "Glossary generation is already in progress"); err != nil {
 			h.logger.Error("Failed to write error response", zap.Error(err))
 		}
@@ -475,11 +475,25 @@ func (h *GlossaryHandler) AutoGenerate(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	initialStatus := &models.GlossaryGenerationStatus{
+		Status:  "planning",
+		Message: "Starting glossary generation...",
+	}
+
 	// Return 202 Accepted with initial status
 	if err := WriteJSON(w, http.StatusAccepted, ApiResponse{
 		Success: true,
-		Data:    h.glossaryService.GetGenerationStatus(projectID),
+		Data:    initialStatus,
 	}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+func servicesIsGlossaryGenerationInProgress(status string) bool {
+	switch status {
+	case "planning", "investigating", "qualifying", "writing", "discovering", "enriching":
+		return true
+	default:
+		return false
 	}
 }

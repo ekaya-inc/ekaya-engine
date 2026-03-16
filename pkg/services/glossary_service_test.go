@@ -96,6 +96,21 @@ func (m *mockGlossaryRepo) DeleteBySource(ctx context.Context, projectID uuid.UU
 	return nil
 }
 
+func (m *mockGlossaryRepo) ReplaceInferredTerms(ctx context.Context, projectID uuid.UUID, terms []*models.BusinessGlossaryTerm) error {
+	if err := m.DeleteBySource(ctx, projectID, models.SourceInferred); err != nil {
+		return err
+	}
+	for _, term := range terms {
+		cloned := *term
+		cloned.ProjectID = projectID
+		cloned.Source = models.ProvenanceInferred
+		if err := m.Create(ctx, &cloned); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (m *mockGlossaryRepo) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error) {
 	if m.getByProjErr != nil {
 		return nil, m.getByProjErr
@@ -229,6 +244,7 @@ type mockSchemaRepoForGlossary struct {
 	tables         []*models.SchemaTable
 	listErr        error
 	columnsByTable map[string][]*models.SchemaColumn
+	relationships  []*models.SchemaRelationship
 }
 
 func (m *mockSchemaRepoForGlossary) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
@@ -302,7 +318,7 @@ func (m *mockSchemaRepoForGlossary) UpdateColumnStats(ctx context.Context, colum
 	return nil
 }
 func (m *mockSchemaRepoForGlossary) ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
-	return nil, nil
+	return m.relationships, nil
 }
 func (m *mockSchemaRepoForGlossary) GetRelationshipByID(ctx context.Context, projectID, relationshipID uuid.UUID) (*models.SchemaRelationship, error) {
 	return nil, nil

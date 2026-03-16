@@ -215,6 +215,31 @@ func TestGlossaryHandler_AutoGenerate_AlreadyRunning(t *testing.T) {
 	assert.Contains(t, errResp["message"], "already in progress")
 }
 
+func TestGlossaryHandler_AutoGenerate_AlreadyRunningDuringPlanning(t *testing.T) {
+	projectID := uuid.New()
+
+	now := time.Now()
+	mockGlossary := &mockGlossaryServiceForHandler{
+		generationStatus: &models.GlossaryGenerationStatus{
+			Status:    "planning",
+			Message:   "Planning investigation areas...",
+			StartedAt: &now,
+		},
+	}
+	mockQuestions := &mockQuestionServiceForHandler{
+		pendingCounts: &repositories.QuestionCounts{Required: 0, Optional: 0},
+	}
+	handler := NewGlossaryHandler(mockGlossary, mockQuestions, zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/glossary/auto-generate", nil)
+	req.SetPathValue("pid", projectID.String())
+	rec := httptest.NewRecorder()
+
+	handler.AutoGenerate(rec, req)
+
+	assert.Equal(t, http.StatusConflict, rec.Code)
+}
+
 func TestGlossaryHandler_AutoGenerate_Success(t *testing.T) {
 	projectID := uuid.New()
 
@@ -240,6 +265,14 @@ func TestGlossaryHandler_AutoGenerate_Success(t *testing.T) {
 	var response ApiResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&response))
 	assert.True(t, response.Success)
+
+	dataBytes, err := json.Marshal(response.Data)
+	require.NoError(t, err)
+
+	var status models.GlossaryGenerationStatus
+	require.NoError(t, json.Unmarshal(dataBytes, &status))
+	assert.Equal(t, "planning", status.Status)
+	assert.Contains(t, status.Message, "Starting glossary generation")
 }
 
 func TestGlossaryHandler_AutoGenerate_NoRequiredQuestions_AllowsOptional(t *testing.T) {

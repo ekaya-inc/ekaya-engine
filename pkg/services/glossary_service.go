@@ -2688,39 +2688,15 @@ func (s *glossaryService) GetGenerationStatus(projectID uuid.UUID) *models.Gloss
 func (s *glossaryService) RunAutoGenerate(ctx context.Context, projectID uuid.UUID) error {
 	now := time.Now()
 
-	// Establish tenant context — callers pass context.Background() from goroutines
-	setGenerationStatus(projectID, "discovering", "Resolving tenant context...", "", &now)
-	tenantCtx, cleanup, err := s.getTenant(ctx, projectID)
-	if err != nil {
-		s.logger.Error("glossary auto-generate: failed to get tenant context", zap.Error(err))
-		setGenerationStatus(projectID, "failed", "Failed to get tenant context", err.Error(), &now)
-		return fmt.Errorf("get tenant context: %w", err)
-	}
-	defer cleanup()
-
-	// Set inferred provenance — this is an automated LLM operation, not a user action
-	tenantCtx = models.WithInferredProvenance(tenantCtx, uuid.Nil)
-
-	// Discovery phase
-	setGenerationStatus(projectID, "discovering", "Discovering glossary terms from schema...", "", &now)
-	count, err := s.discoverGlossaryTerms(tenantCtx, projectID, true)
-	if err != nil {
-		s.logger.Error("glossary auto-generate: discovery failed", zap.Error(err))
-		setGenerationStatus(projectID, "failed", "Discovery failed", err.Error(), &now)
-		return fmt.Errorf("glossary discovery failed: %w", err)
-	}
-	s.logger.Info("glossary auto-generate: discovery complete", zap.Int("terms_discovered", count))
-
-	// Enrichment phase
-	setGenerationStatus(projectID, "enriching", fmt.Sprintf("Enriching %d discovered terms with SQL...", count), "", &now)
-	err = s.EnrichGlossaryTerms(tenantCtx, projectID)
-	if err != nil {
-		s.logger.Error("glossary auto-generate: enrichment failed", zap.Error(err))
-		setGenerationStatus(projectID, "failed", "Enrichment failed", err.Error(), &now)
-		return fmt.Errorf("glossary enrichment failed: %w", err)
+	if err := s.runSQLFirstAutoGenerate(ctx, projectID, now); err != nil {
+		s.logger.Error("glossary auto-generate: failed", zap.String("project_id", projectID.String()), zap.Error(err))
+		return err
 	}
 
-	setGenerationStatus(projectID, "completed", fmt.Sprintf("Generated and enriched %d glossary terms", count), "", &now)
-	s.logger.Info("glossary auto-generate: completed", zap.Int("terms_discovered", count))
+	status := s.GetGenerationStatus(projectID)
+	s.logger.Info("glossary auto-generate: finished",
+		zap.String("project_id", projectID.String()),
+		zap.String("status", status.Status),
+		zap.String("message", status.Message))
 	return nil
 }

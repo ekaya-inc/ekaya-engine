@@ -234,6 +234,29 @@ describe('GlossaryPage', () => {
       });
     });
 
+    it('shows dedicated no-qualified-terms state', async () => {
+      vi.mocked(engineApi.listGlossaryTerms).mockResolvedValue({
+        success: true,
+        data: {
+          terms: [],
+          total: 0,
+          generation_status: {
+            status: 'no_qualified_terms',
+            message: 'No example glossary terms met the quality bar for this project.',
+          },
+        },
+      });
+
+      renderGlossaryPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('No Verified Example Terms Yet')).toBeInTheDocument();
+        expect(screen.getByText('No example glossary terms met the quality bar for this project.')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^add term$/i })).toBeInTheDocument();
+      });
+    });
+
     it('shows link to ontology page in empty state', async () => {
       vi.mocked(engineApi.listGlossaryTerms).mockResolvedValue({
         success: true,
@@ -327,6 +350,27 @@ describe('GlossaryPage', () => {
       await waitFor(() => {
         expect(screen.getAllByText('Glossary').length).toBeGreaterThan(0);
         expect(screen.getByText('2 terms')).toBeInTheDocument();
+      });
+    });
+
+    it('shows preserved-terms banner for no-qualified rerun', async () => {
+      vi.mocked(engineApi.listGlossaryTerms).mockResolvedValue({
+        success: true,
+        data: {
+          terms: mockTerms,
+          total: mockTerms.length,
+          generation_status: {
+            status: 'no_qualified_terms',
+            message: 'No new example glossary terms met the quality bar. Existing inferred terms were preserved.',
+          },
+        },
+      });
+
+      renderGlossaryPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('No new verified example terms were saved')).toBeInTheDocument();
+        expect(screen.getByText('No new example glossary terms met the quality bar. Existing inferred terms were preserved.')).toBeInTheDocument();
       });
     });
 

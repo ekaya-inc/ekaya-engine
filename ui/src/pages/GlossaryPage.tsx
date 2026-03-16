@@ -36,6 +36,15 @@ import type { GlossaryGenerationStatus, GlossaryTerm } from "../types";
 
 const POLL_INTERVAL_MS = 3000;
 
+const inProgressGlossaryStatuses: GlossaryGenerationStatus['status'][] = [
+  'discovering' as GlossaryGenerationStatus['status'],
+  'enriching' as GlossaryGenerationStatus['status'],
+  'planning',
+  'investigating',
+  'qualifying',
+  'writing',
+];
+
 /**
  * GlossaryPage - Display business glossary terms with technical mappings
  * Shows all glossary terms (discovered and user-defined) with their SQL details.
@@ -163,7 +172,7 @@ const GlossaryPage = () => {
   }, [loading, terms.length, generationStatus?.status, pendingRequiredQuestions, checkingQuestions, checkPendingQuestions]);
 
   // Poll while generation is in progress
-  const isGenerating = generationStatus?.status === 'discovering' || generationStatus?.status === 'enriching';
+  const isGenerating = generationStatus != null && inProgressGlossaryStatuses.includes(generationStatus.status);
 
   useEffect(() => {
     if (isGenerating) {
@@ -181,6 +190,14 @@ const GlossaryPage = () => {
         fetchTerms(true);
         toast({
           title: 'Glossary generated',
+          description: generationStatus.message,
+          variant: 'default',
+        });
+      } else if (generating && generationStatus?.status === 'no_qualified_terms') {
+        setGenerating(false);
+        fetchTerms(true);
+        toast({
+          title: 'No verified glossary terms generated',
           description: generationStatus.message,
           variant: 'default',
         });
@@ -207,9 +224,10 @@ const GlossaryPage = () => {
     if (!pid) return;
     setGenerating(true);
     try {
-      await engineApi.autoGenerateGlossary(pid);
-      // Poll will pick up status changes
-      fetchTerms(true);
+      const response = await engineApi.autoGenerateGlossary(pid);
+      if (response.data) {
+        setGenerationStatus(response.data);
+      }
     } catch (err) {
       setGenerating(false);
       const errorMessage = err instanceof Error ? err.message : 'Failed to start glossary generation';
@@ -402,6 +420,28 @@ const GlossaryPage = () => {
                     )}
                   </div>
                 </>
+              ) : generationStatus?.status === 'no_qualified_terms' ? (
+                <>
+                  <div className="mb-4">
+                    <BookOpen className="h-16 w-16 mx-auto text-muted-foreground" />
+                  </div>
+                  <h2 className="text-xl font-semibold mb-2">No Verified Example Terms Yet</h2>
+                  <p className="text-sm text-muted-foreground mb-6">
+                    {generationStatus.message}
+                  </p>
+                  <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
+                    <Button variant="outline" onClick={handleAutoGenerate} disabled={generating}>
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Try Again
+                    </Button>
+                    {hasGlossaryWriteAccess && (
+                      <Button onClick={handleAddTerm}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Add Term
+                      </Button>
+                    )}
+                  </div>
+                </>
               ) : checkingQuestions ? (
                 <>
                   <div className="mb-4">
@@ -529,6 +569,27 @@ const GlossaryPage = () => {
                   {generationStatus?.message ?? 'Working...'}
                 </p>
               </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {generationStatus?.status === 'no_qualified_terms' && !isGenerating && (
+        <Card className="mb-6 border-amber-300/60 bg-amber-50/80">
+          <CardContent className="py-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-text-primary">
+                  No new verified example terms were saved
+                </p>
+                <p className="text-xs text-text-secondary">
+                  {generationStatus.message}
+                </p>
+              </div>
+              <Button variant="outline" onClick={handleAutoGenerate} disabled={generating}>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Try Again
+              </Button>
             </div>
           </CardContent>
         </Card>
