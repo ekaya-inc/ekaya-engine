@@ -7,7 +7,7 @@ import { AlertCircle, CheckCircle2, Loader2, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 import engineApi from '../services/engineApi';
-import type { GlossaryTerm, TestSQLResult, OutputColumn } from '../types';
+import type { GlossaryTerm, TestSQLResult, OutputColumn, SqlDialect } from '../types';
 
 import { SqlEditor } from './SqlEditor';
 import { Button } from './ui/Button';
@@ -27,6 +27,7 @@ interface GlossaryTermEditorProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: () => void;
+  dialect?: SqlDialect;
 }
 
 export function GlossaryTermEditor({
@@ -35,6 +36,7 @@ export function GlossaryTermEditor({
   isOpen,
   onClose,
   onSave,
+  dialect = 'PostgreSQL',
 }: GlossaryTermEditorProps) {
   const isEditing = !!term;
 
@@ -312,7 +314,7 @@ export function GlossaryTermEditor({
             <SqlEditor
               value={definingSql}
               onChange={setDefiningSql}
-              dialect="PostgreSQL"
+              dialect={dialect}
               placeholder="SELECT COUNT(DISTINCT user_id) AS active_users FROM users WHERE ..."
               minHeight="200px"
               readOnly={isSaving}

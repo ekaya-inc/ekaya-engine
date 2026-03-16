@@ -16,6 +16,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { GlossaryTermEditor } from "../components/GlossaryTermEditor";
+import { SqlExecutionPanel } from "../components/SqlExecutionPanel";
 import { Button } from "../components/ui/Button";
 import {
   Card,
@@ -25,9 +26,11 @@ import {
   CardTitle,
 } from "../components/ui/Card";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
+import { useDatasourceConnection } from "../contexts/DatasourceConnectionContext";
 import { useToast } from "../hooks/useToast";
 import engineApi from "../services/engineApi";
 import ontologyApi from "../services/ontologyApi";
+import { datasourceTypeToDialect } from "../types";
 import type { GlossaryGenerationStatus, GlossaryTerm } from "../types";
 
 const POLL_INTERVAL_MS = 3000;
@@ -41,6 +44,10 @@ const GlossaryPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
   const { toast } = useToast();
+  const { selectedDatasource } = useDatasourceConnection();
+  const dialect = selectedDatasource?.type
+    ? datasourceTypeToDialect[selectedDatasource.type]
+    : 'PostgreSQL';
 
   // State for glossary terms
   const [terms, setTerms] = useState<GlossaryTerm[]>([]);
@@ -620,6 +627,20 @@ const GlossaryPage = () => {
                           </div>
                         )}
 
+                        {pid && term.defining_sql && (
+                          <div>
+                            <div className="text-xs font-medium text-text-tertiary mb-2">
+                              Execution
+                            </div>
+                            <SqlExecutionPanel
+                              projectId={pid}
+                              datasourceId={selectedDatasource?.datasourceId}
+                              sql={term.defining_sql}
+                              buttonLabel="Execute Query"
+                            />
+                          </div>
+                        )}
+
                         {term.base_table && (
                           <div>
                             <div className="text-xs font-medium text-text-tertiary mb-1">
@@ -685,6 +706,7 @@ const GlossaryPage = () => {
           isOpen={editorOpen}
           onClose={() => setEditorOpen(false)}
           onSave={handleEditorSave}
+          dialect={dialect}
         />
       )}
 

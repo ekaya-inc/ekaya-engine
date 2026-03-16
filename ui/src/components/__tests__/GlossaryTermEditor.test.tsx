@@ -22,14 +22,17 @@ vi.mock('../SqlEditor', () => ({
     onChange,
     placeholder,
     readOnly,
+    dialect,
   }: {
     value: string;
     onChange: (value: string) => void;
     placeholder?: string;
     readOnly?: boolean;
+    dialect?: string;
   }) => (
     <textarea
       data-testid="sql-editor"
+      data-dialect={dialect}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
@@ -116,6 +119,20 @@ describe('GlossaryTermEditor', () => {
       );
 
       expect(screen.getByRole('button', { name: /create term/i })).toBeInTheDocument();
+    });
+
+    it('passes the provided SQL dialect to the editor', () => {
+      render(
+        <GlossaryTermEditor
+          projectId={projectId}
+          isOpen={true}
+          onClose={mockOnClose}
+          onSave={mockOnSave}
+          dialect="MSSQL"
+        />
+      );
+
+      expect(screen.getByTestId('sql-editor')).toHaveAttribute('data-dialect', 'MSSQL');
     });
   });
 

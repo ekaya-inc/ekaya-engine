@@ -7,12 +7,15 @@ import ontologyService from '../../services/ontologyService';
 import type { GlossaryTerm } from '../../types';
 import GlossaryPage from '../GlossaryPage';
 
+const mockUseDatasourceConnection = vi.fn();
+
 // Mock the services
 vi.mock('../../services/engineApi', () => ({
   default: {
     listGlossaryTerms: vi.fn(),
     deleteGlossaryTerm: vi.fn(),
     testGlossarySQL: vi.fn(),
+    testQuery: vi.fn(),
     createGlossaryTerm: vi.fn(),
     updateGlossaryTerm: vi.fn(),
     autoGenerateGlossary: vi.fn(),
@@ -34,9 +37,9 @@ vi.mock('../../services/ontologyApi', () => ({
 
 // Mock the GlossaryTermEditor component
 vi.mock('../../components/GlossaryTermEditor', () => ({
-  GlossaryTermEditor: ({ isOpen, onClose, onSave }: { isOpen: boolean; onClose: () => void; onSave: () => void }) =>
+  GlossaryTermEditor: ({ isOpen, onClose, onSave, dialect }: { isOpen: boolean; onClose: () => void; onSave: () => void; dialect?: string }) =>
     isOpen ? (
-      <div data-testid="glossary-term-editor">
+      <div data-testid="glossary-term-editor" data-dialect={dialect}>
         <button onClick={onSave}>Save</button>
         <button onClick={onClose}>Close</button>
       </div>
@@ -48,6 +51,10 @@ vi.mock('../../hooks/useToast', () => ({
   useToast: () => ({
     toast: vi.fn(),
   }),
+}));
+
+vi.mock('../../contexts/DatasourceConnectionContext', () => ({
+  useDatasourceConnection: () => mockUseDatasourceConnection(),
 }));
 
 const mockTerms: GlossaryTerm[] = [
@@ -96,6 +103,13 @@ describe('GlossaryPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(ontologyService.subscribe).mockReturnValue(vi.fn());
+    mockUseDatasourceConnection.mockReturnValue({
+      selectedDatasource: {
+        datasourceId: 'ds-1',
+        name: 'Test DB',
+        type: 'postgres',
+      },
+    });
   });
 
   describe('Loading State', () => {
@@ -356,6 +370,54 @@ describe('GlossaryPage', () => {
         expect(screen.queryByText('Defining SQL')).not.toBeInTheDocument();
       });
     });
+
+    it('shows execute query button in expanded view', async () => {
+      renderGlossaryPage();
+
+      await waitFor(() => {
+        const detailsButtons = screen.getAllByText('SQL Details');
+        const firstButton = detailsButtons[0];
+        if (!firstButton) throw new Error('Expected SQL Details button');
+        fireEvent.click(firstButton);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /execute query/i })).toBeInTheDocument();
+      });
+    });
+
+    it('executes glossary SQL and shows results', async () => {
+      vi.mocked(engineApi.testQuery).mockResolvedValue({
+        success: true,
+        data: {
+          columns: [{ name: 'active_users', type: 'integer' }],
+          rows: [{ active_users: 42 }],
+          row_count: 1,
+        },
+      });
+
+      renderGlossaryPage();
+
+      await waitFor(() => {
+        const detailsButtons = screen.getAllByText('SQL Details');
+        const firstButton = detailsButtons[0];
+        if (!firstButton) throw new Error('Expected SQL Details button');
+        fireEvent.click(firstButton);
+      });
+
+      const executeButton = await screen.findByRole('button', { name: /execute query/i });
+      fireEvent.click(executeButton);
+
+      await waitFor(() => {
+        expect(engineApi.testQuery).toHaveBeenCalledWith('proj-1', 'ds-1', {
+          sql_query: mockTerms[0]?.defining_sql,
+          limit: 100,
+        });
+        expect(screen.getByText('Query Results')).toBeInTheDocument();
+        expect(screen.getByText(/Showing 1 of 1 rows/)).toBeInTheDocument();
+        expect(screen.getByText('42')).toBeInTheDocument();
+      });
+    });
   });
 
   describe('CRUD Operations', () => {
@@ -384,6 +446,27 @@ describe('GlossaryPage', () => {
 
       await waitFor(() => {
         expect(screen.getByTestId('glossary-term-editor')).toBeInTheDocument();
+      });
+    });
+
+    it('passes the selected datasource dialect to the glossary editor', async () => {
+      mockUseDatasourceConnection.mockReturnValue({
+        selectedDatasource: {
+          datasourceId: 'ds-1',
+          name: 'SQL Server',
+          type: 'mssql',
+        },
+      });
+
+      renderGlossaryPage();
+
+      await waitFor(() => {
+        const addButton = screen.getByRole('button', { name: /add term/i });
+        fireEvent.click(addButton);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('glossary-term-editor')).toHaveAttribute('data-dialect', 'MSSQL');
       });
     });
 
