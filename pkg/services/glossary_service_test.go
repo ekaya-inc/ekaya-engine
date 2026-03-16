@@ -3543,7 +3543,7 @@ func TestTestSQL_MultipleRows_ReturnsError(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, result.Valid)
 	assert.Contains(t, result.Error, "multiple rows")
-	assert.Contains(t, result.Error, "Aggregate metrics should return a single row")
+	assert.Contains(t, result.Error, "The SQL for Glossary Definitions must return a single row")
 }
 
 func TestTestSQL_SingleRow_ReturnsValid(t *testing.T) {

@@ -537,7 +537,7 @@ func (s *glossaryService) TestSQL(ctx context.Context, projectID uuid.UUID, sql 
 	if len(result.Rows) > 1 {
 		return &SQLTestResult{
 			Valid: false,
-			Error: "Query returns multiple rows. Aggregate metrics should return a single row.",
+			Error: "Query returns multiple rows. The SQL for Glossary Definitions must return a single row.",
 		}, nil
 	}
 
