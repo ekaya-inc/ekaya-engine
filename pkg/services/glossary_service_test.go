@@ -2616,6 +2616,9 @@ func TestGlossaryService_EnrichTermPrompt_IncludesEnumValues(t *testing.T) {
 	// so the LLM generates SQL with correct WHERE clause values (BUG-12 fix)
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
+	ctx = withProjectKnowledgeFactsForPrompt(ctx, []*models.KnowledgeFact{
+		{FactType: models.FactTypeFiscalYear, Value: "Fiscal year ends on June 30"},
+	})
 
 	// Schema column ID for the transaction_state column
 	txStateColID := uuid.New()
@@ -2694,6 +2697,8 @@ func TestGlossaryService_EnrichTermPrompt_IncludesEnumValues(t *testing.T) {
 	assert.Contains(t, prompt, "TRANSACTION_STATE_ENDED", "Prompt must include actual enum value TRANSACTION_STATE_ENDED")
 	assert.Contains(t, prompt, "TRANSACTION_STATE_WAITING", "Prompt must include actual enum value TRANSACTION_STATE_WAITING")
 	assert.Contains(t, prompt, "TRANSACTION_STATE_ERROR", "Prompt must include actual enum value TRANSACTION_STATE_ERROR")
+	assert.Contains(t, prompt, "## Relevant Project Knowledge", "Prompt should include project knowledge section")
+	assert.Contains(t, prompt, "Fiscal year ends on June 30", "Prompt should include fiscal year guidance")
 
 	// The prompt should include the "Allowed values:" label
 	assert.Contains(t, prompt, "Allowed values:", "Prompt must include 'Allowed values:' label for enum columns")

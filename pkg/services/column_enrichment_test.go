@@ -1493,7 +1493,10 @@ func TestColumnEnrichmentService_EnrichTable_IntegerEnumInference(t *testing.T) 
 	}
 
 	// Execute
-	err := service.EnrichTable(context.Background(), projectID, "billing_transactions")
+	ctx := withProjectKnowledgeFactsForPrompt(context.Background(), []*models.KnowledgeFact{
+		{FactType: models.FactTypeFiscalYear, Value: "Fiscal year ends on June 30"},
+	})
+	err := service.EnrichTable(ctx, projectID, "billing_transactions")
 
 	// Verify
 	require.NoError(t, err)
@@ -1503,6 +1506,8 @@ func TestColumnEnrichmentService_EnrichTable_IntegerEnumInference(t *testing.T) 
 	assert.Contains(t, capturedPrompt, "Infer labels from column context")
 	assert.Contains(t, capturedPrompt, "For integer enums")
 	assert.Contains(t, capturedPrompt, "For string enums")
+	assert.Contains(t, capturedPrompt, "## Relevant Project Knowledge")
+	assert.Contains(t, capturedPrompt, "Fiscal year ends on June 30")
 
 	// Verify column metadata was saved with proper enum values
 	assert.Equal(t, 2, colMetadataRepo.upsertCalls)

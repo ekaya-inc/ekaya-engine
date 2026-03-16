@@ -72,6 +72,7 @@ var _ OntologyBuilderService = (*ontologyBuilderService)(nil)
 
 func (s *ontologyBuilderService) ProcessAnswer(ctx context.Context, projectID uuid.UUID, question *models.OntologyQuestion, answer string) (*AnswerProcessingResult, error) {
 	startTime := time.Now()
+	ctx = withLoadedProjectKnowledgeFactsForPrompt(ctx, projectID, s.logger)
 	s.logger.Info("Processing answer",
 		zap.String("project_id", projectID.String()),
 		zap.String("question_id", question.ID.String()))
@@ -83,6 +84,7 @@ func (s *ontologyBuilderService) ProcessAnswer(ctx context.Context, projectID uu
 	}
 
 	prompt := s.buildAnswerProcessingPrompt(question, answer)
+	prompt = prependProjectKnowledgeToPrompt(prompt, buildRelevantProjectKnowledgeSection(ctx, projectID, s.logger))
 	systemMsg := s.answerProcessingSystemMessage()
 
 	llmResult, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.2, false)

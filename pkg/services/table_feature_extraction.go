@@ -82,6 +82,7 @@ func (s *tableFeatureExtractionService) ExtractTableFeatures(
 	s.logger.Info("Starting table feature extraction",
 		zap.String("project_id", projectID.String()),
 		zap.String("datasource_id", datasourceID.String()))
+	ctx = withLoadedProjectKnowledgeFactsForPrompt(ctx, projectID, s.logger)
 
 	// Report initial progress
 	if progressCallback != nil {
@@ -289,6 +290,7 @@ func (s *tableFeatureExtractionService) analyzeTable(
 
 	// Build the prompt
 	prompt := s.buildPrompt(tc)
+	prompt = prependProjectKnowledgeToPrompt(prompt, buildRelevantProjectKnowledgeSection(workCtx, projectID, s.logger))
 	systemMsg := s.systemMessage()
 
 	// Get LLM client

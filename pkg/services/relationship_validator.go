@@ -64,9 +64,6 @@ const minConfidenceThreshold = 0.7
 
 // ValidateCandidate asks LLM if this is a valid FK relationship.
 func (v *relationshipValidator) ValidateCandidate(ctx context.Context, projectID uuid.UUID, candidate *RelationshipCandidate) (*RelationshipValidationResult, error) {
-	prompt := v.buildValidationPrompt(candidate)
-	systemMsg := v.systemMessage()
-
 	// Acquire fresh tenant context to avoid concurrent map writes in pgx
 	workCtx := ctx
 	if v.getTenantCtx != nil {
@@ -78,6 +75,11 @@ func (v *relationshipValidator) ValidateCandidate(ctx context.Context, projectID
 		}
 		defer cleanup()
 	}
+
+	workCtx = withLoadedProjectKnowledgeFactsForPrompt(workCtx, projectID, v.logger)
+	prompt := v.buildValidationPrompt(candidate)
+	prompt = prependProjectKnowledgeToPrompt(prompt, buildRelevantProjectKnowledgeSection(workCtx, projectID, v.logger))
+	systemMsg := v.systemMessage()
 
 	llmClient, err := v.llmFactory.CreateForProject(workCtx, projectID)
 	if err != nil {
@@ -296,6 +298,7 @@ func (v *relationshipValidator) ValidateCandidates(ctx context.Context, projectI
 	if len(candidates) == 0 {
 		return nil, nil
 	}
+	ctx = withLoadedProjectKnowledgeFactsForPrompt(ctx, projectID, v.logger)
 
 	total := len(candidates)
 	if progressCallback != nil {
