@@ -20,6 +20,8 @@ The core problem is not just prompt quality. The core problem is that validation
 
 This master plan creates a single `SQLEvaluator` service first, tests it in isolation, and then migrates internal clients to it one-by-one until all SQL entry points use the same evaluator.
 
+This initiative also absorbs the remaining valid concerns from prior glossary-only planning and issue documents. Those concerns are no longer treated as glossary-specific; they are treated as evaluator concerns that should apply to any text-to-SQL or SQL-review surface.
+
 ## Desired End State
 
 Every internal SQL path should call the same evaluator before SQL is accepted, executed, or recorded as a trusted example. That includes:
@@ -60,6 +62,15 @@ Today, the relevant SQL paths are split across several files:
 - Parameter-level SQL injection checks already exist in `pkg/services/query.go`, but they are not part of a general-purpose evaluator.
 
 This means the repo already contains useful building blocks, but they are not centralized and they are not producing a single reusable verdict.
+
+The motivating failure classes are broader than glossary:
+
+- wrong enum literals even when ontology values are available
+- wrong join paths even when documented relationships exist
+- hidden or undocumented parameters such as arbitrary time windows
+- semantically useless outputs such as zero-value results on populated data paths
+- SQL that computes a different metric shape than the user intent describes
+- SQL that should have been rejected because the request is underspecified or not answerable from the current schema without inventing business assumptions
 
 ## Architectural Direction
 
@@ -128,6 +139,15 @@ The exact structs can be refined in implementation, but the evaluator should ret
 - suggested fix SQL: optional
 - notes: compact explanation suitable for LLM or UI consumption
 - evidence: enum values, referenced tables, policy hits, result signals
+
+For intent-aware modes, the issue model should be rich enough to represent evaluator outcomes such as:
+
+- `invalid_enum_literal`
+- `invalid_join_path`
+- `requires_parameter`
+- `unsupported_assumption`
+- `intent_sql_mismatch`
+- `degenerate_result`
 
 ## Rollout Strategy
 

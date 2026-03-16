@@ -44,8 +44,14 @@ Target behavior:
 
 - Replace direct `TestSQL(...)` usage and glossary-only rule stacks with evaluator mode `glossary_example`.
 - Reject wrong enum literals.
+- Reject invalid join paths even when the SQL is syntactically valid.
+- Reject hidden parameters and unsupported assumptions such as arbitrary time windows or geographic bounds without supporting project knowledge.
+- Reject SQL whose computed metric shape diverges from the requested intent.
 - Reject zero-value or empty outputs on populated paths.
 - Reject example terms that touch sensitive data unless explicitly allowed by policy.
+- Delay inferred-term persistence until candidates pass evaluator checks.
+- Preserve manual and MCP-created glossary terms even when inferred examples are replaced.
+- Preserve the successful `no_qualified_terms` terminal outcome when nothing meets the bar.
 
 Primary touchpoints:
 
@@ -161,6 +167,13 @@ Examples:
 - `validate` endpoints should return issues and suggested fixes
 - review flows should attach evaluator findings to approval decisions
 - execution tools may block or warn depending on mode
+
+For glossary example generation specifically, evaluator findings should be usable as retry input, for example:
+
+- `invalid_enum_literal` with suggested replacement values
+- `invalid_join_path` with referenced-table evidence
+- `requires_parameter` for hidden time windows or bounds
+- `intent_sql_mismatch` when the SQL computes a different metric than requested
 
 The rollout should preserve one evaluator contract while allowing caller-specific presentation.
 

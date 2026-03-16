@@ -104,6 +104,16 @@ Recommended result fields:
 - `Notes`
 - `Evidence`
 
+Recommended issue categories for correctness-oriented modes:
+
+- `invalid_enum_literal`
+- `missing_table_or_column`
+- `invalid_join_path`
+- `requires_parameter`
+- `unsupported_assumption`
+- `intent_sql_mismatch`
+- `degenerate_result`
+
 ## Evaluation Modes
 
 The evaluator should not behave the same way for every caller. Define modes up front.
@@ -168,9 +178,17 @@ Minimum initial rules:
 - enum literal validation against ontology
 - join/reference policy hooks
 - convention checks hook
-- parameterization or unsupported-literal checks hook
+- hidden-parameter and unsupported-assumption checks
+- intent/metric-shape validation hook for strict intent-aware modes
 
 Enum validation is important enough to call out explicitly. This is the class of failure that produced `status = 'Completed'` when the ontology already knew the enum value was `Complete`.
+
+The rule set should also absorb other failure classes that were previously observed in glossary generation:
+
+- arbitrary hidden parameters such as `30 days` when no project knowledge justifies that window
+- relationship-path mismatches when documented joins exist
+- SQL that computes a different shape than the requested metric, such as a completeness percentage instead of a density metric
+- SQL that should be refused because the request is underspecified without new business assumptions
 
 ## Execution Checks to Implement in Phase 1
 
@@ -192,6 +210,11 @@ Minimum execution-result rules:
 - multi-row rejection when the mode expects one row
 
 The evaluator should not assume `0` is always wrong. It should let the mode define whether zero on a populated path is acceptable.
+
+For strict example-generation modes, execution checks should be able to distinguish:
+
+- a legitimate zero over a credible populated path
+- a degenerate zero caused by a broken join, dead filter, or unpopulated source path
 
 ## Repair Hook
 
@@ -216,6 +239,9 @@ Required test categories:
 - syntax failure vs syntax success
 - enum mismatch detection
 - missing table and missing column detection
+- invalid join-path detection
+- hidden-parameter or unsupported-assumption detection
+- intent/metric-shape mismatch detection in strict modes
 - mode-specific non-`SELECT` behavior
 - single-row vs multi-row behavior
 - all-null and zero-value degenerate-result detection

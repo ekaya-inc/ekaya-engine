@@ -8,10 +8,15 @@
 This plan is now partially implemented.
 
 Completed since the original version:
-- glossary SQL validation (BUG-10)
 - `create_glossary_term` MCP tool
 - relationship API now includes source/target column types
 - incremental ontology extraction now exists in the DAG at a coarse level (`is_incremental`, `change_summary`, `ComputeChangeSet`, cleanup of deleted items, and affected-table scoping for some stages)
+
+Glossary and broader text-to-SQL evaluation quality now belong to the `SQLEvaluator` initiative and should be tracked in:
+
+- `plans/MASTER-PLAN-sql-evaluator-data-guardian.md`
+- `plans/PLAN-sql-evaluator-core.md`
+- `plans/PLAN-sql-evaluator-client-rollout.md`
 
 Still remaining:
 - verify the distinct-count fix against a fresh extraction
