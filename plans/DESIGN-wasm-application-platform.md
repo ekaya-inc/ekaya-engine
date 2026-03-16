@@ -258,78 +258,12 @@ This provides:
 
 ---
 
-## First Three Apps: AI Data Guardian Suite
+## First Apps: AI Data Guardian Suite
 
-All three apps are **AI-automated** — they require LLM access and use it to eliminate manual work. They form a cohesive data reliability and compliance suite.
-
-### 1. AI Drift Monitor
-
-**Problem:** Schema drift causes pipeline failures. Detection takes 4+ hours on average. Teams discover problems after stakeholders complain.
-
-**What it does (AI-automated):**
-- Scheduled schema snapshots via `SchemaDiscoverer` (existing interface, PostgreSQL + MSSQL)
-- Change detection via existing `SchemaChangeDetectionService` patterns
-- **AI generates natural-language impact analysis:** "The `orders.discount_code` column was dropped. This will break 3 approved queries that reference it: [list]. The column had 45,000 non-null values."
-- **AI classifies severity:** breaking change vs. additive change vs. cosmetic
-- Stores historical timeline of all schema changes in app-isolated schema
-- Alerts via webhook when breaking changes detected
-
-**Existing code leveraged:**
-- `pkg/adapters/datasource/postgres/schema.go` — Table/column/FK discovery
-- `pkg/adapters/datasource/mssql/schema.go` — Same interfaces
-- `pkg/services/schema_change_detection.go` — Change type detection
-- `pkg/models/column_metadata.go` — Column classification context
-
-**Why it's a good first app:**
-- Lowest complexity — schema introspection queries already exist
-- Clear I/O pattern — read schema, compare, generate report
-- High value with minimal computation
-- Demonstrates scheduled execution + LLM integration
-
-### 2. AI Data Guardian
-
-**Problem:** 57% of data professionals cite poor data quality as their #1 challenge. Companies maintain ~290 manually-written tests. Monte Carlo charges six figures.
-
-**What it does (AI-automated):**
-- Profiles data using aggregate queries (null rates, cardinality, distributions, freshness)
-- **AI auto-generates quality expectations** from profiling results: "This column has 0.3% nulls historically. Alert if null rate exceeds 2%."
-- Scheduled checks against expectations using `QueryExecutor`
-- **AI explains anomalies** when checks fail: "The `users.email` column null rate jumped from 0.3% to 15.2% in the last 24 hours. This correlates with a new column `users.sso_id` appearing yesterday — likely a migration that made email optional for SSO users."
-- Stores expectations and check results in app-isolated schema
-
-**Existing code leveraged:**
-- `pkg/adapters/datasource/interfaces.go` — `QueryExecutor` for aggregate queries
-- `pkg/services/column_feature_extraction.go` — Feature extraction patterns
-- `pkg/adapters/datasource/postgres/schema.go` — `AnalyzeColumnStats()`, `GetDistinctValues()`
-
-**Why it's a good second app:**
-- Builds on Drift Monitor's scheduling + LLM patterns
-- Adds statistical computation (z-score, IQR — simple math)
-- Higher value density — the AI-generated expectations eliminate the "cold start" problem
-
-### 3. AI Compliance Manager
-
-**Problem:** SOC 2 audits cost $50K-$100K+. Companies scramble for weeks collecting screenshots and documentation. Existing tools (Vanta, Drata) cover infrastructure but miss the data layer.
-
-**What it does (AI-automated):**
-- Reads engine's own audit infrastructure (MCP audit events, general audit log, column sensitivity, role assignments)
-- **AI maps evidence to compliance frameworks:** "MCP audit events showing query_blocked events with security_level=critical map to SOC 2 CC6.1 (Logical and Physical Access Controls)"
-- **AI generates compliance narratives:** "During the reporting period, 47 unauthorized table access attempts were detected and blocked. All sensitive columns are classified and access is logged."
-- Generates audit-ready evidence packages on demand
-- Stores compliance reports and evidence snapshots in app-isolated schema
-
-**Existing code leveraged:**
-- `pkg/models/mcp_audit.go` — 10 event types with security classification
-- `pkg/services/audit_service.go` — Entity CRUD tracking with provenance
-- `pkg/models/column_metadata.go` — `IsSensitive` flag, classification
-- `pkg/auth/claims.go` — Role and access information
-- `pkg/services/retention_service.go` — Data lifecycle compliance
-
-**Why it's a good third app:**
-- Zero new data collection — aggregates existing audit data
-- Demonstrates multi-source data aggregation pattern
-- Highest dollar-value impact (directly reduces audit costs)
-- Proves the platform can read engine internal data safely
+**Migrated to:** `plans/guardian/` — See the following DESIGN files for full details:
+- `plans/guardian/DESIGN-guardian-data-quality.md` — AI Drift Monitor, AI Data Quality Monitor
+- `plans/guardian/DESIGN-guardian-compliance.md` — AI Compliance Manager
+- `plans/guardian/DESIGN-guardian-security-alerting.md` — AI Query Monitor
 
 ---
 
