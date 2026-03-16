@@ -57,10 +57,10 @@ func setupGlossaryToolIntegrationTest(t *testing.T) *glossaryToolTestContext {
 	glossaryRepo := repositories.NewGlossaryRepository()
 
 	// Configure mock to enable glossary tools (per-app toggles)
-	// update_glossary_term and delete_glossary_term are in Ontology Forge developer toggle.
+	// update_glossary_term and delete_glossary_term are in the AI Data Liaison developer toggle (addApprovalTools).
 	mockMCPConfig := &mockMCPConfigService{
 		config: &models.ToolGroupConfig{
-			AddOntologyMaintenanceTools: true, // Enables ontology maintenance tools including glossary write tools
+			AddApprovalTools: true, // Enables approval tools including glossary write tools
 		},
 	}
 
