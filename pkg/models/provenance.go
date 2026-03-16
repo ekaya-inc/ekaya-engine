@@ -42,7 +42,7 @@ func (s ProvenanceSource) IsValid() bool {
 // ProvenanceContext carries source and actor information through operations.
 // This context is used to track WHO performed an action and HOW it was performed.
 type ProvenanceContext struct {
-	// Source indicates how the operation was performed (inference, mcp, manual)
+	// Source indicates how the operation was performed (inferred, mcp, manual)
 	Source ProvenanceSource
 
 	// UserID is the UUID of the user who triggered the operation.

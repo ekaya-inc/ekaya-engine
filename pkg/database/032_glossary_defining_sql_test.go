@@ -258,7 +258,7 @@ func Test_031_GlossaryDefiningSql(t *testing.T) {
 		AND column_name = 'source'
 	`).Scan(&defaultValue)
 	require.NoError(t, err)
-	assert.Contains(t, defaultValue, "inferred", "Source column should default to 'inference'")
+	assert.Contains(t, defaultValue, "inferred", "Source column should default to 'inferred'")
 
 	// Verify foreign key from aliases to glossary
 	var fkExists bool

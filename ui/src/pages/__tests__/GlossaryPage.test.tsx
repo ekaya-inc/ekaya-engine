@@ -199,11 +199,32 @@ describe('GlossaryPage', () => {
     });
 
     it('displays source badges correctly', async () => {
+      vi.mocked(engineApi.listGlossaryTerms).mockResolvedValue({
+        success: true,
+        data: {
+          terms: [
+            ...mockTerms,
+            {
+              id: 'term-3',
+              project_id: 'proj-1',
+              term: 'Bookings',
+              definition: 'Gross bookings from completed orders',
+              defining_sql: 'SELECT SUM(total) AS bookings FROM orders WHERE status = \'completed\'',
+              source: 'mcp',
+              created_at: '2024-01-17T00:00:00Z',
+              updated_at: '2024-01-17T00:00:00Z',
+            },
+          ],
+          total: 3,
+        },
+      });
+
       renderGlossaryPage();
 
       await waitFor(() => {
         expect(screen.getByText('Inferred')).toBeInTheDocument();
         expect(screen.getByText('Manual')).toBeInTheDocument();
+        expect(screen.getByText('MCP')).toBeInTheDocument();
       });
     });
 

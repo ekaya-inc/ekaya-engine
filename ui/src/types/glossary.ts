@@ -8,7 +8,7 @@ import type { OutputColumn } from './query';
 /**
  * Source of a glossary term
  */
-export type GlossaryTermSource = 'inferred' | 'manual' | 'client';
+export type GlossaryTermSource = 'inferred' | 'manual' | 'mcp';
 
 /**
  * GlossaryTerm represents a business term with its SQL definition.

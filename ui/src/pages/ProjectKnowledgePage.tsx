@@ -48,7 +48,6 @@ const FACT_TYPE_COLORS: Record<string, string> = {
  * Badge colors for source types
  */
 const SOURCE_COLORS: Record<string, string> = {
-  inference: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
   inferred: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
   manual: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
   mcp: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
@@ -59,13 +58,12 @@ const SOURCE_COLORS: Record<string, string> = {
  */
 function getSourceDisplayName(source: string): string {
   switch (source) {
-    case 'inference':
     case 'inferred':
       return 'Inferred';
     case 'manual':
       return 'Manual';
     case 'mcp':
-      return 'Client';
+      return 'MCP';
     default:
       return source;
   }

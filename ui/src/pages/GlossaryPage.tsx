@@ -556,9 +556,11 @@ const GlossaryPage = () => {
                               ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
                               : term.source === 'manual'
                               ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                              : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                              : term.source === 'mcp'
+                              ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                              : 'bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-300'
                           }`}>
-                            {term.source === 'inferred' ? 'Inferred' : term.source === 'manual' ? 'Manual' : 'Client'}
+                            {term.source === 'inferred' ? 'Inferred' : term.source === 'manual' ? 'Manual' : term.source === 'mcp' ? 'MCP' : term.source}
                           </span>
                         </div>
                         <p className="mt-1 text-sm text-text-secondary">

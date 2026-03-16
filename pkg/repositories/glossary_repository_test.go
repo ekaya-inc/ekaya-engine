@@ -235,7 +235,7 @@ func TestGlossaryRepository_Create_MinimalFields(t *testing.T) {
 	}
 	// Verify provenance was set from context
 	if retrieved.Source != "inferred" {
-		t.Errorf("expected Source 'inference', got %q", retrieved.Source)
+		t.Errorf("expected Source 'inferred', got %q", retrieved.Source)
 	}
 }
 
@@ -1116,7 +1116,7 @@ func TestGlossaryRepository_Create_Provenance_Inference(t *testing.T) {
 
 	// Verify Source was set from context
 	if term.Source != "inferred" {
-		t.Errorf("expected Source 'inference', got %q", term.Source)
+		t.Errorf("expected Source 'inferred', got %q", term.Source)
 	}
 
 	// Verify persisted correctly
@@ -1125,7 +1125,7 @@ func TestGlossaryRepository_Create_Provenance_Inference(t *testing.T) {
 		t.Fatalf("GetByID failed: %v", err)
 	}
 	if retrieved.Source != "inferred" {
-		t.Errorf("expected persisted Source 'inference', got %q", retrieved.Source)
+		t.Errorf("expected persisted Source 'inferred', got %q", retrieved.Source)
 	}
 }
 

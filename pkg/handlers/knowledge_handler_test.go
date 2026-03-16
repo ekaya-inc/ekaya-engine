@@ -172,7 +172,7 @@ func TestKnowledgeHandler_List(t *testing.T) {
 				FactType:  "business_rule",
 				Value:     "All timestamps are stored in UTC",
 				Context:   "Inferred from analysis",
-				Source:    "inference",
+				Source:    "inferred",
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
 			},
