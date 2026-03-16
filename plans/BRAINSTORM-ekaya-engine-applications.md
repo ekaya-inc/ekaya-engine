@@ -26,7 +26,7 @@
 
 These apps address the core data engineering bottlenecks: **77% of data engineering teams say workloads are getting heavier**, and organizations spend **30% of their time** on non-value-add data management tasks.
 
-**8. Auto Data Catalog — Self-discovering, searchable data dictionary.** Uses Foreign Data Wrappers to introspect the customer's databases, extracts table/column metadata, infers descriptions using LLM analysis of column names and sample data, and stores everything in managed PostgreSQL with pgvector embeddings for semantic search. Teams can search "where do we store customer emails?" and get ranked results across all connected data sources. Mid-market companies rarely have formal data catalogs — enterprise tools like Atlan (Forrester Wave Leader, 2025) and Alation start at **$50K+/year**. An auto-discovering catalog running as a WASM app on Ekaya fills the gap between "nothing" and "six-figure contracts."
+**8. Auto Data Catalog** — *Migrated to `plans/edge/DESIGN-edge-discovery.md`*
 
 **9. Semantic Metrics Store — Define once, query everywhere.** A lightweight semantic layer where teams define canonical business metrics (MRR, churn rate, customer LTV) as SQL expressions with dimensions, filters, and access controls. Serves consistent metric values via API to any downstream tool — dashboards, notebooks, AI agents, Slack bots. Gartner's 2025 guidance elevated semantic layers **from optional to foundational**, and Snowflake's internal testing showed **85% accuracy for natural language queries with semantic context versus 40% without**. This directly enables the existing AI Data Liaison app to give dramatically better answers while solving the "everyone has different numbers" problem that plagues every growing company.
 
@@ -73,7 +73,7 @@ Each app exploits a specific combination of Ekaya's architectural advantages. Th
 | App | Customer DB access | Managed PostgreSQL | WASM sandboxing |
 |-----|:-:|:-:|:-:|
 | *Apps 1-7 (Data Guardian)* | *Migrated to `plans/guardian/`* | | |
-| Auto Data Catalog | FDWs for multi-source introspection | pgvector semantic search | Safe metadata extraction |
+| *App 8 (Auto Data Catalog)* | *Migrated to `plans/edge/`* | | |
 | Semantic Metrics Store | Queries customer warehouse | Caches computed metrics | Custom metric logic |
 | Reverse ETL Sync | Reads source data | Stores sync state/errors | Safe transformation execution |
 | Data Quality Sentinel | Profiles source tables | Time-series anomaly storage | Sandboxed test execution |
@@ -95,7 +95,7 @@ Not all 20 apps have equal pull. Based on market urgency, competitive landscape,
 
 **Highest immediate demand** centers on the compliance cluster (Apps 1–7, now migrated to `plans/guardian/`). See `plans/guardian/DESIGN-guardian-*.md` for the full Data Guardian product design.
 
-**Strongest platform lock-in** comes from the data infrastructure cluster (Apps 8–13). Auto Data Catalog and Semantic Metrics Store become the connective tissue that every other app depends on — once a company's metric definitions and data dictionary live on Ekaya, switching costs rise dramatically. These apps also directly amplify the existing AI Data Liaison by giving it semantic context, which Snowflake proved improves natural language query accuracy from **40% to 85%**.
+**Strongest platform lock-in** comes from the data infrastructure cluster (Apps 9–13; App 8 Auto Data Catalog migrated to `plans/edge/`). Semantic Metrics Store becomes connective tissue that every other app depends on — once a company's metric definitions live on Ekaya, switching costs rise dramatically. These apps also directly amplify the existing AI Data Liaison by giving it semantic context, which Snowflake proved improves natural language query accuracy from **40% to 85%**.
 
 **Largest TAM expansion** comes from the AI-native cluster (Apps 14–17). MCP Gateway & Registry positions Ekaya as the control plane for enterprise AI data access — a category that barely exists today but that **Gartner predicts will include integrated agents in 40% of enterprise apps by 2026**. Moving first here establishes Ekaya as the default governance layer between AI agents and company data.
 
@@ -105,15 +105,15 @@ Not all 20 apps have equal pull. Based on market urgency, competitive landscape,
 
 These ideas were originally explored as separate repositories (Dec 2025) before the WASM application platform was conceived. The original repos have been archived and the unique concepts consolidated here.
 
-**21. Data Chat — Conversational data interface.** A "chat with your data" frontend deployed within the customer's data boundary. Originally built as a Docker appliance (LibreChat fork + MongoDB + Redis + Meilisearch) connecting to ekaya-engine via MCP SSE. The concept: business users ask questions in plain English, the system generates SQL and returns visualized results (EChart artifacts). This is essentially a UI layer on top of the AI Data Liaison — worth revisiting as a lightweight WASM app that renders a chat interface within the engine UI rather than requiring a separate Docker deployment. The original implementation exists as a reference at `ekaya-app-data-chat` (archived).
+**21. Data Chat** — *Migrated to `plans/edge/DESIGN-edge-chat.md`*
 
 **22. Data Factory — Continuously-fresh demo data generation.** Generates realistic, temporally-shifting demo data for prospect demos and testing. Day 1: generates 90-day historical data. Day 2+: shifts timestamps and adds new "today" records so demo data never goes stale. Uses LLM for realistic value generation (names, addresses, plausible business metrics) and preserves foreign key relationships across tables. Solves the universal "stale demo" problem — every SaaS company has demo data from 2023 that undermines credibility. A WASM app with `db_query` + `llm_generate` host functions could run this entirely within the engine.
 
-**23. Data Model Factory — AI-powered "vibe coding" for schemas.** Describe what you want in natural language ("a calendar application with Google Calendar integration") and Ekaya generates the complete schema (tables, columns, constraints), ontology (entities, relationships, business rules), API endpoints, and integration stubs. Iterative refinement via natural language feedback. This is the ultimate expression of the "vibe-code data applications" vision from the WASM platform design — but focused on the data model layer rather than application logic. Could be a powerful onboarding tool: new users describe their domain and get a working schema instantly.
+**23. Data Model Factory** — *Migrated to `plans/edge/DESIGN-edge-discovery.md`*
 
 **24. Data Quality Agents — Ontology-aware quality analysis with LLM fix suggestions.** Detects issues (unexpected nulls, type mismatches, duplicate records, broken foreign keys, range violations, pattern mismatches) by analyzing data against the ontology. Unique differentiator: LLM generates SQL fix suggestions (e.g., "UPDATE users SET email = LOWER(email) WHERE email != LOWER(email)") that require human approval before execution. This overlaps significantly with App #11 (Data Quality Sentinel / AI Data Guardian) but adds the **fix suggestion + approval workflow** which is a distinct capability. The approval pattern should be incorporated into the AI Data Guardian design.
 
-**25. Ontology Templates — Pre-built, one-click schema bootstrapping.** Library of curated ontology templates (3-5 tables each) for common business domains: digital marketing (campaigns, results, creatives), B2B sales pipeline, e-commerce analytics, mobile app analytics, subscription SaaS metrics, campaign optimization. Each template includes schema definitions, semantic ontology (descriptions, business rules, relationships), sample queries, and visual previews. Solves the cold-start problem for new projects — instead of connecting a database and waiting for AI discovery, start with a template and customize. Could be embedded in the engine binary or downloaded from the marketplace.
+**25. Ontology Templates** — *Migrated to `plans/edge/DESIGN-edge-discovery.md`*
 
 **26. Product Kit — Embedded text-to-SQL for SaaS products.** A standalone, read-only inference server that SaaS companies deploy into their production backend to give end-users AI-powered data querying. The server has **no access to the product database** — it generates safe, validated SQL that the product's own backend executes against the schema it was designed for (e.g., a denormalized table used for end-user analytics in the product UI).
 
@@ -164,7 +164,7 @@ These ideas were originally explored as separate repositories (Dec 2025) before 
 
 The earlier explorations add three new priority considerations:
 
-**Immediate GTM amplifier:** App #25 (Ontology Templates) has the highest impact on reducing time-to-value for new users. A prospect who can start with a "digital marketing" template and see results in 5 minutes is far more likely to convert than one who needs to connect a database and wait for ontology discovery. This should be considered for the first wave alongside the AI Data Guardian suite.
+**Immediate GTM amplifier:** App #25 (Ontology Templates, migrated to `plans/edge/DESIGN-edge-discovery.md`) has the highest impact on reducing time-to-value for new users. Key feature of Ekaya Edge.
 
 **New market segment:** App #26 (Product Kit) opens an entirely different buyer — SaaS CTOs who want to add AI data features to their own products. This is a B2B2C play with different pricing (embedded licensing) and different distribution (developer docs, SDKs). Worth tracking as a separate initiative.
 
