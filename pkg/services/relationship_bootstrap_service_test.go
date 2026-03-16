@@ -101,6 +101,105 @@ func TestRelationshipBootstrapService_BootstrapCreatesColumnFeaturesRelationship
 	assert.Equal(t, models.CardinalityNTo1, rel.Cardinality)
 }
 
+func TestRelationshipBootstrapService_BootstrapSkipsSoftDeletedColumnFeaturesRelationships(t *testing.T) {
+	logger := zap.NewNop()
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	paymentsTableID := uuid.New()
+	usersTableID := uuid.New()
+	paymentUserIDColID := uuid.New()
+	userIDColID := uuid.New()
+
+	enumPath := string(models.ClassificationPathEnum)
+	enumPurpose := models.PurposeEnum
+	enumSemanticType := "enum"
+	attributeRole := models.RoleAttribute
+	description := "Original enum classification"
+	confidence := 0.92
+
+	mockSchemaRepo := &mockSchemaRepoForBootstrap{
+		tables: []*models.SchemaTable{
+			{ID: paymentsTableID, ProjectID: projectID, DatasourceID: datasourceID, SchemaName: "public", TableName: "payments"},
+			{ID: usersTableID, ProjectID: projectID, DatasourceID: datasourceID, SchemaName: "public", TableName: "users"},
+		},
+		columns: []*models.SchemaColumn{
+			{ID: paymentUserIDColID, ProjectID: projectID, SchemaTableID: paymentsTableID, ColumnName: "user_id", DataType: "uuid"},
+			{ID: userIDColID, ProjectID: projectID, SchemaTableID: usersTableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+		},
+		softDeletedRelationshipKeys: map[string]struct{}{
+			relationshipColumnKey(paymentUserIDColID, userIDColID): {},
+		},
+	}
+
+	mockColumnMetadataRepo := &mockColumnMetadataRepoForBootstrap{
+		metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+			paymentUserIDColID: {
+				ProjectID:          projectID,
+				SchemaColumnID:     paymentUserIDColID,
+				ClassificationPath: &enumPath,
+				Purpose:            &enumPurpose,
+				SemanticType:       &enumSemanticType,
+				Role:               &attributeRole,
+				Description:        &description,
+				Confidence:         &confidence,
+				Features: models.ColumnMetadataFeatures{
+					IdentifierFeatures: &models.IdentifierFeatures{
+						FKTargetTable:  "users",
+						FKTargetColumn: "id",
+						FKConfidence:   0.95,
+					},
+				},
+			},
+		},
+	}
+
+	mockDatasourceSvc := &mockDatasourceServiceForBootstrap{
+		datasource: &models.Datasource{
+			ID:             datasourceID,
+			ProjectID:      projectID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{},
+		},
+	}
+
+	mockAdapterFactory := &mockAdapterFactoryForBootstrap{
+		schemaDiscoverer: &mockSchemaDiscovererForBootstrap{
+			joinResults: map[string]*datasource.JoinAnalysis{
+				"public.payments.user_id->public.users.id": {
+					JoinCount:     100,
+					SourceMatched: 90,
+					TargetMatched: 90,
+				},
+			},
+		},
+	}
+
+	svc := NewRelationshipBootstrapService(
+		mockDatasourceSvc,
+		mockAdapterFactory,
+		mockSchemaRepo,
+		mockColumnMetadataRepo,
+		logger,
+	)
+
+	result, err := svc.Bootstrap(context.Background(), projectID, datasourceID, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, 0, result.ColumnFeatureRelationships)
+	assert.Equal(t, 0, result.FKRelationships)
+	assert.Empty(t, mockSchemaRepo.upsertedRelationshipsWithMetrics)
+
+	reconciled := mockColumnMetadataRepo.metadataByColumnID[paymentUserIDColID]
+	require.NotNil(t, reconciled)
+	require.NotNil(t, reconciled.ClassificationPath)
+	assert.Equal(t, enumPath, *reconciled.ClassificationPath)
+	require.NotNil(t, reconciled.Role)
+	assert.Equal(t, attributeRole, *reconciled.Role)
+	require.NotNil(t, reconciled.SemanticType)
+	assert.Equal(t, enumSemanticType, *reconciled.SemanticType)
+}
+
 func TestRelationshipBootstrapService_BootstrapRecomputesDeclaredFKCardinality(t *testing.T) {
 	logger := zap.NewNop()
 	projectID := uuid.New()
@@ -255,6 +354,108 @@ func TestRelationshipBootstrapService_BootstrapDiscoversDeclaredFKRelationshipsF
 	assert.Equal(t, accountIDColID, rel.TargetColumnID)
 	assert.Equal(t, models.Cardinality1To1, rel.Cardinality)
 	assert.True(t, rel.IsValidated)
+}
+
+func TestRelationshipBootstrapService_BootstrapSkipsSoftDeletedDiscoveredFKRelationships(t *testing.T) {
+	logger := zap.NewNop()
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	productsTableID := uuid.New()
+	distributionCentersTableID := uuid.New()
+	distributionCenterIDColID := uuid.New()
+	targetIDColID := uuid.New()
+
+	enumPath := string(models.ClassificationPathEnum)
+	enumPurpose := models.PurposeEnum
+	enumSemanticType := "enum"
+	attributeRole := models.RoleAttribute
+	description := "Distribution center bucket"
+	confidence := 0.95
+
+	mockSchemaRepo := &mockSchemaRepoForBootstrap{
+		tables: []*models.SchemaTable{
+			{ID: productsTableID, ProjectID: projectID, DatasourceID: datasourceID, SchemaName: "public", TableName: "products"},
+			{ID: distributionCentersTableID, ProjectID: projectID, DatasourceID: datasourceID, SchemaName: "public", TableName: "distribution_centers"},
+		},
+		columns: []*models.SchemaColumn{
+			{ID: distributionCenterIDColID, ProjectID: projectID, SchemaTableID: productsTableID, ColumnName: "distribution_center_id", DataType: "integer"},
+			{ID: targetIDColID, ProjectID: projectID, SchemaTableID: distributionCentersTableID, ColumnName: "id", DataType: "integer", IsPrimaryKey: true},
+		},
+		softDeletedRelationshipKeys: map[string]struct{}{
+			relationshipColumnKey(distributionCenterIDColID, targetIDColID): {},
+		},
+	}
+
+	mockColumnMetadataRepo := &mockColumnMetadataRepoForBootstrap{
+		metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+			distributionCenterIDColID: {
+				ProjectID:          projectID,
+				SchemaColumnID:     distributionCenterIDColID,
+				ClassificationPath: &enumPath,
+				Purpose:            &enumPurpose,
+				SemanticType:       &enumSemanticType,
+				Role:               &attributeRole,
+				Description:        &description,
+				Confidence:         &confidence,
+			},
+		},
+	}
+
+	mockDatasourceSvc := &mockDatasourceServiceForBootstrap{
+		datasource: &models.Datasource{
+			ID:             datasourceID,
+			ProjectID:      projectID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{},
+		},
+	}
+
+	mockAdapterFactory := &mockAdapterFactoryForBootstrap{
+		schemaDiscoverer: &mockSchemaDiscovererForBootstrap{
+			supportsFKs: true,
+			foreignKeys: []datasource.ForeignKeyMetadata{
+				{
+					ConstraintName: "products_distribution_center_id_fkey",
+					SourceSchema:   "public",
+					SourceTable:    "products",
+					SourceColumn:   "distribution_center_id",
+					TargetSchema:   "public",
+					TargetTable:    "distribution_centers",
+					TargetColumn:   "id",
+				},
+			},
+			joinResults: map[string]*datasource.JoinAnalysis{
+				"public.products.distribution_center_id->public.distribution_centers.id": {
+					JoinCount:     100,
+					SourceMatched: 100,
+					TargetMatched: 10,
+				},
+			},
+		},
+	}
+
+	svc := NewRelationshipBootstrapService(
+		mockDatasourceSvc,
+		mockAdapterFactory,
+		mockSchemaRepo,
+		mockColumnMetadataRepo,
+		logger,
+	)
+
+	result, err := svc.Bootstrap(context.Background(), projectID, datasourceID, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, 0, result.DeclaredFKRelationships)
+	assert.Equal(t, 0, result.FKRelationships)
+	assert.Empty(t, mockSchemaRepo.upsertedRelationships)
+
+	reconciled := mockColumnMetadataRepo.metadataByColumnID[distributionCenterIDColID]
+	require.NotNil(t, reconciled)
+	require.NotNil(t, reconciled.ClassificationPath)
+	assert.Equal(t, enumPath, *reconciled.ClassificationPath)
+	require.NotNil(t, reconciled.Role)
+	assert.Equal(t, attributeRole, *reconciled.Role)
 }
 
 func TestRelationshipBootstrapService_BootstrapReconcilesEnumMetadataForDeclaredFK(t *testing.T) {
@@ -613,6 +814,7 @@ type mockSchemaRepoForBootstrap struct {
 	relationships                    []*models.SchemaRelationship
 	upsertedRelationships            []*models.SchemaRelationship
 	upsertedRelationshipsWithMetrics []*models.SchemaRelationship
+	softDeletedRelationshipKeys      map[string]struct{}
 }
 
 func (m *mockSchemaRepoForBootstrap) ListTablesByDatasource(_ context.Context, _, _ uuid.UUID) ([]*models.SchemaTable, error) {
@@ -628,6 +830,10 @@ func (m *mockSchemaRepoForBootstrap) ListRelationshipsByDatasource(_ context.Con
 }
 
 func (m *mockSchemaRepoForBootstrap) UpsertRelationship(_ context.Context, rel *models.SchemaRelationship) error {
+	key := relationshipColumnKey(rel.SourceColumnID, rel.TargetColumnID)
+	if _, exists := m.softDeletedRelationshipKeys[key]; exists {
+		return nil
+	}
 	if rel.ID == uuid.Nil {
 		rel.ID = uuid.New()
 	}
@@ -643,6 +849,13 @@ func (m *mockSchemaRepoForBootstrap) UpsertRelationship(_ context.Context, rel *
 }
 
 func (m *mockSchemaRepoForBootstrap) UpsertRelationshipWithMetrics(_ context.Context, rel *models.SchemaRelationship, _ *models.DiscoveryMetrics) error {
+	key := relationshipColumnKey(rel.SourceColumnID, rel.TargetColumnID)
+	if _, exists := m.softDeletedRelationshipKeys[key]; exists {
+		return nil
+	}
+	if rel.ID == uuid.Nil {
+		rel.ID = uuid.New()
+	}
 	cloned := *rel
 	for i, existing := range m.upsertedRelationshipsWithMetrics {
 		if existing.SourceColumnID == cloned.SourceColumnID && existing.TargetColumnID == cloned.TargetColumnID {
@@ -652,6 +865,29 @@ func (m *mockSchemaRepoForBootstrap) UpsertRelationshipWithMetrics(_ context.Con
 	}
 	m.upsertedRelationshipsWithMetrics = append(m.upsertedRelationshipsWithMetrics, &cloned)
 	return nil
+}
+
+func (m *mockSchemaRepoForBootstrap) GetRelationshipByColumns(_ context.Context, sourceColumnID, targetColumnID uuid.UUID) (*models.SchemaRelationship, error) {
+	key := relationshipColumnKey(sourceColumnID, targetColumnID)
+	for _, rel := range m.upsertedRelationshipsWithMetrics {
+		if relationshipColumnKey(rel.SourceColumnID, rel.TargetColumnID) == key {
+			cloned := *rel
+			return &cloned, nil
+		}
+	}
+	for _, rel := range m.upsertedRelationships {
+		if relationshipColumnKey(rel.SourceColumnID, rel.TargetColumnID) == key {
+			cloned := *rel
+			return &cloned, nil
+		}
+	}
+	for _, rel := range m.relationships {
+		if relationshipColumnKey(rel.SourceColumnID, rel.TargetColumnID) == key {
+			cloned := *rel
+			return &cloned, nil
+		}
+	}
+	return nil, nil
 }
 
 type mockDatasourceServiceForBootstrap struct {

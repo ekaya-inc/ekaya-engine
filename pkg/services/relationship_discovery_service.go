@@ -317,6 +317,16 @@ func (s *llmRelationshipDiscoveryService) createSchemaRelationshipFromValidation
 	if err := s.schemaRepo.UpsertRelationshipWithMetrics(ctx, rel, metrics); err != nil {
 		return err
 	}
+	activeRel, err := getActiveRelationshipAfterUpsert(ctx, s.schemaRepo, candidate.SourceColumnID, candidate.TargetColumnID)
+	if err != nil {
+		return fmt.Errorf("check active relationship after validation upsert: %w", err)
+	}
+	if activeRel == nil {
+		s.logger.Debug("Skipping metadata reconciliation for soft-deleted validated relationship",
+			zap.String("source_column_id", candidate.SourceColumnID.String()),
+			zap.String("target_column_id", candidate.TargetColumnID.String()))
+		return nil
+	}
 
 	sourceColumn := columnByID[candidate.SourceColumnID]
 	targetColumn := columnByID[candidate.TargetColumnID]

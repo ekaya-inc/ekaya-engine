@@ -323,6 +323,16 @@ func (s *relationshipBootstrapService) bootstrapColumnFeatureRelationships(
 		if err := s.schemaRepo.UpsertRelationshipWithMetrics(ctx, rel, metrics); err != nil {
 			return createdCount, fmt.Errorf("upsert column_features relationship: %w", err)
 		}
+		activeRel, err := getActiveRelationshipAfterUpsert(ctx, s.schemaRepo, sourceColumn.ID, targetColumn.ID)
+		if err != nil {
+			return createdCount, fmt.Errorf("check active column_features relationship: %w", err)
+		}
+		if activeRel == nil {
+			s.logger.Debug("Skipping column_features metadata reconciliation for soft-deleted relationship",
+				zap.String("source_column_id", sourceColumn.ID.String()),
+				zap.String("target_column_id", targetColumn.ID.String()))
+			continue
+		}
 		if err := reconcileRelationshipBackedColumnMetadata(
 			ctx,
 			s.columnMetadataRepo,
@@ -431,6 +441,14 @@ func relationshipTableColumnKey(tableID uuid.UUID, columnName string) string {
 	return fmt.Sprintf("%s:%s", tableID.String(), columnName)
 }
 
+func getActiveRelationshipAfterUpsert(
+	ctx context.Context,
+	schemaRepo repositories.SchemaRepository,
+	sourceColumnID, targetColumnID uuid.UUID,
+) (*models.SchemaRelationship, error) {
+	return schemaRepo.GetRelationshipByColumns(ctx, sourceColumnID, targetColumnID)
+}
+
 func resolveBootstrapTargetTable(
 	sourceTable *models.SchemaTable,
 	targetTableName string,
@@ -533,13 +551,20 @@ func (s *relationshipBootstrapService) discoverDeclaredFKRelationships(
 		if err := s.schemaRepo.UpsertRelationship(ctx, rel); err != nil {
 			return nil, nil, fmt.Errorf("upsert discovered FK relationship %s: %w", fk.ConstraintName, err)
 		}
-
-		if rel.ID == uuid.Nil {
+		activeRel, err := getActiveRelationshipAfterUpsert(ctx, s.schemaRepo, sourceColumn.ID, targetColumn.ID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("check discovered FK relationship %s: %w", fk.ConstraintName, err)
+		}
+		if activeRel == nil {
+			s.logger.Debug("Skipping discovered FK relationship that remains soft-deleted",
+				zap.String("constraint", fk.ConstraintName),
+				zap.String("source_column_id", sourceColumn.ID.String()),
+				zap.String("target_column_id", targetColumn.ID.String()))
 			continue
 		}
 
 		declaredFKKeys[relKey] = struct{}{}
-		relationships = append(relationships, rel)
+		relationships = append(relationships, activeRel)
 	}
 
 	return relationships, declaredFKKeys, nil
