@@ -8,9 +8,9 @@
 
 ## Completion Gate
 
-- Before calling a coding task complete, run `make check` from the repo root.
-- If `make check` fails, do not report the task as complete. Fix the issues caused by your changes and rerun `make check`.
-- If completion is blocked by pre-existing unrelated failures or the user explicitly tells you not to run it, say that clearly instead of claiming the task is complete.
+- Before calling a coding task complete after backend code changes, run `make check` from the repo root.
+- If backend code changed and `make check` fails, do not report the task as complete. Fix the issues caused by your changes and rerun `make check`.
+- If backend code changed and completion is blocked by pre-existing unrelated failures or the user explicitly tells you not to run it, say that clearly instead of claiming the task is complete.
 
 ## MCP Test Environment
 
