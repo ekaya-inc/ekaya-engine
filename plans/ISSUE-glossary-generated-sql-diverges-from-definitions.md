@@ -4,6 +4,7 @@
 **Status:** TODO
 **Priority:** HIGH
 **Observed on:** MCP project `4cecc18a-b051-40c1-8308-ad3e3363b0a8`, datasource `the_look`
+**Plan of record:** `plans/PLAN-glossary-sql-first-example-generation.md`
 
 ## Observation
 
@@ -19,6 +20,18 @@ This makes the glossary the weakest remaining generation surface because bad SQL
 ## Review scope
 
 Ten glossary entries were reviewed. The stored SQL for each term was fetched from the glossary, executed when present, and compared against an independently derived SQL candidate using ontology/schema tools (`get_schema`, `get_ontology`, `get_context`, `probe_columns`).
+
+## Partial mitigations completed
+
+The core generation issue is still open, but a few adjacent problems have been fixed:
+
+- The glossary UI now exposes an `Execute Query` action and reuses the shared query-results table so bad glossary SQL is visible immediately from the term details view.
+- The glossary SQL editor now derives its CodeMirror dialect from the selected datasource instead of hardcoding PostgreSQL, so SQL Server-backed projects get the correct editor dialect.
+- The glossary edit modal now stays constrained to the modal width for long SQL instead of stretching the page horizontally.
+- Manual glossary edits now persist glossary provenance as `manual` rather than leaving the original inferred source in place.
+- Glossary SQL validation now states explicitly that glossary definitions must return a single row.
+
+These changes improve visibility, correctness of editing metadata, and SQL-editor behavior, but they do not solve the underlying glossary-generation quality problem described below.
 
 ## Findings by glossary term
 
