@@ -100,7 +100,7 @@ const applications: ApplicationInfo[] = [
   {
     id: 'ai-data-liaison',
     title: 'AI Data Liaison',
-    subtitle: 'Make Better Business Decisions 10x Faster and lower the burden on the data team',
+    subtitle: 'Give business users governed access to glossary terms, approved queries, and collaboration workflows with the data team',
     icon: Handshake,
     color: 'green',
     available: true,

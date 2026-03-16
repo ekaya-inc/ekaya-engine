@@ -469,8 +469,11 @@ func filterAndConvertToolSpecs(tools []ToolSpec, role string, installedApps map[
 func filterAndConvertToolDefs(tools []ToolDefinition, installedApps map[string]bool) []EnabledToolInfo {
 	result := make([]EnabledToolInfo, 0, len(tools))
 	for _, tool := range tools {
-		// For deprecated EnabledTools, use "developer" role for lookup
-		appID := GetToolAppID(tool.Name, "developer")
+		role := "developer"
+		if tool.ToolGroup == ToolGroupUser {
+			role = "user"
+		}
+		appID := GetToolAppID(tool.Name, role)
 		if !installedApps[appID] {
 			continue
 		}

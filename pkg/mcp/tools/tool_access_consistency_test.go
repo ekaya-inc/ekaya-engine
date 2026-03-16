@@ -642,6 +642,142 @@ func TestDataLiaison_Installed_ExecutionAllowed(t *testing.T) {
 	t.Log("CALLING: data liaison tool correctly allowed when app is installed")
 }
 
+func TestSharedQueryTool_MCPServerPath_ListAndCallAllowedWithoutDataLiaison(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		"tools": {
+			AddDirectDatabaseAccess: true,
+			AddRequestTools:         true,
+		},
+	})
+
+	mcpConfigService := services.NewMCPConfigService(
+		repositories.NewMCPConfigRepository(),
+		&mockQueryService{},
+		&mockProjectService{defaultDatasourceID: uuid.New()},
+		nil,
+		"http://localhost",
+		zap.NewNop(),
+	)
+
+	appService := newMockInstalledAppService() // MCP Server only
+
+	filterDeps := &MCPToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:                  engineDB.DB,
+			MCPConfigService:    mcpConfigService,
+			Logger:              zap.NewNop(),
+			InstalledAppService: appService,
+		},
+		ProjectService: consistencyMockProjectService(),
+	}
+
+	filter := NewToolFilter(filterDeps)
+	allTools := createTestToolsWithDataLiaison()
+
+	claims := &auth.Claims{ProjectID: projectID.String(), Roles: []string{models.RoleAdmin}}
+	claims.Subject = "user-123"
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
+
+	filteredTools := filter(ctx, allTools)
+	if !containsTool(filteredTools, "query") {
+		t.Fatal("LISTING: query should remain visible through MCP Server ownership when AI Data Liaison is not installed")
+	}
+
+	queryDeps := &QueryToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:                  engineDB.DB,
+			MCPConfigService:    mcpConfigService,
+			Logger:              zap.NewNop(),
+			InstalledAppService: appService,
+		},
+		ProjectService: &mockProjectService{defaultDatasourceID: uuid.New()},
+		QueryService:   &mockQueryService{},
+	}
+
+	_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, queryDeps, "query")
+	if err != nil {
+		t.Fatalf("CALLING: query should remain callable through MCP Server ownership: %v", err)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if tenantCtx == nil {
+		t.Fatal("CALLING: expected tenant context to be set")
+	}
+}
+
+func TestGlossary_Uninstalled_ListAndCallBlocked(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		"tools": {
+			AddRequestTools: true,
+		},
+	})
+
+	mcpConfigService := services.NewMCPConfigService(
+		repositories.NewMCPConfigRepository(),
+		&mockQueryService{},
+		&mockProjectService{defaultDatasourceID: uuid.New()},
+		nil,
+		"http://localhost",
+		zap.NewNop(),
+	)
+
+	appService := newMockInstalledAppService() // No AI Data Liaison
+
+	filterDeps := &MCPToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:                  engineDB.DB,
+			MCPConfigService:    mcpConfigService,
+			Logger:              zap.NewNop(),
+			InstalledAppService: appService,
+		},
+		ProjectService: consistencyMockProjectService(),
+	}
+
+	filter := NewToolFilter(filterDeps)
+	allTools := createTestToolsWithDataLiaison()
+
+	claims := &auth.Claims{ProjectID: projectID.String(), Roles: []string{models.RoleUser}}
+	claims.Subject = "user-123"
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
+
+	filteredTools := filter(ctx, allTools)
+	if containsTool(filteredTools, "list_glossary") {
+		t.Fatal("LISTING: list_glossary should be hidden when AI Data Liaison is not installed")
+	}
+	if containsTool(filteredTools, "get_glossary_sql") {
+		t.Fatal("LISTING: get_glossary_sql should be hidden when AI Data Liaison is not installed")
+	}
+
+	queryDeps := &QueryToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:                  engineDB.DB,
+			MCPConfigService:    mcpConfigService,
+			Logger:              zap.NewNop(),
+			InstalledAppService: appService,
+		},
+		ProjectService: &mockProjectService{defaultDatasourceID: uuid.New()},
+		QueryService:   &mockQueryService{},
+	}
+
+	_, _, cleanup, err := AcquireToolAccess(ctx, queryDeps, "list_glossary")
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err == nil {
+		t.Fatal("CALLING: list_glossary should fail when AI Data Liaison is not installed")
+	}
+	if result := AsToolAccessResult(err); result == nil {
+		t.Fatalf("CALLING: expected ToolAccessError, got system error: %v", err)
+	}
+}
+
 // TestAIAgents_Uninstalled_ListAndCallBlocked tests that agent tools are both
 // hidden from listing AND blocked from execution when ai-agents app is uninstalled.
 func TestAIAgents_Uninstalled_ListAndCallBlocked(t *testing.T) {

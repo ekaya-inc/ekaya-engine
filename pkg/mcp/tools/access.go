@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -154,7 +155,7 @@ func CheckToolAccess(ctx context.Context, deps ToolAccessDeps, toolName string) 
 	}
 
 	// Check if the required app is installed for this tool
-	if err := checkAppInstallation(tenantCtx, deps, claims, toolName, projectID); err != nil {
+	if err := checkAppInstallation(tenantCtx, deps, claims, toolName, projectID, state); err != nil {
 		scope.Close()
 		return nil, err
 	}
@@ -225,10 +226,20 @@ func isToolInList(toolName string, tools []services.ToolSpec) bool {
 	return false
 }
 
-// checkAppInstallation verifies that the required app is installed for the given tool.
+// checkAppInstallation verifies that at least one enabled ownership path for
+// the tool is installed. This keeps execution-time app gating aligned with the
+// same toggle registry used by the UI/tool inventory and preserves shared tools
+// such as query, which can be exposed by more than one app path.
 // Returns nil if access is allowed, or a ToolAccessError if the app is not installed.
 // If InstalledAppService is nil (e.g. in tests), access is allowed (backward compat).
-func checkAppInstallation(ctx context.Context, deps ToolAccessDeps, claims *auth.Claims, toolName string, projectID uuid.UUID) error {
+func checkAppInstallation(
+	ctx context.Context,
+	deps ToolAccessDeps,
+	claims *auth.Claims,
+	toolName string,
+	projectID uuid.UUID,
+	state map[string]*models.ToolGroupConfig,
+) error {
 	appService := deps.GetInstalledAppService()
 	if appService == nil {
 		return nil // No app service available, allow access (backward compat for tests)
@@ -250,22 +261,56 @@ func checkAppInstallation(ctx context.Context, deps ToolAccessDeps, claims *auth
 		return nil
 	}
 
-	// Data Liaison tools require ai-data-liaison app to be installed
-	if services.DataLiaisonTools[toolName] {
-		installed, err := appService.IsInstalled(ctx, projectID, models.AppIDAIDataLiaison)
-		if err != nil {
-			deps.GetLogger().Error("Failed to check AI Data Liaison app installation",
-				zap.String("project_id", projectID.String()),
-				zap.Error(err))
-			// Fail closed: deny access on error
-			return newToolAccessError("app_not_installed", "AI Data Liaison app installation check failed")
+	requiredAppIDs := services.GetEnabledToolOwningAppIDs(toolName, state)
+	if len(requiredAppIDs) == 0 {
+		requiredAppIDs = services.GetToolOwningAppIDs(toolName)
+	}
+
+	if len(requiredAppIDs) == 0 {
+		return nil
+	}
+
+	requiredAppNames := make([]string, 0, len(requiredAppIDs))
+	hasInstalledOwner := false
+	for _, appID := range requiredAppIDs {
+		if appID == models.AppIDMCPServer {
+			hasInstalledOwner = true
+			continue
 		}
-		if !installed {
-			return newToolAccessError("app_not_installed", "AI Data Liaison app is not installed for this project")
+
+		appName := services.AppDisplayNames[appID]
+		if appName == "" {
+			appName = appID
+		}
+		requiredAppNames = append(requiredAppNames, appName)
+
+		installed, err := appService.IsInstalled(ctx, projectID, appID)
+		if err != nil {
+			deps.GetLogger().Error("Failed to check tool owner app installation",
+				zap.String("project_id", projectID.String()),
+				zap.String("tool_name", toolName),
+				zap.String("app_id", appID),
+				zap.Error(err))
+			return newToolAccessError("app_not_installed", fmt.Sprintf("%s app installation check failed", appName))
+		}
+		if installed {
+			hasInstalledOwner = true
 		}
 	}
 
-	return nil
+	if hasInstalledOwner {
+		return nil
+	}
+
+	if len(requiredAppNames) == 0 {
+		return nil
+	}
+	if len(requiredAppNames) == 1 {
+		return newToolAccessError("app_not_installed", fmt.Sprintf("%s app is not installed for this project", requiredAppNames[0]))
+	}
+
+	return newToolAccessError("app_not_installed",
+		fmt.Sprintf("required tool owner apps are not installed for this project: %s", strings.Join(requiredAppNames, ", ")))
 }
 
 // AcquireToolAccess verifies tool access and sets up tenant context for tool execution.

@@ -1458,6 +1458,65 @@ func TestMCPConfigService_Get_DeveloperToolsContainsDevCore(t *testing.T) {
 	assert.Contains(t, devToolNames, "list_query_suggestions", "DeveloperTools should include list_query_suggestions")
 }
 
+func TestMCPConfigService_Get_GlossaryToolsOwnedByAIDataLiaison(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	configRepo := &mockMCPConfigRepository{
+		config: &models.MCPConfig{
+			ProjectID: projectID,
+			ToolGroups: map[string]*models.ToolGroupConfig{
+				"tools": {
+					AddOntologyMaintenanceTools: true,
+					AddOntologySuggestions:      true,
+					AddApprovalTools:            true,
+					AddRequestTools:             true,
+				},
+			},
+		},
+	}
+
+	queryService := &mockQueryServiceForMCP{hasEnabledQueries: true}
+	projectService := &mockProjectServiceForMCP{defaultDatasourceID: datasourceID}
+	installedAppService := &mockInstalledAppServiceForMCP{
+		installed: map[string]bool{
+			models.AppIDOntologyForge: true,
+			models.AppIDAIDataLiaison: true,
+		},
+	}
+
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		installedAppService,
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	resp, err := svc.Get(context.Background(), projectID)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	userToolApps := make(map[string]string, len(resp.UserTools))
+	for _, tool := range resp.UserTools {
+		userToolApps[tool.Name] = tool.AppID
+	}
+
+	devToolApps := make(map[string]string, len(resp.DeveloperTools))
+	for _, tool := range resp.DeveloperTools {
+		devToolApps[tool.Name] = tool.AppID
+	}
+
+	assert.Equal(t, models.AppIDOntologyForge, userToolApps["get_context"])
+	assert.Equal(t, models.AppIDOntologyForge, userToolApps["get_ontology"])
+	assert.Equal(t, models.AppIDAIDataLiaison, userToolApps["list_glossary"])
+	assert.Equal(t, models.AppIDAIDataLiaison, userToolApps["get_glossary_sql"])
+	assert.Equal(t, models.AppIDAIDataLiaison, devToolApps["create_glossary_term"])
+	assert.Equal(t, models.AppIDAIDataLiaison, devToolApps["update_glossary_term"])
+	assert.Equal(t, models.AppIDAIDataLiaison, devToolApps["delete_glossary_term"])
+}
+
 func TestMCPConfigService_Get_DeveloperToolsWithoutSubOptions(t *testing.T) {
 	// Test that DeveloperTools only has health when no toggles are enabled
 	projectID := uuid.New()

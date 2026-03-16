@@ -1,7 +1,4 @@
 import {
-  Check,
-  Copy,
-  ExternalLink,
   Handshake,
   Loader2,
   ScrollText,
@@ -32,7 +29,6 @@ import {
 } from '../components/ui/Dialog';
 import { Input } from '../components/ui/Input';
 import { Switch } from '../components/ui/Switch';
-import { useConfig } from '../contexts/ConfigContext';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
 import type { InstalledApp, MCPConfigResponse } from '../types';
@@ -41,7 +37,6 @@ const AIDataLiaisonPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { config: appConfig } = useConfig();
   const { toast } = useToast();
 
   // Uninstall dialog state
@@ -52,10 +47,10 @@ const AIDataLiaisonPage = () => {
   // Checklist state
   const [loading, setLoading] = useState(true);
   const [ontologyForgeReady, setOntologyForgeReady] = useState(false);
+  const [glossaryReady, setGlossaryReady] = useState(false);
   const [mcpConfig, setMcpConfig] = useState<MCPConfigResponse | null>(null);
   const [installedApp, setInstalledApp] = useState<InstalledApp | null>(null);
   const [activating, setActivating] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [updatingConfig, setUpdatingConfig] = useState(false);
 
   // Per-app tool config from MCP config
@@ -67,16 +62,18 @@ const AIDataLiaisonPage = () => {
 
     setLoading(true);
     try {
-      // Fetch MCP config, installed app, and ontology forge status in parallel
-      const [mcpConfigRes, installedAppRes, ontologyForgeRes] = await Promise.all([
+      // Fetch MCP config, installed app status, ontology prerequisites, and glossary readiness in parallel.
+      const [mcpConfigRes, installedAppRes, ontologyForgeRes, glossaryRes] = await Promise.all([
         engineApi.getMCPConfig(pid),
         engineApi.getInstalledApp(pid, 'ai-data-liaison').catch(() => null),
         engineApi.getInstalledApp(pid, 'ontology-forge').catch(() => null),
+        engineApi.listGlossaryTerms(pid).catch(() => null),
       ]);
 
       setMcpConfig(mcpConfigRes.data ?? null);
       setInstalledApp(installedAppRes?.data ?? null);
       setOntologyForgeReady(ontologyForgeRes?.data?.activated_at != null);
+      setGlossaryReady((glossaryRes?.data?.terms?.length ?? 0) > 0);
     } catch (error) {
       console.error('Failed to fetch checklist data:', error);
       toast({
@@ -168,17 +165,6 @@ const AIDataLiaisonPage = () => {
     }
   };
 
-  const handleCopyUrl = async () => {
-    if (!mcpConfig?.serverUrl) return;
-    try {
-      await navigator.clipboard.writeText(mcpConfig.serverUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy URL:', err);
-    }
-  };
-
   const handleActivate = async () => {
     if (!pid) return;
 
@@ -265,6 +251,7 @@ const AIDataLiaisonPage = () => {
   // Build checklist items based on current state
   const getChecklistItems = (): ChecklistItem[] => {
     const items: ChecklistItem[] = [];
+    const glossaryConfigured = glossaryReady;
 
     // 1. Ontology Forge set up
     items.push({
@@ -278,22 +265,40 @@ const AIDataLiaisonPage = () => {
       linkText: ontologyForgeReady ? 'Manage' : 'Set up',
     });
 
-    // 2. Activate (only requires step 1)
+    // 2. Glossary set up
+    items.push({
+      id: 'glossary',
+      title: 'Glossary set up',
+      description: glossaryConfigured
+        ? 'Glossary is configured and ready'
+        : ontologyForgeReady
+          ? 'Set up the business glossary for consistent business terminology'
+          : 'Complete step 1 first',
+      status: loading ? 'loading' : glossaryConfigured ? 'complete' : 'pending',
+      disabled: !ontologyForgeReady && !glossaryConfigured,
+      link: `/projects/${pid}/glossary`,
+      linkText: glossaryConfigured ? 'Manage' : 'Set up',
+    });
+
+    // 3. Activate AI Data Liaison after Ontology Forge and Glossary are ready
     const activated = installedApp?.activated_at != null;
+    const activationReady = ontologyForgeReady && glossaryConfigured;
     items.push({
       id: 'activate',
       title: 'Activate AI Data Liaison',
       description: activated
         ? 'AI Data Liaison activated'
-        : ontologyForgeReady
+        : activationReady
           ? 'Activate to start using the application'
-          : 'Complete step 1 before activating',
+          : ontologyForgeReady
+            ? 'Complete step 2 before activating'
+            : 'Complete steps 1 and 2 before activating',
       status: loading ? 'loading' : activated ? 'complete' : 'pending',
-      disabled: !ontologyForgeReady && !activated,
+      disabled: !activationReady && !activated,
       ...(activated ? {} : {
         onAction: handleActivate,
         actionText: 'Activate',
-        actionDisabled: activating || !ontologyForgeReady,
+        actionDisabled: activating || !activationReady,
       }),
     });
 
@@ -317,7 +322,7 @@ const AIDataLiaisonPage = () => {
         title="AI Data Liaison"
         slug="ai-data-liaison"
         icon={<Handshake className="h-8 w-8 text-green-500" />}
-        description="Ekaya acts as a data liaison between you and your business users. This application extends the Ekaya Engine with MCP tools that enable usage to enhance and extend the ontology and UI for you to manage queries suggested by users."
+        description="Ekaya acts as a data liaison between you and your business users. This application extends the Ekaya Engine with MCP tools that let teams manage query workflows, share glossary terminology, and collaborate through governed business definitions."
       />
 
       {/* Setup Checklist */}
@@ -327,47 +332,6 @@ const AIDataLiaisonPage = () => {
         description="Complete these steps to enable AI Data Liaison"
         completeDescription="AI Data Liaison is ready for business users"
       />
-
-      {/* MCP URL Quick Access (only when ready) */}
-      {mcpConfig?.serverUrl && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Share with Business Users</CardTitle>
-            <CardDescription>
-              Business users connect their Claude Desktop to this MCP Server URL
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center gap-2">
-              <div className="flex-1 rounded-lg border border-border-light bg-surface-secondary px-4 py-3 font-mono text-sm text-text-primary">
-                {mcpConfig.serverUrl}
-              </div>
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={handleCopyUrl}
-                className="shrink-0"
-                title={copied ? 'Copied!' : 'Copy to clipboard'}
-              >
-                {copied ? (
-                  <Check className="h-4 w-4 text-green-500" />
-                ) : (
-                  <Copy className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
-            <a
-              href={`${appConfig?.authServerUrl}/mcp-setup?mcp_url=${encodeURIComponent(mcpConfig.serverUrl)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 text-sm text-brand-purple hover:underline"
-            >
-              <ExternalLink className="h-4 w-4" />
-              MCP Setup Instructions for Business Users
-            </a>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Tool Configuration */}
       {mcpConfig && (
@@ -382,8 +346,9 @@ const AIDataLiaisonPage = () => {
                 <div className="flex-1">
                   <span className="text-sm font-medium text-text-primary">Add Approval Tools</span>
                   <p className="text-sm text-text-secondary mt-1">
-                    Include tools to review and manage query suggestions: approve, reject,
-                    and manage approved queries.
+                    Include tools to review and manage query suggestions and glossary terms:
+                    approve, reject, manage approved queries, and maintain shared business
+                    terminology.
                   </p>
                 </div>
                 <Switch
@@ -407,8 +372,8 @@ const AIDataLiaisonPage = () => {
                   <span className="text-sm font-medium text-text-primary">Add Request Tools</span>
                   <span className="ml-2 text-xs font-medium text-brand-purple">[RECOMMENDED]</span>
                   <p className="text-sm text-text-secondary mt-1">
-                    Enable business users to suggest queries and request data access through the
-                    MCP Client.
+                    Enable business users to suggest queries, request data access, and access
+                    glossary terms through the MCP Client.
                   </p>
                 </div>
                 <Switch
@@ -468,9 +433,10 @@ const AIDataLiaisonPage = () => {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-text-secondary mb-4">
-            Uninstalling AI Data Liaison will disable the query suggestion workflow. Business users
-            will no longer be able to suggest queries, and data engineers will lose access to
-            suggestion management tools.
+            Uninstalling AI Data Liaison will disable the query suggestion workflow and remove
+            AI Data Liaison access to glossary functionality. Business users will no longer be
+            able to suggest queries or access glossary terms through AI Data Liaison, and data
+            engineers will lose access to suggestion and glossary management tools.
           </p>
           <Button
             variant="outline"
@@ -497,8 +463,9 @@ const AIDataLiaisonPage = () => {
           <DialogHeader>
             <DialogTitle>Uninstall AI Data Liaison?</DialogTitle>
             <DialogDescription>
-              This will disable the query suggestion workflow. Business users will no longer be able
-              to suggest queries for approval.
+              This will disable the query suggestion workflow and remove AI Data Liaison access to
+              glossary functionality. Business users will no longer be able to suggest queries or
+              access glossary terms through AI Data Liaison.
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">

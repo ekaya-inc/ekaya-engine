@@ -77,6 +77,7 @@ const ProjectDashboard = () => {
   }, []);
 
   const hasOntologyForge = installedApps.some((app) => app.app_id === APP_ID_ONTOLOGY_FORGE);
+  const hasAIDataLiaison = installedApps.some((app) => app.app_id === APP_ID_AI_DATA_LIAISON);
 
   const dataTiles: Tile[] = useMemo(() => {
     const tiles: Tile[] = [
@@ -125,7 +126,7 @@ const ProjectDashboard = () => {
     }
 
     // Pending Queries tile for AI Data Liaison
-    if (installedApps.some((app) => app.app_id === APP_ID_AI_DATA_LIAISON)) {
+    if (hasAIDataLiaison) {
       tiles.push({
         title: 'Pending Queries',
         description: 'Review, approve, or reject AI-suggested queries.',
@@ -137,7 +138,7 @@ const ProjectDashboard = () => {
     }
 
     return tiles;
-  }, [pid, isConnected, hasOntologyForge, installedApps]);
+  }, [pid, isConnected, hasOntologyForge, hasAIDataLiaison, installedApps]);
 
   const intelligenceTiles: Tile[] = useMemo(() => {
     const tiles: Tile[] = [
@@ -181,18 +182,18 @@ const ProjectDashboard = () => {
         disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
         color: 'purple', // Ontology Forge color
       },
-      {
+    ];
+
+    if (hasAIDataLiaison) {
+      tiles.push({
         title: 'Glossary',
-        description: 'Business terms and their SQL definitions for consistent reporting.',
+        description: 'Business terms and SQL definitions that keep shared terminology consistent.',
         icon: BookOpen,
         path: `/projects/${pid}/glossary`,
         disabled: !isConnected || !hasSelectedTables || !activeAIConfig,
-        color: 'purple', // Ontology Forge color
-      },
-    ];
+        color: 'green',
+      });
 
-    // Add Audit Log tile if AI Data Liaison is installed
-    if (installedApps.some((app) => app.app_id === APP_ID_AI_DATA_LIAISON)) {
       tiles.push({
         title: 'Audit Log',
         description: 'Monitor query activity, security alerts, and governance events.',
@@ -204,7 +205,7 @@ const ProjectDashboard = () => {
     }
 
     return tiles;
-  }, [pid, isConnected, hasSelectedTables, activeAIConfig, installedApps]);
+  }, [pid, isConnected, hasSelectedTables, activeAIConfig, hasAIDataLiaison]);
 
   const applicationTiles: Tile[] = useMemo(() => {
     const tiles: Tile[] = [
@@ -234,7 +235,7 @@ const ProjectDashboard = () => {
     if (installedApps.some((app) => app.app_id === APP_ID_AI_DATA_LIAISON)) {
       tiles.push({
         title: 'AI Data Liaison',
-        description: 'Make Better Business Decisions 10x Faster and lower the burden on the data team.',
+        description: 'Give business users governed access to glossary terms, approved queries, and collaboration workflows with the data team.',
         icon: Handshake,
         path: `/projects/${pid}/ai-data-liaison`,
         disabled: !isConnected,
