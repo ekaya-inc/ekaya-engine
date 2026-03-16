@@ -102,10 +102,8 @@ const (
 	DAGNodeFKDiscovery             DAGNodeName = "FKDiscovery"
 	DAGNodeTableFeatureExtraction  DAGNodeName = "TableFeatureExtraction"
 	DAGNodeColumnEnrichment        DAGNodeName = "ColumnEnrichment"
-	DAGNodePKMatchDiscovery        DAGNodeName = "PKMatchDiscovery"
+	DAGNodeRelationshipDiscovery   DAGNodeName = "RelationshipDiscovery"
 	DAGNodeOntologyFinalization    DAGNodeName = "OntologyFinalization"
-	DAGNodeGlossaryDiscovery       DAGNodeName = "GlossaryDiscovery"
-	DAGNodeGlossaryEnrichment      DAGNodeName = "GlossaryEnrichment"
 )
 
 // DAGNodeOrder defines the execution order for each node.
@@ -114,7 +112,7 @@ var DAGNodeOrder = map[DAGNodeName]int{
 	DAGNodeColumnFeatureExtraction: 2,
 	DAGNodeFKDiscovery:             3,
 	DAGNodeTableFeatureExtraction:  4,
-	DAGNodePKMatchDiscovery:        5,
+	DAGNodeRelationshipDiscovery:   5,
 	DAGNodeColumnEnrichment:        6,
 	DAGNodeOntologyFinalization:    7,
 }
@@ -126,7 +124,7 @@ func AllDAGNodes() []DAGNodeName {
 		DAGNodeColumnFeatureExtraction,
 		DAGNodeFKDiscovery,
 		DAGNodeTableFeatureExtraction,
-		DAGNodePKMatchDiscovery,
+		DAGNodeRelationshipDiscovery,
 		DAGNodeColumnEnrichment,
 		DAGNodeOntologyFinalization,
 	}

@@ -113,6 +113,36 @@ const EnrichmentPage = () => {
     return roleColors[role.toLowerCase()] ?? 'bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-300';
   };
 
+  const normalizeBadgeValue = (value: string): string => value.trim().toLowerCase().replace(/\s+/g, '_');
+
+  const shouldRenderSemanticTypeBadge = (column: ColumnDetail): boolean => {
+    if (!column.semantic_type) {
+      return false;
+    }
+    const semanticType = normalizeBadgeValue(column.semantic_type);
+    if (column.is_primary_key && semanticType === 'primary_key') {
+      return false;
+    }
+    if (column.is_foreign_key && semanticType === 'foreign_key') {
+      return false;
+    }
+    return true;
+  };
+
+  const shouldRenderRoleBadge = (column: ColumnDetail): boolean => {
+    if (!column.role) {
+      return false;
+    }
+    const role = normalizeBadgeValue(column.role);
+    if (column.is_primary_key && role === 'primary_key') {
+      return false;
+    }
+    if (column.is_foreign_key && role === 'foreign_key') {
+      return false;
+    }
+    return true;
+  };
+
   // Get entity summaries and column details
   const entitySummaries = enrichment?.entity_summaries ?? [];
   const columnDetails = enrichment?.column_details ?? [];
@@ -227,12 +257,12 @@ const EnrichmentPage = () => {
             <span className="font-mono text-sm font-medium text-text-primary">
               {column.name}
             </span>
-            {column.semantic_type && (
+            {shouldRenderSemanticTypeBadge(column) && (
               <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getSemanticTypeBadgeColor(column.semantic_type)}`}>
                 {column.semantic_type}
               </span>
             )}
-            {column.role && (
+            {shouldRenderRoleBadge(column) && (
               <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getRoleBadgeColor(column.role)}`}>
                 {column.role}
               </span>

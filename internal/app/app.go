@@ -202,8 +202,8 @@ func Run(version string) error {
 		ontologyChatRepo, knowledgeRepo,
 		schemaRepo, ontologyDAGRepo, projectService,
 		llmFactory, datasourceService, adapterFactory, logger)
-	deterministicRelationshipService := services.NewDeterministicRelationshipService(
-		datasourceService, projectService, adapterFactory, schemaRepo, columnMetadataRepo, logger)
+	relationshipBootstrapService := services.NewRelationshipBootstrapService(
+		datasourceService, adapterFactory, schemaRepo, columnMetadataRepo, logger)
 	ontologyFinalizationService := services.NewOntologyFinalizationService(
 		projectRepo, schemaRepo, columnMetadataRepo, convRepo, llmFactory, getTenantCtx, logger)
 	ontologyContextService := services.NewOntologyContextService(
@@ -236,9 +236,8 @@ func Run(version string) error {
 		schemaRepo, columnMetadataRepo, datasourceService, adapterFactory, llmFactory, llmWorkerPool, getTenantCtx,
 		ontologyQuestionService, logger)
 	ontologyDAGService.SetColumnFeatureExtractionMethods(columnFeatureExtractionService)
-	ontologyDAGService.SetFKDiscoveryMethods(services.NewFKDiscoveryAdapter(deterministicRelationshipService))
-	ontologyDAGService.SetPKMatchDiscoveryMethods(services.NewPKMatchDiscoveryAdapter(deterministicRelationshipService))
-	// LLM-validated relationship discovery (replaces threshold-based PKMatch when configured)
+	ontologyDAGService.SetFKDiscoveryMethods(services.NewFKDiscoveryAdapter(relationshipBootstrapService))
+	// LLM-validated relationship discovery powers the RelationshipDiscovery DAG stage.
 	relationshipCandidateCollector := services.NewRelationshipCandidateCollector(
 		schemaRepo, columnMetadataRepo, adapterFactory, datasourceService, logger)
 	relationshipValidator := services.NewRelationshipValidator(
@@ -249,8 +248,6 @@ func Run(version string) error {
 	ontologyDAGService.SetLLMRelationshipDiscoveryMethods(services.NewLLMRelationshipDiscoveryAdapter(llmRelationshipDiscoveryService))
 	ontologyDAGService.SetFinalizationMethods(services.NewOntologyFinalizationAdapter(ontologyFinalizationService))
 	ontologyDAGService.SetColumnEnrichmentMethods(services.NewColumnEnrichmentAdapter(columnEnrichmentService))
-	ontologyDAGService.SetGlossaryDiscoveryMethods(services.NewGlossaryDiscoveryAdapter(glossaryService))
-	ontologyDAGService.SetGlossaryEnrichmentMethods(services.NewGlossaryEnrichmentAdapter(glossaryService))
 	tableFeatureExtractionSvc := services.NewTableFeatureExtractionService(
 		schemaRepo, columnMetadataRepo, tableMetadataRepo, llmFactory, llmWorkerPool, getTenantCtx, logger)
 	ontologyDAGService.SetTableFeatureExtractionMethods(tableFeatureExtractionSvc)

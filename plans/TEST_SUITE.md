@@ -1,560 +1,499 @@
-# TEST SUITE: MCP Tools Verification - 2026-01-31
+# TEST SUITE: MCP Verification for The Look - 2026-03-16
 
-This file documents a comprehensive test pass of all Ekaya MCP tools. Run this test suite after changes to verify tool functionality.
+This suite replaces the older `tikr`-specific checks. It is scoped to the tutorial `the_look` datasource now wired into the local Ekaya MCP server.
 
----
+Use this file when the user says:
+- "Run The Look MCP test suite"
+- "Test the MCP server against the tutorial database"
+- "Review and answer ontology questions for the tutorial dataset"
+
+The suite has two goals:
+1. Verify the MCP read path against the live `the_look` project.
+2. Review pending ontology questions and prove whether each one could have been answered from the data alone before using source material or a documented best guess.
+
+## Source Material
+
+Use these as the non-data sources of truth:
+
+- `/Users/damondanieli/go/src/github.com/ekaya-inc/ekaya-tutorials/exploring/tutorial-01-creating-new-database-from-csvs/data_dictionary.csv`
+- `/Users/damondanieli/go/src/github.com/ekaya-inc/ekaya-tutorials/exploring/tutorial-01-creating-new-database-from-csvs/THE_LOOK_README.md`
+
+Use the live Ekaya MCP server as the runtime source of truth for:
+
+- current project and datasource health
+- schema and ontology state
+- pending ontology questions
+- observed data values and distributions
 
 ## Quick Start
 
-When the user says **"Run MCP test suite"** or **"Test the MCP tools"**:
-1. Read this file
-2. Follow the TEST PLAYBOOK section exactly (26 read-only tools)
-3. Document any failures in the RESULTS section at the bottom
-4. If all pass, update the "Last Successful Run" date
+When running this suite:
 
-When the user says **"Run MCP write tests"** or **"Test write operations"**:
-1. Verify connected to `test_data` database (not production!)
-2. Follow the TEST_DATA WRITE OPERATIONS PLAYBOOK section (39 additional tests)
-3. Tests create, update, and delete data - only safe on test_data
+1. Start with `health()` and confirm the datasource is `the_look`.
+2. Run Phases 1 through 5 in order.
+3. In Phase 6, audit every pending ontology question:
+   - first decide whether the answer was already available from MCP data access alone
+   - if yes, record a `question-generation miss`
+   - if no, use the source material above
+   - if the source material still does not answer it, resolve with a clearly labeled best guess or use `escalate_ontology_question` if the goal is to preserve strict human review
+4. Always update ontology metadata before `resolve_ontology_question`.
+5. Record failures and newly discovered data quirks at the bottom of the run log.
 
-When the user says **"Run full MCP test suite"**:
-1. Run both playbooks in sequence (65 total tests)
+## Live Baseline Snapshot
 
-**Last Successful Run (Read-Only):** 2026-01-31
-**Last Successful Run (Write Tests):** 2026-01-31
+These values were observed from the live MCP server on 2026-03-16 and are the current sanity baseline for this tutorial project:
 
----
+- `health()` returned `engine=healthy`, `version=dev`, and `datasource.name=the_look`
+- `get_context(depth="domain")` returned `table_count=7` and `column_count=75`
+- `list_glossary()` returned `count=0`
+- `list_pending_changes(status="pending")` returned `count=0`
+- `list_ontology_questions(status="pending")` returned `total_count=20`
+- `list_ontology_questions(status="answered")` returned `total_count=0`
 
-## TEST PLAYBOOK
+Current row-count snapshot:
 
-### Phase 1: Connection & Health (3 tools)
+| Table | Expected Rows |
+|-------|---------------|
+| `distribution_centers` | 10 |
+| `events` | 12658 |
+| `inventory_items` | 1764 |
+| `order_items` | 1764 |
+| `orders` | 1214 |
+| `products` | 1708 |
+| `users` | 1000 |
 
-Run these first to verify basic connectivity:
+## Phase 1: Health, Schema, and Discovery
 
-```
+Run these first.
+
+```text
 1. health()
-   Expected: {"engine":"healthy","version":"...","datasource":{"status":"connected"}}
+   Verify:
+   - engine is "healthy"
+   - datasource status is "connected"
+   - datasource name is "the_look"
 
-2. echo(message="MCP test")
-   Expected: {"echo":"MCP test"}
+2. echo(message="the look mcp test")
+   Verify:
+   - the payload is echoed back unchanged
 
-3. get_schema(include_entities=true, selected_only=true)
-   Expected: Large response with DOMAIN ENTITIES section and table definitions
-   Verify: At least 30+ tables listed
+3. get_schema()
+   Verify:
+   - exactly 7 tables are listed
+   - the row counts match the baseline snapshot
+   - relationships include:
+     - products.distribution_center_id -> distribution_centers.id
+     - orders.user_id -> users.id
+     - events.user_id -> users.id
+     - order_items.order_id -> orders.order_id
+     - order_items.inventory_item_id -> inventory_items.id
+
+4. get_context(depth="domain", include_relationships=true)
+   Verify:
+   - description clearly identifies retail / ecommerce behavior
+   - table_count is 7
+   - column_count is 75
+   - project_knowledge mentions order lifecycle and traffic sources
+
+5. get_context(depth="tables", include_relationships=true)
+   Verify:
+   - all 7 tables appear
+   - table types make sense:
+     - `orders`, `order_items`, `inventory_items`, `events` are transactional
+     - `users`, `products`, `distribution_centers` are reference
+
+6. get_ontology(depth="tables", include_relationships=true)
+   Verify:
+   - each table has a description
+   - enum-bearing columns are marked as having enum values
+   - `users.gender`, `events.browser`, `events.traffic_source`, `events.event_type`, `orders.status`, `order_items.status`, and `products.department` are surfaced as attributes
+
+7. search_schema(query="user", limit=10)
+   Verify:
+   - the `users` table is the top table hit
+   - `user_id` columns appear in `events`, `orders`, and `order_items`
+
+8. search_schema(query="sold_at", limit=10)
+   Verify:
+   - `inventory_items.sold_at` is returned as the matching column
 ```
 
-### Phase 2: Context & Ontology (4 tools)
+## Phase 2: Query and Query-Tool Checks
 
-Test ontology retrieval at different depths:
+Use `query()` for the dataset-specific checks below. If the current tool loadout also exposes `validate()`, `sample()`, or `explain_query()`, run them against the same SQL.
 
-```
-4. get_context(depth="domain")
-   Expected: domain description, primary_domains, conventions, glossary
-   Known Issue: table_count may show wrong number
+### 2A. Enumerations and Value Sets
 
-5. get_context(depth="entities", include_relationships=true)
-   Expected: entities object with descriptions, key_columns, occurrences
-   Known Issue: relationships may be null
-
-6. get_ontology(depth="domain")
-   Expected: domain, entities array, relationships array
-   Verify: relationships is NOT null (unlike get_context)
-
-7. search_schema(query="user", limit=5)
-   Expected: tables, columns, entities arrays with relevance scores
-   Verify: User entity found in entities array
+```sql
+SELECT 'users.gender' AS column_name, array_agg(DISTINCT gender ORDER BY gender) AS values FROM users
+UNION ALL
+SELECT 'events.traffic_source' AS column_name, array_agg(DISTINCT traffic_source ORDER BY traffic_source) AS values FROM events
+UNION ALL
+SELECT 'events.event_type' AS column_name, array_agg(DISTINCT event_type ORDER BY event_type) AS values FROM events
+UNION ALL
+SELECT 'products.department' AS column_name, array_agg(DISTINCT department ORDER BY department) AS values FROM products
+UNION ALL
+SELECT 'events.browser' AS column_name, array_agg(DISTINCT browser ORDER BY browser) AS values FROM events
 ```
 
-### Phase 3: Query Execution (5 tools)
+Verify:
 
-Test SQL execution capabilities:
+- `users.gender` = `F`, `M`
+- `events.traffic_source` = `Adwords`, `Email`, `Facebook`, `Organic`, `YouTube`
+- `events.event_type` = `cart`, `department`, `home`, `product`, `purchase`
+- `products.department` = `Men`, `Women`
+- `events.browser` = `Chrome`, `Firefox`, `IE`, `Other`, `Safari`
 
-```
-8. query(sql="SELECT COUNT(*) as count FROM users", limit=10)
-   Expected: {"columns":["count"],"rows":[{"count":NNNN}],"row_count":1}
+### 2B. Coordinate Completeness and Ranges
 
-9. sample(table="users", limit=3)
-   Expected: 3 rows with all user columns
-   CRITICAL: This previously crashed the server - verify it works!
-
-10. validate(sql="SELECT * FROM nonexistent_table")
-    Expected: {"valid":false,"error":"relation \"nonexistent_table\" does not exist"}
-
-11. validate(sql="SELECT * FROM users LIMIT 1")
-    Expected: {"valid":true}
-
-12. explain_query(sql="SELECT * FROM users LIMIT 10")
-    Expected: plan with execution details, performance_hints array
-```
-
-### Phase 4: Metadata Tools (3 tools)
-
-Test column metadata retrieval:
-
-```
-13. get_column_metadata(table="users", column="deleted_at")
-    Expected: schema info + metadata with description, semantic_type
-    Known Issue: semantic_type may be "audit_updated" instead of "soft_delete"
-
-14. probe_column(table="users", column="avg_rating")
-    Expected: semantic info + features with purpose, semantic_type, confidence
-    Known Issue: purpose may show "text" for numeric columns
-
-15. probe_columns(columns=[{"table":"users","column":"deleted_at"},{"table":"users","column":"marker_at"}])
-    Expected: results object with both columns' data
+```sql
+SELECT 'distribution_centers' AS table_name,
+       MIN(latitude) AS min_latitude,
+       MAX(latitude) AS max_latitude,
+       MIN(longitude) AS min_longitude,
+       MAX(longitude) AS max_longitude,
+       COUNT(*) FILTER (WHERE latitude IS NULL OR longitude IS NULL) AS missing_coordinate_rows
+FROM distribution_centers
+UNION ALL
+SELECT 'users' AS table_name,
+       MIN(latitude) AS min_latitude,
+       MAX(latitude) AS max_latitude,
+       MIN(longitude) AS min_longitude,
+       MAX(longitude) AS max_longitude,
+       COUNT(*) FILTER (WHERE latitude IS NULL OR longitude IS NULL) AS missing_coordinate_rows
+FROM users
 ```
 
-### Phase 5: Glossary Tools (2 tools)
+Verify:
 
-```
-16. list_glossary()
-    Expected: terms array with 10 terms, each with enrichment_status="success"
+- `distribution_centers` has `missing_coordinate_rows = 0`
+- `users` has `missing_coordinate_rows = 0`
+- all observed latitudes are within `[-90, 90]`
+- all observed longitudes are within `[-180, 180]`
 
-17. get_glossary_sql(term="Host Earnings")
-    Expected: term, definition, defining_sql, base_table, output_columns
-```
+### 2C. Price Relationships
 
-### Phase 6: Question Tools (1 tool)
-
-```
-18. list_ontology_questions(status="answered", limit=3)
-    Expected: questions array with answered questions, counts_by_status
-```
-
-### Phase 7: Change Management (2 tools)
-
-```
-19. list_pending_changes(status="pending", limit=5)
-    Expected: changes array (may be empty)
-
-20. scan_data_changes(tables="users")
-    Expected: total_changes count, changes array
-```
-
-### Phase 8: Approved Queries (3 tools)
-
-```
-21. list_approved_queries()
-    Expected: queries array with at least 1 query
-
-22. execute_approved_query(query_id="<id from step 21>", limit=3)
-    Expected: query_name, rows array with data
-
-23. get_query_history(limit=5)
-    Expected: recent_queries array (may be empty)
+```sql
+SELECT 'products' AS table_name,
+       COUNT(*) AS row_count,
+       COUNT(*) FILTER (WHERE retail_price < cost) AS retail_below_cost,
+       MIN(retail_price - cost) AS min_margin,
+       MAX(retail_price - cost) AS max_margin
+FROM products
+UNION ALL
+SELECT 'inventory_items' AS table_name,
+       COUNT(*) AS row_count,
+       COUNT(*) FILTER (WHERE product_retail_price < cost) AS retail_below_cost,
+       MIN(product_retail_price - cost) AS min_margin,
+       MAX(product_retail_price - cost) AS max_margin
+FROM inventory_items
+UNION ALL
+SELECT 'order_items' AS table_name,
+       COUNT(*) AS row_count,
+       COUNT(*) FILTER (WHERE sale_price < 0) AS retail_below_cost,
+       MIN(sale_price) AS min_margin,
+       MAX(sale_price) AS max_margin
+FROM order_items
 ```
 
-### Phase 9: Query Suggestions (1 tool)
+Verify:
 
+- `products.retail_below_cost = 0`
+- `inventory_items.retail_below_cost = 0`
+- `order_items.sale_price` has no negative values
+- current observed `sale_price` range is positive
+
+### 2D. Status and Timestamp Completeness
+
+```sql
+SELECT
+  COUNT(*) AS row_count,
+  COUNT(*) FILTER (WHERE shipped_at IS NOT NULL AND shipped_at < created_at) AS shipped_before_created,
+  COUNT(*) FILTER (WHERE delivered_at IS NOT NULL AND shipped_at IS NOT NULL AND delivered_at < shipped_at) AS delivered_before_shipped,
+  COUNT(*) FILTER (WHERE returned_at IS NOT NULL AND delivered_at IS NOT NULL AND returned_at < delivered_at) AS returned_before_delivered,
+  COUNT(*) FILTER (WHERE status IN ('Shipped','Complete','Returned') AND shipped_at IS NULL) AS shipped_status_missing_shipped_at,
+  COUNT(*) FILTER (WHERE status = 'Complete' AND delivered_at IS NULL) AS complete_missing_delivered_at,
+  COUNT(*) FILTER (WHERE status = 'Returned' AND returned_at IS NULL) AS returned_missing_returned_at
+FROM order_items
 ```
-24. list_query_suggestions(status="pending")
-    Expected: suggestions array (may be empty)
+
+Verify:
+
+- `shipped_status_missing_shipped_at = 0`
+- `complete_missing_delivered_at = 0`
+- `returned_missing_returned_at = 0`
+- current baseline has `shipped_before_created = 359`
+- current baseline has `delivered_before_shipped = 0`
+- current baseline has `returned_before_delivered = 0`
+
+The `shipped_before_created = 359` result is a known data quirk for this seed. Do not use that anomaly to redefine the intended business semantics of the lifecycle timestamps.
+
+### 2E. Inventory Linkage and `sold_at`
+
+```sql
+SELECT
+  COUNT(*) AS inventory_row_count,
+  COUNT(*) FILTER (WHERE oi.inventory_item_id IS NOT NULL) AS inventory_rows_linked_to_order_items,
+  COUNT(*) FILTER (WHERE sold_at IS NULL) AS sold_at_nulls,
+  COUNT(*) FILTER (WHERE sold_at IS NOT NULL) AS sold_at_present
+FROM inventory_items ii
+LEFT JOIN order_items oi ON oi.inventory_item_id = ii.id
 ```
 
-### Phase 10: Schema Refresh (1 tool)
+Verify:
 
+- all 1764 `inventory_items` rows are linked to `order_items`
+- current baseline has `sold_at_nulls = 1764`
+- current baseline has `sold_at_present = 0`
+
+This means the current seed leaves `inventory_items.sold_at` completely unpopulated even though every inventory item is linked to an order item. Record this as a data quirk during the run.
+
+### 2F. Completeness Spot Checks
+
+```sql
+SELECT
+  (SELECT COUNT(*) FILTER (WHERE street_address IS NULL OR BTRIM(street_address) = '') FROM users) AS missing_street_address,
+  (SELECT COUNT(*) FILTER (WHERE browser IS NULL OR BTRIM(browser) = '') FROM events) AS missing_browser,
+  (SELECT COUNT(*) FILTER (WHERE status IN ('Shipped','Complete','Returned') AND shipped_at IS NULL) FROM orders) AS shipped_orders_missing_shipped_at
 ```
-25. refresh_schema(auto_select=false)
-    Expected: tables_added, tables_removed, columns_added counts
+
+Verify:
+
+- `missing_street_address = 0`
+- `missing_browser = 0`
+- `shipped_orders_missing_shipped_at = 0`
+
+### 2G. Optional Generic Query-Tool Checks
+
+If these tools are enabled in the current loadout, run them too:
+
+```text
+- validate(sql="SELECT status, COUNT(*) FROM orders GROUP BY status")
+  Expected: valid=true
+
+- validate(sql="SELECT * FROM nonexistent_table")
+  Expected: valid=false
+
+- explain_query(sql="SELECT status, COUNT(*) FROM orders GROUP BY status")
+  Expected: returns a plan without execution errors
+
+- sample(table="orders", limit=3)
+  Expected: 3 rows, including `status`, `created_at`, `shipped_at`, `delivered_at`, and `returned_at`
 ```
 
-### Phase 11: DDL Execution (1 tool)
+## Phase 3: Metadata and Probe Checks
 
+```text
+1. get_column_metadata(table="inventory_items", column="sold_at")
+   Verify:
+   - data_type is `timestamp with time zone`
+   - column is nullable
+   - metadata description is "The timestamp when the inventory item was sold"
+   - semantic_type is `event_time`
+
+2. probe_column(table="inventory_items", column="sold_at")
+   Verify:
+   - description matches the metadata
+   - purpose is timestamp
+   - semantic_type is `event_time`
+
+3. probe_columns(columns=[
+     {"table":"users","column":"gender"},
+     {"table":"events","column":"traffic_source"},
+     {"table":"products","column":"department"}
+   ])
+   Verify:
+   - `users.gender` exposes enum labels `F=Female`, `M=Male`
+   - `events.traffic_source` exposes the five observed sources
+   - `products.department` exposes `Men` and `Women`
 ```
-26. execute(sql="SELECT 1 as test")
-    Expected: {"columns":["test"],"rows":[{"test":1}],"row_count":1}
+
+If `probe_columns()` already surfaces the answer, the matching ontology question should not remain pending.
+
+## Phase 4: List and State Checks
+
+```text
+1. list_glossary()
+   Expected baseline:
+   - `count=0`
+   - `terms=[]`
+
+2. list_pending_changes(status="pending", limit=20)
+   Expected baseline:
+   - `count=0`
+   - `changes=[]`
+
+3. list_ontology_questions(status="pending", limit=50)
+   Expected baseline:
+   - current total_count is 20
+   - every item has `id`, `question`, `category`, `priority`, and `context`
+
+4. list_ontology_questions(status="answered", limit=50)
+   Expected baseline:
+   - current total_count is 0
 ```
 
----
+## Phase 5: Ontology Question Audit Rules
 
-## PASS/FAIL CRITERIA
+This is the important project-specific addition.
 
-### Must Pass (Critical)
-- [ ] health() returns healthy
-- [ ] sample() does NOT crash the server
-- [ ] query() executes successfully
-- [ ] list_glossary() returns terms with success status
+For every pending ontology question:
 
-### Should Pass (Important)
-- [ ] All 26 tools return without error
-- [ ] execute_approved_query() returns data
+1. Pull the question with `list_ontology_questions(status="pending")`.
+2. Gather evidence from MCP data access first:
+   - `query`
+   - `probe_column`
+   - `probe_columns`
+   - `get_context`
+   - `get_ontology`
+3. Decide whether the answer was already available from data alone.
+4. If yes:
+   - classify it as a `question-generation miss`
+   - answer it from the observed data
+   - document why it should not have remained pending
+5. If no:
+   - use `data_dictionary.csv` and `THE_LOOK_README.md`
+6. If the source material still does not answer it:
+   - resolve it with an explicit best guess and mark the inference in `resolution_notes`
+   - or use `escalate_ontology_question` if the purpose of the run is to preserve strict human review instead of completing the ontology
 
-### Known Issues (Document but don't fail)
-- get_context relationships=null
-- table_count wrong in domain
-- probe_column purpose/type mismatches
+Never call `resolve_ontology_question` before one of these metadata updates:
 
----
+- `update_column`
+- `update_columns`
+- `update_project_knowledge`
+- `update_table`
+- `update_glossary_term`
 
-## TEST EXECUTION TEMPLATE
+Question status changes without metadata updates do not persist the learned knowledge.
 
-Copy this for documenting a test run:
+## Phase 6: Current Pending Question Resolution Matrix
+
+Use this matrix for the current `the_look` project.
+
+### 6A. Questions That Should Be Answered From Data Alone
+
+These are `question-generation miss` candidates.
+
+- `users.gender`: `probe_columns()` already infers `F=Female` and `M=Male`. Resolve from data plus obvious enum expansion.
+- `distribution_centers latitude/longitude invalid or missing`: the coordinate query shows `missing_coordinate_rows=0` and all observed values are valid coordinates.
+- `products.department` possible values: the enumeration query shows only `Men` and `Women` in the current dataset.
+- `inventory_items.sold_at` null percentage: the inventory linkage query shows `sold_at_nulls=1764` and `sold_at_present=0`, so the current percentage is `100%`.
+- `orders shipped_at missing even though shipped`: current orders data shows all `Shipped`, `Complete`, and `Returned` rows have `shipped_at`; missing values are confined to `Processing` and `Cancelled`.
+- `users latitude/longitude present and valid`: the coordinate query shows zero missing values and values within valid latitude/longitude bounds.
+- `users.street_address` missing values: current data shows zero null or blank rows.
+- `events.browser` missing or inconsistent values: current data shows zero null or blank rows and only `Chrome`, `Firefox`, `IE`, `Other`, and `Safari`.
+
+Recommended metadata actions:
+
+- `update_column` or `update_columns` for enum columns such as `users.gender`, `products.department`, and `events.browser`
+- `update_project_knowledge` for current-seed data facts such as `inventory_items.sold_at is 100% null in the current tutorial seed`
+
+### 6B. Questions That Need Source Material
+
+Use the source files above after confirming the data alone is insufficient.
+
+- `latitude/longitude unit of measurement`: best supported answer is decimal degrees. The source material treats these as geographic coordinates, not radians.
+- `traffic_source meanings`: these are acquisition channels through which users arrived at the site. Current observed values are `Adwords`, `Email`, `Facebook`, `Organic`, and `YouTube`.
+- `relationship between created_at, shipped_at, delivered_at, returned_at`: the source material describes an order lifecycle of created -> shipped -> delivered, with return as an optional later event, and null timestamps meaning the event has not happened yet.
+- `cost` vs `retail_price`: the README says all prices are USD and there is no fixed markup; current data happens to have no rows with `retail_price < cost`.
+- `product_retail_price` vs `cost`: same answer as above, but for the denormalized inventory copy.
+- `sold_at is null`: the README says null means the inventory item is still in stock or not yet sold. The current seed does not populate `sold_at`, so note that the source gives the intended meaning while the data shows an implementation gap.
+- `event_type` categorization: the README describes website activity as page views, product views, cart additions, and purchases. In this seed, those categories appear as `home`, `department`, `product`, `cart`, and `purchase`.
+- `sale_price` constraints: the README says prices are in USD. Current data shows only positive sale prices, with an observed range of `1.82` to `499`, but the source material does not define a fixed minimum or maximum.
+
+Recommended metadata actions:
+
+- `update_project_knowledge` for lifecycle, currency, traffic-source, and null-timestamp semantics
+- `update_column` for enum descriptions on `events.traffic_source` and `events.event_type`
+
+### 6C. Questions That Require Best Guess or Explicit Inference
+
+These are not answered cleanly by the current data or the provided source material. If the goal of the run is completion rather than strict escalation, resolve them with explicit inference notes.
+
+- `acceptable latitude/longitude range for distribution centers`: best guess is standard valid earth coordinates, with current tutorial data falling inside US warehouse ranges.
+- `partial returns for order_items`: best guess is that partial returns are modeled across multiple `order_items` rows, not within a single row, because each row links to one `inventory_item`.
+- `policy for marking an order as returned`: best guess is that `returned_at` records when the return is finalized in the system, not necessarily when the warehouse physically receives the item.
+- `policy for marking an order as delivered`: best guess is that `delivered_at` records the system's delivery confirmation event, not proven customer receipt semantics.
+
+If you resolve these instead of escalating them, say so directly in `resolution_notes`.
+
+## Phase 7: Suggested Question-Resolution Workflow
+
+Use this order when actually answering the questions:
+
+```text
+1. list_ontology_questions(status="pending", limit=50)
+2. run the Phase 2 evidence queries
+3. classify each question:
+   - data-only
+   - source-backed
+   - inference
+4. persist the answer:
+   - enum / column meaning -> update_column or update_columns
+   - table-level meaning -> update_table
+   - cross-table rule / convention -> update_project_knowledge
+5. resolve the question:
+   - resolve_ontology_question(question_id=..., resolution_notes="Answered from data query ...")
+   - or resolution_notes="Answered from THE_LOOK_README.md ..."
+   - or resolution_notes="Inference based on row grain and available docs ..."
+6. rerun list_ontology_questions(status="pending") and confirm the count dropped
+7. rerun get_context(depth="domain") or get_column_metadata(...) to confirm the knowledge is now visible
+```
+
+## Known Project-Specific Quirks
+
+Document these if they still appear during a run:
+
+- `inventory_items.sold_at` is null for every row in the current seed
+- `order_items` currently has 359 rows where `shipped_at < created_at`
+- `list_glossary()` is empty in the current baseline, so glossary-specific read tests are not meaningful unless the run creates a temporary term first
+
+## Report Template
+
+Copy this section when documenting a run:
 
 ```markdown
 ## Test Run: YYYY-MM-DD
 
-**Tester:** [Claude session / Human]
-**Ekaya Version:** [from health response]
-**Duration:** [time to complete]
+**Tester:** [Codex session / Human]
+**Ekaya Version:** [from `health()`]
+**Datasource:** [from `health()`]
+**Project ID:** [from `health()`]
 
-### Results
+### Core MCP Results
 
-| Phase | Tools | Pass | Fail | Notes |
-|-------|-------|------|------|-------|
-| 1. Connection | 3 | | | |
-| 2. Context | 4 | | | |
-| 3. Query | 5 | | | |
-| 4. Metadata | 3 | | | |
-| 5. Glossary | 2 | | | |
-| 6. Questions | 1 | | | |
-| 7. Changes | 2 | | | |
-| 8. Approved | 3 | | | |
-| 9. Suggestions | 1 | | | |
-| 10. Refresh | 1 | | | |
-| 11. DDL | 1 | | | |
-| **Total** | **26** | | | |
+| Phase | Result | Notes |
+|------|--------|-------|
+| 1. Health / Schema / Discovery | | |
+| 2. Query Checks | | |
+| 3. Metadata / Probe Checks | | |
+| 4. List / State Checks | | |
+| 5. Question Audit Rules Applied | | |
+| 6. Question Resolution Pass | | |
+
+### Question Audit Summary
+
+| Bucket | Count | Notes |
+|-------|-------|-------|
+| Answerable from data alone | | |
+| Needed source material | | |
+| Resolved by best guess / inference | | |
+| Escalated instead of resolved | | |
+
+### Question-Generation Misses
+
+[List every pending question that should have been answerable from data alone]
+
+### Resolutions Applied
+
+[List metadata updates and matching question IDs]
 
 ### Failures
-[List any failures with details]
 
-### New Issues Discovered
-[List any new issues]
+[List tool failures or mismatches]
+
+### New Issues / Data Quirks
+
+[List anything newly discovered]
 ```
-
----
-
-## RESULTS: 2026-01-31 (Baseline - before entity tools removed)
-
-**Tester:** Claude session
-**Ekaya Version:** dev
-**Duration:** ~5 minutes
-**Note:** Entity and relationship tools were removed after this baseline.
-
-### Results
-
-| Phase | Tools | Pass | Fail | Notes |
-|-------|-------|------|------|-------|
-| 1. Connection | 3 | 3 | 0 | All healthy |
-| 2. Context | 4 | 4 | 0 | Known issues documented |
-| 3. Query | 5 | 5 | 0 | sample() fixed! |
-| 4. Metadata | 3 | 3 | 0 | Semantic type issues |
-| 5. Glossary | 2 | 2 | 0 | 10/10 terms valid |
-| 6. Questions | 1 | 1 | 0 | 124 answered |
-| 7. Changes | 2 | 2 | 0 | No pending changes |
-| 8. Approved | 3 | 3 | 0 | 1 query available |
-| 9. Suggestions | 1 | 1 | 0 | None pending |
-| 10. Refresh | 1 | 1 | 0 | No changes detected |
-| 11. DDL | 1 | 1 | 0 | SELECT works |
-| **Total** | **26** | **26** | **0** | |
-
-### Critical Fix Verified
-- `sample(table="users", limit=3)` no longer crashes the server
-
-### Known Issues (Not Failures)
-See ISSUES-ontology-enrichment-2026-01-31.md for full list
-
----
-
-## TOOLS NOT IN AUTOMATED SUITE (Production)
-
-These tools require write operations. On production datasources, test manually.
-**On `test_data` database:** These are covered in the TEST_DATA WRITE OPERATIONS PLAYBOOK below.
-
-| Tool | Reason | Manual Test Procedure |
-|------|--------|----------------------|
-| update_column | Modifies ontology | Test on dev datasource |
-| update_table | Modifies ontology | Test on dev datasource |
-| update_project_knowledge | Modifies ontology | Test on dev datasource |
-| update_glossary_term | Modifies ontology | Test on dev datasource |
-| create_glossary_term | Creates data | Test on dev datasource |
-| create_approved_query | Creates data | Test on dev datasource |
-| delete_column_metadata | Deletes data | Test on dev datasource |
-| delete_table_metadata | Deletes data | Test on dev datasource |
-| delete_project_knowledge | Deletes data | Test on dev datasource |
-| delete_glossary_term | Deletes data | Test on dev datasource |
-| delete_approved_query | Deletes data | Test on dev datasource |
-| update_approved_query | Modifies data | Test on dev datasource |
-| suggest_approved_query | Creates suggestion | Test on dev datasource |
-| suggest_query_update | Creates suggestion | Test on dev datasource |
-| approve_query_suggestion | Modifies data | Test on dev datasource |
-| reject_query_suggestion | Modifies data | Test on dev datasource |
-| approve_change | Applies change | Test on dev datasource |
-| reject_change | Rejects change | Test on dev datasource |
-| approve_all_changes | Applies changes | Test on dev datasource |
-| resolve_ontology_question | Modifies ontology | Tested during benchmark |
-| skip_ontology_question | Modifies ontology | Test on dev datasource |
-| dismiss_ontology_question | Modifies ontology | Test on dev datasource |
-| escalate_ontology_question | Modifies ontology | Test on dev datasource |
-
----
-
-## TEST_DATA WRITE OPERATIONS PLAYBOOK
-
-**IMPORTANT:** Only run this section when connected to the `test_data` database. These tests modify data.
-
-When the user says **"Run MCP write tests"** or **"Test write operations"**:
-1. Verify you are connected to `test_data` (check health response)
-2. Follow phases W1-W7 in order (later phases depend on earlier ones)
-3. Document any failures
-
-### Phase W1: Table & Column Metadata (5 tools)
-
-Test table and column metadata updates:
-
-```
-W1. update_table(table="users", description="Test description for users table", usage_notes="Primary user data table")
-    Expected: success message
-    Verify: Description appears in get_context
-
-W2. update_column(table="users", column="created_at", description="Timestamp when user was created", semantic_type="timestamp")
-    Expected: success message
-
-W3. get_column_metadata(table="users", column="created_at")
-    Expected: description="Timestamp when user was created"
-
-W4. delete_column_metadata(table="users", column="created_at")
-    Expected: success message
-    Verify: Custom description cleared (schema info preserved)
-
-W5. delete_table_metadata(table="users")
-    Expected: success message
-    Verify: Custom table metadata cleared
-```
-
-### Phase W2: Project Knowledge CRUD (3 tools)
-
-Test project-level facts:
-
-```
-W6. update_project_knowledge(fact="Test fact: MCP testing in progress", category="convention", context="Added during MCP test suite")
-    Expected: success message with fact_id
-
-W7. list_ontology_questions(limit=1)
-    Note: Just to verify project knowledge doesn't break other tools
-
-W8. delete_project_knowledge(fact_id="<fact_id from W6>")
-    Expected: success message
-    Note: Requires fact_id from W6 response
-```
-
-### Phase W3: Glossary Term CRUD (6 tools)
-
-Test glossary term lifecycle:
-
-```
-W9. create_glossary_term(term="Test Metric", definition="A metric created for testing", defining_sql="SELECT COUNT(*) as test_count FROM users", base_table="users")
-    Expected: success message, term created
-
-W10. list_glossary()
-     Expected: "Test Metric" appears in terms array
-
-W11. get_glossary_sql(term="Test Metric")
-     Expected: term, definition, defining_sql with "SELECT COUNT(*)"
-
-W12. update_glossary_term(term="Test Metric", definition="Updated test metric definition", aliases=["TM", "TestM"])
-     Expected: success message
-
-W13. get_glossary_sql(term="TM")
-     Expected: Resolves alias to "Test Metric"
-
-W14. delete_glossary_term(term="Test Metric")
-     Expected: success message
-     Verify: Term no longer in list_glossary()
-```
-
-### Phase W4: Approved Query CRUD (5 tools)
-
-Test approved query lifecycle:
-
-```
-W15. create_approved_query(name="Test Query", description="Query for MCP testing", sql="SELECT id, created_at FROM users WHERE created_at > {{start_date}}", parameters=[{"name":"start_date","type":"date","description":"Start date filter","required":true}], tags=["test","mcp"])
-     Expected: success message with query_id
-
-W16. list_approved_queries(tags=["test"])
-     Expected: "Test Query" appears in queries array
-
-W17. execute_approved_query(query_id="<id from W15>", parameters={"start_date":"2020-01-01"}, limit=5)
-     Expected: rows array with user data
-
-W18. update_approved_query(query_id="<id from W15>", description="Updated description for test query", tags=["test","mcp","updated"])
-     Expected: success message
-
-W19. delete_approved_query(query_id="<id from W15>")
-     Expected: success message
-     Verify: Query no longer in list_approved_queries()
-```
-
-### Phase W5: Query Suggestions (9 tools)
-
-Test suggestion workflow:
-
-```
-W20. suggest_approved_query(name="Suggested Test Query", description="A suggested query", sql="SELECT COUNT(*) as user_count FROM users")
-     Expected: success message with suggestion_id
-
-W21. list_query_suggestions(status="pending")
-     Expected: "Suggested Test Query" in suggestions array
-
-W22. reject_query_suggestion(suggestion_id="<id from W20>", reason="Rejected during MCP testing")
-     Expected: success message
-     Verify: Suggestion status changed to rejected
-
-W23. suggest_approved_query(name="Another Test Query", description="Will be approved", sql="SELECT 1 as test")
-     Expected: success message with suggestion_id
-
-W24. approve_query_suggestion(suggestion_id="<id from W23>")
-     Expected: success message, query now in approved list
-
-W25. suggest_query_update(query_id="<query_id from W24>", sql="SELECT 2 as updated_test", context="Testing suggest_query_update tool")
-     Expected: success message with suggestion_id for update
-
-W26. list_query_suggestions(status="pending")
-     Expected: Update suggestion appears
-
-W27. reject_query_suggestion(suggestion_id="<id from W25>", reason="Update rejected during testing")
-     Expected: success message
-
-W28. delete_approved_query(query_id="<query_id from approved suggestion>")
-     Expected: Cleanup the approved query
-```
-
-### Phase W6: Ontology Questions (6 tools)
-
-Test question status management:
-
-```
-W29. list_ontology_questions(status="pending", limit=5)
-     Expected: questions array (may be empty)
-     Note: If empty, skip W30-W34
-
-W30. skip_ontology_question(question_id="<first pending question>", reason="Skipped during MCP testing")
-     Expected: success message
-     Verify: Question status changed to "skipped"
-
-W31. list_ontology_questions(status="skipped", limit=1)
-     Expected: The skipped question appears
-
-W32. dismiss_ontology_question(question_id="<a pending question>", reason="Not relevant - MCP test")
-     Expected: success message
-     Verify: Question status changed to "dismissed"
-
-W33. escalate_ontology_question(question_id="<a pending question>", reason="Needs human review - MCP test")
-     Expected: success message
-     Verify: Question status changed to "escalated"
-
-W34. resolve_ontology_question(question_id="<a pending question>", resolution_notes="Resolved during MCP testing")
-     Expected: success message
-     Verify: Question status changed to "answered"
-```
-
-### Phase W7: Change Management (5 tools)
-
-Test change approval workflow:
-
-```
-W35. scan_data_changes(tables="users")
-     Expected: changes array (creates pending changes if data changed)
-
-W36. list_pending_changes(status="pending", limit=5)
-     Expected: changes array
-     Note: If empty, W37-W38 will have nothing to test
-
-W37. reject_change(change_id="<first pending change>")
-     Expected: success message (if pending changes exist)
-     Note: Only run if W36 returned changes
-
-W38. approve_change(change_id="<second pending change>")
-     Expected: success message (if pending changes exist)
-     Note: Only run if W36 returned multiple changes
-
-W39. approve_all_changes()
-     Expected: summary of approved/skipped changes
-```
-
----
-
-## WRITE TESTS PASS/FAIL CRITERIA
-
-### Must Pass (Critical)
-- [ ] create_glossary_term() creates term successfully
-- [ ] create_approved_query() creates query successfully
-- [ ] execute_approved_query() runs created query
-
-### Should Pass (Important)
-- [ ] All CRUD operations complete without error
-- [ ] Delete operations remove created test data
-- [ ] Query suggestions workflow completes
-
-### Cleanup Verification
-- [ ] Test Metric glossary term deleted
-- [ ] Test Query approved query deleted
-- [ ] No test artifacts remain
-
----
-
-## WRITE TESTS EXECUTION TEMPLATE
-
-```markdown
-## Write Test Run: YYYY-MM-DD
-
-**Tester:** [Claude session]
-**Database:** test_data
-**Duration:** [time to complete]
-
-### Results
-
-| Phase | Tools | Pass | Fail | Notes |
-|-------|-------|------|------|-------|
-| W1. Table/Column | 5 | | | |
-| W2. Knowledge | 3 | | | |
-| W3. Glossary | 6 | | | |
-| W4. Approved Query | 5 | | | |
-| W5. Suggestions | 9 | | | |
-| W6. Questions | 6 | | | |
-| W7. Changes | 5 | | | |
-| **Total** | **39** | | | |
-
-### Created IDs (for cleanup reference)
-- Glossary: Test Metric
-- Query ID: [from W15]
-- Approved Query from Suggestion: [from W24]
-- Suggestion IDs: [from W20, W23, W25]
-- Knowledge fact_id: [from W6]
-
-### Failures
-[List any failures with details]
-
-### Cleanup Status
-- [ ] All test glossary terms removed
-- [ ] All test queries removed
-```
-
----
-
-## CRASH DETECTION
-
-If the server crashes during testing:
-
-1. Note which tool was called
-2. Note the exact parameters
-3. Check if previous tools in sequence matter
-4. Document in ISSUES file
-5. Restart server and continue from next tool
-
-**Previous Crash Sequence (Fixed):**
-```
-health → echo → get_schema → get_context → get_ontology →
-search_schema → query → sample ← CRASHED HERE
-```
-
----
-
-## AUTOMATION NOTES
-
-To automate this test suite:
-
-1. Tools can be called in parallel within phases (no dependencies)
-2. Phase 9 step 24 depends on step 23 (needs query_id)
-3. All tools should complete within 30 seconds each
-4. Total suite should complete in under 5 minutes
-5. Consider adding to CI/CD after Ekaya server startup

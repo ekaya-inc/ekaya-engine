@@ -444,11 +444,20 @@ func (s *columnEnrichmentService) filterColumnsForLLM(columns []*models.SchemaCo
 	for _, col := range columns {
 		meta := metadataByColumnID[col.ID]
 
+		// Enum-classified inferred columns still need LLM enrichment when they do not yet
+		// have stored enum values. This keeps descriptive metadata from Phase 2 while
+		// ensuring we still label and persist the actual categorical values.
+		enumValuesMissing := false
+		if meta != nil && isEnumClassifiedColumn(col, meta) && !columnMetadataHasEnumValues(meta) && !isCuratedColumnMetadata(meta) {
+			enumValuesMissing = true
+		}
+
 		// Column needs LLM enrichment if:
 		// - No ColumnMetadata available
 		// - Confidence below threshold
 		// - Missing description (even if other fields are populated)
-		if meta == nil || meta.Confidence == nil || *meta.Confidence < highConfidenceThreshold || meta.Description == nil || *meta.Description == "" {
+		// - Enum-classified metadata exists but enum values have not been persisted yet
+		if meta == nil || meta.Confidence == nil || *meta.Confidence < highConfidenceThreshold || meta.Description == nil || *meta.Description == "" || enumValuesMissing {
 			columnsNeedingLLM = append(columnsNeedingLLM, col)
 			continue
 		}
@@ -1090,7 +1099,7 @@ func (s *columnEnrichmentService) buildColumnEnrichmentPrompt(
 	sb.WriteString("2. **semantic_type**: identifier, currency_cents, timestamp_utc, status, count, percentage, email, text, boolean_flag, json, etc.\n")
 	sb.WriteString("3. **role**: dimension (for grouping/filtering) | measure (for aggregation) | identifier (unique IDs) | attribute (descriptive)\n")
 	sb.WriteString("4. **synonyms**: alternative names users might use (optional array)\n")
-	sb.WriteString("5. **enum_values**: for status/type/state columns with sampled values:\n")
+	sb.WriteString("5. **enum_values**: for enum/categorical/status/type/state columns with sampled values:\n")
 	sb.WriteString("   - Return as objects: [{\"value\": \"1\", \"label\": \"Started\"}, ...]\n")
 	sb.WriteString("   - Infer labels from column context and common patterns\n")
 	sb.WriteString("   - For integer enums, infer meaning from column name (e.g., transaction_state [1,2,3] → Started, Ended, Waiting)\n")
@@ -1205,11 +1214,7 @@ func (s *columnEnrichmentService) saveEnrichments(
 		// Check if this column's metadata was curated by MCP/manual — if so, preserve
 		// user-curated fields (description, role, semantic_type, enum values) and only
 		// apply additive enrichments (synonyms, FK associations).
-		effectiveSource := meta.Source
-		if meta.LastEditSource != nil && *meta.LastEditSource != "" {
-			effectiveSource = *meta.LastEditSource
-		}
-		isCurated := effectiveSource == models.ProvenanceMCP || effectiveSource == models.ProvenanceManual
+		isCurated := isCuratedColumnMetadata(meta)
 
 		// Apply LLM enrichment data
 		if enrichment, ok := enrichmentByName[col.ColumnName]; ok {
@@ -1283,6 +1288,15 @@ func (s *columnEnrichmentService) saveEnrichments(
 			}
 		}
 
+		// Ensure inferred enum columns always store the authoritative raw value set from
+		// the datasource, even when the LLM only labels a subset or skips enum_values.
+		if sampledValues, hasSamples := enumSamples[col.ColumnName]; hasSamples && !isCurated && isEnumClassifiedColumn(col, meta) {
+			if meta.Features.EnumFeatures == nil {
+				meta.Features.EnumFeatures = &models.EnumFeatures{}
+			}
+			meta.Features.EnumFeatures.Values = mergeSampledEnumValues(meta.Features.EnumFeatures.Values, sampledValues)
+		}
+
 		// Apply enum distribution metadata (count, percentage, state semantics)
 		if dist, hasDist := enumDistributions[col.ColumnName]; hasDist && meta.Features.EnumFeatures != nil && len(meta.Features.EnumFeatures.Values) > 0 {
 			applyEnumDistributionsToColumnEnumValues(meta.Features.EnumFeatures, dist)
@@ -1323,6 +1337,60 @@ func convertEnumValuesToColumnEnumValues(enumValues []models.EnumValue) []models
 		result = append(result, cev)
 	}
 	return result
+}
+
+func columnMetadataHasEnumValues(meta *models.ColumnMetadata) bool {
+	if meta == nil {
+		return false
+	}
+	enumFeatures := meta.GetEnumFeatures()
+	return enumFeatures != nil && len(enumFeatures.Values) > 0
+}
+
+func isEnumClassifiedColumn(col *models.SchemaColumn, meta *models.ColumnMetadata) bool {
+	if col != nil && len(col.EnumValues) > 0 {
+		return true
+	}
+	if meta == nil {
+		return false
+	}
+	if meta.ClassificationPath != nil && models.ClassificationPath(*meta.ClassificationPath) == models.ClassificationPathEnum {
+		return true
+	}
+	return meta.NeedsEnumAnalysis || columnMetadataHasEnumValues(meta)
+}
+
+func isCuratedColumnMetadata(meta *models.ColumnMetadata) bool {
+	if meta == nil {
+		return false
+	}
+	effectiveSource := meta.Source
+	if meta.LastEditSource != nil && *meta.LastEditSource != "" {
+		effectiveSource = *meta.LastEditSource
+	}
+	return effectiveSource == models.ProvenanceMCP || effectiveSource == models.ProvenanceManual
+}
+
+func mergeSampledEnumValues(existing []models.ColumnEnumValue, sampledValues []string) []models.ColumnEnumValue {
+	if len(sampledValues) == 0 {
+		return existing
+	}
+
+	byValue := make(map[string]models.ColumnEnumValue, len(existing))
+	for _, ev := range existing {
+		byValue[ev.Value] = ev
+	}
+
+	merged := make([]models.ColumnEnumValue, 0, len(sampledValues))
+	for _, value := range sampledValues {
+		if ev, ok := byValue[value]; ok {
+			merged = append(merged, ev)
+			continue
+		}
+		merged = append(merged, models.ColumnEnumValue{Value: value})
+	}
+
+	return merged
 }
 
 // applyEnumDistributionsToColumnEnumValues applies distribution data (count, percentage,
@@ -1428,6 +1496,16 @@ func splitEnumDescription(desc string) []string {
 		return nil
 	}
 	return []string{label, description}
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
 }
 
 // toEnumValues converts a slice of strings to EnumValue objects without descriptions.

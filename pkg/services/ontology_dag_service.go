@@ -57,12 +57,9 @@ type ontologyDAGService struct {
 	columnFeatureExtractionMethods  dag.ColumnFeatureExtractionMethods
 	tableFeatureExtractionMethods   dag.TableFeatureExtractionMethods
 	fkDiscoveryMethods              dag.FKDiscoveryMethods
-	pkMatchDiscoveryMethods         dag.PKMatchDiscoveryMethods
 	llmRelationshipDiscoveryMethods dag.LLMRelationshipDiscoveryMethods
 	finalizationMethods             dag.OntologyFinalizationMethods
 	columnEnrichmentMethods         dag.ColumnEnrichmentMethods
-	glossaryDiscoveryMethods        dag.GlossaryDiscoveryMethods
-	glossaryEnrichmentMethods       dag.GlossaryEnrichmentMethods
 
 	getTenantCtx TenantContextFunc
 	logger       *zap.Logger
@@ -125,15 +122,7 @@ func (s *ontologyDAGService) SetFKDiscoveryMethods(methods dag.FKDiscoveryMethod
 	s.fkDiscoveryMethods = methods
 }
 
-// SetPKMatchDiscoveryMethods sets the pk_match discovery methods interface.
-// Deprecated: Use SetLLMRelationshipDiscoveryMethods for LLM-validated relationship discovery.
-func (s *ontologyDAGService) SetPKMatchDiscoveryMethods(methods dag.PKMatchDiscoveryMethods) {
-	s.pkMatchDiscoveryMethods = methods
-}
-
 // SetLLMRelationshipDiscoveryMethods sets the LLM-validated relationship discovery methods interface.
-// This replaces the threshold-based PKMatchDiscovery with LLM validation for semantic accuracy.
-// If set, this takes precedence over pkMatchDiscoveryMethods.
 func (s *ontologyDAGService) SetLLMRelationshipDiscoveryMethods(methods dag.LLMRelationshipDiscoveryMethods) {
 	s.llmRelationshipDiscoveryMethods = methods
 }
@@ -146,16 +135,6 @@ func (s *ontologyDAGService) SetFinalizationMethods(methods dag.OntologyFinaliza
 // SetColumnEnrichmentMethods sets the column enrichment methods interface.
 func (s *ontologyDAGService) SetColumnEnrichmentMethods(methods dag.ColumnEnrichmentMethods) {
 	s.columnEnrichmentMethods = methods
-}
-
-// SetGlossaryDiscoveryMethods sets the glossary discovery methods interface.
-func (s *ontologyDAGService) SetGlossaryDiscoveryMethods(methods dag.GlossaryDiscoveryMethods) {
-	s.glossaryDiscoveryMethods = methods
-}
-
-// SetGlossaryEnrichmentMethods sets the glossary enrichment methods interface.
-func (s *ontologyDAGService) SetGlossaryEnrichmentMethods(methods dag.GlossaryEnrichmentMethods) {
-	s.glossaryEnrichmentMethods = methods
 }
 
 // Start initiates a new DAG execution or returns an existing active DAG.
@@ -694,18 +673,11 @@ func (s *ontologyDAGService) getNodeExecutor(nodeName models.DAGNodeName, nodeID
 		node.SetCurrentNodeID(nodeID)
 		return node, nil
 
-	case models.DAGNodePKMatchDiscovery:
-		// Prefer LLM-validated relationship discovery if configured
-		if s.llmRelationshipDiscoveryMethods != nil {
-			node := dag.NewRelationshipDiscoveryNode(s.dagRepo, s.llmRelationshipDiscoveryMethods, s.logger)
-			node.SetCurrentNodeID(nodeID)
-			return node, nil
+	case models.DAGNodeRelationshipDiscovery:
+		if s.llmRelationshipDiscoveryMethods == nil {
+			return nil, fmt.Errorf("LLM relationship discovery methods not set")
 		}
-		// Fall back to legacy threshold-based PKMatch discovery
-		if s.pkMatchDiscoveryMethods == nil {
-			return nil, fmt.Errorf("relationship discovery methods not set (neither LLM nor PKMatch)")
-		}
-		node := dag.NewPKMatchDiscoveryNode(s.dagRepo, s.pkMatchDiscoveryMethods, s.logger)
+		node := dag.NewRelationshipDiscoveryNode(s.dagRepo, s.llmRelationshipDiscoveryMethods, s.logger)
 		node.SetCurrentNodeID(nodeID)
 		return node, nil
 
@@ -722,22 +694,6 @@ func (s *ontologyDAGService) getNodeExecutor(nodeName models.DAGNodeName, nodeID
 			return nil, fmt.Errorf("column enrichment methods not set")
 		}
 		node := dag.NewColumnEnrichmentNode(s.dagRepo, s.columnEnrichmentMethods, s.logger)
-		node.SetCurrentNodeID(nodeID)
-		return node, nil
-
-	case models.DAGNodeGlossaryDiscovery:
-		if s.glossaryDiscoveryMethods == nil {
-			return nil, fmt.Errorf("glossary discovery methods not set")
-		}
-		node := dag.NewGlossaryDiscoveryNode(s.dagRepo, s.glossaryDiscoveryMethods, s.logger)
-		node.SetCurrentNodeID(nodeID)
-		return node, nil
-
-	case models.DAGNodeGlossaryEnrichment:
-		if s.glossaryEnrichmentMethods == nil {
-			return nil, fmt.Errorf("glossary enrichment methods not set")
-		}
-		node := dag.NewGlossaryEnrichmentNode(s.dagRepo, s.glossaryEnrichmentMethods, s.logger)
 		node.SetCurrentNodeID(nodeID)
 		return node, nil
 

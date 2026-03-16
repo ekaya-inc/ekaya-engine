@@ -1542,7 +1542,7 @@ func TestColumnEnrichmentService_buildColumnEnrichmentPrompt_EnumInstructions(t 
 	}
 
 	enumSamples := map[string][]string{
-		"status": {"1", "2", "3"},
+		"status": []string{"1", "2", "3"},
 	}
 
 	prompt := service.buildColumnEnrichmentPrompt(tableCtx, columns, nil, enumSamples)
@@ -1553,6 +1553,7 @@ func TestColumnEnrichmentService_buildColumnEnrichmentPrompt_EnumInstructions(t 
 	assert.Contains(t, prompt, "Infer labels from column context")
 	assert.Contains(t, prompt, "For integer enums")
 	assert.Contains(t, prompt, "For string enums")
+	assert.Contains(t, prompt, "enum/categorical/status/type/state")
 	assert.Contains(t, prompt, "Include description if you can infer the business meaning")
 
 	// Verify response format example shows object structure
@@ -2423,6 +2424,24 @@ func TestFilterColumnsForLLM(t *testing.T) {
 			expectedSyntheticColumns: []string{"status"},
 		},
 		{
+			name: "enum column without enum values still needs LLM",
+			columns: []*models.SchemaColumn{
+				{ID: statusEnumColID, ColumnName: "status", DataType: "varchar"},
+			},
+			metadataByColumnID: map[uuid.UUID]*models.ColumnMetadata{
+				statusEnumColID: {
+					SchemaColumnID:     statusEnumColID,
+					Confidence:         ptrFloat(0.95),
+					Description:        ptrStr("Order status"),
+					SemanticType:       ptrStr("status"),
+					Role:               ptrStr("dimension"),
+					ClassificationPath: ptrStr(string(models.ClassificationPathEnum)),
+				},
+			},
+			expectedNeedLLM:   1,
+			expectedSynthetic: 0,
+		},
+		{
 			name: "column with identifier features copies FK association",
 			columns: []*models.SchemaColumn{
 				{ID: hostIDColID, ColumnName: "host_id", DataType: "uuid"},
@@ -2673,6 +2692,74 @@ func TestSaveEnrichments_ColumnFeaturesMerge(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSaveEnrichments_MergesSampledEnumValuesIntoMetadata(t *testing.T) {
+	projectID := uuid.New()
+	statusColID := uuid.New()
+	ptrFloat := func(f float64) *float64 { return &f }
+	ptrStr := func(s string) *string { return &s }
+
+	enumPath := string(models.ClassificationPathEnum)
+	colMetadataRepo := &testColEnrichmentColumnMetadataRepo{
+		metadataByColumnID: make(map[uuid.UUID]*models.ColumnMetadata),
+	}
+
+	existingMeta := &models.ColumnMetadata{
+		SchemaColumnID:     statusColID,
+		Confidence:         ptrFloat(0.95),
+		Description:        ptrStr("Browser used for the event"),
+		SemanticType:       ptrStr("enum"),
+		Role:               ptrStr("attribute"),
+		ClassificationPath: &enumPath,
+	}
+	colMetadataRepo.metadataByColumnID[statusColID] = existingMeta
+
+	service := &columnEnrichmentService{
+		columnMetadataRepo: colMetadataRepo,
+		logger:             zap.NewNop(),
+	}
+
+	savedCount, err := service.saveEnrichments(
+		context.Background(),
+		projectID,
+		"events",
+		[]columnEnrichment{
+			{
+				Name:        "browser",
+				Description: "Browser used for the event",
+				EnumValues: []models.EnumValue{
+					{Value: "Chrome", Label: "Chrome"},
+				},
+			},
+		},
+		[]*models.SchemaColumn{
+			{ID: statusColID, ColumnName: "browser", DataType: "varchar"},
+		},
+		nil,
+		map[string][]string{
+			"browser": []string{"Chrome", "Firefox", "Safari"},
+		},
+		nil,
+		nil,
+		map[uuid.UUID]*models.ColumnMetadata{
+			statusColID: existingMeta,
+		},
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, savedCount)
+
+	meta := colMetadataRepo.metadataByColumnID[statusColID]
+	require.NotNil(t, meta)
+	require.NotNil(t, meta.Features.EnumFeatures)
+	require.Len(t, meta.Features.EnumFeatures.Values, 3)
+	assert.Equal(t, "Chrome", meta.Features.EnumFeatures.Values[0].Value)
+	assert.Equal(t, "Chrome", meta.Features.EnumFeatures.Values[0].Label)
+	assert.Equal(t, "Firefox", meta.Features.EnumFeatures.Values[1].Value)
+	assert.Empty(t, meta.Features.EnumFeatures.Values[1].Label)
+	assert.Equal(t, "Safari", meta.Features.EnumFeatures.Values[2].Value)
+	assert.Empty(t, meta.Features.EnumFeatures.Values[2].Label)
 }
 
 // TestEnrichProject_SkipsLLMForHighConfidenceColumns verifies that the service

@@ -2,7 +2,9 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -10,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -814,6 +817,9 @@ func TestTypeDetectionHelpers(t *testing.T) {
 type mockSchemaRepoForFeatureExtraction struct {
 	tables  []*models.SchemaTable
 	columns []*models.SchemaColumn
+
+	updatedColumnStats       map[uuid.UUID]featureExtractionColumnStatsUpdate
+	updatedColumnJoinability map[uuid.UUID]featureExtractionJoinabilityUpdate
 }
 
 func (m *mockSchemaRepoForFeatureExtraction) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
@@ -830,6 +836,11 @@ func (m *mockSchemaRepoForFeatureExtraction) ListColumnsByDatasource(ctx context
 
 // Stub implementations for interface
 func (m *mockSchemaRepoForFeatureExtraction) GetTableByID(ctx context.Context, projectID, tableID uuid.UUID) (*models.SchemaTable, error) {
+	for _, table := range m.tables {
+		if table.ID == tableID {
+			return table, nil
+		}
+	}
 	return nil, nil
 }
 func (m *mockSchemaRepoForFeatureExtraction) GetTableByName(ctx context.Context, projectID, datasourceID uuid.UUID, schemaName, tableName string) (*models.SchemaTable, error) {
@@ -884,6 +895,15 @@ func (m *mockSchemaRepoForFeatureExtraction) UpdateColumnSelection(ctx context.C
 	return nil
 }
 func (m *mockSchemaRepoForFeatureExtraction) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64) error {
+	if m.updatedColumnStats == nil {
+		m.updatedColumnStats = make(map[uuid.UUID]featureExtractionColumnStatsUpdate)
+	}
+	m.updatedColumnStats[columnID] = featureExtractionColumnStatsUpdate{
+		DistinctCount: cloneInt64Ptr(distinctCount),
+		NullCount:     cloneInt64Ptr(nullCount),
+		MinLength:     cloneInt64Ptr(minLength),
+		MaxLength:     cloneInt64Ptr(maxLength),
+	}
 	return nil
 }
 func (m *mockSchemaRepoForFeatureExtraction) ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
@@ -923,6 +943,16 @@ func (m *mockSchemaRepoForFeatureExtraction) GetJoinableColumns(ctx context.Cont
 	return nil, nil
 }
 func (m *mockSchemaRepoForFeatureExtraction) UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount, distinctCount *int64, isJoinable *bool, joinabilityReason *string) error {
+	if m.updatedColumnJoinability == nil {
+		m.updatedColumnJoinability = make(map[uuid.UUID]featureExtractionJoinabilityUpdate)
+	}
+	m.updatedColumnJoinability[columnID] = featureExtractionJoinabilityUpdate{
+		RowCount:          cloneInt64Ptr(rowCount),
+		NonNullCount:      cloneInt64Ptr(nonNullCount),
+		DistinctCount:     cloneInt64Ptr(distinctCount),
+		IsJoinable:        cloneBoolPtr(isJoinable),
+		JoinabilityReason: cloneStringPtr(joinabilityReason),
+	}
 	return nil
 }
 func (m *mockSchemaRepoForFeatureExtraction) GetPrimaryKeyColumns(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error) {
@@ -965,6 +995,147 @@ func (m *mockColumnMetadataRepoForFeatureExtraction) Delete(ctx context.Context,
 }
 func (m *mockColumnMetadataRepoForFeatureExtraction) DeleteBySchemaColumnID(ctx context.Context, schemaColumnID uuid.UUID) error {
 	return nil
+}
+
+type featureExtractionColumnStatsUpdate struct {
+	DistinctCount *int64
+	NullCount     *int64
+	MinLength     *int64
+	MaxLength     *int64
+}
+
+type featureExtractionJoinabilityUpdate struct {
+	RowCount          *int64
+	NonNullCount      *int64
+	DistinctCount     *int64
+	IsJoinable        *bool
+	JoinabilityReason *string
+}
+
+type mockDatasourceServiceForFeatureExtraction struct {
+	DatasourceService
+
+	datasource *models.Datasource
+	getErr     error
+}
+
+func (m *mockDatasourceServiceForFeatureExtraction) Get(ctx context.Context, projectID, id uuid.UUID) (*models.Datasource, error) {
+	if m.getErr != nil {
+		return nil, m.getErr
+	}
+	if m.datasource != nil {
+		return m.datasource, nil
+	}
+	return &models.Datasource{
+		ID:             id,
+		ProjectID:      projectID,
+		Name:           "test-datasource",
+		DatasourceType: "postgres",
+		Config:         map[string]any{},
+	}, nil
+}
+
+type mockAdapterFactoryForFeatureExtraction struct {
+	datasource.DatasourceAdapterFactory
+
+	discoverer    datasource.SchemaDiscoverer
+	discovererErr error
+}
+
+func (m *mockAdapterFactoryForFeatureExtraction) NewSchemaDiscoverer(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.SchemaDiscoverer, error) {
+	if m.discovererErr != nil {
+		return nil, m.discovererErr
+	}
+	if m.discoverer != nil {
+		return m.discoverer, nil
+	}
+	return nil, errors.New("schema discoverer not configured")
+}
+
+type mockSchemaDiscovererForFeatureExtraction struct {
+	datasource.SchemaDiscoverer
+
+	columnStatsByTable           map[string][]datasource.ColumnStats
+	distinctValuesByColumn       map[string][]string
+	analyzeColumnStatsErr        error
+	analyzeColumnStatsErrByTable map[string]error
+	distinctValuesErr            error
+	analyzeCalls                 []featureExtractionAnalyzeCall
+	distinctValueCalls           []featureExtractionDistinctValuesCall
+	closed                       bool
+}
+
+type featureExtractionAnalyzeCall struct {
+	SchemaName  string
+	TableName   string
+	ColumnNames []string
+}
+
+type featureExtractionDistinctValuesCall struct {
+	SchemaName string
+	TableName  string
+	ColumnName string
+	Limit      int
+}
+
+func (m *mockSchemaDiscovererForFeatureExtraction) AnalyzeColumnStats(ctx context.Context, schemaName, tableName string, columnNames []string) ([]datasource.ColumnStats, error) {
+	if m.analyzeColumnStatsErr != nil {
+		return nil, m.analyzeColumnStatsErr
+	}
+	call := featureExtractionAnalyzeCall{
+		SchemaName:  schemaName,
+		TableName:   tableName,
+		ColumnNames: append([]string(nil), columnNames...),
+	}
+	m.analyzeCalls = append(m.analyzeCalls, call)
+	if m.analyzeColumnStatsErrByTable != nil {
+		if err, ok := m.analyzeColumnStatsErrByTable[schemaName+"."+tableName]; ok {
+			return nil, err
+		}
+	}
+	return m.columnStatsByTable[schemaName+"."+tableName], nil
+}
+
+func (m *mockSchemaDiscovererForFeatureExtraction) GetDistinctValues(ctx context.Context, schemaName, tableName, columnName string, limit int) ([]string, error) {
+	if m.distinctValuesErr != nil {
+		return nil, m.distinctValuesErr
+	}
+	m.distinctValueCalls = append(m.distinctValueCalls, featureExtractionDistinctValuesCall{
+		SchemaName: schemaName,
+		TableName:  tableName,
+		ColumnName: columnName,
+		Limit:      limit,
+	})
+	return m.distinctValuesByColumn[schemaName+"."+tableName+"."+columnName], nil
+}
+
+func (m *mockSchemaDiscovererForFeatureExtraction) Close() error {
+	m.closed = true
+	return nil
+}
+
+func cloneInt64Ptr(v *int64) *int64 {
+	if v == nil {
+		return nil
+	}
+	value := *v
+	return &value
+}
+
+func cloneBoolPtr(v *bool) *bool {
+	if v == nil {
+		return nil
+	}
+	value := *v
+	return &value
+}
+
+func cloneStringPtr(v *string) *string {
+	if v == nil {
+		return nil
+	}
+	value := *v
+	return &value
 }
 
 func TestRunPhase1DataCollection(t *testing.T) {
@@ -1085,6 +1256,309 @@ func TestRunPhase1DataCollection(t *testing.T) {
 	// Verify progress was reported
 	if len(progressCalls) == 0 {
 		t.Error("No progress callbacks received")
+	}
+}
+
+func TestRunPhase1DataCollection_BackfillsMissingStatsAndReroutesEnums(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	tableID := uuid.New()
+	columnID := uuid.New()
+	rowCount := int64(1000)
+	minLength := int64(7)
+	maxLength := int64(10)
+
+	mockRepo := &mockSchemaRepoForFeatureExtraction{
+		tables: []*models.SchemaTable{
+			{
+				ID:           tableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "events",
+				RowCount:     &rowCount,
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            columnID,
+				ProjectID:     projectID,
+				SchemaTableID: tableID,
+				ColumnName:    "event_type",
+				DataType:      "text",
+				IsSelected:    true,
+			},
+		},
+	}
+
+	discoverer := &mockSchemaDiscovererForFeatureExtraction{
+		columnStatsByTable: map[string][]datasource.ColumnStats{
+			"public.events": {
+				{
+					ColumnName:    "event_type",
+					RowCount:      rowCount,
+					NonNullCount:  rowCount,
+					DistinctCount: 5,
+					MinLength:     &minLength,
+					MaxLength:     &maxLength,
+				},
+			},
+		},
+	}
+
+	svc := &columnFeatureExtractionService{
+		schemaRepo:        mockRepo,
+		datasourceService: &mockDatasourceServiceForFeatureExtraction{},
+		adapterFactory: &mockAdapterFactoryForFeatureExtraction{
+			discoverer: discoverer,
+		},
+		logger: zap.NewNop(),
+	}
+
+	result, err := svc.runPhase1DataCollection(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("runPhase1DataCollection() error = %v", err)
+	}
+
+	if len(result.Profiles) != 1 {
+		t.Fatalf("len(Profiles) = %d, want 1", len(result.Profiles))
+	}
+
+	profile := result.Profiles[0]
+	if profile.DistinctCount != 5 {
+		t.Errorf("DistinctCount = %d, want 5", profile.DistinctCount)
+	}
+	if diff := math.Abs(profile.Cardinality - 0.005); diff > 1e-9 {
+		t.Errorf("Cardinality = %f, want 0.005", profile.Cardinality)
+	}
+	if profile.ClassificationPath != models.ClassificationPathEnum {
+		t.Errorf("ClassificationPath = %v, want %v", profile.ClassificationPath, models.ClassificationPathEnum)
+	}
+	if len(discoverer.analyzeCalls) != 1 {
+		t.Fatalf("AnalyzeColumnStats calls = %d, want 1", len(discoverer.analyzeCalls))
+	}
+	call := discoverer.analyzeCalls[0]
+	if call.SchemaName != "public" || call.TableName != "events" {
+		t.Errorf("AnalyzeColumnStats called for %s.%s, want public.events", call.SchemaName, call.TableName)
+	}
+	if len(call.ColumnNames) != 1 || call.ColumnNames[0] != "event_type" {
+		t.Errorf("AnalyzeColumnStats columns = %v, want [event_type]", call.ColumnNames)
+	}
+	if !discoverer.closed {
+		t.Error("schema discoverer should be closed")
+	}
+
+	update, ok := mockRepo.updatedColumnStats[columnID]
+	if !ok {
+		t.Fatal("UpdateColumnStats was not called for the backfilled column")
+	}
+	if update.DistinctCount == nil || *update.DistinctCount != 5 {
+		t.Errorf("persisted DistinctCount = %v, want 5", update.DistinctCount)
+	}
+	if update.NullCount == nil || *update.NullCount != 0 {
+		t.Errorf("persisted NullCount = %v, want 0", update.NullCount)
+	}
+
+	joinabilityUpdate, ok := mockRepo.updatedColumnJoinability[columnID]
+	if !ok {
+		t.Fatal("UpdateColumnJoinability was not called for the backfilled column")
+	}
+	if joinabilityUpdate.RowCount == nil || *joinabilityUpdate.RowCount != rowCount {
+		t.Errorf("persisted RowCount = %v, want %d", joinabilityUpdate.RowCount, rowCount)
+	}
+	if joinabilityUpdate.NonNullCount == nil || *joinabilityUpdate.NonNullCount != rowCount {
+		t.Errorf("persisted NonNullCount = %v, want %d", joinabilityUpdate.NonNullCount, rowCount)
+	}
+	if joinabilityUpdate.DistinctCount == nil || *joinabilityUpdate.DistinctCount != 5 {
+		t.Errorf("persisted joinability DistinctCount = %v, want 5", joinabilityUpdate.DistinctCount)
+	}
+	if joinabilityUpdate.IsJoinable == nil || *joinabilityUpdate.IsJoinable {
+		t.Errorf("persisted IsJoinable = %v, want false", joinabilityUpdate.IsJoinable)
+	}
+	if joinabilityUpdate.JoinabilityReason == nil || *joinabilityUpdate.JoinabilityReason != models.JoinabilityLowCardinality {
+		t.Errorf("persisted JoinabilityReason = %v, want %s", joinabilityUpdate.JoinabilityReason, models.JoinabilityLowCardinality)
+	}
+}
+
+func TestRunPhase1DataCollection_PersistsJoinabilityWhenDistinctCountAlreadyExists(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	tableID := uuid.New()
+	columnID := uuid.New()
+	rowCount := int64(100)
+	existingDistinctCount := int64(90)
+
+	mockRepo := &mockSchemaRepoForFeatureExtraction{
+		tables: []*models.SchemaTable{
+			{
+				ID:           tableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "orders",
+				RowCount:     &rowCount,
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            columnID,
+				ProjectID:     projectID,
+				SchemaTableID: tableID,
+				ColumnName:    "user_id",
+				DataType:      "uuid",
+				DistinctCount: &existingDistinctCount,
+				IsSelected:    true,
+			},
+		},
+	}
+
+	discoverer := &mockSchemaDiscovererForFeatureExtraction{
+		columnStatsByTable: map[string][]datasource.ColumnStats{
+			"public.orders": {
+				{
+					ColumnName:    "user_id",
+					RowCount:      rowCount,
+					NonNullCount:  90,
+					DistinctCount: 90,
+				},
+			},
+		},
+	}
+
+	svc := &columnFeatureExtractionService{
+		schemaRepo:        mockRepo,
+		datasourceService: &mockDatasourceServiceForFeatureExtraction{},
+		adapterFactory: &mockAdapterFactoryForFeatureExtraction{
+			discoverer: discoverer,
+		},
+		logger: zap.NewNop(),
+	}
+
+	_, err := svc.runPhase1DataCollection(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("runPhase1DataCollection() error = %v", err)
+	}
+
+	if len(discoverer.analyzeCalls) != 1 {
+		t.Fatalf("AnalyzeColumnStats calls = %d, want 1", len(discoverer.analyzeCalls))
+	}
+
+	joinabilityUpdate, ok := mockRepo.updatedColumnJoinability[columnID]
+	if !ok {
+		t.Fatal("UpdateColumnJoinability was not called for the column with existing stats")
+	}
+	if joinabilityUpdate.RowCount == nil || *joinabilityUpdate.RowCount != rowCount {
+		t.Errorf("persisted RowCount = %v, want %d", joinabilityUpdate.RowCount, rowCount)
+	}
+	if joinabilityUpdate.NonNullCount == nil || *joinabilityUpdate.NonNullCount != 90 {
+		t.Errorf("persisted NonNullCount = %v, want 90", joinabilityUpdate.NonNullCount)
+	}
+	if joinabilityUpdate.IsJoinable == nil || !*joinabilityUpdate.IsJoinable {
+		t.Errorf("persisted IsJoinable = %v, want true", joinabilityUpdate.IsJoinable)
+	}
+	if joinabilityUpdate.JoinabilityReason == nil || *joinabilityUpdate.JoinabilityReason != models.JoinabilityUniqueValues {
+		t.Errorf("persisted JoinabilityReason = %v, want %s", joinabilityUpdate.JoinabilityReason, models.JoinabilityUniqueValues)
+	}
+}
+
+func TestRunPhase1DataCollection_ContinuesWhenAnalyzeColumnStatsFailsForOneTable(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	goodTableID := uuid.New()
+	failedTableID := uuid.New()
+	goodColumnID := uuid.New()
+	failedColumnID := uuid.New()
+	rowCount := int64(100)
+
+	mockRepo := &mockSchemaRepoForFeatureExtraction{
+		tables: []*models.SchemaTable{
+			{
+				ID:           goodTableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "orders",
+				RowCount:     &rowCount,
+			},
+			{
+				ID:           failedTableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "broken_orders",
+				RowCount:     &rowCount,
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            goodColumnID,
+				ProjectID:     projectID,
+				SchemaTableID: goodTableID,
+				ColumnName:    "user_id",
+				DataType:      "uuid",
+				IsSelected:    true,
+			},
+			{
+				ID:            failedColumnID,
+				ProjectID:     projectID,
+				SchemaTableID: failedTableID,
+				ColumnName:    "account_id",
+				DataType:      "uuid",
+				IsSelected:    true,
+			},
+		},
+	}
+
+	discoverer := &mockSchemaDiscovererForFeatureExtraction{
+		columnStatsByTable: map[string][]datasource.ColumnStats{
+			"public.orders": {
+				{
+					ColumnName:    "user_id",
+					RowCount:      rowCount,
+					NonNullCount:  90,
+					DistinctCount: 90,
+				},
+			},
+		},
+		analyzeColumnStatsErrByTable: map[string]error{
+			"public.broken_orders": errors.New("relation unavailable"),
+		},
+	}
+
+	svc := &columnFeatureExtractionService{
+		schemaRepo:        mockRepo,
+		datasourceService: &mockDatasourceServiceForFeatureExtraction{},
+		adapterFactory: &mockAdapterFactoryForFeatureExtraction{
+			discoverer: discoverer,
+		},
+		logger: zap.NewNop(),
+	}
+
+	result, err := svc.runPhase1DataCollection(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("runPhase1DataCollection() error = %v", err)
+	}
+
+	if len(result.Profiles) != 2 {
+		t.Fatalf("len(Profiles) = %d, want 2", len(result.Profiles))
+	}
+	if len(discoverer.analyzeCalls) != 2 {
+		t.Fatalf("AnalyzeColumnStats calls = %d, want 2", len(discoverer.analyzeCalls))
+	}
+	if !discoverer.closed {
+		t.Error("schema discoverer should be closed")
+	}
+
+	goodUpdate, ok := mockRepo.updatedColumnJoinability[goodColumnID]
+	if !ok {
+		t.Fatal("UpdateColumnJoinability was not called for the healthy table")
+	}
+	if goodUpdate.IsJoinable == nil || !*goodUpdate.IsJoinable {
+		t.Errorf("healthy table joinability = %v, want true", goodUpdate.IsJoinable)
+	}
+
+	if _, ok := mockRepo.updatedColumnJoinability[failedColumnID]; ok {
+		t.Fatal("UpdateColumnJoinability should not be called for the failed table")
 	}
 }
 
@@ -1308,6 +1782,168 @@ func TestRunPhase2ColumnClassification_RequiresLLMSupport(t *testing.T) {
 	}
 	if !containsStr(err.Error(), "LLM support") {
 		t.Errorf("Error should mention LLM support, got: %v", err)
+	}
+}
+
+func TestRunPhase2ColumnClassification_HydratesEnumSampleValues(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	tableID := uuid.New()
+
+	mockRepo := &mockSchemaRepoForFeatureExtraction{
+		tables: []*models.SchemaTable{
+			{
+				ID:           tableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "orders",
+			},
+		},
+	}
+
+	discoverer := &mockSchemaDiscovererForFeatureExtraction{
+		distinctValuesByColumn: map[string][]string{
+			"public.orders.status": {"approved", "pending", "rejected"},
+		},
+	}
+
+	var capturedPrompt string
+	mockClient := llm.NewMockLLMClient()
+	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		capturedPrompt = prompt
+		return &llm.GenerateResponseResult{
+			Content: `{"is_state_machine": true, "state_description": "Order workflow", "needs_detailed_analysis": true, "confidence": 0.9, "description": "Tracks order status."}`,
+		}, nil
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.MockClient = mockClient
+
+	workerPool := llm.NewWorkerPool(llm.DefaultWorkerPoolConfig(), zap.NewNop())
+
+	profiles := []*models.ColumnDataProfile{
+		{
+			ColumnID:           uuid.New(),
+			ColumnName:         "status",
+			TableID:            tableID,
+			TableName:          "orders",
+			DataType:           "text",
+			DistinctCount:      3,
+			ClassificationPath: models.ClassificationPathEnum,
+		},
+	}
+
+	svc := &columnFeatureExtractionService{
+		schemaRepo:        mockRepo,
+		datasourceService: &mockDatasourceServiceForFeatureExtraction{},
+		adapterFactory: &mockAdapterFactoryForFeatureExtraction{
+			discoverer: discoverer,
+		},
+		llmFactory:  mockFactory,
+		workerPool:  workerPool,
+		logger:      zap.NewNop(),
+		classifiers: make(map[models.ClassificationPath]ColumnClassifier),
+	}
+
+	result, err := svc.runPhase2ColumnClassification(context.Background(), projectID, profiles, nil)
+	if err != nil {
+		t.Fatalf("runPhase2ColumnClassification() error = %v", err)
+	}
+
+	if len(result.Features) != 1 {
+		t.Fatalf("len(Features) = %d, want 1", len(result.Features))
+	}
+	if len(profiles[0].SampleValues) != 3 {
+		t.Fatalf("SampleValues length = %d, want 3", len(profiles[0].SampleValues))
+	}
+	if len(discoverer.distinctValueCalls) != 1 {
+		t.Fatalf("GetDistinctValues calls = %d, want 1", len(discoverer.distinctValueCalls))
+	}
+	call := discoverer.distinctValueCalls[0]
+	if call.SchemaName != "public" || call.TableName != "orders" || call.ColumnName != "status" || call.Limit != 50 {
+		t.Errorf("GetDistinctValues call = %+v, want public.orders.status limit 50", call)
+	}
+	for _, expected := range []string{"`approved`", "`pending`", "`rejected`"} {
+		if !strings.Contains(capturedPrompt, expected) {
+			t.Errorf("prompt should contain sampled enum value %q", expected)
+		}
+	}
+	if !discoverer.closed {
+		t.Error("schema discoverer should be closed")
+	}
+}
+
+func TestRunPhase2ColumnClassification_ContinuesWhenEnumSamplingFails(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	tableID := uuid.New()
+
+	mockRepo := &mockSchemaRepoForFeatureExtraction{
+		tables: []*models.SchemaTable{
+			{
+				ID:           tableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "orders",
+			},
+		},
+	}
+
+	discoverer := &mockSchemaDiscovererForFeatureExtraction{
+		distinctValuesErr: errors.New("distinct values failed"),
+	}
+
+	mockClient := llm.NewMockLLMClient()
+	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		return &llm.GenerateResponseResult{
+			Content: `{"is_state_machine": false, "needs_detailed_analysis": false, "confidence": 0.7, "description": "Tracks order status."}`,
+		}, nil
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.MockClient = mockClient
+
+	workerPool := llm.NewWorkerPool(llm.DefaultWorkerPoolConfig(), zap.NewNop())
+
+	profiles := []*models.ColumnDataProfile{
+		{
+			ColumnID:           uuid.New(),
+			ColumnName:         "status",
+			TableID:            tableID,
+			TableName:          "orders",
+			DataType:           "text",
+			DistinctCount:      3,
+			ClassificationPath: models.ClassificationPathEnum,
+		},
+	}
+
+	svc := &columnFeatureExtractionService{
+		schemaRepo:        mockRepo,
+		datasourceService: &mockDatasourceServiceForFeatureExtraction{},
+		adapterFactory: &mockAdapterFactoryForFeatureExtraction{
+			discoverer: discoverer,
+		},
+		llmFactory:  mockFactory,
+		workerPool:  workerPool,
+		logger:      zap.NewNop(),
+		classifiers: make(map[models.ClassificationPath]ColumnClassifier),
+	}
+
+	result, err := svc.runPhase2ColumnClassification(context.Background(), projectID, profiles, nil)
+	if err != nil {
+		t.Fatalf("runPhase2ColumnClassification() error = %v", err)
+	}
+
+	if len(result.Features) != 1 {
+		t.Fatalf("len(Features) = %d, want 1", len(result.Features))
+	}
+	if len(profiles[0].SampleValues) != 0 {
+		t.Fatalf("SampleValues length = %d, want 0", len(profiles[0].SampleValues))
+	}
+	if !discoverer.closed {
+		t.Error("schema discoverer should be closed")
 	}
 }
 

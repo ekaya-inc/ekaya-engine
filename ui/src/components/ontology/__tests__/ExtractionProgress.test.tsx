@@ -35,6 +35,58 @@ describe('ExtractionProgress', () => {
   });
 
   describe('phase detection from progress message', () => {
+    it('renders relationship discovery phases when node type is RelationshipDiscovery', () => {
+      render(
+        <ExtractionProgress
+          progress={undefined}
+          nodeStatus={undefined}
+          nodeType="RelationshipDiscovery"
+        />
+      );
+
+      expect(screen.getByText('Preserving datasource foreign keys')).toBeInTheDocument();
+      expect(screen.getByText('Processing pre-resolved foreign keys')).toBeInTheDocument();
+      expect(screen.getByText('Collecting relationship candidates')).toBeInTheDocument();
+      expect(screen.getByText('Validating relationships')).toBeInTheDocument();
+      expect(screen.getByText('Storing results')).toBeInTheDocument();
+    });
+
+    it('detects relationship discovery validation progress', () => {
+      const progress: DAGNodeProgress = {
+        current: 3,
+        total: 10,
+        message: 'Validating relationships',
+      };
+
+      render(
+        <ExtractionProgress
+          progress={progress}
+          nodeStatus="running"
+          nodeType="RelationshipDiscovery"
+        />
+      );
+
+      expect(
+        within(
+          screen.getByText('Preserving datasource foreign keys').closest('[role="listitem"]') as HTMLElement
+        ).getByLabelText('Complete')
+      ).toBeInTheDocument();
+      expect(
+        within(
+          screen.getByText('Processing pre-resolved foreign keys').closest('[role="listitem"]') as HTMLElement
+        ).getByLabelText('Complete')
+      ).toBeInTheDocument();
+      expect(
+        within(
+          screen.getByText('Collecting relationship candidates').closest('[role="listitem"]') as HTMLElement
+        ).getByLabelText('Complete')
+      ).toBeInTheDocument();
+
+      const validationRow = screen.getByText('Validating relationships').closest('[role="listitem"]');
+      expect(validationRow).toHaveAttribute('aria-current', 'step');
+      expect(screen.getByText('3/10')).toBeInTheDocument();
+    });
+
     it('detects phase 1 from "Collecting column metadata..." message', () => {
       const progress: DAGNodeProgress = {
         current: 10,

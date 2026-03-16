@@ -12,53 +12,23 @@ import (
 // This allows the dag package to remain independent of the services package,
 // avoiding import cycles.
 
-// FKDiscoveryAdapter adapts DeterministicRelationshipService for FK discovery.
+// FKDiscoveryAdapter adapts RelationshipBootstrapService for FK discovery.
 type FKDiscoveryAdapter struct {
-	svc DeterministicRelationshipService
+	svc RelationshipBootstrapService
 }
 
 // NewFKDiscoveryAdapter creates a new adapter.
-func NewFKDiscoveryAdapter(svc DeterministicRelationshipService) dag.FKDiscoveryMethods {
+func NewFKDiscoveryAdapter(svc RelationshipBootstrapService) dag.FKDiscoveryMethods {
 	return &FKDiscoveryAdapter{svc: svc}
 }
 
 func (a *FKDiscoveryAdapter) DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback dag.ProgressCallback) (*dag.FKDiscoveryResult, error) {
-	// Convert dag.ProgressCallback to services.RelationshipProgressCallback
-	var svcCallback RelationshipProgressCallback
-	if progressCallback != nil {
-		svcCallback = RelationshipProgressCallback(progressCallback)
-	}
-	result, err := a.svc.DiscoverFKRelationships(ctx, projectID, datasourceID, svcCallback)
+	result, err := a.svc.Bootstrap(ctx, projectID, datasourceID, progressCallback)
 	if err != nil {
 		return nil, err
 	}
 	return &dag.FKDiscoveryResult{
 		FKRelationships: result.FKRelationships,
-	}, nil
-}
-
-// PKMatchDiscoveryAdapter adapts DeterministicRelationshipService for pk_match discovery.
-type PKMatchDiscoveryAdapter struct {
-	svc DeterministicRelationshipService
-}
-
-// NewPKMatchDiscoveryAdapter creates a new adapter.
-func NewPKMatchDiscoveryAdapter(svc DeterministicRelationshipService) dag.PKMatchDiscoveryMethods {
-	return &PKMatchDiscoveryAdapter{svc: svc}
-}
-
-func (a *PKMatchDiscoveryAdapter) DiscoverPKMatchRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback dag.ProgressCallback) (*dag.PKMatchDiscoveryResult, error) {
-	// Convert dag.ProgressCallback to services.RelationshipProgressCallback
-	var svcCallback RelationshipProgressCallback
-	if progressCallback != nil {
-		svcCallback = RelationshipProgressCallback(progressCallback)
-	}
-	result, err := a.svc.DiscoverPKMatchRelationships(ctx, projectID, datasourceID, svcCallback)
-	if err != nil {
-		return nil, err
-	}
-	return &dag.PKMatchDiscoveryResult{
-		InferredRelationships: result.InferredRelationships,
 	}, nil
 }
 
@@ -122,32 +92,4 @@ func (a *ColumnEnrichmentAdapter) EnrichProject(ctx context.Context, projectID u
 		TablesFailed:   result.TablesFailed,
 		DurationMs:     result.DurationMs,
 	}, nil
-}
-
-// GlossaryDiscoveryAdapter adapts GlossaryService for the dag package.
-type GlossaryDiscoveryAdapter struct {
-	svc GlossaryService
-}
-
-// NewGlossaryDiscoveryAdapter creates a new adapter.
-func NewGlossaryDiscoveryAdapter(svc GlossaryService) dag.GlossaryDiscoveryMethods {
-	return &GlossaryDiscoveryAdapter{svc: svc}
-}
-
-func (a *GlossaryDiscoveryAdapter) DiscoverGlossaryTerms(ctx context.Context, projectID uuid.UUID) (int, error) {
-	return a.svc.DiscoverGlossaryTerms(ctx, projectID)
-}
-
-// GlossaryEnrichmentAdapter adapts GlossaryService for the dag package.
-type GlossaryEnrichmentAdapter struct {
-	svc GlossaryService
-}
-
-// NewGlossaryEnrichmentAdapter creates a new adapter.
-func NewGlossaryEnrichmentAdapter(svc GlossaryService) dag.GlossaryEnrichmentMethods {
-	return &GlossaryEnrichmentAdapter{svc: svc}
-}
-
-func (a *GlossaryEnrichmentAdapter) EnrichGlossaryTerms(ctx context.Context, projectID uuid.UUID) error {
-	return a.svc.EnrichGlossaryTerms(ctx, projectID)
 }

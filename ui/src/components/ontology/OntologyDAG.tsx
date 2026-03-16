@@ -740,19 +740,19 @@ export const OntologyDAG = ({
                           className="mt-2"
                         />
                       )}
-                    {/* Multi-phase progress for PKMatchDiscovery node */}
-                    {node.name === 'PKMatchDiscovery' &&
+                    {/* Multi-phase progress for RelationshipDiscovery node */}
+                    {node.name === 'RelationshipDiscovery' &&
                       (node.status === 'running' || node.status === 'completed') && (
                         <ExtractionProgress
                           progress={node.progress}
                           nodeStatus={node.status}
-                          nodeType="PKMatchDiscovery"
+                          nodeType="RelationshipDiscovery"
                           className="mt-2"
                         />
                       )}
                     {/* Standard progress bar for other nodes */}
                     {node.name !== 'ColumnFeatureExtraction' &&
-                      node.name !== 'PKMatchDiscovery' &&
+                      node.name !== 'RelationshipDiscovery' &&
                       node.status === 'running' &&
                       node.progress &&
                       node.progress.total > 1 && (

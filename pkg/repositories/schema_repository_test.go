@@ -1840,8 +1840,8 @@ func TestSchemaRepository_GetRelationshipsByMethod(t *testing.T) {
 	orderItemsTable := tc.createTestTable(ctx, "public", "order_items")
 	itemProductIDCol := tc.createTestColumn(ctx, orderItemsTable.ID, "product_id", 1)
 
-	// Create relationship with foreign_key method
-	fkMethod := models.InferenceMethodForeignKey
+	// Create relationship with fk method
+	fkMethod := models.InferenceMethodFK
 	fkRel := &models.SchemaRelationship{
 		ProjectID:        tc.projectID,
 		SourceTableID:    ordersTable.ID,
@@ -1874,16 +1874,19 @@ func TestSchemaRepository_GetRelationshipsByMethod(t *testing.T) {
 		t.Fatalf("UpsertRelationship (value_overlap) failed: %v", err)
 	}
 
-	// Query by foreign_key method
-	fkRels, err := tc.repo.GetRelationshipsByMethod(ctx, tc.projectID, tc.dsID, models.InferenceMethodForeignKey)
+	// Query by fk method
+	fkRels, err := tc.repo.GetRelationshipsByMethod(ctx, tc.projectID, tc.dsID, models.InferenceMethodFK)
 	if err != nil {
-		t.Fatalf("GetRelationshipsByMethod (foreign_key) failed: %v", err)
+		t.Fatalf("GetRelationshipsByMethod (fk) failed: %v", err)
 	}
 	if len(fkRels) != 1 {
 		t.Errorf("expected 1 FK relationship, got %d", len(fkRels))
 	}
 	if fkRels[0].ID != fkRel.ID {
 		t.Errorf("expected FK relationship ID %s, got %s", fkRel.ID, fkRels[0].ID)
+	}
+	if fkRels[0].InferenceMethod == nil || *fkRels[0].InferenceMethod != models.InferenceMethodFK {
+		t.Errorf("expected FK inference method %q, got %+v", models.InferenceMethodFK, fkRels[0].InferenceMethod)
 	}
 
 	// Query by value_overlap method
@@ -1923,7 +1926,7 @@ func TestSchemaRepository_GetRelationshipsByMethod_IncludesDiscoveryMetrics(t *t
 	col2 := tc.createTestColumn(ctx, table2.ID, "pk_col", 1)
 
 	// Create relationship with metrics using UpsertRelationshipWithMetrics
-	pkMatchMethod := "pk_match"
+	relationshipDiscoveryMethod := models.InferenceMethodRelationshipDiscovery
 	rel := &models.SchemaRelationship{
 		ProjectID:        tc.projectID,
 		SourceTableID:    table1.ID,
@@ -1933,7 +1936,7 @@ func TestSchemaRepository_GetRelationshipsByMethod_IncludesDiscoveryMetrics(t *t
 		RelationshipType: models.RelationshipTypeInferred,
 		Cardinality:      models.CardinalityNTo1,
 		Confidence:       0.95,
-		InferenceMethod:  &pkMatchMethod,
+		InferenceMethod:  &relationshipDiscoveryMethod,
 	}
 	metrics := &models.DiscoveryMetrics{
 		MatchRate:      0.95,
@@ -1946,7 +1949,7 @@ func TestSchemaRepository_GetRelationshipsByMethod_IncludesDiscoveryMetrics(t *t
 	}
 
 	// Query and verify discovery metrics are returned
-	rels, err := tc.repo.GetRelationshipsByMethod(ctx, tc.projectID, tc.dsID, "pk_match")
+	rels, err := tc.repo.GetRelationshipsByMethod(ctx, tc.projectID, tc.dsID, models.InferenceMethodRelationshipDiscovery)
 	if err != nil {
 		t.Fatalf("GetRelationshipsByMethod failed: %v", err)
 	}

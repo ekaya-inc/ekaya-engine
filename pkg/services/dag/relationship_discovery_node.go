@@ -23,7 +23,7 @@ type LLMRelationshipDiscoveryResult struct {
 }
 
 // LLMRelationshipDiscoveryMethods defines the interface for LLM-validated relationship discovery.
-// This is the new implementation that replaces the threshold-based PKMatchDiscovery.
+// This is the new implementation that replaces the old threshold-based matcher.
 type LLMRelationshipDiscoveryMethods interface {
 	// DiscoverRelationships runs the full LLM-validated discovery pipeline:
 	// 1. Preserve existing DB-declared FK relationships (skip LLM)
@@ -35,7 +35,6 @@ type LLMRelationshipDiscoveryMethods interface {
 }
 
 // RelationshipDiscoveryNode wraps LLM-validated relationship discovery.
-// This replaces the old PKMatchDiscoveryNode that used threshold-based heuristics.
 type RelationshipDiscoveryNode struct {
 	*BaseNode
 	discoverySvc LLMRelationshipDiscoveryMethods
@@ -48,7 +47,7 @@ func NewRelationshipDiscoveryNode(
 	logger *zap.Logger,
 ) *RelationshipDiscoveryNode {
 	return &RelationshipDiscoveryNode{
-		BaseNode:     NewBaseNode(models.DAGNodePKMatchDiscovery, dagRepo, logger),
+		BaseNode:     NewBaseNode(models.DAGNodeRelationshipDiscovery, dagRepo, logger),
 		discoverySvc: discoverySvc,
 	}
 }

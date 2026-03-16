@@ -497,13 +497,10 @@ export type DAGNodeName =
   | 'KnowledgeSeeding'
   | 'FKDiscovery'
   | 'TableFeatureExtraction'
-  | 'PKMatchDiscovery'
   | 'RelationshipDiscovery'
   | 'ColumnFeatureExtraction'
   | 'ColumnEnrichment'
-  | 'OntologyFinalization'
-  | 'GlossaryDiscovery'
-  | 'GlossaryEnrichment';
+  | 'OntologyFinalization';
 
 /**
  * Progress within a DAG node
@@ -662,13 +659,9 @@ export const DAGNodeDescriptions: Record<DAGNodeName, { title: string; descripti
     title: 'Extracting Table Features',
     description: 'Analyzing table metadata and usage patterns',
   },
-  PKMatchDiscovery: {
-    title: 'Discovering Primary Key Matches',
-    description: 'Discovering relationships via primary key matching',
-  },
   RelationshipDiscovery: {
     title: 'Discovering Relationships',
-    description: 'Discovering foreign key relationships',
+    description: 'Validating inferred foreign key relationships',
   },
   ColumnFeatureExtraction: {
     title: 'Extracting Column Features',
@@ -681,13 +674,5 @@ export const DAGNodeDescriptions: Record<DAGNodeName, { title: string; descripti
   OntologyFinalization: {
     title: 'Finalizing Ontology',
     description: 'Generating domain summary and conventions',
-  },
-  GlossaryDiscovery: {
-    title: 'Discovering Glossary Terms',
-    description: 'Discovering business glossary terms and definitions',
-  },
-  GlossaryEnrichment: {
-    title: 'Enriching Glossary',
-    description: 'Generating SQL definitions for glossary terms',
   },
 };

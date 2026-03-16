@@ -41,10 +41,10 @@ const COLUMN_FEATURE_MESSAGE_TO_PHASE: readonly [RegExp, string][] = [
 ];
 
 /**
- * Default phases for PK Match Discovery workflow (relationship discovery).
+ * Default phases for Relationship Discovery workflow.
  * These match the phases in pkg/services/relationship_discovery_service.go
  */
-const PK_MATCH_DISCOVERY_PHASES: readonly ExtractionPhase[] = [
+const RELATIONSHIP_DISCOVERY_PHASES: readonly ExtractionPhase[] = [
   { id: 'phase1', name: 'Preserving datasource foreign keys', status: 'pending' },
   { id: 'phase2', name: 'Processing pre-resolved foreign keys', status: 'pending' },
   { id: 'phase3', name: 'Collecting relationship candidates', status: 'pending' },
@@ -53,10 +53,10 @@ const PK_MATCH_DISCOVERY_PHASES: readonly ExtractionPhase[] = [
 ] as const;
 
 /**
- * Maps progress message patterns to phase IDs for PKMatchDiscovery.
+ * Maps progress message patterns to phase IDs for RelationshipDiscovery.
  * Order matters - first match wins.
  */
-const PK_MATCH_MESSAGE_TO_PHASE: readonly [RegExp, string][] = [
+const RELATIONSHIP_DISCOVERY_MESSAGE_TO_PHASE: readonly [RegExp, string][] = [
   [/preserving.*db.*fk/i, 'phase1'],
   [/processing.*columnfeatures|columnfeatures.*fk/i, 'phase2'],
   [/collecting.*candidates|loading.*schema|found.*potential.*fk|fk.*targets|generated.*candidate|analyzing.*candidates/i, 'phase3'],
@@ -65,13 +65,13 @@ const PK_MATCH_MESSAGE_TO_PHASE: readonly [RegExp, string][] = [
 ];
 
 /** Supported node types for multi-phase progress display */
-export type ProgressNodeType = 'ColumnFeatureExtraction' | 'PKMatchDiscovery';
+export type ProgressNodeType = 'ColumnFeatureExtraction' | 'RelationshipDiscovery';
 
 /** Get phases config for a node type */
 const getPhasesForNode = (nodeType: ProgressNodeType): readonly ExtractionPhase[] => {
   switch (nodeType) {
-    case 'PKMatchDiscovery':
-      return PK_MATCH_DISCOVERY_PHASES;
+    case 'RelationshipDiscovery':
+      return RELATIONSHIP_DISCOVERY_PHASES;
     case 'ColumnFeatureExtraction':
     default:
       return COLUMN_FEATURE_EXTRACTION_PHASES;
@@ -83,8 +83,8 @@ const getMessageToPhaseMappingForNode = (
   nodeType: ProgressNodeType
 ): readonly [RegExp, string][] => {
   switch (nodeType) {
-    case 'PKMatchDiscovery':
-      return PK_MATCH_MESSAGE_TO_PHASE;
+    case 'RelationshipDiscovery':
+      return RELATIONSHIP_DISCOVERY_MESSAGE_TO_PHASE;
     case 'ColumnFeatureExtraction':
     default:
       return COLUMN_FEATURE_MESSAGE_TO_PHASE;

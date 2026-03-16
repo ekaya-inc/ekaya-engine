@@ -75,7 +75,7 @@ type SchemaRepository interface {
 	SoftDeleteOrphanedRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (int64, error)
 
 	// GetRelationshipsByMethod returns relationships filtered by inference method.
-	// Use this to query relationships discovered by a specific algorithm (e.g., "pk_match", "column_features", "fk").
+	// Use this to query relationships discovered by a specific algorithm (e.g., "relationship_discovery", "column_features", "fk").
 	GetRelationshipsByMethod(ctx context.Context, projectID, datasourceID uuid.UUID, method string) ([]*models.SchemaRelationship, error)
 
 	// Relationship Discovery
@@ -94,7 +94,7 @@ type SchemaRepository interface {
 	SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error
 
 	// DeleteInferredRelationshipsByProject hard-deletes all relationships for a project.
-	// This includes both inferred relationships (column_features, pk_match) and DB-declared FKs.
+	// This includes both inferred relationships (column_features, relationship_discovery) and DB-declared FKs.
 	// Returns the count of deleted relationships.
 	// Used when deleting ontology to give a clean slate - DB-declared FKs will be
 	// re-imported during the next schema refresh.
