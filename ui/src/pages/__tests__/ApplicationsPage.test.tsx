@@ -97,6 +97,7 @@ describe('ApplicationsPage', () => {
     renderPage();
 
     expect(screen.getByText('AI Data Liaison')).toBeInTheDocument();
+    expect(screen.getByText(/governed access to glossary terms, approved queries, and collaboration workflows/i)).toBeInTheDocument();
     expect(screen.getByText('Ontology Forge')).toBeInTheDocument();
     expect(screen.getByText('AI Agents')).toBeInTheDocument();
     expect(screen.getByText('Product Kit [COMING SOON]')).toBeInTheDocument();

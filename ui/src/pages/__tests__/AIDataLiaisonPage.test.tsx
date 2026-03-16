@@ -14,6 +14,7 @@ vi.mock('../../services/engineApi', () => ({
     completeAppCallback: vi.fn(),
     getInstalledApp: vi.fn(),
     getMCPConfig: vi.fn(),
+    listGlossaryTerms: vi.fn(),
     updateMCPConfig: vi.fn(),
   },
 }));
@@ -71,9 +72,17 @@ const mockMCPConfig: MCPConfigResponse = {
 const setupMocks = (options: {
   hasOntologyForge?: boolean;
   hasMCPConfig?: boolean;
+  hasGlossary?: boolean;
+  glossaryRequestFails?: boolean;
   isActivated?: boolean;
 } = {}) => {
-  const { hasOntologyForge = false, hasMCPConfig = true, isActivated = false } = options;
+  const {
+    hasOntologyForge = false,
+    hasMCPConfig = true,
+    hasGlossary = false,
+    glossaryRequestFails = false,
+    isActivated = false,
+  } = options;
 
   vi.mocked(engineApi.getInstalledApp).mockImplementation((_pid: string, appId: string) => {
     if (appId === 'ai-data-liaison') {
@@ -118,6 +127,29 @@ const setupMocks = (options: {
       success: true,
     });
   }
+
+  if (glossaryRequestFails) {
+    vi.mocked(engineApi.listGlossaryTerms).mockRejectedValue(new Error('Glossary unavailable'));
+  } else {
+    vi.mocked(engineApi.listGlossaryTerms).mockResolvedValue({
+      success: true,
+      data: {
+        terms: hasGlossary
+          ? [{
+              id: 'term-1',
+              project_id: 'proj-1',
+              term: 'Revenue',
+              definition: 'Recognized revenue',
+              defining_sql: 'SELECT 1',
+              source: 'manual',
+              created_at: '2024-01-01',
+              updated_at: '2024-01-01',
+            }]
+          : [],
+        total: hasGlossary ? 1 : 0,
+      },
+    });
+  }
 };
 
 const setupAllCompleteMocks = (options: { isActivated?: boolean } = {}) => {
@@ -125,6 +157,7 @@ const setupAllCompleteMocks = (options: { isActivated?: boolean } = {}) => {
   setupMocks({
     hasOntologyForge: true,
     hasMCPConfig: true,
+    hasGlossary: true,
     isActivated,
   });
 };
@@ -170,7 +203,7 @@ describe('AIDataLiaisonPage', () => {
 
     it('renders the page description', async () => {
       await renderAIDataLiaisonPage();
-      expect(screen.getByText(/Ekaya acts as a data liaison between you and your business users/)).toBeInTheDocument();
+      expect(screen.getByText(/query workflows, share glossary terminology, and collaborate through governed business definitions/i)).toBeInTheDocument();
     });
 
     it('renders back button', async () => {
@@ -205,13 +238,33 @@ describe('AIDataLiaisonPage', () => {
       expect(screen.getByText('Ontology Forge is configured and ready')).toBeInTheDocument();
     });
 
+    it('shows Glossary as pending when Ontology Forge is ready but glossary is empty', async () => {
+      setupMocks({ hasOntologyForge: true, hasGlossary: false });
+      await renderAIDataLiaisonPage();
+      expect(screen.getByText('2. Glossary set up')).toBeInTheDocument();
+      expect(screen.getByText('Set up the business glossary for consistent business terminology')).toBeInTheDocument();
+    });
+
+    it('shows Glossary as complete when at least one glossary term exists', async () => {
+      setupAllCompleteMocks();
+      await renderAIDataLiaisonPage();
+      expect(screen.getByText('2. Glossary set up')).toBeInTheDocument();
+      expect(screen.getByText('Glossary is configured and ready')).toBeInTheDocument();
+    });
+
+    it('fails soft when glossary readiness fetch fails', async () => {
+      setupMocks({ hasOntologyForge: true, glossaryRequestFails: true });
+      await renderAIDataLiaisonPage();
+      expect(screen.getByText('2. Glossary set up')).toBeInTheDocument();
+      expect(screen.getByText('Set up the business glossary for consistent business terminology')).toBeInTheDocument();
+    });
   });
 
   describe('Activate Step', () => {
     it('shows activate step when prerequisites are met but not activated', async () => {
       setupAllCompleteMocks({ isActivated: false });
       await renderAIDataLiaisonPage();
-      expect(screen.getByText('2. Activate AI Data Liaison')).toBeInTheDocument();
+      expect(screen.getByText('3. Activate AI Data Liaison')).toBeInTheDocument();
       expect(screen.getByText('Activate to start using the application')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /^activate$/i })).toBeInTheDocument();
     });
@@ -220,14 +273,21 @@ describe('AIDataLiaisonPage', () => {
       setupMocks({ hasOntologyForge: false });
       await renderAIDataLiaisonPage();
       expect(screen.getByText(/Activate AI Data Liaison/)).toBeInTheDocument();
-      expect(screen.getByText('Complete step 1 before activating')).toBeInTheDocument();
+      expect(screen.getByText('Complete steps 1 and 2 before activating')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^activate$/i })).toBeDisabled();
+    });
+
+    it('requires glossary before activation when Ontology Forge is ready', async () => {
+      setupMocks({ hasOntologyForge: true, hasGlossary: false });
+      await renderAIDataLiaisonPage();
+      expect(screen.getByText('Complete step 2 before activating')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /^activate$/i })).toBeDisabled();
     });
 
     it('shows activated state when activated_at is set', async () => {
       setupAllCompleteMocks({ isActivated: true });
       await renderAIDataLiaisonPage();
-      expect(screen.getByText('2. Activate AI Data Liaison')).toBeInTheDocument();
+      expect(screen.getByText('3. Activate AI Data Liaison')).toBeInTheDocument();
       expect(screen.getByText('AI Data Liaison activated')).toBeInTheDocument();
       // No activate button when already activated
       expect(screen.queryByRole('button', { name: /^activate$/i })).not.toBeInTheDocument();
@@ -297,6 +357,11 @@ describe('AIDataLiaisonPage', () => {
   });
 
   describe('Tool Configuration', () => {
+    it('does not render the Share with Business Users section', async () => {
+      await renderAIDataLiaisonPage();
+      expect(screen.queryByText('Share with Business Users')).not.toBeInTheDocument();
+    });
+
     it('renders tool configuration card', async () => {
       await renderAIDataLiaisonPage();
       expect(screen.getByText('Tool Configuration')).toBeInTheDocument();
@@ -305,12 +370,14 @@ describe('AIDataLiaisonPage', () => {
     it('shows approval tools toggle', async () => {
       await renderAIDataLiaisonPage();
       expect(screen.getByText('Add Approval Tools')).toBeInTheDocument();
+      expect(screen.getByText(/review and manage query suggestions and glossary terms/i)).toBeInTheDocument();
     });
 
     it('shows request tools toggle with recommended badge', async () => {
       await renderAIDataLiaisonPage();
       expect(screen.getByText('Add Request Tools')).toBeInTheDocument();
       expect(screen.getByText('[RECOMMENDED]')).toBeInTheDocument();
+      expect(screen.getByText(/access glossary terms through the MCP Client/i)).toBeInTheDocument();
     });
   });
 
@@ -349,7 +416,7 @@ describe('AIDataLiaisonPage', () => {
 
     it('renders warning text', async () => {
       await renderAIDataLiaisonPage();
-      expect(screen.getByText(/Uninstalling AI Data Liaison will disable the query suggestion workflow/)).toBeInTheDocument();
+      expect(screen.getByText(/remove AI Data Liaison access to glossary functionality/i)).toBeInTheDocument();
     });
   });
 

@@ -31,7 +31,7 @@ type AuditLogEntry struct {
 	Action     string    `json:"action"`      // 'create', 'update', 'delete'
 
 	// Who/how
-	Source    string     `json:"source"`            // 'inference', 'mcp', 'manual'
+	Source    string     `json:"source"`            // 'inferred', 'mcp', 'manual'
 	UserID    *uuid.UUID `json:"user_id,omitempty"` // Who triggered the action (from JWT, may be null for system operations)
 	UserEmail *string    `json:"user_email,omitempty"`
 

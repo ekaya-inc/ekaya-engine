@@ -1140,6 +1140,6 @@ func TestExecuteDAG_SetsInferenceProvenance(t *testing.T) {
 
 	// Verify provenance was set correctly
 	assert.True(t, provenanceFound, "Provenance should be set in context")
-	assert.Equal(t, models.SourceInferred, capturedProvenance.Source, "Source should be inference")
+	assert.Equal(t, models.SourceInferred, capturedProvenance.Source, "Source should be inferred")
 	assert.Equal(t, userID, capturedProvenance.UserID, "UserID should match the triggering user")
 }

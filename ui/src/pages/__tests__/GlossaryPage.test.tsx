@@ -2,10 +2,13 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as authToken from '../../lib/auth-token';
 import engineApi from '../../services/engineApi';
 import ontologyService from '../../services/ontologyService';
 import type { GlossaryTerm } from '../../types';
 import GlossaryPage from '../GlossaryPage';
+
+const mockUseDatasourceConnection = vi.fn();
 
 // Mock the services
 vi.mock('../../services/engineApi', () => ({
@@ -13,6 +16,7 @@ vi.mock('../../services/engineApi', () => ({
     listGlossaryTerms: vi.fn(),
     deleteGlossaryTerm: vi.fn(),
     testGlossarySQL: vi.fn(),
+    testQuery: vi.fn(),
     createGlossaryTerm: vi.fn(),
     updateGlossaryTerm: vi.fn(),
     autoGenerateGlossary: vi.fn(),
@@ -32,11 +36,15 @@ vi.mock('../../services/ontologyApi', () => ({
   },
 }));
 
+vi.mock('../../lib/auth-token', () => ({
+  getUserRoles: vi.fn(() => ['admin']),
+}));
+
 // Mock the GlossaryTermEditor component
 vi.mock('../../components/GlossaryTermEditor', () => ({
-  GlossaryTermEditor: ({ isOpen, onClose, onSave }: { isOpen: boolean; onClose: () => void; onSave: () => void }) =>
+  GlossaryTermEditor: ({ isOpen, onClose, onSave, dialect }: { isOpen: boolean; onClose: () => void; onSave: () => void; dialect?: string }) =>
     isOpen ? (
-      <div data-testid="glossary-term-editor">
+      <div data-testid="glossary-term-editor" data-dialect={dialect}>
         <button onClick={onSave}>Save</button>
         <button onClick={onClose}>Close</button>
       </div>
@@ -48,6 +56,10 @@ vi.mock('../../hooks/useToast', () => ({
   useToast: () => ({
     toast: vi.fn(),
   }),
+}));
+
+vi.mock('../../contexts/DatasourceConnectionContext', () => ({
+  useDatasourceConnection: () => mockUseDatasourceConnection(),
 }));
 
 const mockTerms: GlossaryTerm[] = [
@@ -95,7 +107,15 @@ const renderGlossaryPage = () => {
 describe('GlossaryPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(authToken.getUserRoles).mockReturnValue(['admin']);
     vi.mocked(ontologyService.subscribe).mockReturnValue(vi.fn());
+    mockUseDatasourceConnection.mockReturnValue({
+      selectedDatasource: {
+        datasourceId: 'ds-1',
+        name: 'Test DB',
+        type: 'postgres',
+      },
+    });
   });
 
   describe('Loading State', () => {
@@ -164,6 +184,79 @@ describe('GlossaryPage', () => {
       expect(screen.getByTestId || screen.queryByText(/run ontology extraction/i) || true).toBeTruthy();
     });
 
+    it('shows example generation copy and Add Term action when ready to auto-generate', async () => {
+      vi.mocked(engineApi.listGlossaryTerms).mockResolvedValue({
+        success: true,
+        data: {
+          terms: [],
+          total: 0,
+          generation_status: {
+            status: 'idle',
+            message: 'No generation in progress',
+          },
+        },
+      });
+
+      renderGlossaryPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('No Glossary Terms Yet')).toBeInTheDocument();
+        expect(
+          screen.getByText(
+            'Generate example business glossary terms from your ontology to get started. Terms will include SQL definitions, business and technical mappings.'
+          )
+        ).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /auto-generate example terms/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^add term$/i })).toBeInTheDocument();
+      });
+    });
+
+    it('opens the editor when Add Term is clicked from the empty state', async () => {
+      vi.mocked(engineApi.listGlossaryTerms).mockResolvedValue({
+        success: true,
+        data: {
+          terms: [],
+          total: 0,
+          generation_status: {
+            status: 'idle',
+            message: 'No generation in progress',
+          },
+        },
+      });
+
+      renderGlossaryPage();
+
+      const addButton = await screen.findByRole('button', { name: /^add term$/i });
+      fireEvent.click(addButton);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('glossary-term-editor')).toBeInTheDocument();
+      });
+    });
+
+    it('shows dedicated no-qualified-terms state', async () => {
+      vi.mocked(engineApi.listGlossaryTerms).mockResolvedValue({
+        success: true,
+        data: {
+          terms: [],
+          total: 0,
+          generation_status: {
+            status: 'no_qualified_terms',
+            message: 'No example glossary terms met the quality bar for this project.',
+          },
+        },
+      });
+
+      renderGlossaryPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('No Verified Example Terms Yet')).toBeInTheDocument();
+        expect(screen.getByText('No example glossary terms met the quality bar for this project.')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^add term$/i })).toBeInTheDocument();
+      });
+    });
+
     it('shows link to ontology page in empty state', async () => {
       vi.mocked(engineApi.listGlossaryTerms).mockResolvedValue({
         success: true,
@@ -176,6 +269,29 @@ describe('GlossaryPage', () => {
         const ontologyLink = screen.getByRole('button', { name: /go to ontology/i });
         expect(ontologyLink).toBeInTheDocument();
       });
+    });
+
+    it('hides empty-state Add Term action for users without glossary write access', async () => {
+      vi.mocked(authToken.getUserRoles).mockReturnValue(['user']);
+      vi.mocked(engineApi.listGlossaryTerms).mockResolvedValue({
+        success: true,
+        data: {
+          terms: [],
+          total: 0,
+          generation_status: {
+            status: 'idle',
+            message: 'No generation in progress',
+          },
+        },
+      });
+
+      renderGlossaryPage();
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /auto-generate example terms/i })).toBeInTheDocument();
+      });
+
+      expect(screen.queryByRole('button', { name: /^add term$/i })).not.toBeInTheDocument();
     });
   });
 
@@ -199,11 +315,32 @@ describe('GlossaryPage', () => {
     });
 
     it('displays source badges correctly', async () => {
+      vi.mocked(engineApi.listGlossaryTerms).mockResolvedValue({
+        success: true,
+        data: {
+          terms: [
+            ...mockTerms,
+            {
+              id: 'term-3',
+              project_id: 'proj-1',
+              term: 'Bookings',
+              definition: 'Gross bookings from completed orders',
+              defining_sql: 'SELECT SUM(total) AS bookings FROM orders WHERE status = \'completed\'',
+              source: 'mcp',
+              created_at: '2024-01-17T00:00:00Z',
+              updated_at: '2024-01-17T00:00:00Z',
+            },
+          ],
+          total: 3,
+        },
+      });
+
       renderGlossaryPage();
 
       await waitFor(() => {
         expect(screen.getByText('Inferred')).toBeInTheDocument();
         expect(screen.getByText('Manual')).toBeInTheDocument();
+        expect(screen.getByText('MCP')).toBeInTheDocument();
       });
     });
 
@@ -213,6 +350,27 @@ describe('GlossaryPage', () => {
       await waitFor(() => {
         expect(screen.getAllByText('Glossary').length).toBeGreaterThan(0);
         expect(screen.getByText('2 terms')).toBeInTheDocument();
+      });
+    });
+
+    it('shows preserved-terms banner for no-qualified rerun', async () => {
+      vi.mocked(engineApi.listGlossaryTerms).mockResolvedValue({
+        success: true,
+        data: {
+          terms: mockTerms,
+          total: mockTerms.length,
+          generation_status: {
+            status: 'no_qualified_terms',
+            message: 'No new example glossary terms met the quality bar. Existing inferred terms were preserved.',
+          },
+        },
+      });
+
+      renderGlossaryPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('No new verified example terms were saved')).toBeInTheDocument();
+        expect(screen.getByText('No new example glossary terms met the quality bar. Existing inferred terms were preserved.')).toBeInTheDocument();
       });
     });
 
@@ -241,7 +399,7 @@ describe('GlossaryPage', () => {
       renderGlossaryPage();
 
       await waitFor(() => {
-        const detailsButtons = screen.getAllByText('SQL Details');
+        const detailsButtons = screen.getAllByRole('button', { name: /toggle details/i });
         expect(detailsButtons).toHaveLength(2);
       });
     });
@@ -250,9 +408,9 @@ describe('GlossaryPage', () => {
       renderGlossaryPage();
 
       await waitFor(() => {
-        const detailsButtons = screen.getAllByText('SQL Details');
+        const detailsButtons = screen.getAllByRole('button', { name: /toggle details/i });
         const firstButton = detailsButtons[0];
-        if (!firstButton) throw new Error('Expected SQL Details button');
+        if (!firstButton) throw new Error('Expected details toggle button');
         fireEvent.click(firstButton);
       });
 
@@ -262,13 +420,30 @@ describe('GlossaryPage', () => {
       });
     });
 
+    it('toggles SQL details when the row is clicked', async () => {
+      renderGlossaryPage();
+
+      const termTitle = await screen.findByText('Active Users');
+      fireEvent.click(termTitle);
+
+      await waitFor(() => {
+        expect(screen.getByText('Defining SQL')).toBeInTheDocument();
+      });
+
+      fireEvent.click(termTitle);
+
+      await waitFor(() => {
+        expect(screen.queryByText('Defining SQL')).not.toBeInTheDocument();
+      });
+    });
+
     it('displays base table in expanded view', async () => {
       renderGlossaryPage();
 
       await waitFor(() => {
-        const detailsButtons = screen.getAllByText('SQL Details');
+        const detailsButtons = screen.getAllByRole('button', { name: /toggle details/i });
         const firstButton = detailsButtons[0];
-        if (!firstButton) throw new Error('Expected SQL Details button');
+        if (!firstButton) throw new Error('Expected details toggle button');
         fireEvent.click(firstButton);
       });
 
@@ -282,9 +457,9 @@ describe('GlossaryPage', () => {
       renderGlossaryPage();
 
       await waitFor(() => {
-        const detailsButtons = screen.getAllByText('SQL Details');
+        const detailsButtons = screen.getAllByRole('button', { name: /toggle details/i });
         const firstButton = detailsButtons[0];
-        if (!firstButton) throw new Error('Expected SQL Details button');
+        if (!firstButton) throw new Error('Expected details toggle button');
         fireEvent.click(firstButton);
       });
 
@@ -299,9 +474,9 @@ describe('GlossaryPage', () => {
       renderGlossaryPage();
 
       await waitFor(() => {
-        const detailsButtons = screen.getAllByText('SQL Details');
+        const detailsButtons = screen.getAllByRole('button', { name: /toggle details/i });
         const firstButton = detailsButtons[0];
-        if (!firstButton) throw new Error('Expected SQL Details button');
+        if (!firstButton) throw new Error('Expected details toggle button');
         fireEvent.click(firstButton);
       });
 
@@ -316,9 +491,9 @@ describe('GlossaryPage', () => {
       renderGlossaryPage();
 
       await waitFor(() => {
-        const detailsButtons = screen.getAllByText('SQL Details');
+        const detailsButtons = screen.getAllByRole('button', { name: /toggle details/i });
         const firstButton = detailsButtons[0];
-        if (!firstButton) throw new Error('Expected SQL Details button');
+        if (!firstButton) throw new Error('Expected details toggle button');
         fireEvent.click(firstButton);
       });
 
@@ -326,13 +501,61 @@ describe('GlossaryPage', () => {
         expect(screen.getByText('Defining SQL')).toBeInTheDocument();
       });
 
-      const detailsButtons = screen.getAllByText('SQL Details');
+      const detailsButtons = screen.getAllByRole('button', { name: /toggle details/i });
       const firstButton = detailsButtons[0];
-      if (!firstButton) throw new Error('Expected SQL Details button');
+      if (!firstButton) throw new Error('Expected details toggle button');
       fireEvent.click(firstButton);
 
       await waitFor(() => {
         expect(screen.queryByText('Defining SQL')).not.toBeInTheDocument();
+      });
+    });
+
+    it('shows execute query button in expanded view', async () => {
+      renderGlossaryPage();
+
+      await waitFor(() => {
+        const detailsButtons = screen.getAllByRole('button', { name: /toggle details/i });
+        const firstButton = detailsButtons[0];
+        if (!firstButton) throw new Error('Expected details toggle button');
+        fireEvent.click(firstButton);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /execute query/i })).toBeInTheDocument();
+      });
+    });
+
+    it('executes glossary SQL and shows results', async () => {
+      vi.mocked(engineApi.testQuery).mockResolvedValue({
+        success: true,
+        data: {
+          columns: [{ name: 'active_users', type: 'integer' }],
+          rows: [{ active_users: 42 }],
+          row_count: 1,
+        },
+      });
+
+      renderGlossaryPage();
+
+      await waitFor(() => {
+        const detailsButtons = screen.getAllByRole('button', { name: /toggle details/i });
+        const firstButton = detailsButtons[0];
+        if (!firstButton) throw new Error('Expected details toggle button');
+        fireEvent.click(firstButton);
+      });
+
+      const executeButton = await screen.findByRole('button', { name: /execute query/i });
+      fireEvent.click(executeButton);
+
+      await waitFor(() => {
+        expect(engineApi.testQuery).toHaveBeenCalledWith('proj-1', 'ds-1', {
+          sql_query: mockTerms[0]?.defining_sql,
+          limit: 100,
+        });
+        expect(screen.getByText('Query Results')).toBeInTheDocument();
+        expect(screen.getByText(/Showing 1 of 1 rows/)).toBeInTheDocument();
+        expect(screen.getByText('42')).toBeInTheDocument();
       });
     });
   });
@@ -366,6 +589,27 @@ describe('GlossaryPage', () => {
       });
     });
 
+    it('passes the selected datasource dialect to the glossary editor', async () => {
+      mockUseDatasourceConnection.mockReturnValue({
+        selectedDatasource: {
+          datasourceId: 'ds-1',
+          name: 'SQL Server',
+          type: 'mssql',
+        },
+      });
+
+      renderGlossaryPage();
+
+      await waitFor(() => {
+        const addButton = screen.getByRole('button', { name: /add term/i });
+        fireEvent.click(addButton);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('glossary-term-editor')).toHaveAttribute('data-dialect', 'MSSQL');
+      });
+    });
+
     it('renders edit and delete buttons for each term', async () => {
       renderGlossaryPage();
 
@@ -394,12 +638,14 @@ describe('GlossaryPage', () => {
       });
     });
 
-    it('shows Regenerate button when terms exist', async () => {
+    it('does not show Regenerate button when terms exist', async () => {
       renderGlossaryPage();
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: /regenerate/i })).toBeInTheDocument();
+        expect(screen.getByText('Active Users')).toBeInTheDocument();
       });
+
+      expect(screen.queryByRole('button', { name: /regenerate/i })).not.toBeInTheDocument();
     });
   });
 });

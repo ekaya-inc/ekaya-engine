@@ -6,7 +6,7 @@
 /**
  * Source of a project knowledge fact
  */
-export type ProjectKnowledgeSource = 'inference' | 'mcp' | 'manual';
+export type ProjectKnowledgeSource = 'inferred' | 'mcp' | 'manual';
 
 /**
  * ProjectKnowledge represents a project-level fact learned during refinement.

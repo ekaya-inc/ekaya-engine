@@ -34,8 +34,7 @@ var AppToggles = []AppToggle{
 		Tools: []string{
 			"get_schema", "search_schema", "probe_column", "probe_columns", "get_column_metadata",
 			"update_column", "update_columns", "update_table", "update_project_knowledge",
-			"update_glossary_term", "create_glossary_term",
-			"delete_column_metadata", "delete_table_metadata", "delete_project_knowledge", "delete_glossary_term",
+			"delete_column_metadata", "delete_table_metadata", "delete_project_knowledge",
 			"refresh_schema", "scan_data_changes", "list_pending_changes",
 			"approve_change", "reject_change", "approve_all_changes",
 			"list_ontology_questions", "resolve_ontology_question", "skip_ontology_question",
@@ -48,7 +47,7 @@ var AppToggles = []AppToggle{
 		Role:        "user",
 		ToggleKey:   "addOntologySuggestions",
 		DisplayName: "Add Ontology Suggestions",
-		Tools:       []string{"get_context", "get_ontology", "list_glossary", "get_glossary_sql"},
+		Tools:       []string{"get_context", "get_ontology"},
 	},
 	// AI Data Liaison — Developer
 	{
@@ -59,6 +58,7 @@ var AppToggles = []AppToggle{
 		Tools: []string{
 			"list_query_suggestions", "approve_query_suggestion", "reject_query_suggestion",
 			"create_approved_query", "update_approved_query", "delete_approved_query",
+			"create_glossary_term", "update_glossary_term", "delete_glossary_term",
 			"explain_query",
 		},
 	},
@@ -70,6 +70,7 @@ var AppToggles = []AppToggle{
 		DisplayName: "Add Request Tools",
 		Tools: []string{
 			"query", "sample", "validate",
+			"list_glossary", "get_glossary_sql",
 			"list_approved_queries", "execute_approved_query",
 			"suggest_approved_query", "suggest_query_update",
 			"get_query_history", "record_query_feedback",
@@ -99,6 +100,52 @@ func GetToolAppID(toolName, role string) string {
 		}
 	}
 	return models.AppIDMCPServer // fallback
+}
+
+// GetToolOwningAppIDs returns every app that can expose the tool through the
+// toggle registry, independent of caller role.
+func GetToolOwningAppIDs(toolName string) []string {
+	if toolName == "health" {
+		return []string{models.AppIDMCPServer}
+	}
+
+	appIDs := make([]string, 0, 2)
+	for _, toggle := range AppToggles {
+		if !slices.Contains(toggle.Tools, toolName) {
+			continue
+		}
+		if slices.Contains(appIDs, toggle.AppID) {
+			continue
+		}
+		appIDs = append(appIDs, toggle.AppID)
+	}
+
+	return appIDs
+}
+
+// GetEnabledToolOwningAppIDs returns app IDs for toggle paths that both own the
+// tool and are currently enabled in the provided config state.
+func GetEnabledToolOwningAppIDs(toolName string, state map[string]*models.ToolGroupConfig) []string {
+	if toolName == "health" {
+		return []string{models.AppIDMCPServer}
+	}
+
+	cfg := getToolsConfig(state)
+	appIDs := make([]string, 0, 2)
+	for _, toggle := range AppToggles {
+		if !IsToggleEnabled(cfg, toggle.ToggleKey) {
+			continue
+		}
+		if !slices.Contains(toggle.Tools, toolName) {
+			continue
+		}
+		if slices.Contains(appIDs, toggle.AppID) {
+			continue
+		}
+		appIDs = append(appIDs, toggle.AppID)
+	}
+
+	return appIDs
 }
 
 // IsToggleEnabled checks if a toggle is enabled in the config.

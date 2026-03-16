@@ -211,7 +211,8 @@ func handleContext(
 		response["tables"] = tablesResponse
 	}
 
-	// Add glossary to response (always included regardless of depth)
+	// Glossary page/tool ownership now lives under AI Data Liaison, but get_context
+	// still includes glossary because it remains part of ontology context output.
 	response["glossary"] = buildGlossaryResponse(glossary)
 
 	return response, nil

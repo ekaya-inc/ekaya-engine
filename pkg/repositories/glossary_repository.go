@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
@@ -20,6 +22,7 @@ type GlossaryRepository interface {
 	Update(ctx context.Context, term *models.BusinessGlossaryTerm) error
 	Delete(ctx context.Context, termID uuid.UUID) error
 	DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error
+	ReplaceInferredTerms(ctx context.Context, projectID uuid.UUID, terms []*models.BusinessGlossaryTerm) error
 	GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error)
 	GetByTerm(ctx context.Context, projectID uuid.UUID, term string) (*models.BusinessGlossaryTerm, error)
 	GetByAlias(ctx context.Context, projectID uuid.UUID, alias string) (*models.BusinessGlossaryTerm, error)
@@ -29,6 +32,11 @@ type GlossaryRepository interface {
 }
 
 type glossaryRepository struct{}
+
+type glossaryExecer interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
 
 // NewGlossaryRepository creates a new GlossaryRepository.
 func NewGlossaryRepository() GlossaryRepository {
@@ -64,42 +72,7 @@ func (r *glossaryRepository) Create(ctx context.Context, term *models.BusinessGl
 		term.CreatedBy = nil
 	}
 
-	query := `
-		INSERT INTO engine_business_glossary (
-			project_id, term, definition, defining_sql, base_table,
-			output_columns, source, enrichment_status, enrichment_error,
-			created_by, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-		RETURNING id, created_at, updated_at`
-
-	err := scope.Conn.QueryRow(ctx, query,
-		term.ProjectID,
-		term.Term,
-		term.Definition,
-		term.DefiningSQL,
-		nullString(term.BaseTable),
-		jsonbValue(term.OutputColumns),
-		term.Source,
-		nullString(term.EnrichmentStatus),
-		nullString(term.EnrichmentError),
-		term.CreatedBy,
-		now,
-		now,
-	).Scan(&term.ID, &term.CreatedAt, &term.UpdatedAt)
-	if err != nil {
-		return fmt.Errorf("failed to create glossary term: %w", err)
-	}
-
-	// Create aliases if provided
-	if len(term.Aliases) > 0 {
-		for _, alias := range term.Aliases {
-			if err := r.CreateAlias(ctx, term.ID, alias); err != nil {
-				return fmt.Errorf("failed to create alias %q: %w", alias, err)
-			}
-		}
-	}
-
-	return nil
+	return r.createTermWithExec(ctx, scope.Conn, term, now)
 }
 
 func (r *glossaryRepository) Update(ctx context.Context, term *models.BusinessGlossaryTerm) error {
@@ -115,6 +88,7 @@ func (r *glossaryRepository) Update(ctx context.Context, term *models.BusinessGl
 	}
 
 	// Set provenance fields from context
+	term.Source = prov.Source.String()
 	lastEditSource := prov.Source.String()
 	term.LastEditSource = &lastEditSource
 	// Only set UpdatedBy if there's a valid user ID (not the nil UUID)
@@ -127,8 +101,8 @@ func (r *glossaryRepository) Update(ctx context.Context, term *models.BusinessGl
 	query := `
 		UPDATE engine_business_glossary
 		SET term = $2, definition = $3, defining_sql = $4, base_table = $5,
-		    output_columns = $6, enrichment_status = $7,
-		    enrichment_error = $8, last_edit_source = $9, updated_by = $10
+		    output_columns = $6, source = $7, enrichment_status = $8,
+		    enrichment_error = $9, last_edit_source = $10, updated_by = $11
 		WHERE id = $1
 		RETURNING updated_at`
 
@@ -139,6 +113,7 @@ func (r *glossaryRepository) Update(ctx context.Context, term *models.BusinessGl
 		term.DefiningSQL,
 		nullString(term.BaseTable),
 		jsonbValue(term.OutputColumns),
+		term.Source,
 		nullString(term.EnrichmentStatus),
 		nullString(term.EnrichmentError),
 		term.LastEditSource,
@@ -213,6 +188,95 @@ func (r *glossaryRepository) DeleteBySource(ctx context.Context, projectID uuid.
 	query := `DELETE FROM engine_business_glossary WHERE project_id = $1 AND source = $2`
 	if _, err := scope.Conn.Exec(ctx, query, projectID, source.String()); err != nil {
 		return fmt.Errorf("failed to delete glossary terms by source: %w", err)
+	}
+
+	return nil
+}
+
+func (r *glossaryRepository) ReplaceInferredTerms(ctx context.Context, projectID uuid.UUID, terms []*models.BusinessGlossaryTerm) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	prov, ok := models.GetProvenance(ctx)
+	if !ok {
+		return fmt.Errorf("provenance context required")
+	}
+
+	tx, err := scope.Conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin glossary replace transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // best effort cleanup
+
+	// Protect manually curated rows from inferred replacement collisions.
+	if len(terms) > 0 {
+		termNames := make([]string, 0, len(terms))
+		for _, term := range terms {
+			termNames = append(termNames, term.Term)
+		}
+
+		collisionQuery := `
+			SELECT term
+			FROM engine_business_glossary
+			WHERE project_id = $1
+			  AND source <> $2
+			  AND term = ANY($3)`
+
+		rows, err := tx.Query(ctx, collisionQuery, projectID, prov.Source.String(), termNames)
+		if err != nil {
+			return fmt.Errorf("failed to check glossary collisions: %w", err)
+		}
+		defer rows.Close()
+
+		var collisions []string
+		for rows.Next() {
+			var term string
+			if err := rows.Scan(&term); err != nil {
+				return fmt.Errorf("failed to scan glossary collision: %w", err)
+			}
+			collisions = append(collisions, term)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("failed to iterate glossary collisions: %w", err)
+		}
+		if len(collisions) > 0 {
+			return fmt.Errorf("generated glossary terms conflict with existing curated terms: %s", strings.Join(collisions, ", "))
+		}
+	}
+
+	aliasQuery := `
+		DELETE FROM engine_glossary_aliases
+		WHERE glossary_id IN (
+			SELECT id FROM engine_business_glossary
+			WHERE project_id = $1 AND source = $2
+		)`
+	if _, err := tx.Exec(ctx, aliasQuery, projectID, prov.Source.String()); err != nil {
+		return fmt.Errorf("failed to delete glossary aliases: %w", err)
+	}
+
+	deleteQuery := `DELETE FROM engine_business_glossary WHERE project_id = $1 AND source = $2`
+	if _, err := tx.Exec(ctx, deleteQuery, projectID, prov.Source.String()); err != nil {
+		return fmt.Errorf("failed to delete inferred glossary terms: %w", err)
+	}
+
+	now := time.Now()
+	for _, term := range terms {
+		term.ProjectID = projectID
+		term.Source = prov.Source.String()
+		if prov.UserID != uuid.Nil {
+			term.CreatedBy = &prov.UserID
+		} else {
+			term.CreatedBy = nil
+		}
+		if err := r.createTermWithExec(ctx, tx, term, now); err != nil {
+			return err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit glossary replacement: %w", err)
 	}
 
 	return nil
@@ -372,16 +436,7 @@ func (r *glossaryRepository) CreateAlias(ctx context.Context, glossaryID uuid.UU
 		return fmt.Errorf("no tenant scope in context")
 	}
 
-	query := `
-		INSERT INTO engine_glossary_aliases (glossary_id, alias)
-		VALUES ($1, $2)`
-
-	_, err := scope.Conn.Exec(ctx, query, glossaryID, alias)
-	if err != nil {
-		return fmt.Errorf("failed to create alias: %w", err)
-	}
-
-	return nil
+	return r.createAliasWithExec(ctx, scope.Conn, glossaryID, alias)
 }
 
 func (r *glossaryRepository) DeleteAlias(ctx context.Context, glossaryID uuid.UUID, alias string) error {
@@ -489,4 +544,52 @@ func jsonbValue(v any) any {
 // jsonUnmarshal unmarshals JSONB data from the database.
 func jsonUnmarshal(data []byte, v any) error {
 	return json.Unmarshal(data, v)
+}
+
+func (r *glossaryRepository) createTermWithExec(ctx context.Context, execer glossaryExecer, term *models.BusinessGlossaryTerm, now time.Time) error {
+	query := `
+		INSERT INTO engine_business_glossary (
+			project_id, term, definition, defining_sql, base_table,
+			output_columns, source, enrichment_status, enrichment_error,
+			created_by, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		RETURNING id, created_at, updated_at`
+
+	err := execer.QueryRow(ctx, query,
+		term.ProjectID,
+		term.Term,
+		term.Definition,
+		term.DefiningSQL,
+		nullString(term.BaseTable),
+		jsonbValue(term.OutputColumns),
+		term.Source,
+		nullString(term.EnrichmentStatus),
+		nullString(term.EnrichmentError),
+		term.CreatedBy,
+		now,
+		now,
+	).Scan(&term.ID, &term.CreatedAt, &term.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("failed to create glossary term: %w", err)
+	}
+
+	for _, alias := range term.Aliases {
+		if err := r.createAliasWithExec(ctx, execer, term.ID, alias); err != nil {
+			return fmt.Errorf("failed to create alias %q: %w", alias, err)
+		}
+	}
+
+	return nil
+}
+
+func (r *glossaryRepository) createAliasWithExec(ctx context.Context, execer glossaryExecer, glossaryID uuid.UUID, alias string) error {
+	query := `
+		INSERT INTO engine_glossary_aliases (glossary_id, alias)
+		VALUES ($1, $2)`
+
+	if _, err := execer.Exec(ctx, query, glossaryID, alias); err != nil {
+		return fmt.Errorf("failed to create alias: %w", err)
+	}
+
+	return nil
 }

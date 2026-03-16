@@ -16,6 +16,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { GlossaryTermEditor } from "../components/GlossaryTermEditor";
+import { SqlExecutionPanel } from "../components/SqlExecutionPanel";
 import { Button } from "../components/ui/Button";
 import {
   Card,
@@ -25,12 +26,24 @@ import {
   CardTitle,
 } from "../components/ui/Card";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
+import { useDatasourceConnection } from "../contexts/DatasourceConnectionContext";
 import { useToast } from "../hooks/useToast";
+import { getUserRoles } from "../lib/auth-token";
 import engineApi from "../services/engineApi";
 import ontologyApi from "../services/ontologyApi";
+import { datasourceTypeToDialect } from "../types";
 import type { GlossaryGenerationStatus, GlossaryTerm } from "../types";
 
 const POLL_INTERVAL_MS = 3000;
+
+const inProgressGlossaryStatuses: GlossaryGenerationStatus['status'][] = [
+  'discovering' as GlossaryGenerationStatus['status'],
+  'enriching' as GlossaryGenerationStatus['status'],
+  'planning',
+  'investigating',
+  'qualifying',
+  'writing',
+];
 
 /**
  * GlossaryPage - Display business glossary terms with technical mappings
@@ -41,6 +54,12 @@ const GlossaryPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
   const { toast } = useToast();
+  const { selectedDatasource } = useDatasourceConnection();
+  const dialect = selectedDatasource?.type
+    ? datasourceTypeToDialect[selectedDatasource.type]
+    : 'PostgreSQL';
+  const roles = getUserRoles();
+  const hasGlossaryWriteAccess = roles.includes('admin') || roles.includes('data');
 
   // State for glossary terms
   const [terms, setTerms] = useState<GlossaryTerm[]>([]);
@@ -66,7 +85,6 @@ const GlossaryPage = () => {
   const [deletingTermId, setDeletingTermId] = useState<string | null>(null);
 
   // Confirmation dialog state
-  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
   const [termToDelete, setTermToDelete] = useState<GlossaryTerm | null>(null);
 
   // Polling ref
@@ -154,7 +172,7 @@ const GlossaryPage = () => {
   }, [loading, terms.length, generationStatus?.status, pendingRequiredQuestions, checkingQuestions, checkPendingQuestions]);
 
   // Poll while generation is in progress
-  const isGenerating = generationStatus?.status === 'discovering' || generationStatus?.status === 'enriching';
+  const isGenerating = generationStatus != null && inProgressGlossaryStatuses.includes(generationStatus.status);
 
   useEffect(() => {
     if (isGenerating) {
@@ -172,6 +190,14 @@ const GlossaryPage = () => {
         fetchTerms(true);
         toast({
           title: 'Glossary generated',
+          description: generationStatus.message,
+          variant: 'default',
+        });
+      } else if (generating && generationStatus?.status === 'no_qualified_terms') {
+        setGenerating(false);
+        fetchTerms(true);
+        toast({
+          title: 'No verified glossary terms generated',
           description: generationStatus.message,
           variant: 'default',
         });
@@ -198,37 +224,16 @@ const GlossaryPage = () => {
     if (!pid) return;
     setGenerating(true);
     try {
-      await engineApi.autoGenerateGlossary(pid);
-      // Poll will pick up status changes
-      fetchTerms(true);
+      const response = await engineApi.autoGenerateGlossary(pid);
+      if (response.data) {
+        setGenerationStatus(response.data);
+      }
     } catch (err) {
       setGenerating(false);
       const errorMessage = err instanceof Error ? err.message : 'Failed to start glossary generation';
       toast({
         title: 'Failed to generate glossary',
         description: errorMessage,
-        variant: 'destructive',
-      });
-    }
-  };
-
-  // Handle regenerate (with confirmation)
-  const handleRegenerate = (): void => {
-    setConfirmRegenerate(true);
-  };
-
-  const confirmRegenerateAction = async (): Promise<void> => {
-    if (!pid) return;
-    setConfirmRegenerate(false);
-    setGenerating(true);
-    try {
-      await engineApi.autoGenerateGlossary(pid);
-      fetchTerms(true);
-    } catch (err) {
-      setGenerating(false);
-      toast({
-        title: 'Failed to regenerate glossary',
-        description: err instanceof Error ? err.message : 'An unexpected error occurred',
         variant: 'destructive',
       });
     }
@@ -298,6 +303,17 @@ const GlossaryPage = () => {
     fetchTerms();
   };
 
+  const glossaryEditor = pid ? (
+    <GlossaryTermEditor
+      projectId={pid}
+      term={editingTerm}
+      isOpen={editorOpen}
+      onClose={() => setEditorOpen(false)}
+      onSave={handleEditorSave}
+      dialect={dialect}
+    />
+  ) : null;
+
   // Loading state
   if (loading) {
     return (
@@ -356,103 +372,160 @@ const GlossaryPage = () => {
   // Empty state - with generation status awareness
   if (terms.length === 0) {
     return (
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-6">
-          <Button variant="ghost" onClick={() => navigate(`/projects/${pid}`)}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Dashboard
-          </Button>
-        </div>
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center max-w-md p-6">
-            {/* Generation in progress */}
-            {isGenerating ? (
-              <>
-                <div className="mb-4">
-                  <Loader2 className="h-16 w-16 mx-auto text-brand-purple animate-spin" />
-                </div>
-                <h2 className="text-xl font-semibold mb-2">Generating Glossary Terms</h2>
-                <p className="text-sm text-muted-foreground mb-2">
-                  {generationStatus?.message ?? 'Working...'}
-                </p>
-                <p className="text-xs text-text-tertiary">
-                  This may take a few minutes depending on the size of your schema.
-                </p>
-              </>
-            ) : generationStatus?.status === 'failed' ? (
-              <>
-                <div className="mb-4 text-destructive">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                </div>
-                <h2 className="text-xl font-semibold mb-2">Generation Failed</h2>
-                <p className="text-sm text-muted-foreground mb-4">
-                  {generationStatus.error ?? generationStatus.message}
-                </p>
-                <Button onClick={handleAutoGenerate} disabled={generating}>
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Retry
-                </Button>
-              </>
-            ) : checkingQuestions ? (
-              <>
-                <div className="mb-4">
-                  <Loader2 className="h-16 w-16 mx-auto text-muted-foreground animate-spin" />
-                </div>
-                <h2 className="text-xl font-semibold mb-2">Checking readiness...</h2>
-              </>
-            ) : pendingRequiredQuestions !== null && pendingRequiredQuestions !== 0 ? (
-              /* Required questions need answering */
-              <>
-                <div className="mb-4">
-                  <MessageSquareWarning className="h-16 w-16 mx-auto text-amber-500" />
-                </div>
-                <h2 className="text-xl font-semibold mb-2">Answer Required Questions First</h2>
-                <p className="text-sm text-muted-foreground mb-6">
-                  {pendingRequiredQuestions > 0
-                    ? `${pendingRequiredQuestions} required question${pendingRequiredQuestions === 1 ? '' : 's'} must be answered before glossary terms can be generated.`
-                    : 'Required ontology questions must be answered before glossary terms can be generated.'}
-                </p>
-                <Button onClick={() => navigate(`/projects/${pid}/ontology-questions`)}>
-                  Answer Questions
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </>
-            ) : pendingRequiredQuestions === 0 && !generating ? (
-              /* Ready to auto-generate */
-              <>
-                <div className="mb-4">
-                  <BookOpen className="h-16 w-16 mx-auto text-muted-foreground" />
-                </div>
-                <h2 className="text-xl font-semibold mb-2">No Glossary Terms Yet</h2>
-                <p className="text-sm text-muted-foreground mb-6">
-                  Generate business glossary terms from your ontology. Terms will include SQL definitions and technical mappings.
-                </p>
-                <Button onClick={handleAutoGenerate}>
-                  <Sparkles className="mr-2 h-4 w-4" />
-                  Auto-Generate Terms
-                </Button>
-              </>
-            ) : (
-              /* Fallback: still loading / no info yet */
-              <>
-                <div className="mb-4">
-                  <BookOpen className="h-16 w-16 mx-auto text-muted-foreground" />
-                </div>
-                <h2 className="text-xl font-semibold mb-2">No Glossary Terms Yet</h2>
-                <p className="text-sm text-muted-foreground mb-6">
-                  Run the ontology extraction workflow first, then generate glossary terms.
-                </p>
-                <Button onClick={() => navigate(`/projects/${pid}/ontology`)}>
-                  Go to Ontology
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </>
-            )}
+      <>
+        <div className="mx-auto max-w-6xl">
+          <div className="mb-6">
+            <Button variant="ghost" onClick={() => navigate(`/projects/${pid}`)}>
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Dashboard
+            </Button>
+          </div>
+          <div className="flex items-center justify-center min-h-[400px]">
+            <div className="text-center max-w-md p-6">
+              {/* Generation in progress */}
+              {isGenerating ? (
+                <>
+                  <div className="mb-4">
+                    <Loader2 className="h-16 w-16 mx-auto text-brand-purple animate-spin" />
+                  </div>
+                  <h2 className="text-xl font-semibold mb-2">Generating Glossary Terms</h2>
+                  <p className="text-sm text-muted-foreground mb-2">
+                    {generationStatus?.message ?? 'Working...'}
+                  </p>
+                  <p className="text-xs text-text-tertiary">
+                    This may take a few minutes depending on the size of your schema.
+                  </p>
+                </>
+              ) : generationStatus?.status === 'failed' ? (
+                <>
+                  <div className="mb-4 text-destructive">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  </div>
+                  <h2 className="text-xl font-semibold mb-2">Generation Failed</h2>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    {generationStatus.error ?? generationStatus.message}
+                  </p>
+                  <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
+                    <Button onClick={handleAutoGenerate} disabled={generating}>
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Retry
+                    </Button>
+                    {hasGlossaryWriteAccess && (
+                      <Button onClick={handleAddTerm}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Add Term
+                      </Button>
+                    )}
+                  </div>
+                </>
+              ) : generationStatus?.status === 'no_qualified_terms' ? (
+                <>
+                  <div className="mb-4">
+                    <BookOpen className="h-16 w-16 mx-auto text-muted-foreground" />
+                  </div>
+                  <h2 className="text-xl font-semibold mb-2">No Verified Example Terms Yet</h2>
+                  <p className="text-sm text-muted-foreground mb-6">
+                    {generationStatus.message}
+                  </p>
+                  <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
+                    <Button variant="outline" onClick={handleAutoGenerate} disabled={generating}>
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Try Again
+                    </Button>
+                    {hasGlossaryWriteAccess && (
+                      <Button onClick={handleAddTerm}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Add Term
+                      </Button>
+                    )}
+                  </div>
+                </>
+              ) : checkingQuestions ? (
+                <>
+                  <div className="mb-4">
+                    <Loader2 className="h-16 w-16 mx-auto text-muted-foreground animate-spin" />
+                  </div>
+                  <h2 className="text-xl font-semibold mb-2">Checking readiness...</h2>
+                </>
+              ) : pendingRequiredQuestions !== null && pendingRequiredQuestions !== 0 ? (
+                /* Required questions need answering */
+                <>
+                  <div className="mb-4">
+                    <MessageSquareWarning className="h-16 w-16 mx-auto text-amber-500" />
+                  </div>
+                  <h2 className="text-xl font-semibold mb-2">Answer Required Questions First</h2>
+                  <p className="text-sm text-muted-foreground mb-6">
+                    {pendingRequiredQuestions > 0
+                      ? `${pendingRequiredQuestions} required question${pendingRequiredQuestions === 1 ? '' : 's'} must be answered before glossary terms can be generated.`
+                      : 'Required ontology questions must be answered before glossary terms can be generated.'}
+                  </p>
+                  <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
+                    <Button onClick={() => navigate(`/projects/${pid}/ontology-questions`)}>
+                      Answer Questions
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Button>
+                    {hasGlossaryWriteAccess && (
+                      <Button onClick={handleAddTerm}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Add Term
+                      </Button>
+                    )}
+                  </div>
+                </>
+              ) : pendingRequiredQuestions === 0 && !generating ? (
+                /* Ready to auto-generate */
+                <>
+                  <div className="mb-4">
+                    <BookOpen className="h-16 w-16 mx-auto text-muted-foreground" />
+                  </div>
+                  <h2 className="text-xl font-semibold mb-2">No Glossary Terms Yet</h2>
+                  <p className="text-sm text-muted-foreground mb-6">
+                    Generate example business glossary terms from your ontology to get started. Terms will include SQL definitions, business and technical mappings.
+                  </p>
+                  <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
+                    <Button variant="outline" onClick={handleAutoGenerate}>
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      Auto-Generate Example Terms
+                    </Button>
+                    {hasGlossaryWriteAccess && (
+                      <Button onClick={handleAddTerm}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Add Term
+                      </Button>
+                    )}
+                  </div>
+                </>
+              ) : (
+                /* Fallback: still loading / no info yet */
+                <>
+                  <div className="mb-4">
+                    <BookOpen className="h-16 w-16 mx-auto text-muted-foreground" />
+                  </div>
+                  <h2 className="text-xl font-semibold mb-2">No Glossary Terms Yet</h2>
+                  <p className="text-sm text-muted-foreground mb-6">
+                    Run the ontology extraction workflow first, then generate glossary terms.
+                  </p>
+                  <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
+                    <Button onClick={() => navigate(`/projects/${pid}/ontology`)}>
+                      Go to Ontology
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Button>
+                    {hasGlossaryWriteAccess && (
+                      <Button onClick={handleAddTerm}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Add Term
+                      </Button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+        {glossaryEditor}
+      </>
     );
   }
 
@@ -471,18 +544,6 @@ const GlossaryPage = () => {
             <Button onClick={handleAddTerm} disabled={isGenerating}>
               <Plus className="mr-2 h-4 w-4" />
               Add Term
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleRegenerate}
-              disabled={isGenerating || generating}
-            >
-              {isGenerating ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCw className="mr-2 h-4 w-4" />
-              )}
-              Regenerate
             </Button>
           </div>
         </div>
@@ -508,6 +569,27 @@ const GlossaryPage = () => {
                   {generationStatus?.message ?? 'Working...'}
                 </p>
               </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {generationStatus?.status === 'no_qualified_terms' && !isGenerating && (
+        <Card className="mb-6 border-amber-300/60 bg-amber-50/80">
+          <CardContent className="py-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-text-primary">
+                  No new verified example terms were saved
+                </p>
+                <p className="text-xs text-text-secondary">
+                  {generationStatus.message}
+                </p>
+              </div>
+              <Button variant="outline" onClick={handleAutoGenerate} disabled={generating}>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Try Again
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -541,9 +623,12 @@ const GlossaryPage = () => {
               const hasSqlDetails = !!term.defining_sql || !!term.base_table || (term.output_columns != null && term.output_columns.length > 0) || (term.aliases != null && term.aliases.length > 0);
 
               return (
-                <div key={term.id} className="border border-border-light rounded-lg">
+                <div key={term.id} className="group border border-border-light rounded-lg">
                   {/* Term Header */}
-                  <div className="p-4">
+                  <div
+                    className={`p-4 ${hasSqlDetails ? 'cursor-pointer' : ''}`}
+                    onClick={hasSqlDetails ? () => toggleExpanded(term.id) : undefined}
+                  >
                     <div className="flex items-start justify-between">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
@@ -556,9 +641,11 @@ const GlossaryPage = () => {
                               ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
                               : term.source === 'manual'
                               ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                              : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                              : term.source === 'mcp'
+                              ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                              : 'bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-300'
                           }`}>
-                            {term.source === 'inferred' ? 'Inferred' : term.source === 'manual' ? 'Manual' : 'Client'}
+                            {term.source === 'inferred' ? 'Inferred' : term.source === 'manual' ? 'Manual' : term.source === 'mcp' ? 'MCP' : term.source}
                           </span>
                         </div>
                         <p className="mt-1 text-sm text-text-secondary">
@@ -566,12 +653,15 @@ const GlossaryPage = () => {
                         </p>
                       </div>
 
-                      <div className="flex items-center gap-2 ml-2">
+                      <div className="ml-2 flex items-center gap-2 opacity-100 transition-opacity md:opacity-0 md:pointer-events-none md:group-hover:opacity-100 md:group-hover:pointer-events-auto md:group-focus-within:opacity-100 md:group-focus-within:pointer-events-auto">
                         {/* Action Buttons */}
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleEditTerm(term)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleEditTerm(term);
+                          }}
                           disabled={deletingTermId === term.id}
                         >
                           <Edit3 className="h-4 w-4" />
@@ -579,7 +669,10 @@ const GlossaryPage = () => {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleDeleteTerm(term)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleDeleteTerm(term);
+                          }}
                           disabled={deletingTermId === term.id}
                         >
                           <Trash2 className="h-4 w-4" />
@@ -588,10 +681,13 @@ const GlossaryPage = () => {
                         {/* Expand SQL Details Button */}
                         {hasSqlDetails && (
                           <button
-                            onClick={() => toggleExpanded(term.id)}
-                            className="flex items-center gap-1 px-2 py-1 rounded text-sm text-text-secondary hover:bg-surface-secondary/50 transition-colors"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              toggleExpanded(term.id);
+                            }}
+                            aria-label="Toggle details"
+                            className="flex items-center rounded p-1 text-text-secondary hover:bg-surface-secondary/50 transition-colors"
                           >
-                            <span>SQL Details</span>
                             {expandedTerms.has(term.id) ? (
                               <ChevronDown className="h-4 w-4" />
                             ) : (
@@ -615,6 +711,20 @@ const GlossaryPage = () => {
                             <pre className="text-sm font-mono bg-surface-primary border border-border-light rounded p-2 overflow-x-auto">
                               {term.defining_sql}
                             </pre>
+                          </div>
+                        )}
+
+                        {pid && term.defining_sql && (
+                          <div>
+                            <div className="text-xs font-medium text-text-tertiary mb-2">
+                              Execution
+                            </div>
+                            <SqlExecutionPanel
+                              projectId={pid}
+                              datasourceId={selectedDatasource?.datasourceId}
+                              sql={term.defining_sql}
+                              buttonLabel="Execute Query"
+                            />
                           </div>
                         )}
 
@@ -675,26 +785,7 @@ const GlossaryPage = () => {
         </CardContent>
       </Card>
 
-      {/* Glossary Term Editor Modal */}
-      {pid && (
-        <GlossaryTermEditor
-          projectId={pid}
-          term={editingTerm}
-          isOpen={editorOpen}
-          onClose={() => setEditorOpen(false)}
-          onSave={handleEditorSave}
-        />
-      )}
-
-      {/* Regenerate Confirmation */}
-      <ConfirmDialog
-        open={confirmRegenerate}
-        onConfirm={confirmRegenerateAction}
-        onCancel={() => setConfirmRegenerate(false)}
-        title="Regenerate Glossary"
-        description="This will regenerate all inferred glossary terms. Manually created terms will be preserved."
-        confirmLabel="Regenerate"
-      />
+      {glossaryEditor}
 
       {/* Delete Confirmation */}
       <ConfirmDialog

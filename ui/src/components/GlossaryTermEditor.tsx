@@ -7,7 +7,7 @@ import { AlertCircle, CheckCircle2, Loader2, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 import engineApi from '../services/engineApi';
-import type { GlossaryTerm, TestSQLResult, OutputColumn } from '../types';
+import type { GlossaryTerm, TestSQLResult, OutputColumn, SqlDialect } from '../types';
 
 import { SqlEditor } from './SqlEditor';
 import { Button } from './ui/Button';
@@ -27,6 +27,7 @@ interface GlossaryTermEditorProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: () => void;
+  dialect?: SqlDialect;
 }
 
 export function GlossaryTermEditor({
@@ -35,6 +36,7 @@ export function GlossaryTermEditor({
   isOpen,
   onClose,
   onSave,
+  dialect = 'PostgreSQL',
 }: GlossaryTermEditorProps) {
   const isEditing = !!term;
 
@@ -252,7 +254,7 @@ export function GlossaryTermEditor({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-full max-w-4xl max-h-[90vh] overflow-x-hidden overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {isEditing ? 'Edit Glossary Term' : 'Add Glossary Term'}
@@ -264,7 +266,7 @@ export function GlossaryTermEditor({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
+        <div className="min-w-0 space-y-4 py-4">
           {/* Term Name */}
           <div>
             <label
@@ -302,7 +304,7 @@ export function GlossaryTermEditor({
           </div>
 
           {/* Defining SQL */}
-          <div>
+          <div className="min-w-0">
             <label
               htmlFor="defining-sql"
               className="block text-sm font-medium text-text-primary mb-1"
@@ -312,7 +314,7 @@ export function GlossaryTermEditor({
             <SqlEditor
               value={definingSql}
               onChange={setDefiningSql}
-              dialect="PostgreSQL"
+              dialect={dialect}
               placeholder="SELECT COUNT(DISTINCT user_id) AS active_users FROM users WHERE ..."
               minHeight="200px"
               readOnly={isSaving}

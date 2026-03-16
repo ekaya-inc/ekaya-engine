@@ -38,10 +38,6 @@ type MCPToolDeps struct {
 	QueryHistoryService          services.QueryHistoryService // Optional: for query learning history
 }
 
-// dataLiaisonTools is a reference to the shared list in services.DataLiaisonTools.
-// These tools require the AI Data Liaison app to be installed.
-var dataLiaisonTools = services.DataLiaisonTools
-
 // GetAuditor implements QueryLoggingDeps.
 func (d *MCPToolDeps) GetAuditor() *audit.SecurityAuditor { return d.Auditor }
 

@@ -8,7 +8,7 @@ import (
 
 // GlossaryGenerationStatus tracks the progress of automated glossary generation.
 type GlossaryGenerationStatus struct {
-	Status    string     `json:"status"`          // "idle", "discovering", "enriching", "completed", "failed"
+	Status    string     `json:"status"`          // "idle", "planning", "investigating", "qualifying", "writing", "completed", "no_qualified_terms", "failed"
 	Message   string     `json:"message"`         // Human-readable progress message
 	Error     string     `json:"error,omitempty"` // Error message if failed
 	StartedAt *time.Time `json:"started_at,omitempty"`

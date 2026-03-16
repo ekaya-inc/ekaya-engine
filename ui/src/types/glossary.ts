@@ -8,7 +8,7 @@ import type { OutputColumn } from './query';
 /**
  * Source of a glossary term
  */
-export type GlossaryTermSource = 'inferred' | 'manual' | 'client';
+export type GlossaryTermSource = 'inferred' | 'manual' | 'mcp';
 
 /**
  * GlossaryTerm represents a business term with its SQL definition.
@@ -34,7 +34,7 @@ export interface GlossaryTerm {
  * GlossaryGenerationStatus tracks the progress of automated glossary generation.
  */
 export interface GlossaryGenerationStatus {
-  status: 'idle' | 'discovering' | 'enriching' | 'completed' | 'failed';
+  status: 'idle' | 'planning' | 'investigating' | 'qualifying' | 'writing' | 'completed' | 'no_qualified_terms' | 'failed';
   message: string;
   error?: string;
   started_at?: string;
