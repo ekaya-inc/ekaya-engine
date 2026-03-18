@@ -5,7 +5,7 @@
 
 ## Current Status
 
-Verified on 2026-03-13: implementation is still pending.
+Verified on 2026-03-18: implementation is still pending.
 
 The current code still uses the old loadouts:
 
