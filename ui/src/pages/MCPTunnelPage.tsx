@@ -1,13 +1,13 @@
 import {
-  ArrowLeft,
   Globe,
   Loader2,
   RefreshCw,
   Trash2,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
+import AppPageHeader from '../components/AppPageHeader';
 import SetupChecklist from '../components/SetupChecklist';
 import type { ChecklistItem } from '../components/SetupChecklist';
 import { Button } from '../components/ui/Button';
@@ -34,6 +34,8 @@ import type {
   TunnelConnectionStatus,
   TunnelStatusResponse,
 } from '../types';
+
+const statusPollIntervalMs = 2000;
 
 const defaultTunnelStatus: TunnelStatusResponse = {
   tunnel_status: 'disconnected',
@@ -97,14 +99,19 @@ const MCPTunnelPage = () => {
   const [isUninstalling, setIsUninstalling] = useState(false);
   const [showUninstallDialog, setShowUninstallDialog] = useState(false);
 
-  const fetchPageData = useCallback(async (showLoading = true) => {
+  const fetchPageData = useCallback(async (
+    showLoading = true,
+    options?: { silent?: boolean }
+  ) => {
     if (!pid) {
       return;
     }
 
+    const silent = options?.silent === true;
+
     if (showLoading) {
       setLoading(true);
-    } else {
+    } else if (!silent) {
       setRefreshingStatus(true);
     }
 
@@ -125,7 +132,9 @@ const MCPTunnelPage = () => {
       setTunnelStatus(defaultTunnelStatus);
     } finally {
       setLoading(false);
-      setRefreshingStatus(false);
+      if (!silent) {
+        setRefreshingStatus(false);
+      }
     }
   }, [pid, toast]);
 
@@ -252,6 +261,24 @@ const MCPTunnelPage = () => {
     tunnelStatus.tunnel_status === 'connected' && tunnelStatus.public_url != null;
   const connectedSince = formatConnectedSince(tunnelStatus.connected_since);
 
+  useEffect(() => {
+    if (
+      !activated ||
+      (tunnelStatus.tunnel_status !== 'connecting' &&
+        tunnelStatus.tunnel_status !== 'reconnecting')
+    ) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void fetchPageData(false, { silent: true });
+    }, statusPollIntervalMs);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [activated, tunnelStatus.tunnel_status, fetchPageData]);
+
   const checklistItems: ChecklistItem[] = [
     {
       id: 'activate',
@@ -301,23 +328,13 @@ const MCPTunnelPage = () => {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex items-center gap-4">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Back to project dashboard"
-          onClick={() => navigate(`/projects/${pid}`)}
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div>
-          <h1 className="text-2xl font-bold">MCP Tunnel</h1>
-          <p className="text-text-secondary">
-            Give your MCP Server a public URL so external MCP clients can reach
-            it without firewall changes or inbound port exposure.
-          </p>
-        </div>
-      </div>
+      <AppPageHeader
+        title="MCP Tunnel"
+        slug="mcp-tunnel"
+        icon={<Globe className="h-8 w-8 text-green-500" />}
+        description="Give your MCP Server a public URL so external MCP clients can reach it without firewall changes or inbound port exposure."
+        showInfoLink={false}
+      />
 
       <SetupChecklist
         items={checklistItems}
@@ -380,12 +397,12 @@ const MCPTunnelPage = () => {
 
           {tunnelStatus.public_url ? (
             <div className="rounded-lg border border-border-light bg-surface-secondary px-4 py-3">
-              <div className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-                Public URL
-              </div>
-              <div className="mt-2 break-all font-mono text-sm text-text-primary">
-                {tunnelStatus.public_url}
-              </div>
+              <Link
+                to={`/projects/${pid}/mcp-server`}
+                className="text-sm font-medium text-brand-purple hover:underline"
+              >
+                Find your MCP URL and setup instructions on the MCP Server page.
+              </Link>
             </div>
           ) : null}
         </CardContent>
