@@ -806,7 +806,7 @@ func TestMiddleware_RequireAuth_AgentAPIKey_ExtractProjectFromPath(t *testing.T)
 func TestMiddleware_RequireAuth_AgentAPIKey_BearerToken(t *testing.T) {
 	projectID := uuid.New()
 	agentID := uuid.New()
-	apiKey := "8b9bc7dce2de106351ba7f7712dfbfb16d010a2478a094a8c328cdafd21f468b"
+	apiKey := "ekai-8b9bc7dce2de106351ba7f7712dfbfb16d010a2478a094a8c328cdafd21f468b"
 
 	agentKeyService := newMockAgentKeyService()
 	agentKeyService.validKeys[projectID] = apiKey
@@ -858,6 +858,62 @@ func TestMiddleware_RequireAuth_AgentAPIKey_BearerToken(t *testing.T) {
 	}
 }
 
+func TestMiddleware_RequireAuth_AgentAPIKey_RawAuthorizationHeader(t *testing.T) {
+	projectID := uuid.New()
+	agentID := uuid.New()
+	apiKey := "ekai-54e9594ed7d8dcde4f2d6b68f7e6368615f9f7ca5dc28b4d5ef4e9ca7c8b8e33"
+
+	agentKeyService := newMockAgentKeyService()
+	agentKeyService.validKeys[projectID] = apiKey
+	agentKeyService.namedAgents[projectID] = &models.Agent{
+		ID:        agentID,
+		ProjectID: projectID,
+		Name:      "agent-raw-auth-header",
+	}
+	authService := &mockAuthService{validateErr: errors.New("invalid token")}
+	tenantProvider := &mockTenantScopeProvider{}
+
+	middleware := NewMiddleware(authService, agentKeyService, tenantProvider, zap.NewNop())
+
+	var handlerCalled bool
+	var ctxClaims *auth.Claims
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		ctxClaims, _ = auth.GetClaims(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	wrappedHandler := middleware.RequireAuth("pid")(handler)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp/"+projectID.String(), nil)
+	req.SetPathValue("pid", projectID.String())
+	req.Header.Set("Authorization", apiKey)
+	rec := httptest.NewRecorder()
+
+	wrappedHandler.ServeHTTP(rec, req)
+
+	if !handlerCalled {
+		t.Error("expected handler to be called")
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+
+	if ctxClaims == nil {
+		t.Fatal("expected claims in context")
+	}
+
+	if ctxClaims.ProjectID != projectID.String() {
+		t.Errorf("expected project ID %q, got %q", projectID.String(), ctxClaims.ProjectID)
+	}
+
+	if ctxClaims.Subject != "agent:"+agentID.String() {
+		t.Errorf("expected named agent subject, got %q", ctxClaims.Subject)
+	}
+}
+
 func TestIsJWT(t *testing.T) {
 	testCases := []struct {
 		name     string
@@ -870,8 +926,8 @@ func TestIsJWT(t *testing.T) {
 			expected: true,
 		},
 		{
-			name:     "API key (hex string)",
-			token:    "8b9bc7dce2de106351ba7f7712dfbfb16d010a2478a094a8c328cdafd21f468b",
+			name:     "API key (ekai-prefixed)",
+			token:    "ekai-8b9bc7dce2de106351ba7f7712dfbfb16d010a2478a094a8c328cdafd21f468b",
 			expected: false,
 		},
 		{
