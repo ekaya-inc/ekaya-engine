@@ -103,10 +103,11 @@ describe('OntologyPage', () => {
     expect(screen.queryByTestId('ontology-dag')).not.toBeInTheDocument();
   });
 
-  it('renders page header with correct title', () => {
+  it('renders page header with matching dashboard icon and title', () => {
     renderPage();
 
     expect(screen.getByText('Ontology Extraction')).toBeInTheDocument();
     expect(screen.getByText(/Extract business knowledge from your database schema/i)).toBeInTheDocument();
+    expect(screen.getByTestId('ontology-header-icon')).toBeInTheDocument();
   });
 });

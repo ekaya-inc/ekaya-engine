@@ -5,7 +5,7 @@
  * visualization. Users can start, monitor, and cancel the extraction process from here.
  */
 
-import { AlertTriangle, ArrowLeft, Brain, RefreshCw } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Layers, RefreshCw } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
@@ -94,7 +94,7 @@ const OntologyPage = () => {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
-              <Brain className="h-8 w-8 text-purple-500" />
+              <Layers data-testid="ontology-header-icon" className="h-8 w-8 text-purple-500" />
               Ontology Extraction
             </h1>
             <p className="mt-2 text-text-secondary">
