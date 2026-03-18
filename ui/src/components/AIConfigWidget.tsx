@@ -158,7 +158,17 @@ const AIConfigWidget = ({ projectId, disabled = false, onConfigChange }: AIConfi
       }
 
       const result = await engineApi.testAIConnection(projectId, body);
-      setTestResult(result.data ?? { success: false, message: 'No response data' });
+      const resultData = result.data ?? { success: false, message: 'No response data' };
+
+      if (resultData.success) {
+        setAiConfig((prev) => ({
+          ...prev,
+          llmBaseUrl: resultData.resolved_llm_base_url ?? prev.llmBaseUrl,
+          embeddingBaseUrl: resultData.resolved_embedding_base_url ?? prev.embeddingBaseUrl,
+        }));
+      }
+
+      setTestResult(resultData);
     } catch (err) {
       setTestResult({
         success: false,
@@ -378,7 +388,7 @@ const AIConfigWidget = ({ projectId, disabled = false, onConfigChange }: AIConfi
                   {(selectedProvider === 'Custom' || selectedProvider === 'Azure OpenAI') && (
                     <input
                       type="text"
-                      placeholder={selectedProvider === 'Azure OpenAI' ? 'https://your-resource.openai.azure.com' : 'https://your-endpoint.com/v1'}
+                      placeholder={selectedProvider === 'Azure OpenAI' ? 'https://your-resource.openai.azure.com' : 'https://your-endpoint.com'}
                       value={aiConfig.llmBaseUrl}
                       onChange={(e) => updateAiConfig('llmBaseUrl', e.target.value)}
                       disabled={activeAIConfig === 'byok'}
@@ -388,6 +398,11 @@ const AIConfigWidget = ({ projectId, disabled = false, onConfigChange }: AIConfi
                   {selectedProvider === 'Azure OpenAI' && (
                     <p className="mt-1 text-xs text-text-tertiary">
                       Enter your Azure OpenAI resource endpoint
+                    </p>
+                  )}
+                  {selectedProvider === 'Custom' && (
+                    <p className="mt-1 text-xs text-text-tertiary">
+                      Paste the server URL only and Ekaya will try common OpenAI-compatible base paths automatically.
                     </p>
                   )}
                 </div>

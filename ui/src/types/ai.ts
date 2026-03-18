@@ -14,7 +14,7 @@ export interface AIConfigForm {
   embeddingModel: string;
 }
 
-export type AIErrorType = 'endpoint' | 'auth' | 'model' | 'unknown' | '';
+export type AIErrorType = 'endpoint' | 'auth' | 'model' | 'rate_limited' | 'unknown' | '';
 
 export interface AITestResult {
   success: boolean;
@@ -23,9 +23,11 @@ export interface AITestResult {
   llm_message?: string;
   llm_error_type?: AIErrorType;
   llm_response_time_ms?: number;
+  resolved_llm_base_url?: string;
   embedding_success?: boolean;
   embedding_message?: string;
   embedding_error_type?: AIErrorType;
+  resolved_embedding_base_url?: string;
 }
 
 export interface AIOptionConfig {
@@ -73,4 +75,3 @@ export interface AIConfigTestRequest {
   embedding_api_key?: string;
   embedding_model?: string;
 }
-

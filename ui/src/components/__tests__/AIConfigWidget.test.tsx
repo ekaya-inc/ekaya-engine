@@ -49,6 +49,7 @@ describe('AIConfigWidget', () => {
         data: {
           success: true,
           message: 'Connection successful',
+          resolved_llm_base_url: 'https://api.openai.com/v1',
         },
       });
 
@@ -90,8 +91,8 @@ describe('AIConfigWidget', () => {
       fireEvent.click(screen.getByText('Custom'));
 
       // Fill in the custom URL
-      const urlInput = screen.getByPlaceholderText('https://your-endpoint.com/v1');
-      await userEvent.type(urlInput, 'https://api.openai.com/v1');
+      const urlInput = screen.getByPlaceholderText('https://your-endpoint.com');
+      await userEvent.type(urlInput, 'https://api.openai.com');
 
       // Fill in API key
       const apiKeyInput = screen.getByPlaceholderText('sk-...');
@@ -209,7 +210,7 @@ describe('AIConfigWidget', () => {
 
       // Custom URL input should appear
       await waitFor(() => {
-        expect(screen.getByPlaceholderText('https://your-endpoint.com/v1')).toBeInTheDocument();
+        expect(screen.getByPlaceholderText('https://your-endpoint.com')).toBeInTheDocument();
       });
     });
 
@@ -346,8 +347,8 @@ describe('AIConfigWidget', () => {
 
       // Fill in required fields
       await userEvent.type(
-        screen.getByPlaceholderText('https://your-endpoint.com/v1'),
-        'https://api.example.com/v1'
+        screen.getByPlaceholderText('https://your-endpoint.com'),
+        'https://api.example.com'
       );
       await userEvent.type(screen.getByPlaceholderText('sk-...'), 'sk-key');
       await userEvent.type(
@@ -398,8 +399,8 @@ describe('AIConfigWidget', () => {
       fireEvent.click(screen.getByText('OpenAI'));
       fireEvent.click(screen.getByText('Custom'));
       await userEvent.type(
-        screen.getByPlaceholderText('https://your-endpoint.com/v1'),
-        'https://api.example.com/v1'
+        screen.getByPlaceholderText('https://your-endpoint.com'),
+        'https://api.example.com'
       );
 
       // Click test connection
