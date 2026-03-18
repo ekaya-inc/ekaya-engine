@@ -65,18 +65,19 @@ func (a *AuditLogger) beforeCallTool(_ context.Context, id any, _ *mcplib.CallTo
 	a.startTimes.Store(id, time.Now())
 }
 
-func (a *AuditLogger) afterCallTool(ctx context.Context, id any, req *mcplib.CallToolRequest, result *mcplib.CallToolResult) {
+func (a *AuditLogger) afterCallTool(ctx context.Context, id any, req *mcplib.CallToolRequest, result any) {
 	startTime, _ := a.loadAndDeleteStart(id)
 	durationMs := int(time.Since(startTime).Milliseconds())
+	toolResult, _ := result.(*mcplib.CallToolResult)
 
 	event := a.buildEvent(ctx, req)
 	event.EventType = models.MCPEventToolCall
 	event.WasSuccessful = true
 	event.DurationMs = &durationMs
-	event.ResultSummary = summarizeResult(result)
+	event.ResultSummary = summarizeResult(toolResult)
 
 	// Classify security level based on result content
-	classifyToolCallSecurity(event, result)
+	classifyToolCallSecurity(event, toolResult)
 
 	go a.record(event)
 }
