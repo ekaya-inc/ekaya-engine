@@ -16,6 +16,8 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
+const agentAPIKeyPrefix = "ekai-"
+
 // TenantScopeProvider creates tenant-scoped contexts for database operations.
 type TenantScopeProvider interface {
 	// WithTenantScope returns a context with tenant scope set for the given project.
@@ -69,33 +71,14 @@ func WithAuditLogger(logger AuthFailureLogger) MiddlewareOption {
 // RequireAuth validates authentication and requires project ID to match URL path.
 // It supports two authentication methods:
 //  1. JWT (Bearer): Authorization: Bearer <jwt> (3 dot-separated segments)
-//  2. Agent API Key: Authorization: Bearer <key>, Authorization: api-key:<key>, or X-API-Key: <key>
+//  2. Agent API Key: Authorization: Bearer <key>, Authorization: ekai-<key>, Authorization: api-key:<key>, or X-API-Key: <key>
 //
 // The pathParamName is the name used in r.PathValue() (e.g., "pid").
 // Returns RFC 6750 WWW-Authenticate headers on authentication failures.
 func (m *Middleware) RequireAuth(pathParamName string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Try Agent API Key authentication first
-			authHeader := r.Header.Get("Authorization")
-			apiKey := ""
-
-			if strings.HasPrefix(authHeader, "api-key:") {
-				// Explicit api-key: prefix
-				apiKey = strings.TrimPrefix(authHeader, "api-key:")
-			} else if key := r.Header.Get("X-API-Key"); key != "" {
-				// X-API-Key header
-				apiKey = key
-			} else if strings.HasPrefix(authHeader, "Bearer ") {
-				// Bearer token - determine if it's a JWT or API key
-				token := strings.TrimPrefix(authHeader, "Bearer ")
-				if !isJWT(token) {
-					// Not a JWT (no 3 dot-separated segments), treat as API key
-					apiKey = token
-				}
-			}
-
-			if apiKey != "" {
+			if apiKey := extractAgentAPIKey(r); apiKey != "" {
 				m.handleAgentKeyAuth(w, r, next, pathParamName, apiKey)
 				return
 			}
@@ -104,6 +87,36 @@ func (m *Middleware) RequireAuth(pathParamName string) func(http.Handler) http.H
 			m.handleJWTAuth(w, r, next, pathParamName)
 		})
 	}
+}
+
+func extractAgentAPIKey(r *http.Request) string {
+	authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+	if strings.HasPrefix(authHeader, "api-key:") {
+		// Explicit api-key: prefix
+		return strings.TrimSpace(strings.TrimPrefix(authHeader, "api-key:"))
+	}
+
+	if key := strings.TrimSpace(r.Header.Get("X-API-Key")); key != "" {
+		// X-API-Key header
+		return key
+	}
+
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		// Bearer token - determine if it's a JWT or API key
+		token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+		if !isJWT(token) {
+			// Not a JWT (no 3 dot-separated segments), treat as API key
+			return token
+		}
+		return ""
+	}
+
+	if strings.HasPrefix(authHeader, agentAPIKeyPrefix) {
+		// Support raw Authorization header values for modern ekai-prefixed agent keys.
+		return authHeader
+	}
+
+	return ""
 }
 
 // isJWT checks if a token looks like a JWT (3 dot-separated segments).

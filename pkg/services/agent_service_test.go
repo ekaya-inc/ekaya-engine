@@ -2,7 +2,9 @@ package services
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -229,7 +231,7 @@ func TestAgentServiceCreateAndValidateKey(t *testing.T) {
 	agent, key, err := svc.Create(context.Background(), projectID, "sales-bot", queryIDs)
 	require.NoError(t, err)
 	require.NotNil(t, agent)
-	assert.Len(t, key, 64)
+	assertGeneratedAgentKeyFormat(t, key)
 	assert.Equal(t, "sales-bot", agent.Name)
 	assert.NotEqual(t, key, agent.APIKeyEncrypted)
 
@@ -266,7 +268,7 @@ func TestAgentServiceGetAndRotateKey(t *testing.T) {
 
 	rotatedKey, err := svc.RotateKey(context.Background(), projectID, agent.ID)
 	require.NoError(t, err)
-	assert.Len(t, rotatedKey, 64)
+	assertGeneratedAgentKeyFormat(t, rotatedKey)
 	assert.NotEqual(t, originalKey, rotatedKey)
 
 	validated, err := svc.ValidateKey(context.Background(), projectID, rotatedKey)
@@ -319,4 +321,16 @@ func TestAgentServiceListUsesBatchQueryAccess(t *testing.T) {
 	assert.Equal(t, 0, repo.getAccessCalls)
 	assert.Equal(t, []uuid.UUID{queryA}, agents[0].QueryIDs)
 	assert.Equal(t, []uuid.UUID{queryB}, agents[1].QueryIDs)
+}
+
+func assertGeneratedAgentKeyFormat(t *testing.T, key string) {
+	t.Helper()
+
+	require.True(t, strings.HasPrefix(key, agentAPIKeyPrefix))
+
+	suffix := strings.TrimPrefix(key, agentAPIKeyPrefix)
+	require.Len(t, suffix, agentAPIKeyEntropyBytes*2)
+
+	_, err := hex.DecodeString(suffix)
+	require.NoError(t, err)
 }
