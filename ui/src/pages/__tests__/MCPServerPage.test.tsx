@@ -10,6 +10,7 @@ import MCPServerPage from '../MCPServerPage';
 vi.mock('../../services/engineApi', () => ({
   default: {
     getMCPConfig: vi.fn(),
+    getTunnelStatus: vi.fn(),
     listDataSources: vi.fn(),
     updateMCPConfig: vi.fn(),
     getServerStatus: vi.fn(),
@@ -81,9 +82,11 @@ const mockMCPConfig: MCPConfigResponse = {
 
 const setupMocks = (options: {
   hasDatasource?: boolean;
+  publicTunnelUrl?: string;
 } = {}) => {
   const {
     hasDatasource = true,
+    publicTunnelUrl,
   } = options;
 
   vi.mocked(engineApi.getMCPConfig).mockResolvedValue({
@@ -92,6 +95,17 @@ const setupMocks = (options: {
   });
 
   vi.mocked(engineApi.getServerStatus).mockResolvedValue(null);
+  vi.mocked(engineApi.getTunnelStatus).mockResolvedValue({
+    success: true,
+    data: publicTunnelUrl
+      ? {
+          tunnel_status: 'connected',
+          public_url: publicTunnelUrl,
+        }
+      : {
+          tunnel_status: 'disconnected',
+        },
+  });
 
   vi.mocked(engineApi.listDataSources).mockResolvedValue({
     success: true,
@@ -197,7 +211,7 @@ describe('MCPServerPage - Role-based access', () => {
     await waitFor(() => {
       expect(screen.getByText('Setup Checklist')).toBeInTheDocument();
     });
-    expect(screen.getByText('Your MCP Server URL')).toBeInTheDocument();
+    expect(screen.getByText('MCP Server Addresses')).toBeInTheDocument();
   });
 
   it('shows full config UI for data role', async () => {
@@ -208,10 +222,10 @@ describe('MCPServerPage - Role-based access', () => {
     await waitFor(() => {
       expect(screen.getByText('Setup Checklist')).toBeInTheDocument();
     });
-    expect(screen.getByText('Your MCP Server URL')).toBeInTheDocument();
+    expect(screen.getByText('MCP Server Addresses')).toBeInTheDocument();
   });
 
-  it('shows instructions page for user role instead of config UI', async () => {
+  it('shows addresses page for user role without config UI', async () => {
     vi.mocked(authToken.getUserRoles).mockReturnValue(['user']);
     setupMocks();
     await renderPage();
@@ -222,15 +236,17 @@ describe('MCPServerPage - Role-based access', () => {
 
     // Should NOT show the admin config UI
     expect(screen.queryByText('Setup Checklist')).not.toBeInTheDocument();
-    expect(screen.queryByText('Your MCP Server URL')).not.toBeInTheDocument();
+    expect(screen.queryByText('Tool Configuration')).not.toBeInTheDocument();
 
-    // Should show instructions with a link to MCP setup
-    expect(screen.getByText(/MCP Setup Instructions/)).toBeInTheDocument();
-    const setupLink = screen.getByRole('link', { name: /MCP Setup Instructions/ });
+    // Should show the address card with instructions
+    expect(screen.getByText('MCP Server Addresses')).toBeInTheDocument();
+    expect(screen.getByText('Private Address (Server)')).toBeInTheDocument();
+    expect(screen.getByText('https://example.com/mcp/proj-1')).toBeInTheDocument();
+    const setupLink = screen.getByRole('link', { name: /Private MCP Setup Instructions/ });
     expect(setupLink).toHaveAttribute('href', expect.stringContaining('/mcp-setup'));
   });
 
-  it('includes project MCP URL in setup link for user role', async () => {
+  it('includes project private MCP URL in setup link for user role', async () => {
     vi.mocked(authToken.getUserRoles).mockReturnValue(['user']);
     setupMocks();
     await renderPage();
@@ -239,8 +255,32 @@ describe('MCPServerPage - Role-based access', () => {
       expect(screen.getByText('MCP Server')).toBeInTheDocument();
     });
 
-    const setupLink = screen.getByRole('link', { name: /MCP Setup Instructions/ });
+    const setupLink = screen.getByRole('link', { name: /Private MCP Setup Instructions/ });
     expect(setupLink).toHaveAttribute(
+      'href',
+      expect.stringContaining(encodeURIComponent('https://example.com/mcp/proj-1')),
+    );
+  });
+
+  it('shows public tunnel and private server addresses when the tunnel URL exists', async () => {
+    vi.mocked(authToken.getUserRoles).mockReturnValue(['admin']);
+    setupMocks({ publicTunnelUrl: 'https://mcp.dev.ekaya.ai/mcp/proj-1' });
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('MCP Server Addresses')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Public Address (Tunnel)')).toBeInTheDocument();
+    expect(screen.getByText('https://mcp.dev.ekaya.ai/mcp/proj-1')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Public MCP Setup Instructions' })).toHaveAttribute(
+      'href',
+      expect.stringContaining(encodeURIComponent('https://mcp.dev.ekaya.ai/mcp/proj-1')),
+    );
+
+    expect(screen.getByText('Private Address (Server)')).toBeInTheDocument();
+    expect(screen.getByText('https://example.com/mcp/proj-1')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Private MCP Setup Instructions' })).toHaveAttribute(
       'href',
       expect.stringContaining(encodeURIComponent('https://example.com/mcp/proj-1')),
     );
@@ -257,6 +297,7 @@ describe('MCPServerPage - Role-based access', () => {
 
     // Should NOT show admin config UI
     expect(screen.queryByText('Setup Checklist')).not.toBeInTheDocument();
-    expect(screen.queryByText('Your MCP Server URL')).not.toBeInTheDocument();
+    expect(screen.queryByText('Tool Configuration')).not.toBeInTheDocument();
+    expect(screen.getByText('MCP Server Addresses')).toBeInTheDocument();
   });
 });
