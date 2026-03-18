@@ -1,8 +1,8 @@
 import { Brain } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 
-import AppPageHeader from '../components/AppPageHeader';
 import AIConfigWidget from '../components/AIConfigWidget';
+import AppPageHeader from '../components/AppPageHeader';
 
 const AIConfigPage = () => {
   const { pid } = useParams<{ pid: string }>();
