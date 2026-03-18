@@ -14,7 +14,7 @@ import {
   History,
   XCircle,
 } from 'lucide-react';
-import { Fragment, useState, useEffect, useCallback, useRef } from 'react';
+import { Fragment, useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import { Button } from '../components/ui/Button';
@@ -148,30 +148,43 @@ const MCPEventsPage = () => {
     return () => { if (userDebounceRef.current) clearTimeout(userDebounceRef.current); };
   }, [userInput]);
 
-  const fetchData = useCallback(async () => {
+  useEffect(() => {
     if (!pid) return;
-    setLoading(true);
-    try {
-      const params: Record<string, string> = { limit: '50', offset: String(offset) };
-      const since = getTimeRangeSince(timeRange);
-      if (since) params.since = since;
-      if (eventTypeFilter) params.event_type = eventTypeFilter;
-      if (toolNameFilter) params.tool_name = toolNameFilter;
-      if (securityLevelFilter) params.security_level = securityLevelFilter;
-      if (userFilter) params.user_id = userFilter;
 
-      const response = await engineApi.listAuditMCPEvents(pid, params);
-      if (response.success && response.data) {
-        setData(response.data);
+    let isCancelled = false;
+
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const params: Record<string, string> = { limit: '50', offset: String(offset) };
+        const since = getTimeRangeSince(timeRange);
+        if (since) params.since = since;
+        if (eventTypeFilter) params.event_type = eventTypeFilter;
+        if (toolNameFilter) params.tool_name = toolNameFilter;
+        if (securityLevelFilter) params.security_level = securityLevelFilter;
+        if (userFilter) params.user_id = userFilter;
+
+        const response = await engineApi.listAuditMCPEvents(pid, params);
+        if (!isCancelled && response.success && response.data) {
+          setData(response.data);
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          console.error('Failed to fetch MCP events:', error);
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoading(false);
+        }
       }
-    } catch (error) {
-      console.error('Failed to fetch MCP events:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [pid, timeRange, eventTypeFilter, toolNameFilter, securityLevelFilter, userFilter, offset, refreshKey]);
+    };
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+    void fetchData();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [pid, timeRange, eventTypeFilter, toolNameFilter, securityLevelFilter, userFilter, offset, refreshKey]);
   useEffect(() => { setOffset(0); }, [timeRange, eventTypeFilter, toolNameFilter, securityLevelFilter, userFilter]);
 
   const securityColor = (level: string) => {

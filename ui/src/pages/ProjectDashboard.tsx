@@ -287,7 +287,7 @@ const ProjectDashboard = () => {
     }
 
     return tiles;
-  }, [pid, installedApps]);
+  }, [pid, installedApps, isConnected]);
 
   const handleTileClick = (tile: Tile): void => {
     if (!tile.disabled) {
