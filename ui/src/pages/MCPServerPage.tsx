@@ -14,7 +14,12 @@ import { useConfig } from '../contexts/ConfigContext';
 import { useToast } from '../hooks/useToast';
 import { getUserRoles } from '../lib/auth-token';
 import engineApi from '../services/engineApi';
-import type { Datasource, MCPConfigResponse, ServerStatusResponse } from '../types';
+import type {
+  Datasource,
+  MCPConfigResponse,
+  ServerStatusResponse,
+  TunnelStatusResponse,
+} from '../types';
 
 const MCPServerPage = () => {
   const { pid } = useParams<{ pid: string }>();
@@ -24,11 +29,12 @@ const MCPServerPage = () => {
   const [config, setConfig] = useState<MCPConfigResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
 
   // Setup checklist state
   const [datasource, setDatasource] = useState<Datasource | null>(null);
   const [serverStatus, setServerStatus] = useState<ServerStatusResponse | null>(null);
+  const [tunnelStatus, setTunnelStatus] = useState<TunnelStatusResponse | null>(null);
 
   // Read tool group config from backend
   const addDirectDatabaseAccess = config?.toolGroups['tools']?.addDirectDatabaseAccess ?? true;
@@ -38,10 +44,11 @@ const MCPServerPage = () => {
 
     try {
       setLoading(true);
-      const [mcpRes, datasourcesRes, serverStatusRes] = await Promise.all([
+      const [mcpRes, datasourcesRes, serverStatusRes, tunnelStatusRes] = await Promise.all([
         engineApi.getMCPConfig(pid),
         engineApi.listDataSources(pid),
         engineApi.getServerStatus(),
+        engineApi.getTunnelStatus(pid).catch(() => null),
       ]);
 
       if (mcpRes.success && mcpRes.data) {
@@ -53,6 +60,7 @@ const MCPServerPage = () => {
       const ds = datasourcesRes.data?.datasources?.[0] ?? null;
       setDatasource(ds);
       setServerStatus(serverStatusRes);
+      setTunnelStatus(tunnelStatusRes?.data ?? null);
     } catch (error) {
       console.error('Failed to fetch MCP config:', error);
       toast({
@@ -114,19 +122,64 @@ const MCPServerPage = () => {
     }
   };
 
-  const handleCopyUrl = async () => {
-    if (!config) return;
+  const handleCopyUrl = async (url: string) => {
     try {
-      await navigator.clipboard.writeText(config.serverUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      await navigator.clipboard.writeText(url);
+      setCopiedUrl(url);
+      window.setTimeout(() => {
+        setCopiedUrl((currentUrl) => (currentUrl === url ? null : currentUrl));
+      }, 2000);
     } catch (err) {
       console.error('Failed to copy URL:', err);
     }
   };
 
+  const getSetupInstructionsUrl = (url: string) =>
+    `${appConfig?.authServerUrl}/mcp-setup?mcp_url=${encodeURIComponent(url)}`;
+
+  const renderAddressBlock = (
+    title: string,
+    url: string,
+    instructionsLabel: string
+  ) => (
+    <div className="space-y-2">
+      <div className="text-sm font-medium text-text-primary">{title}</div>
+      <div className="flex items-center gap-2">
+        <div className="flex-1 rounded-lg border border-border-light bg-surface-secondary px-4 py-3 font-mono text-sm text-text-primary">
+          {url}
+        </div>
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={() => void handleCopyUrl(url)}
+          className="shrink-0"
+          aria-label={`Copy ${title}`}
+          title={copiedUrl === url ? 'Copied!' : 'Copy to clipboard'}
+        >
+          {copiedUrl === url ? (
+            <Check className="h-4 w-4 text-green-500" />
+          ) : (
+            <Copy className="h-4 w-4" />
+          )}
+        </Button>
+      </div>
+
+      <a
+        href={getSetupInstructionsUrl(url)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-2 text-sm text-brand-purple hover:underline"
+      >
+        <ExternalLink className="h-4 w-4" />
+        {instructionsLabel}
+      </a>
+    </div>
+  );
+
   const roles = getUserRoles();
   const hasConfigAccess = roles.includes('admin') || roles.includes('data');
+  const privateServerUrl = config?.serverUrl;
+  const publicTunnelUrl = tunnelStatus?.public_url;
 
   if (loading) {
     return (
@@ -137,10 +190,6 @@ const MCPServerPage = () => {
   }
 
   if (!hasConfigAccess) {
-    const mcpSetupUrl = config?.serverUrl
-      ? `${appConfig?.authServerUrl}/mcp-setup?mcp_url=${encodeURIComponent(config.serverUrl)}`
-      : `${appConfig?.authServerUrl}/mcp-setup`;
-
     return (
       <div className="mx-auto max-w-4xl">
         <AppPageHeader
@@ -152,21 +201,26 @@ const MCPServerPage = () => {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Connect to the MCP Server</CardTitle>
+            <CardTitle className="text-lg">MCP Server Addresses</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-5">
             <p className="text-sm text-text-secondary">
-              Follow the setup instructions to connect your MCP client to this project&apos;s MCP Server.
+              Choose the address that matches how your MCP client will reach this project.
             </p>
-            <a
-              href={mcpSetupUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 text-sm text-brand-purple hover:underline"
-            >
-              <ExternalLink className="h-4 w-4" />
-              MCP Setup Instructions
-            </a>
+            {publicTunnelUrl
+              ? renderAddressBlock(
+                  'Public Address (Tunnel)',
+                  publicTunnelUrl,
+                  'Public MCP Setup Instructions'
+                )
+              : null}
+            {privateServerUrl
+              ? renderAddressBlock(
+                  'Private Address (Server)',
+                  privateServerUrl,
+                  'Private MCP Setup Instructions'
+                )
+              : null}
           </CardContent>
         </Card>
       </div>
@@ -220,37 +274,24 @@ const MCPServerPage = () => {
             {/* Simplified URL Section */}
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">Your MCP Server URL</CardTitle>
+                <CardTitle className="text-lg">MCP Server Addresses</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 rounded-lg border border-border-light bg-surface-secondary px-4 py-3 font-mono text-sm text-text-primary">
-                    {config.serverUrl}
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={handleCopyUrl}
-                    className="shrink-0"
-                    title={copied ? 'Copied!' : 'Copy to clipboard'}
-                  >
-                    {copied ? (
-                      <Check className="h-4 w-4 text-green-500" />
-                    ) : (
-                      <Copy className="h-4 w-4" />
-                    )}
-                  </Button>
-                </div>
-
-                <a
-                  href={`${appConfig?.authServerUrl}/mcp-setup?mcp_url=${encodeURIComponent(config.serverUrl)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-sm text-brand-purple hover:underline"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  MCP Setup Instructions
-                </a>
+              <CardContent className="space-y-5">
+                <p className="text-sm text-text-secondary">
+                  Choose the address that matches how your MCP client will reach this project.
+                </p>
+                {publicTunnelUrl
+                  ? renderAddressBlock(
+                      'Public Address (Tunnel)',
+                      publicTunnelUrl,
+                      'Public MCP Setup Instructions'
+                    )
+                  : null}
+                {renderAddressBlock(
+                  'Private Address (Server)',
+                  config.serverUrl,
+                  'Private MCP Setup Instructions'
+                )}
 
                 <p className="text-sm text-text-secondary font-medium">
                   Note: Changes to configuration will take effect after restarting the MCP Client.

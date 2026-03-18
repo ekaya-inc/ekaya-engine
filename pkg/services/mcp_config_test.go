@@ -1257,7 +1257,7 @@ func TestMCPConfigService_Get_NilInstalledAppService_FiltersNonMCPServerTools(t 
 	assert.NotContains(t, toolNames, "list_query_suggestions", "should NOT include list_query_suggestions with nil service")
 }
 
-func TestMCPConfigService_Get_UsesMCPTunnelEndpoint(t *testing.T) {
+func TestMCPConfigService_Get_KeepsServerURLWhenMCPTunnelInstalled(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
@@ -1292,7 +1292,7 @@ func TestMCPConfigService_Get_UsesMCPTunnelEndpoint(t *testing.T) {
 	resp, err := svc.Get(context.Background(), projectID)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	assert.Equal(t, "https://mcp.ekaya.ai/mcp/proj-1", resp.ServerURL)
+	assert.Equal(t, "http://localhost:3443/mcp/"+projectID.String(), resp.ServerURL)
 }
 
 func TestMCPConfigService_Get_IncludesPerRoleToolLists(t *testing.T) {
