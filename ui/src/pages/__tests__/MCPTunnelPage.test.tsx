@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import engineApi from '../../services/engineApi';
 import MCPTunnelPage from '../MCPTunnelPage';
@@ -19,6 +19,12 @@ const mockToast = vi.fn();
 vi.mock('../../hooks/useToast', () => ({
   useToast: () => ({
     toast: mockToast,
+  }),
+}));
+
+vi.mock('../../contexts/ProjectContext', () => ({
+  useProject: () => ({
+    urls: { projectsPageUrl: 'https://us.ekaya.ai/projects' },
   }),
 }));
 
@@ -113,6 +119,10 @@ describe('MCPTunnelPage', () => {
     setupMocks();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('shows the activation checklist step when the tunnel is installed but not activated', async () => {
     await renderMCPTunnelPage();
 
@@ -163,7 +173,7 @@ describe('MCPTunnelPage', () => {
     });
   });
 
-  it('shows the public URL when the tunnel is connected', async () => {
+  it('links to the MCP Server page when the tunnel is connected', async () => {
     setupMocks({
       isActivated: true,
       tunnelStatus: 'connected',
@@ -173,9 +183,58 @@ describe('MCPTunnelPage', () => {
     await renderMCPTunnelPage();
 
     expect(screen.getByText('Connected')).toBeInTheDocument();
-    expect(screen.getByText('https://mcp.ekaya.ai/mcp/proj-1')).toBeInTheDocument();
+    expect(screen.queryByText('https://mcp.ekaya.ai/mcp/proj-1')).not.toBeInTheDocument();
+    expect(screen.queryByText('Public URL')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('link', {
+        name: 'Find your MCP URL and setup instructions on the MCP Server page.',
+      })
+    ).toHaveAttribute('href', '/projects/proj-1/mcp-server');
     expect(screen.getByText('2. Confirm tunnel connection')).toBeInTheDocument();
     expect(screen.getByText('Tunnel connected and public URL assigned')).toBeInTheDocument();
+  });
+
+  it('polls status while the tunnel is still connecting', async () => {
+    vi.mocked(engineApi.getInstalledApp).mockResolvedValue({
+      success: true,
+      data: {
+        id: 'inst-1',
+        project_id: 'proj-1',
+        app_id: 'mcp-tunnel',
+        installed_at: '2026-03-12T10:00:00Z',
+        activated_at: '2026-03-12T10:05:00Z',
+        settings: {},
+      },
+    });
+    vi.mocked(engineApi.getTunnelStatus)
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          tunnel_status: 'connecting',
+          public_url: 'https://mcp.ekaya.ai/mcp/proj-1',
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          tunnel_status: 'connected',
+          public_url: 'https://mcp.ekaya.ai/mcp/proj-1',
+        },
+      });
+
+    await renderMCPTunnelPage();
+
+    expect(screen.getByText('Connecting')).toBeInTheDocument();
+
+    await act(async () => {
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 2100);
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Connected')).toBeInTheDocument();
+    });
   });
 
   it('completes lifecycle callbacks from the URL', async () => {
