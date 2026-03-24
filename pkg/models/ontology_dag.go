@@ -277,8 +277,9 @@ func (n *DAGNode) IsSkipped() bool {
 
 // OntologyStatusResponse represents the ontology status with change detection.
 type OntologyStatusResponse struct {
-	HasOntology             bool           `json:"has_ontology"`
-	LastBuiltAt             *time.Time     `json:"last_built_at,omitempty"`
-	SchemaChangedSinceBuild bool           `json:"schema_changed_since_build"`
-	ChangeSummary           *ChangeSummary `json:"change_summary,omitempty"`
+	HasOntology             bool                         `json:"has_ontology"`
+	LastBuiltAt             *time.Time                   `json:"last_built_at,omitempty"`
+	CompletionProvenance    OntologyCompletionProvenance `json:"completion_provenance,omitempty"`
+	SchemaChangedSinceBuild bool                         `json:"schema_changed_since_build"`
+	ChangeSummary           *ChangeSummary               `json:"change_summary,omitempty"`
 }

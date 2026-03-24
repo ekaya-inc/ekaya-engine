@@ -210,24 +210,46 @@ func (s *ontologyDAGService) GetLastCompletedDAG(ctx context.Context, datasource
 
 // GetOntologyStatus returns the current ontology status with change detection.
 func (s *ontologyDAGService) GetOntologyStatus(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.OntologyStatusResponse, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
 	// Get the latest completed DAG
 	lastDAG, err := s.GetLastCompletedDAG(ctx, datasourceID)
 	if err != nil {
 		return nil, fmt.Errorf("get last completed DAG: %w", err)
 	}
 
-	resp := &models.OntologyStatusResponse{
-		HasOntology: lastDAG != nil,
+	completionState, err := loadOntologyCompletionState(ctx, scope.Conn, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("load ontology completion state: %w", err)
 	}
 
-	if lastDAG == nil || lastDAG.CompletedAt == nil {
+	resp := &models.OntologyStatusResponse{
+		HasOntology: completionState.Provenance.IsValid() || lastDAG != nil,
+	}
+
+	switch {
+	case completionState.Provenance.IsValid():
+		resp.CompletionProvenance = completionState.Provenance
+	case lastDAG != nil:
+		resp.CompletionProvenance = models.OntologyCompletionProvenanceExtracted
+	}
+
+	switch {
+	case completionState.CompletedAt != nil:
+		resp.LastBuiltAt = completionState.CompletedAt
+	case lastDAG != nil && lastDAG.CompletedAt != nil:
+		resp.LastBuiltAt = lastDAG.CompletedAt
+	}
+
+	if resp.LastBuiltAt == nil {
 		return resp, nil
 	}
 
-	resp.LastBuiltAt = lastDAG.CompletedAt
-
 	// Compute what has changed since the last build
-	changeSet, err := s.ComputeChangeSet(ctx, projectID, *lastDAG.CompletedAt)
+	changeSet, err := s.ComputeChangeSet(ctx, projectID, *resp.LastBuiltAt)
 	if err != nil {
 		return nil, fmt.Errorf("compute change set: %w", err)
 	}

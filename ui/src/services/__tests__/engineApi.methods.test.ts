@@ -7,6 +7,7 @@ vi.mock('../../lib/api', () => ({
 
 import { fetchWithAuth } from '../../lib/api';
 import engineApi from '../engineApi';
+import type { OntologyImportError } from '../engineApi';
 
 const mockFetchWithAuth = vi.mocked(fetchWithAuth);
 
@@ -25,6 +26,16 @@ function mock204Response() {
     ok: true,
     statusText: 'No Content',
     json: () => Promise.reject(new SyntaxError('Unexpected end of JSON input')),
+  } as unknown as Response);
+}
+
+function mockBlobResponse(blob: Blob, status = 200) {
+  mockFetchWithAuth.mockResolvedValue({
+    status,
+    ok: status >= 200 && status < 300,
+    statusText: 'OK',
+    blob: () => Promise.resolve(blob),
+    json: () => Promise.resolve({}),
   } as unknown as Response);
 }
 
@@ -1257,6 +1268,65 @@ describe('engineApi ontology change methods', () => {
     });
   });
 
+  describe('importOntologyBundle', () => {
+    it('uploads multipart form data to the import endpoint', async () => {
+      const responseData = {
+        success: true,
+        data: {
+          imported_at: '2026-03-24T10:00:00Z',
+          completion_provenance: 'imported',
+        },
+      };
+      mockJsonResponse(responseData);
+
+      const file = new File(['{"format":"ekaya-ontology-export"}'], 'bundle.json', {
+        type: 'application/json',
+      });
+
+      const result = await engineApi.importOntologyBundle('proj-1', 'ds-1', file);
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/ontology/import',
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.any(FormData),
+        })
+      );
+      const callArgs = mockFetchWithAuth.mock.calls[0]?.[1] as RequestInit;
+      expect(callArgs.headers).toBeUndefined();
+      expect(result).toEqual(responseData);
+    });
+
+    it('throws OntologyImportError with validation report on failure', async () => {
+      mockFetchWithAuth.mockResolvedValue({
+        status: 400,
+        ok: false,
+        statusText: 'Bad Request',
+        json: () => Promise.resolve({
+          success: false,
+          error: 'schema_validation_failed',
+          message: 'Ontology bundle does not match the selected datasource schema',
+          data: {
+            missing_tables: [{ schema_name: 'public', table_name: 'orders' }],
+          },
+        }),
+      } as unknown as Response);
+
+      const file = new File(['{"format":"ekaya-ontology-export"}'], 'bundle.json', {
+        type: 'application/json',
+      });
+
+      await expect(engineApi.importOntologyBundle('proj-1', 'ds-1', file)).rejects.toMatchObject({
+        name: 'OntologyImportError',
+        message: 'Ontology bundle does not match the selected datasource schema',
+        code: 'schema_validation_failed',
+        report: {
+          missing_tables: [{ schema_name: 'public', table_name: 'orders' }],
+        },
+      } satisfies Partial<OntologyImportError>);
+    });
+  });
+
   describe('getOntologyQuestionCounts', () => {
     it('sends GET to /{projectId}/ontology/questions/counts', async () => {
       const responseData = { data: { required: 3, optional: 7 } };
@@ -1395,6 +1465,23 @@ describe('engineApi MCP config methods', () => {
         })
       );
       expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('exportOntologyBundle', () => {
+    it('sends GET to /ontology/export and returns the response blob', async () => {
+      const blob = new Blob(['{"format":"ekaya-ontology-export"}'], { type: 'application/json' });
+      mockBlobResponse(blob);
+
+      const result = await engineApi.exportOntologyBundle('proj-1', 'ds-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/ontology/export',
+        expect.objectContaining({
+          headers: expect.objectContaining({ Accept: 'application/json' }),
+        })
+      );
+      expect(result).toBe(blob);
     });
   });
 });
