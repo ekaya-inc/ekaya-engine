@@ -15,12 +15,24 @@ import {
   Network,
   RefreshCw,
   Trash2,
+  Upload,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 
+import { getUserRoles } from '../../lib/auth-token';
 import engineApi from '../../services/engineApi';
-import type { DAGNodeName, DAGNodeStatus, DAGStatusResponse, DAGStatus, OntologyStatusResponse } from '../../types';
+import type {
+  DAGNodeName,
+  DAGNodeStatus,
+  DAGStatusResponse,
+  DAGStatus,
+  OntologyImportColumnRef,
+  OntologyImportRelationshipIssue,
+  OntologyImportTableRef,
+  OntologyImportValidationReport,
+  OntologyStatusResponse,
+} from '../../types';
 import { DAGNodeDescriptions } from '../../types';
 import { Button } from '../ui/Button';
 import {
@@ -46,6 +58,7 @@ interface OntologyDAGProps {
 // Polling interval in milliseconds (2 seconds as per plan)
 const POLL_INTERVAL_MS = 2000;
 const DEFAULT_EXPORT_FILENAME = 'ontology-export.json';
+const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
 
 // Helper to get status icon for a node
 const getNodeStatusIcon = (status: DAGNodeStatus, isCurrentNode: boolean) => {
@@ -130,17 +143,26 @@ export const OntologyDAG = ({
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [isExporting, setIsExporting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importErrorMessage, setImportErrorMessage] = useState<string | null>(null);
+  const [importReport, setImportReport] = useState<OntologyImportValidationReport | null>(null);
   const [projectOverview, setProjectOverview] = useState('');
   const [isLoadingOverview, setIsLoadingOverview] = useState(true);
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isMountedRef = useRef(true);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   // Derived state
+  const roles = getUserRoles();
+  const isAdmin = roles.includes('admin');
   const isRunning = dagStatus?.status === 'running' || dagStatus?.status === 'pending';
   const isComplete = dagStatus?.status === 'completed';
   const isFailed = dagStatus?.status === 'failed';
   const isCancelled = dagStatus?.status === 'cancelled';
+  const hasOntology = Boolean(ontologyStatus?.has_ontology);
+  const isImportedComplete =
+    hasOntology && ontologyStatus?.completion_provenance === 'imported';
 
   // Stop polling
   const stopPolling = useCallback(() => {
@@ -262,6 +284,11 @@ export const OntologyDAG = ({
     }
   }, [projectId, datasourceId, stopPolling, fetchStatus]);
 
+  const clearImportFeedback = useCallback(() => {
+    setImportErrorMessage(null);
+    setImportReport(null);
+  }, []);
+
   // Delete ontology
   const handleDelete = useCallback(async () => {
     try {
@@ -273,8 +300,13 @@ export const OntologyDAG = ({
 
       // Reset state
       setDagStatus(null);
+      setOntologyStatus({
+        has_ontology: false,
+        schema_changed_since_build: false,
+      });
       setShowDeleteDialog(false);
       setDeleteConfirmText('');
+      clearImportFeedback();
       stopPolling();
     } catch (err) {
       if (!isMountedRef.current) return;
@@ -287,7 +319,7 @@ export const OntologyDAG = ({
         setIsDeleting(false);
       }
     }
-  }, [projectId, datasourceId, stopPolling, onError]);
+  }, [clearImportFeedback, projectId, datasourceId, stopPolling, onError]);
 
   const handleExport = useCallback(async () => {
     try {
@@ -313,6 +345,79 @@ export const OntologyDAG = ({
       }
     }
   }, [datasourceId, onError, projectId]);
+
+  const handleImport = useCallback(async (file: File) => {
+    try {
+      setIsImporting(true);
+      setError(null);
+      clearImportFeedback();
+
+      const response = await engineApi.importOntologyBundle(projectId, datasourceId, file);
+
+      if (!isMountedRef.current) return;
+
+      if (response.data) {
+        stopPolling();
+        setDagStatus(null);
+        setOntologyStatus({
+          has_ontology: true,
+          last_built_at: response.data.imported_at,
+          completion_provenance: response.data.completion_provenance,
+          schema_changed_since_build: false,
+        });
+      }
+    } catch (err) {
+      if (!isMountedRef.current) return;
+      const failure = getImportFailure(err);
+      setImportErrorMessage(failure.message);
+      setImportReport(failure.report);
+    } finally {
+      if (isMountedRef.current) {
+        setIsImporting(false);
+      }
+    }
+  }, [clearImportFeedback, datasourceId, projectId, stopPolling]);
+
+  const handleImportInputChange = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) {
+      return;
+    }
+
+    if (!file.name.toLowerCase().endsWith('.json')) {
+      setImportErrorMessage('Ontology bundle must be a .json file');
+      setImportReport({
+        problems: [
+          {
+            code: 'invalid_file',
+            message: 'Ontology bundle must use the .json file extension.',
+          },
+        ],
+      });
+      return;
+    }
+
+    if (file.size > MAX_IMPORT_BYTES) {
+      setImportErrorMessage('Ontology bundle exceeds the 5 MB maximum size');
+      setImportReport({
+        problems: [
+          {
+            code: 'file_too_large',
+            message: 'Ontology bundle exceeds the 5 MB maximum size.',
+          },
+        ],
+      });
+      return;
+    }
+
+    await handleImport(file);
+  }, [handleImport]);
+
+  const openImportPicker = useCallback(() => {
+    clearImportFeedback();
+    importInputRef.current?.click();
+  }, [clearImportFeedback]);
 
   // Initial load
   useEffect(() => {
@@ -404,8 +509,8 @@ export const OntologyDAG = ({
 
   // Notify parent of ontology existence status
   useEffect(() => {
-    onStatusChange?.(dagStatus !== null);
-  }, [dagStatus, onStatusChange]);
+    onStatusChange?.(hasOntology);
+  }, [hasOntology, onStatusChange]);
 
   // Count completed nodes
   const completedNodes = dagStatus?.nodes.filter((n) => n.status === 'completed').length ?? 0;
@@ -570,7 +675,7 @@ export const OntologyDAG = ({
   }
 
   // Error state (when fetch fails completely)
-  if (error && !dagStatus) {
+  if (error && !dagStatus && !hasOntology) {
     return (
       <div className="rounded-lg border border-border-light bg-surface-primary p-8 shadow-sm">
         <div className="text-center">
@@ -586,8 +691,151 @@ export const OntologyDAG = ({
     );
   }
 
+  if (isImportedComplete) {
+    return (
+      <div className="rounded-lg border border-border-light bg-surface-primary shadow-sm">
+        <div className="flex items-center justify-between p-4 border-b border-border-light">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-500/10">
+              <Check className="h-5 w-5 text-green-600" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-text-primary">Ontology Import Complete</h3>
+              <p className="text-sm text-text-secondary">
+                Imported ontology bundle is active for this datasource
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowDeleteDialog(true)}
+              disabled={isDeleting}
+              className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete Ontology
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => void handleExport()}
+              disabled={isExporting}
+            >
+              {isExporting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Exporting...
+                </>
+              ) : (
+                <>
+                  <Download className="h-4 w-4 mr-2" />
+                  Export Ontology
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div className="flex items-start gap-3 rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-900/20">
+            <Check className="h-5 w-5 flex-shrink-0 text-green-600" />
+            <div>
+              <p className="font-medium text-green-800 dark:text-green-200">
+                Ontology bundle imported successfully
+              </p>
+            </div>
+          </div>
+
+          {ontologyStatus?.last_built_at && (
+            <p className="text-sm text-text-secondary">
+              Imported on {formatTimestamp(ontologyStatus.last_built_at)}.
+            </p>
+          )}
+
+          {ontologyStatus?.schema_changed_since_build && ontologyStatus.change_summary && (
+            <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20">
+              <AlertCircle className="h-5 w-5 flex-shrink-0 text-amber-600" />
+              <p className="text-sm text-amber-800 dark:text-amber-200">
+                Schema changes detected since import: {formatChangeSummary(ontologyStatus.change_summary)}.
+              </p>
+            </div>
+          )}
+        </div>
+
+        <Dialog open={showDeleteDialog} onOpenChange={(open) => {
+          setShowDeleteDialog(open);
+          if (!open) {
+            setDeleteConfirmText('');
+          }
+        }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Delete Ontology?</DialogTitle>
+              <DialogDescription>
+                This will permanently delete all ontology data, including table metadata, relationships,
+                questions, and chat history. This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-4 space-y-4">
+              <div className="rounded-lg bg-red-50 border border-red-200 p-4 dark:bg-red-900/20 dark:border-red-800">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  <div className="text-sm text-red-800 dark:text-red-200">
+                    <p className="font-medium mb-1">Warning: This is a destructive action</p>
+                    <p>
+                      All imported ontology knowledge will be permanently deleted. You will need to
+                      import again or run a fresh extraction to restore it.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label htmlFor="delete-confirm" className="block text-sm font-medium text-text-primary mb-2">
+                  Type <code className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-xs font-mono">delete ontology</code> to confirm
+                </label>
+                <Input
+                  id="delete-confirm"
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  placeholder="delete ontology"
+                  className="w-full"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowDeleteDialog(false);
+                  setDeleteConfirmText('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void handleDelete()}
+                disabled={deleteConfirmText !== 'delete ontology' || isDeleting}
+                className="bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  'Delete Ontology'
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+  }
+
   // Empty state (no DAG has been run yet)
-  if (!dagStatus) {
+  if (!dagStatus && !hasOntology) {
     const isOverviewValid = projectOverview.length >= 20;
     return (
       <div className="rounded-lg border border-border-light bg-surface-primary p-12 shadow-sm">
@@ -600,6 +848,38 @@ export const OntologyDAG = ({
             Before we analyze your schema, tell us about your application. Who uses it and what do
             they do with this data? This context helps build a more accurate business ontology.
           </p>
+
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={(event) => void handleImportInputChange(event)}
+          />
+
+          {(importErrorMessage !== null || importReport !== null) && (
+            <div className="mx-auto mb-6 max-w-3xl rounded-lg border border-amber-200 bg-amber-50 p-4 text-left dark:border-amber-800 dark:bg-amber-900/20">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600" />
+                  <div className="space-y-3">
+                    <div>
+                      <p className="font-medium text-amber-800 dark:text-amber-200">
+                        {importErrorMessage ?? 'Unable to import ontology bundle'}
+                      </p>
+                      <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">
+                        Fix the bundle or target datasource mismatch, then try again.
+                      </p>
+                    </div>
+                    <ImportValidationDetails report={importReport} />
+                  </div>
+                </div>
+                <Button variant="ghost" size="sm" onClick={clearImportFeedback}>
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          )}
 
           {/* Overview textarea */}
           <div className="max-w-2xl mx-auto mb-6 text-left">
@@ -624,27 +904,51 @@ export const OntologyDAG = ({
             </div>
           </div>
 
-          {/* Button - disabled until 20 chars */}
-          <Button
-            onClick={() => void handleStart()}
-            disabled={isStarting || !isOverviewValid || isLoadingOverview}
-            className="bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50"
-          >
-            {isStarting ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Starting...
-              </>
-            ) : (
-              <>
-                <Brain className="h-4 w-4 mr-2" />
-                Start Extraction
-              </>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <Button
+              onClick={() => void handleStart()}
+              disabled={isStarting || isImporting || !isOverviewValid || isLoadingOverview}
+              className="bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50"
+            >
+              {isStarting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Starting...
+                </>
+              ) : (
+                <>
+                  <Brain className="h-4 w-4 mr-2" />
+                  Start Extraction
+                </>
+              )}
+            </Button>
+            {isAdmin && (
+              <Button
+                variant="outline"
+                onClick={openImportPicker}
+                disabled={isImporting || isStarting || isLoadingOverview}
+              >
+                {isImporting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Importing...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-4 w-4 mr-2" />
+                    Import Ontology
+                  </>
+                )}
+              </Button>
             )}
-          </Button>
+          </div>
         </div>
       </div>
     );
+  }
+
+  if (!dagStatus) {
+    return null;
   }
 
   // DAG visualization
@@ -938,4 +1242,135 @@ function downloadBlob(blob: Blob, filename: string): void {
   link.click();
   link.remove();
   URL.revokeObjectURL(objectUrl);
+}
+
+function formatTimestamp(value: string): string {
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) {
+    return value;
+  }
+  return timestamp.toLocaleString();
+}
+
+function getImportFailure(error: unknown): {
+  message: string;
+  report: OntologyImportValidationReport | null;
+} {
+  if (typeof error === 'object' && error !== null) {
+    const maybeMessage = 'message' in error ? error.message : undefined;
+    const maybeReport = 'report' in error ? error.report : undefined;
+
+    return {
+      message: typeof maybeMessage === 'string' ? maybeMessage : 'Failed to import ontology bundle',
+      report: isOntologyImportValidationReportValue(maybeReport) ? maybeReport : null,
+    };
+  }
+
+  return {
+    message: error instanceof Error ? error.message : 'Failed to import ontology bundle',
+    report: null,
+  };
+}
+
+function isOntologyImportValidationReportValue(
+  value: unknown
+): value is OntologyImportValidationReport {
+  return typeof value === 'object' && value !== null;
+}
+
+function ImportValidationDetails({
+  report,
+}: {
+  report: OntologyImportValidationReport | null;
+}) {
+  if (!report) {
+    return null;
+  }
+
+  const rows: Array<{ label: string; items: string[] }> = [];
+
+  if (report.database_type_mismatch) {
+    rows.push({
+      label: 'Database type mismatch',
+      items: [
+        `Bundle: ${report.database_type_mismatch.bundle_type}, target: ${report.database_type_mismatch.target_type}`,
+      ],
+    });
+  }
+  if (report.problems?.length) {
+    rows.push({
+      label: 'Problems',
+      items: report.problems.map((problem) => problem.message),
+    });
+  }
+  if (report.missing_required_apps?.length) {
+    rows.push({
+      label: 'Missing required apps',
+      items: report.missing_required_apps,
+    });
+  }
+  if (report.missing_tables?.length) {
+    rows.push({
+      label: 'Missing tables',
+      items: report.missing_tables.map(formatTableRef),
+    });
+  }
+  if (report.unexpected_tables?.length) {
+    rows.push({
+      label: 'Unexpected selected tables',
+      items: report.unexpected_tables.map(formatTableRef),
+    });
+  }
+  if (report.missing_columns?.length) {
+    rows.push({
+      label: 'Missing columns',
+      items: report.missing_columns.map(formatColumnRef),
+    });
+  }
+  if (report.unexpected_columns?.length) {
+    rows.push({
+      label: 'Unexpected selected columns',
+      items: report.unexpected_columns.map(formatColumnRef),
+    });
+  }
+  if (report.unresolved_relationships?.length) {
+    rows.push({
+      label: 'Unresolved relationships',
+      items: report.unresolved_relationships.map(formatRelationshipIssue),
+    });
+  }
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-3">
+      {rows.map((row) => (
+        <div key={row.label}>
+          <p className="text-sm font-medium text-amber-900 dark:text-amber-100">{row.label}</p>
+          <ul className="mt-1 list-disc pl-5 text-sm text-amber-800 dark:text-amber-200">
+            {row.items.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function formatTableRef(ref: OntologyImportTableRef): string {
+  if (ref.schema_name) {
+    return `${ref.schema_name}.${ref.table_name}`;
+  }
+  return ref.table_name;
+}
+
+function formatColumnRef(ref: OntologyImportColumnRef): string {
+  return `${formatTableRef(ref.table)}.${ref.column_name}`;
+}
+
+function formatRelationshipIssue(issue: OntologyImportRelationshipIssue): string {
+  return `${formatColumnRef(issue.source)} -> ${formatColumnRef(issue.target)}: ${issue.message}`;
 }
