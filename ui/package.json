@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=24.0.0"
   },
   "scripts": {
     "dev": "vite",
@@ -68,6 +68,8 @@
     "vitest": "^4.0.3"
   },
   "overrides": {
-    "minimatch": ">=10.2.1"
+    "flatted": "3.4.2",
+    "minimatch": "10.2.4",
+    "rollup": "4.60.0"
   }
 }

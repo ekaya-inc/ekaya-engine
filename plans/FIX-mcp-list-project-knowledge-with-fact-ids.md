@@ -46,6 +46,28 @@ There is also a second, related sharp edge:
 
 So omitting `fact_id` does not target an existing row. It creates a new row.
 
+There is a third sharp edge worth capturing because it makes accidental duplication even easier:
+
+- `update_project_knowledge` trims `fact_id` and treats the empty string as "not provided"
+- that means a client sending `fact_id: ""` does not get a validation error
+- it silently falls through to create mode
+
+That behavior is currently documented in unit tests, but it is easy for LLM clients or UI layers to hit by accident when they serialize optional string fields.
+
+## Observed MCP client failure mode
+
+This was not just inferred from code review. It showed up directly during MCP-only ontology curation against `the_look`.
+
+Observed behavior:
+
+- `get_context(depth="domain")` exposed project knowledge facts grouped by category
+- the returned `project_knowledge` entries included `fact` and optional `context`, but no `fact_id`
+- that was enough to identify misleading or redundant facts by text
+- it was not enough to call `delete_project_knowledge`, which requires `fact_id`
+- because `update_project_knowledge` does not actually upsert by `(category, fact)`, there was also no safe MCP-only way to "overwrite in place" without already knowing the row ID
+
+In practice, cleanup had to fall back to manual search/delete outside the MCP tool surface. That is exactly the workflow gap this fix should close.
+
 This fix does not need to redesign that behavior, but it should stop MCP clients from being stranded without a way to discover IDs.
 
 ## Existing infrastructure
@@ -256,6 +278,20 @@ If the implementation adds optional parameters, then keep the test focused on sc
 
 Prefer the zero-arg version for v1 unless there is a strong reason not to.
 
+### 6. `tests/claude-mcp/prompts/240-project-knowledge.md` and `tests/claude-mcp/prompts/340-project-knowledge-delete.md`
+
+These MCP prompt fixtures currently encode the wrong contract:
+
+- they still refer to `key`, `value`, and `fact_type`
+- they assume "update existing fact by key" behavior
+- the delete prompt still assumes deletion by key instead of by `fact_id`
+
+- [ ] Update the project-knowledge prompt fixtures to use the real MCP parameters: `fact`, `category`, optional `context`, and `fact_id`
+- [ ] Rewrite the update test flow so it creates a fact, captures returned `fact_id`, and updates by that ID
+- [ ] Rewrite the delete test flow so it first discovers or captures `fact_id` and deletes by that ID
+
+These prompt files are not the root bug, but leaving them stale will keep reinforcing the wrong mental model for future MCP testing.
+
 ## Tests to update
 
 This repo has a wide MCP test surface. A new tool usually needs more than one handler test.
@@ -271,6 +307,10 @@ This repo has a wide MCP test surface. A new tool usually needs more than one ha
 - [ ] Add repository error-path test
 
 The existing mock repository already implements `GetByProject(...)`, so unit coverage should be straightforward.
+
+- [ ] Add coverage for `fact_id: ""` / whitespace-only handling so the intended behavior is explicit
+
+Decide in implementation whether the tool should keep silently treating blank `fact_id` as omitted or tighten validation. Either way, the behavior should be intentional and tested.
 
 ### Core tool integration tests
 

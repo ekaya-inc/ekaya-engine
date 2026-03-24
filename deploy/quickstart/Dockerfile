@@ -6,7 +6,7 @@
 #
 
 # UI Build stage
-FROM node:22-alpine AS ui-builder
+FROM --platform=$BUILDPLATFORM node:24-alpine AS ui-builder
 WORKDIR /app/ui
 COPY ui/package*.json ./
 RUN npm ci
@@ -14,7 +14,7 @@ COPY ui/ ./
 RUN npm run build
 
 # Go Build stage
-FROM golang:1.25-alpine AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS go-builder
 RUN apk add --no-cache git
 WORKDIR /app
 COPY go.mod go.sum* ./
@@ -24,8 +24,11 @@ COPY --from=ui-builder /app/ui/dist ./ui/dist
 
 ARG VERSION=dev
 ARG BUILD_TAGS=all_adapters
+ARG TARGETOS
+ARG TARGETARCH
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+RUN test -n "${TARGETOS}" && test -n "${TARGETARCH}" && \
+    CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" go build \
     -tags="${BUILD_TAGS}" \
     -ldflags="-w -s -X main.Version=${VERSION}" \
     -o ekaya-engine \
