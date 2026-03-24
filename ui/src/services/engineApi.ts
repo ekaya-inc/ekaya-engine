@@ -1223,6 +1223,35 @@ class EngineApiService {
   }
 
   /**
+   * Download ontology export bundle as raw JSON.
+   * GET /api/projects/{projectId}/datasources/{datasourceId}/ontology/export
+   */
+  async exportOntologyBundle(
+    projectId: string,
+    datasourceId: string
+  ): Promise<Blob> {
+    const url = `${this.baseURL}/${projectId}/datasources/${datasourceId}/ontology/export`;
+    const response = await fetchWithAuth(url, {
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      let message = `HTTP ${response.status}: ${response.statusText}`;
+      try {
+        const data = await response.json() as ApiResponse<unknown>;
+        message = data.message ?? data.error ?? message;
+      } catch {
+        // Keep the default HTTP message when the error body is not JSON.
+      }
+      throw new Error(message);
+    }
+
+    return response.blob();
+  }
+
+  /**
    * Cancel a running ontology DAG
    * POST /api/projects/{projectId}/datasources/{datasourceId}/ontology/dag/cancel
    */

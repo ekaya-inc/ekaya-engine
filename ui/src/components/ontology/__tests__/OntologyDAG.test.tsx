@@ -15,6 +15,7 @@ vi.mock('../../../services/engineApi', () => ({
     startOntologyExtraction: vi.fn(),
     cancelOntologyDAG: vi.fn(),
     deleteOntology: vi.fn(),
+    exportOntologyBundle: vi.fn(),
   },
 }));
 
@@ -46,7 +47,7 @@ vi.mock('../../ui/Input', () => ({
   }) => (
     <input
       id={id}
-      data-testid="delete-confirm-input"
+      data-testid={id ? `${id}-input` : 'input'}
       type={type ?? 'text'}
       value={value}
       onChange={onChange}
@@ -484,5 +485,141 @@ describe('OntologyDAG - Delete Ontology Functionality', () => {
     await waitFor(() => {
       expect(onStatusChange).toHaveBeenCalledWith(false);
     });
+  });
+});
+
+describe('OntologyDAG - Export Ontology', () => {
+  const mockProps = {
+    projectId: 'proj-1',
+    datasourceId: 'ds-1',
+    onComplete: vi.fn(),
+    onError: vi.fn(),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.assign(window, { showSaveFilePicker: undefined });
+    vi.mocked(engineApi.getProjectOverview).mockResolvedValue({
+      success: true,
+      data: { overview: null },
+    });
+  });
+
+  it('shows Export Ontology only when the DAG is complete', async () => {
+    vi.mocked(engineApi.getOntologyDAGStatus).mockResolvedValue({
+      success: true,
+      data: mockCompletedDAG,
+    });
+
+    render(<OntologyDAG {...mockProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /export ontology/i })).toBeInTheDocument();
+    });
+  });
+
+  it('does not show Export Ontology when the DAG is not complete', async () => {
+    vi.mocked(engineApi.getOntologyDAGStatus).mockResolvedValue({
+      success: true,
+      data: mockFailedDAG,
+    });
+
+    render(<OntologyDAG {...mockProps} />);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /export ontology/i })).not.toBeInTheDocument();
+    });
+  });
+
+  it('downloads the bundle with showSaveFilePicker when available', async () => {
+    const write = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const createWritable = vi.fn().mockResolvedValue({ write, close });
+    const showSaveFilePicker = vi.fn().mockResolvedValue({ createWritable });
+    const blob = new Blob(['{"format":"ekaya-ontology-export"}'], { type: 'application/json' });
+
+    vi.mocked(engineApi.getOntologyDAGStatus).mockResolvedValue({
+      success: true,
+      data: mockCompletedDAG,
+    });
+    vi.mocked(engineApi.exportOntologyBundle).mockResolvedValue(blob);
+    Object.assign(window, { showSaveFilePicker });
+
+    const user = userEvent.setup();
+    render(<OntologyDAG {...mockProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /export ontology/i })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: /export ontology/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('dialog-title')).toHaveTextContent('Export Ontology Bundle');
+    });
+
+    const filenameInput = screen.getByTestId('export-filename-input');
+    await user.clear(filenameInput);
+    await user.type(filenameInput, 'the-look-bundle');
+    await user.click(screen.getByRole('button', { name: /save bundle/i }));
+
+    await waitFor(() => {
+      expect(showSaveFilePicker).toHaveBeenCalledWith(expect.objectContaining({
+        suggestedName: 'the-look-bundle.json',
+      }));
+      expect(engineApi.exportOntologyBundle).toHaveBeenCalledWith('proj-1', 'ds-1');
+      expect(write).toHaveBeenCalledWith(blob);
+      expect(close).toHaveBeenCalled();
+    });
+  });
+
+  it('falls back to browser download when File System Access API is unavailable', async () => {
+    const blob = new Blob(['{"format":"ekaya-ontology-export"}'], { type: 'application/json' });
+    const originalCreateElement = document.createElement.bind(document);
+    const link = originalCreateElement('a');
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:export');
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const click = vi.spyOn(link, 'click').mockImplementation(() => {});
+    const remove = vi.spyOn(link, 'remove').mockImplementation(() => {});
+    const appendChild = vi.spyOn(document.body, 'appendChild');
+    const createElement = vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
+      if (tagName.toLowerCase() === 'a') {
+        return link;
+      }
+      return originalCreateElement(tagName);
+    });
+
+    vi.mocked(engineApi.getOntologyDAGStatus).mockResolvedValue({
+      success: true,
+      data: mockCompletedDAG,
+    });
+    vi.mocked(engineApi.exportOntologyBundle).mockResolvedValue(blob);
+    Object.assign(window, { showSaveFilePicker: undefined });
+
+    const user = userEvent.setup();
+    render(<OntologyDAG {...mockProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /export ontology/i })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: /export ontology/i }));
+    await user.click(screen.getByRole('button', { name: /save bundle/i }));
+
+    await waitFor(() => {
+      expect(engineApi.exportOntologyBundle).toHaveBeenCalledWith('proj-1', 'ds-1');
+      expect(createObjectURL).toHaveBeenCalledWith(blob);
+      expect(click).toHaveBeenCalled();
+      expect(remove).toHaveBeenCalled();
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:export');
+      expect(appendChild).toHaveBeenCalled();
+    });
+
+    createObjectURL.mockRestore();
+    revokeObjectURL.mockRestore();
+    appendChild.mockRestore();
+    createElement.mockRestore();
+    click.mockRestore();
+    remove.mockRestore();
   });
 });

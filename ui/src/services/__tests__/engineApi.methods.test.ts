@@ -28,6 +28,16 @@ function mock204Response() {
   } as unknown as Response);
 }
 
+function mockBlobResponse(blob: Blob, status = 200) {
+  mockFetchWithAuth.mockResolvedValue({
+    status,
+    ok: status >= 200 && status < 300,
+    statusText: 'OK',
+    blob: () => Promise.resolve(blob),
+    json: () => Promise.resolve({}),
+  } as unknown as Response);
+}
+
 describe('engineApi datasource methods', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1395,6 +1405,23 @@ describe('engineApi MCP config methods', () => {
         })
       );
       expect(result).toEqual(responseData);
+    });
+  });
+
+  describe('exportOntologyBundle', () => {
+    it('sends GET to /ontology/export and returns the response blob', async () => {
+      const blob = new Blob(['{"format":"ekaya-ontology-export"}'], { type: 'application/json' });
+      mockBlobResponse(blob);
+
+      const result = await engineApi.exportOntologyBundle('proj-1', 'ds-1');
+
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        '/api/projects/proj-1/datasources/ds-1/ontology/export',
+        expect.objectContaining({
+          headers: expect.objectContaining({ Accept: 'application/json' }),
+        })
+      );
+      expect(result).toBe(blob);
     });
   });
 });
