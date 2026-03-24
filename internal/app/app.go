@@ -148,6 +148,7 @@ func Run(version string) error {
 	pendingChangeRepo := repositories.NewPendingChangeRepository()
 	columnMetadataRepo := repositories.NewColumnMetadataRepository()
 	tableMetadataRepo := repositories.NewTableMetadataRepository()
+	glossaryRepo := repositories.NewGlossaryRepository()
 
 	// Create connection manager with config-driven settings
 	connManagerCfg := datasource.ConnectionManagerConfig{
@@ -209,6 +210,19 @@ func Run(version string) error {
 		projectRepo, schemaRepo, columnMetadataRepo, convRepo, llmFactory, getTenantCtx, logger)
 	ontologyContextService := services.NewOntologyContextService(
 		schemaRepo, columnMetadataRepo, tableMetadataRepo, projectService, logger)
+	ontologyExportService := services.NewOntologyExportService(
+		projectRepo,
+		datasourceService,
+		schemaRepo,
+		tableMetadataRepo,
+		columnMetadataRepo,
+		ontologyQuestionRepo,
+		knowledgeRepo,
+		glossaryRepo,
+		queryRepo,
+		agentRepo,
+		logger,
+	)
 
 	// Create worker pool for parallel LLM calls
 	workerPoolConfig := llm.DefaultWorkerPoolConfig()
@@ -221,7 +235,6 @@ func Run(version string) error {
 	columnEnrichmentService := services.NewColumnEnrichmentService(
 		schemaRepo, columnMetadataRepo, convRepo, projectRepo, ontologyQuestionService,
 		datasourceService, adapterFactory, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
-	glossaryRepo := repositories.NewGlossaryRepository()
 	glossaryService := services.NewGlossaryService(glossaryRepo, columnMetadataRepo, knowledgeRepo, schemaRepo, projectService, datasourceService, adapterFactory, llmFactory, getTenantCtx, logger, cfg.Env)
 
 	// Ontology DAG service for orchestrated workflow execution
@@ -446,6 +459,10 @@ func Run(version string) error {
 	// Register ontology DAG handler (protected) - unified workflow execution
 	ontologyDAGHandler := handlers.NewOntologyDAGHandler(ontologyDAGService, projectService, logger)
 	ontologyDAGHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register ontology export handler (protected) - raw export bundle download
+	ontologyExportHandler := handlers.NewOntologyExportHandler(ontologyExportService, logger)
+	ontologyExportHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register ontology enrichment handler (protected) - read-only tiered ontology for UI
 	ontologyEnrichmentHandler := handlers.NewOntologyEnrichmentHandler(schemaService, projectService, logger)

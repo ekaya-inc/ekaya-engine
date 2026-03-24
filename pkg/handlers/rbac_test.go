@@ -611,6 +611,35 @@ func (m *mockOntologyDAGServiceForRBAC) GetOntologyStatus(ctx context.Context, p
 }
 func (m *mockOntologyDAGServiceForRBAC) Shutdown(ctx context.Context) error { return nil }
 
+// mockOntologyExportServiceForRBAC implements services.OntologyExportService.
+type mockOntologyExportServiceForRBAC struct{}
+
+func (m *mockOntologyExportServiceForRBAC) BuildBundle(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.OntologyExportBundle, error) {
+	return &models.OntologyExportBundle{
+		Format:       models.OntologyExportFormat,
+		Version:      models.OntologyExportVersion,
+		RequiredApps: []string{},
+		Datasources:  []models.OntologyExportDatasource{},
+		Ontology: models.OntologyExportOntology{
+			TableMetadata:    []models.OntologyExportTableMetadata{},
+			ColumnMetadata:   []models.OntologyExportColumnMetadata{},
+			Questions:        []models.OntologyExportQuestion{},
+			ProjectKnowledge: []models.OntologyExportKnowledgeFact{},
+			GlossaryTerms:    []models.OntologyExportGlossaryTerm{},
+		},
+		ApprovedQueries: []models.OntologyExportApprovedQuery{},
+		Agents:          []models.OntologyExportAgent{},
+	}, nil
+}
+
+func (m *mockOntologyExportServiceForRBAC) MarshalBundle(bundle *models.OntologyExportBundle) ([]byte, error) {
+	return []byte(`{"format":"ekaya-ontology-export"}`), nil
+}
+
+func (m *mockOntologyExportServiceForRBAC) SuggestedFilename(bundle *models.OntologyExportBundle) string {
+	return "ontology-export.json"
+}
+
 // mockOntologyChatServiceForRBAC implements services.OntologyChatService.
 type mockOntologyChatServiceForRBAC struct{}
 
@@ -930,6 +959,26 @@ func TestRBAC_OntologyDAGHandler(t *testing.T) {
 		{name: "DELETE_admin_allowed", method: http.MethodDelete, path: base, roles: []string{models.RoleAdmin}, expectedStatus: http.StatusOK},
 		{name: "DELETE_data_allowed", method: http.MethodDelete, path: base, roles: []string{models.RoleData}, expectedStatus: http.StatusOK},
 		{name: "DELETE_user_denied", method: http.MethodDelete, path: base, roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runRBACTest(t, projectID, handler.RegisterRoutes, tc)
+		})
+	}
+}
+
+func TestRBAC_OntologyExportHandler(t *testing.T) {
+	projectID := uuid.New()
+	dsID := uuid.New()
+	handler := NewOntologyExportHandler(&mockOntologyExportServiceForRBAC{}, zap.NewNop())
+
+	path := "/api/projects/" + projectID.String() + "/datasources/" + dsID.String() + "/ontology/export"
+
+	tests := []rbacTestCase{
+		{name: "GET_export_admin_allowed", method: http.MethodGet, path: path, roles: []string{models.RoleAdmin}, expectedStatus: http.StatusOK},
+		{name: "GET_export_data_allowed", method: http.MethodGet, path: path, roles: []string{models.RoleData}, expectedStatus: http.StatusOK},
+		{name: "GET_export_user_denied", method: http.MethodGet, path: path, roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
 	}
 
 	for _, tc := range tests {
