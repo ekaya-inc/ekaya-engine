@@ -640,6 +640,15 @@ func (m *mockOntologyExportServiceForRBAC) SuggestedFilename(bundle *models.Onto
 	return "ontology-export.json"
 }
 
+// mockOntologyImportServiceForRBAC implements services.OntologyImportService.
+type mockOntologyImportServiceForRBAC struct{}
+
+func (m *mockOntologyImportServiceForRBAC) ImportBundle(ctx context.Context, projectID, datasourceID uuid.UUID, bundleBytes []byte) (*models.OntologyImportResult, error) {
+	return &models.OntologyImportResult{
+		CompletionProvenance: models.OntologyCompletionProvenanceImported,
+	}, nil
+}
+
 // mockOntologyChatServiceForRBAC implements services.OntologyChatService.
 type mockOntologyChatServiceForRBAC struct{}
 
@@ -979,6 +988,26 @@ func TestRBAC_OntologyExportHandler(t *testing.T) {
 		{name: "GET_export_admin_allowed", method: http.MethodGet, path: path, roles: []string{models.RoleAdmin}, expectedStatus: http.StatusOK},
 		{name: "GET_export_data_allowed", method: http.MethodGet, path: path, roles: []string{models.RoleData}, expectedStatus: http.StatusOK},
 		{name: "GET_export_user_denied", method: http.MethodGet, path: path, roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runRBACTest(t, projectID, handler.RegisterRoutes, tc)
+		})
+	}
+}
+
+func TestRBAC_OntologyImportHandler(t *testing.T) {
+	projectID := uuid.New()
+	dsID := uuid.New()
+	handler := NewOntologyImportHandler(&mockOntologyImportServiceForRBAC{}, zap.NewNop())
+
+	path := "/api/projects/" + projectID.String() + "/datasources/" + dsID.String() + "/ontology/import"
+
+	tests := []rbacTestCase{
+		{name: "POST_import_admin_allowed", method: http.MethodPost, path: path, roles: []string{models.RoleAdmin}, expectedStatus: http.StatusBadRequest},
+		{name: "POST_import_data_denied", method: http.MethodPost, path: path, roles: []string{models.RoleData}, expectedStatus: http.StatusForbidden},
+		{name: "POST_import_user_denied", method: http.MethodPost, path: path, roles: []string{models.RoleUser}, expectedStatus: http.StatusForbidden},
 	}
 
 	for _, tc := range tests {

@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -444,6 +445,15 @@ func (s *ontologyDAGService) Delete(ctx context.Context, projectID uuid.UUID) er
 	}
 	s.logger.Debug("Deleted inferred relationships", zap.String("project_id", projectID.String()), zap.Int64("count", deletedRels))
 
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+	if err := clearOntologyCompletionState(ctx, scope.Conn, projectID); err != nil {
+		s.logger.Error("Failed to clear ontology completion state", zap.String("project_id", projectID.String()), zap.Error(err))
+		return fmt.Errorf("clear ontology completion state: %w", err)
+	}
+
 	s.logger.Info("Successfully deleted all ontology data", zap.String("project_id", projectID.String()))
 	return nil
 }
@@ -835,6 +845,15 @@ func (s *ontologyDAGService) markDAGCompleted(projectID, dagID uuid.UUID) {
 
 	if err := s.dagRepo.UpdateStatus(ctx, dagID, models.DAGStatusCompleted, nil); err != nil {
 		s.logger.Error("Failed to mark DAG as completed", zap.Error(err))
+	}
+
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		s.logger.Error("Tenant scope missing while marking DAG completed")
+		return
+	}
+	if err := storeOntologyCompletionState(ctx, scope.Conn, projectID, models.OntologyCompletionProvenanceExtracted, time.Now().UTC()); err != nil {
+		s.logger.Error("Failed to store ontology completion state", zap.Error(err))
 	}
 
 	s.logger.Info("DAG completed successfully", zap.String("dag_id", dagID.String()))

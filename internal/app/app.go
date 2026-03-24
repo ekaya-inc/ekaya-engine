@@ -223,6 +223,15 @@ func Run(version string) error {
 		agentRepo,
 		logger,
 	)
+	ontologyImportService := services.NewOntologyImportService(
+		projectRepo,
+		datasourceService,
+		schemaRepo,
+		ontologyDAGRepo,
+		installedAppService,
+		credentialEncryptor,
+		logger,
+	)
 
 	// Create worker pool for parallel LLM calls
 	workerPoolConfig := llm.DefaultWorkerPoolConfig()
@@ -463,6 +472,10 @@ func Run(version string) error {
 	// Register ontology export handler (protected) - raw export bundle download
 	ontologyExportHandler := handlers.NewOntologyExportHandler(ontologyExportService, logger)
 	ontologyExportHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register ontology import handler (protected) - raw bundle upload for manual/provisioning reuse
+	ontologyImportHandler := handlers.NewOntologyImportHandler(ontologyImportService, logger)
+	ontologyImportHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register ontology enrichment handler (protected) - read-only tiered ontology for UI
 	ontologyEnrichmentHandler := handlers.NewOntologyEnrichmentHandler(schemaService, projectService, logger)

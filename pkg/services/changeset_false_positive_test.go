@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
@@ -198,4 +199,60 @@ func TestComputeChangeSet_DetectsDeselectedColumn(t *testing.T) {
 	assert.False(t, changeSet.IsEmpty(), "ChangeSet should NOT be empty after deselecting a column")
 	assert.Len(t, changeSet.DeletedColumns, 1, "deselected column should appear in DeletedColumns")
 	assert.Equal(t, "email", changeSet.DeletedColumns[0].ColumnName)
+}
+
+// TestGetOntologyStatus_NoFalsePositivesImmediatelyAfterImport verifies that an imported
+// ontology does not immediately report its own selected schema rows as modified.
+func TestGetOntologyStatus_NoFalsePositivesImmediatelyAfterImport(t *testing.T) {
+	tc := setupSchemaServiceTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	usersTable := tc.createTestTable(ctx, "public", "users", true)
+	tc.createTestColumn(ctx, usersTable.ID, "id", "uuid", 1, true)
+	tc.createTestColumn(ctx, usersTable.ID, "email", "text", 2, true)
+
+	time.Sleep(10 * time.Millisecond)
+	importedAt := time.Now().UTC()
+	require.NotZero(t, importedAt.Nanosecond(), "test requires sub-second precision")
+
+	scope, ok := database.GetTenantScope(ctx)
+	require.True(t, ok, "tenant scope should be present")
+
+	_, err := scope.Conn.Exec(ctx, `
+		UPDATE engine_schema_tables
+		SET updated_at = $2
+		WHERE project_id = $1
+	`, tc.projectID, importedAt)
+	require.NoError(t, err)
+
+	_, err = scope.Conn.Exec(ctx, `
+		UPDATE engine_schema_columns
+		SET updated_at = $2
+		WHERE project_id = $1
+	`, tc.projectID, importedAt)
+	require.NoError(t, err)
+
+	require.NoError(t, storeOntologyCompletionState(
+		ctx,
+		scope.Conn,
+		tc.projectID,
+		models.OntologyCompletionProvenanceImported,
+		importedAt,
+	))
+
+	dagSvc := NewOntologyDAGService(nil, repositories.NewSchemaRepository(), nil, nil, nil, nil, nil, zap.NewNop())
+	status, err := dagSvc.GetOntologyStatus(ctx, tc.projectID, tc.dsID)
+	require.NoError(t, err)
+
+	require.True(t, status.HasOntology)
+	require.Equal(t, models.OntologyCompletionProvenanceImported, status.CompletionProvenance)
+	require.NotNil(t, status.LastBuiltAt)
+	require.True(t, status.LastBuiltAt.Equal(importedAt), "stored completion time should preserve import precision")
+	assert.False(t, status.SchemaChangedSinceBuild, "import should not report its own schema selection updates as changes")
+	require.NotNil(t, status.ChangeSummary)
+	assert.Equal(t, 0, status.ChangeSummary.TablesModified)
+	assert.Equal(t, 0, status.ChangeSummary.ColumnsModified)
 }

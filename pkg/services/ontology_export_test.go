@@ -380,6 +380,122 @@ func TestOntologyExportService_BuildBundle(t *testing.T) {
 	require.NotContains(t, payloadText, "agent-secret")
 }
 
+func TestOntologyExportService_BuildBundle_DeterministicOrdering(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ordersTableID := uuid.New()
+	usersTableID := uuid.New()
+	ordersIDColumnID := uuid.New()
+	ordersUserIDColumnID := uuid.New()
+	ordersStatusColumnID := uuid.New()
+	usersIDColumnID := uuid.New()
+	queryAID := uuid.New()
+	queryZID := uuid.New()
+	agentAID := uuid.New()
+	agentZID := uuid.New()
+
+	service := NewOntologyExportService(
+		&mockOntologyExportProjectRepo{
+			project: &models.Project{
+				ID:   projectID,
+				Name: "The Look Demo",
+			},
+		},
+		&mockOntologyExportDatasourceService{
+			datasource: &models.Datasource{
+				ID:             datasourceID,
+				ProjectID:      projectID,
+				Name:           "The Look",
+				DatasourceType: "postgres",
+			},
+		},
+		&mockOntologyExportSchemaRepo{
+			tables: []*models.SchemaTable{
+				{ID: usersTableID, ProjectID: projectID, DatasourceID: datasourceID, SchemaName: "public", TableName: "users", IsSelected: true},
+				{ID: ordersTableID, ProjectID: projectID, DatasourceID: datasourceID, SchemaName: "public", TableName: "orders", IsSelected: true},
+			},
+			columns: []*models.SchemaColumn{
+				{ID: ordersStatusColumnID, ProjectID: projectID, SchemaTableID: ordersTableID, ColumnName: "status", DataType: "text", IsSelected: true, OrdinalPosition: 3},
+				{ID: usersIDColumnID, ProjectID: projectID, SchemaTableID: usersTableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true, IsSelected: true, OrdinalPosition: 1},
+				{ID: ordersUserIDColumnID, ProjectID: projectID, SchemaTableID: ordersTableID, ColumnName: "user_id", DataType: "uuid", IsSelected: true, OrdinalPosition: 2},
+				{ID: ordersIDColumnID, ProjectID: projectID, SchemaTableID: ordersTableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true, IsSelected: true, OrdinalPosition: 1},
+			},
+			relationships: nil,
+		},
+		&mockOntologyExportTableMetadataRepo{},
+		&mockOntologyExportColumnMetadataRepo{},
+		&mockOntologyExportQuestionRepo{},
+		&mockOntologyExportKnowledgeRepo{},
+		&mockOntologyExportGlossaryRepo{},
+		&mockOntologyExportQueryRepo{
+			items: []*models.Query{
+				{
+					ID:                    queryZID,
+					ProjectID:             projectID,
+					DatasourceID:          datasourceID,
+					NaturalLanguagePrompt: "Z prompt",
+					SQLQuery:              "SELECT * FROM users",
+					Dialect:               "PostgreSQL",
+					Status:                "approved",
+				},
+				{
+					ID:                    queryAID,
+					ProjectID:             projectID,
+					DatasourceID:          datasourceID,
+					NaturalLanguagePrompt: "A prompt",
+					SQLQuery:              "SELECT * FROM orders",
+					Dialect:               "PostgreSQL",
+					Status:                "approved",
+				},
+			},
+		},
+		&mockOntologyExportAgentRepo{
+			agents: []*models.Agent{
+				{ID: agentZID, ProjectID: projectID, Name: "z-agent"},
+				{ID: agentAID, ProjectID: projectID, Name: "a-agent"},
+			},
+			queryAccessBy: map[uuid.UUID][]uuid.UUID{
+				agentZID: {queryZID, queryAID},
+				agentAID: {queryAID},
+			},
+		},
+		zap.NewNop(),
+	)
+
+	bundle, err := service.BuildBundle(context.Background(), projectID, datasourceID)
+	require.NoError(t, err)
+
+	require.Len(t, bundle.Datasources, 1)
+	require.Equal(t, "orders", bundle.Datasources[0].SelectedSchema.Tables[0].TableName)
+	require.Equal(t, "users", bundle.Datasources[0].SelectedSchema.Tables[1].TableName)
+	require.Equal(t, []string{"id", "user_id", "status"}, []string{
+		bundle.Datasources[0].SelectedSchema.Tables[0].Columns[0].ColumnName,
+		bundle.Datasources[0].SelectedSchema.Tables[0].Columns[1].ColumnName,
+		bundle.Datasources[0].SelectedSchema.Tables[0].Columns[2].ColumnName,
+	})
+
+	require.Equal(t, []string{"A prompt", "Z prompt"}, []string{
+		bundle.ApprovedQueries[0].NaturalLanguagePrompt,
+		bundle.ApprovedQueries[1].NaturalLanguagePrompt,
+	})
+	require.Equal(t, []string{"query_001", "query_002"}, []string{
+		bundle.ApprovedQueries[0].Key,
+		bundle.ApprovedQueries[1].Key,
+	})
+
+	require.Equal(t, []string{"a-agent", "z-agent"}, []string{
+		bundle.Agents[0].Name,
+		bundle.Agents[1].Name,
+	})
+	require.Equal(t, []string{"query_001", "query_002"}, bundle.Agents[1].QueryKeys)
+
+	firstPayload, err := service.MarshalBundle(bundle)
+	require.NoError(t, err)
+	secondPayload, err := service.MarshalBundle(bundle)
+	require.NoError(t, err)
+	require.Equal(t, string(firstPayload), string(secondPayload))
+}
+
 func TestOntologyExportService_SuggestedFilename(t *testing.T) {
 	service := &ontologyExportService{}
 
