@@ -27,6 +27,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Cache test Docker image
         id: cache-test-image
@@ -90,15 +92,46 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Resolve validated source commit
+        id: source-commit
+        run: |
+          set -euo pipefail
+
+          PARENT_COUNT="$(git rev-list --parents -n 1 "${GITHUB_SHA}" | awk '{print NF-1}')"
+          case "${PARENT_COUNT}" in
+            1)
+              SOURCE_SHA="${GITHUB_SHA}"
+              RELEASE_SHAPE="direct prod push"
+              ;;
+            2)
+              SOURCE_SHA="$(git rev-parse "${GITHUB_SHA}^2")"
+              RELEASE_SHAPE="prod merge commit"
+              ;;
+            *)
+              echo "Unsupported prod release commit shape: ${GITHUB_SHA} has ${PARENT_COUNT} parents." >&2
+              echo "Expected either a direct push of a validated main commit or a two-parent merge commit from main into prod." >&2
+              exit 1
+              ;;
+          esac
+
+          if ! git merge-base --is-ancestor "${SOURCE_SHA}" origin/main; then
+            echo "Resolved source commit is not reachable from origin/main: ${SOURCE_SHA}" >&2
+            echo "This workflow only promotes commits that already exist on origin/main and were validated by the dev build." >&2
+            exit 1
+          fi
+
+          echo "source_sha=${SOURCE_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "Resolved source commit: ${SOURCE_SHA} (${RELEASE_SHAPE})"
+
       - name: Resolve validated dev image
         id: resolve-source
         run: |
           set -euo pipefail
 
-          SOURCE_IMAGE="${DEV_IMAGE_REPOSITORY}:${GITHUB_SHA}"
+          SOURCE_IMAGE="${DEV_IMAGE_REPOSITORY}:${{ steps.source-commit.outputs.source_sha }}"
           if ! SOURCE_DIGEST="$(gcloud artifacts docker images describe "${SOURCE_IMAGE}" --format='value(image_summary.digest)' 2>/tmp/dev-image-error.log)"; then
             echo "Expected validated dev image was not found: ${SOURCE_IMAGE}" >&2
-            echo "Release contract: the commit pushed to origin/prod must already have been built on origin/main with the same GITHUB_SHA. This workflow will not rebuild or guess another tag." >&2
+            echo "Release contract: the commit promoted to origin/prod must already have been built on origin/main. This workflow will not rebuild or guess another tag." >&2
             cat /tmp/dev-image-error.log >&2
             exit 1
           fi
@@ -116,7 +149,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          DESTINATION_IMAGE="${PROD_IMAGE_REPOSITORY}:${GITHUB_SHA}"
+          DESTINATION_IMAGE="${PROD_IMAGE_REPOSITORY}:${{ steps.source-commit.outputs.source_sha }}"
           docker buildx imagetools create \
             --prefer-index=false \
             --tag "${DESTINATION_IMAGE}" \

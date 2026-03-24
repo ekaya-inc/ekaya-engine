@@ -89,6 +89,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Set image version
+        id: image-version
+        run: |
+          echo "version=${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "Image version: ${GITHUB_SHA}"
+
       - name: Build and push application image
         id: build-image
         uses: docker/build-push-action@v6
@@ -98,6 +104,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.DEV_IMAGE_REPOSITORY }}:${{ github.sha }}
+          build-args: |
+            VERSION=${{ steps.image-version.outputs.version }}
 
       - name: Record deployed image reference
         id: image-ref
