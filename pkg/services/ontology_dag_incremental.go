@@ -221,7 +221,7 @@ func (s *ontologyDAGService) GetOntologyStatus(ctx context.Context, projectID, d
 		return nil, fmt.Errorf("get last completed DAG: %w", err)
 	}
 
-	completionState, err := loadOntologyCompletionState(ctx, scope.Conn, projectID)
+	completionState, err := loadOntologyCompletionState(ctx, scope.Conn, projectID, datasourceID)
 	if err != nil {
 		return nil, fmt.Errorf("load ontology completion state: %w", err)
 	}

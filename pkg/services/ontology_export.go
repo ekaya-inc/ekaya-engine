@@ -68,11 +68,6 @@ type ontologyExportQueryRepository interface {
 	ListByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.Query, error)
 }
 
-type ontologyExportAgentRepository interface {
-	ListByProject(ctx context.Context, projectID uuid.UUID) ([]*models.Agent, error)
-	GetQueryAccessByAgentIDs(ctx context.Context, agentIDs []uuid.UUID) (map[uuid.UUID][]uuid.UUID, error)
-}
-
 type ontologyExportService struct {
 	projectRepo        ontologyExportProjectRepository
 	datasourceService  ontologyExportDatasourceService
@@ -83,7 +78,6 @@ type ontologyExportService struct {
 	knowledgeRepo      ontologyExportKnowledgeRepository
 	glossaryRepo       ontologyExportGlossaryRepository
 	queryRepo          ontologyExportQueryRepository
-	agentRepo          ontologyExportAgentRepository
 	logger             *zap.Logger
 }
 
@@ -105,7 +99,6 @@ func NewOntologyExportService(
 	knowledgeRepo ontologyExportKnowledgeRepository,
 	glossaryRepo ontologyExportGlossaryRepository,
 	queryRepo ontologyExportQueryRepository,
-	agentRepo ontologyExportAgentRepository,
 	logger *zap.Logger,
 ) OntologyExportService {
 	return &ontologyExportService{
@@ -118,7 +111,6 @@ func NewOntologyExportService(
 		knowledgeRepo:      knowledgeRepo,
 		glossaryRepo:       glossaryRepo,
 		queryRepo:          queryRepo,
-		agentRepo:          agentRepo,
 		logger:             logger,
 	}
 }
@@ -183,24 +175,13 @@ func (s *ontologyExportService) BuildBundle(ctx context.Context, projectID, data
 		return nil, fmt.Errorf("load queries: %w", err)
 	}
 
-	agents, err := s.agentRepo.ListByProject(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("load agents: %w", err)
-	}
-
-	queryAccessByAgentID, err := s.loadAgentQueryAccess(ctx, agents)
-	if err != nil {
-		return nil, fmt.Errorf("load agent query access: %w", err)
-	}
-
-	exportedQueries, queryKeys := buildApprovedQueryExports(queries)
-	exportedAgents := buildExportAgents(agents, queryAccessByAgentID, queryKeys)
+	exportedQueries := buildApprovedQueryExports(queries)
 
 	bundle := &models.OntologyExportBundle{
 		Format:       models.OntologyExportFormat,
 		Version:      models.OntologyExportVersion,
 		ExportedAt:   time.Now().UTC(),
-		RequiredApps: buildRequiredApps(exportedQueries, exportedAgents),
+		RequiredApps: buildRequiredApps(exportedQueries),
 		Project: models.OntologyExportProject{
 			Name:          project.Name,
 			IndustryType:  project.IndustryType,
@@ -227,7 +208,6 @@ func (s *ontologyExportService) BuildBundle(ctx context.Context, projectID, data
 			GlossaryTerms:    buildExportGlossaryTerms(glossaryTerms),
 		},
 		ApprovedQueries: exportedQueries,
-		Agents:          exportedAgents,
 		Security: models.OntologyExportSecurity{
 			IncludesDatasourceCredentials: false,
 			IncludesAIConfig:              false,
@@ -279,19 +259,6 @@ func (s *ontologyExportService) loadAllQuestions(ctx context.Context, projectID 
 	}
 
 	return result, nil
-}
-
-func (s *ontologyExportService) loadAgentQueryAccess(ctx context.Context, agents []*models.Agent) (map[uuid.UUID][]uuid.UUID, error) {
-	if len(agents) == 0 {
-		return map[uuid.UUID][]uuid.UUID{}, nil
-	}
-
-	agentIDs := make([]uuid.UUID, 0, len(agents))
-	for _, agent := range agents {
-		agentIDs = append(agentIDs, agent.ID)
-	}
-
-	return s.agentRepo.GetQueryAccessByAgentIDs(ctx, agentIDs)
 }
 
 func filterSelectedTables(tables []*models.SchemaTable) map[uuid.UUID]*models.SchemaTable {
@@ -675,7 +642,7 @@ func buildExportGlossaryTerms(terms []*models.BusinessGlossaryTerm) []models.Ont
 	return exported
 }
 
-func buildApprovedQueryExports(queries []*models.Query) ([]models.OntologyExportApprovedQuery, map[uuid.UUID]string) {
+func buildApprovedQueryExports(queries []*models.Query) []models.OntologyExportApprovedQuery {
 	approved := make([]*models.Query, 0, len(queries))
 	for _, query := range queries {
 		if query == nil || query.Status != "approved" {
@@ -695,10 +662,8 @@ func buildApprovedQueryExports(queries []*models.Query) ([]models.OntologyExport
 	})
 
 	exported := make([]models.OntologyExportApprovedQuery, 0, len(approved))
-	keys := make(map[uuid.UUID]string, len(approved))
 	for index, query := range approved {
 		key := fmt.Sprintf("query_%03d", index+1)
-		keys[query.ID] = key
 
 		parameters := append([]models.QueryParameter(nil), query.Parameters...)
 		sort.Slice(parameters, func(i, j int) bool {
@@ -729,53 +694,13 @@ func buildApprovedQueryExports(queries []*models.Query) ([]models.OntologyExport
 		})
 	}
 
-	return exported, keys
-}
-
-func buildExportAgents(
-	agents []*models.Agent,
-	queryAccessByAgentID map[uuid.UUID][]uuid.UUID,
-	queryKeys map[uuid.UUID]string,
-) []models.OntologyExportAgent {
-	exported := make([]models.OntologyExportAgent, 0, len(agents))
-	for _, agent := range agents {
-		if agent == nil {
-			continue
-		}
-
-		queryIDs := queryAccessByAgentID[agent.ID]
-		queryKeysForAgent := make([]string, 0, len(queryIDs))
-		for _, queryID := range queryIDs {
-			if key, ok := queryKeys[queryID]; ok {
-				queryKeysForAgent = append(queryKeysForAgent, key)
-			}
-		}
-
-		if len(queryKeysForAgent) == 0 {
-			continue
-		}
-
-		sort.Strings(queryKeysForAgent)
-		exported = append(exported, models.OntologyExportAgent{
-			Name:      agent.Name,
-			QueryKeys: queryKeysForAgent,
-		})
-	}
-
-	sort.Slice(exported, func(i, j int) bool {
-		return exported[i].Name < exported[j].Name
-	})
-
 	return exported
 }
 
-func buildRequiredApps(queries []models.OntologyExportApprovedQuery, agents []models.OntologyExportAgent) []string {
+func buildRequiredApps(queries []models.OntologyExportApprovedQuery) []string {
 	apps := []string{models.AppIDOntologyForge}
 	if len(queries) > 0 {
 		apps = append(apps, models.AppIDAIDataLiaison)
-	}
-	if len(agents) > 0 {
-		apps = append(apps, models.AppIDAIAgents)
 	}
 	return apps
 }

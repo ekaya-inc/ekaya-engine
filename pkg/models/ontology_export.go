@@ -18,7 +18,6 @@ type OntologyExportBundle struct {
 	Datasources     []OntologyExportDatasource    `json:"datasources"`
 	Ontology        OntologyExportOntology        `json:"ontology"`
 	ApprovedQueries []OntologyExportApprovedQuery `json:"approved_queries"`
-	Agents          []OntologyExportAgent         `json:"agents"`
 	Security        OntologyExportSecurity        `json:"security"`
 }
 
@@ -200,12 +199,6 @@ type OntologyExportApprovedQuery struct {
 	Constraints           *string          `json:"constraints,omitempty"`
 	Tags                  []string         `json:"tags"`
 	AllowsModification    bool             `json:"allows_modification"`
-}
-
-// OntologyExportAgent is a portable named-agent definition.
-type OntologyExportAgent struct {
-	Name      string   `json:"name"`
-	QueryKeys []string `json:"query_keys"`
 }
 
 // OntologyExportSecurity documents secret-handling guarantees for the bundle.

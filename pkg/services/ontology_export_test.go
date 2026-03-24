@@ -108,19 +108,6 @@ func (m *mockOntologyExportQueryRepo) ListByDatasource(ctx context.Context, proj
 	return m.items, nil
 }
 
-type mockOntologyExportAgentRepo struct {
-	agents        []*models.Agent
-	queryAccessBy map[uuid.UUID][]uuid.UUID
-}
-
-func (m *mockOntologyExportAgentRepo) ListByProject(ctx context.Context, projectID uuid.UUID) ([]*models.Agent, error) {
-	return m.agents, nil
-}
-
-func (m *mockOntologyExportAgentRepo) GetQueryAccessByAgentIDs(ctx context.Context, agentIDs []uuid.UUID) (map[uuid.UUID][]uuid.UUID, error) {
-	return m.queryAccessBy, nil
-}
-
 func TestOntologyExportService_BuildBundle(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -132,7 +119,6 @@ func TestOntologyExportService_BuildBundle(t *testing.T) {
 	usersIDColumnID := uuid.New()
 	approvedEnabledQueryID := uuid.New()
 	approvedDisabledQueryID := uuid.New()
-	agentID := uuid.New()
 
 	tableType := models.TableTypeTransactional
 	tableDescription := "Orders placed by shoppers"
@@ -306,19 +292,6 @@ func TestOntologyExportService_BuildBundle(t *testing.T) {
 				},
 			},
 		},
-		&mockOntologyExportAgentRepo{
-			agents: []*models.Agent{
-				{
-					ID:              agentID,
-					ProjectID:       projectID,
-					Name:            "demo-agent",
-					APIKeyEncrypted: "agent-secret",
-				},
-			},
-			queryAccessBy: map[uuid.UUID][]uuid.UUID{
-				agentID: {approvedEnabledQueryID},
-			},
-		},
 		zap.NewNop(),
 	)
 
@@ -330,7 +303,6 @@ func TestOntologyExportService_BuildBundle(t *testing.T) {
 	require.Equal(t, []string{
 		models.AppIDOntologyForge,
 		models.AppIDAIDataLiaison,
-		models.AppIDAIAgents,
 	}, bundle.RequiredApps)
 
 	require.Len(t, bundle.Datasources, 1)
@@ -365,10 +337,6 @@ func TestOntologyExportService_BuildBundle(t *testing.T) {
 	require.Equal(t, "query_002", bundle.ApprovedQueries[1].Key)
 	require.Equal(t, "Find users", bundle.ApprovedQueries[1].NaturalLanguagePrompt)
 
-	require.Len(t, bundle.Agents, 1)
-	require.Equal(t, "demo-agent", bundle.Agents[0].Name)
-	require.Equal(t, []string{"query_001"}, bundle.Agents[0].QueryKeys)
-
 	payload, err := service.MarshalBundle(bundle)
 	require.NoError(t, err)
 	payloadText := string(payload)
@@ -378,6 +346,7 @@ func TestOntologyExportService_BuildBundle(t *testing.T) {
 	require.NotContains(t, payloadText, "dbpass")
 	require.NotContains(t, payloadText, "nested-secret")
 	require.NotContains(t, payloadText, "agent-secret")
+	require.NotContains(t, payloadText, "\"agents\"")
 }
 
 func TestOntologyExportService_BuildBundle_DeterministicOrdering(t *testing.T) {
@@ -391,8 +360,6 @@ func TestOntologyExportService_BuildBundle_DeterministicOrdering(t *testing.T) {
 	usersIDColumnID := uuid.New()
 	queryAID := uuid.New()
 	queryZID := uuid.New()
-	agentAID := uuid.New()
-	agentZID := uuid.New()
 
 	service := NewOntologyExportService(
 		&mockOntologyExportProjectRepo{
@@ -449,16 +416,6 @@ func TestOntologyExportService_BuildBundle_DeterministicOrdering(t *testing.T) {
 				},
 			},
 		},
-		&mockOntologyExportAgentRepo{
-			agents: []*models.Agent{
-				{ID: agentZID, ProjectID: projectID, Name: "z-agent"},
-				{ID: agentAID, ProjectID: projectID, Name: "a-agent"},
-			},
-			queryAccessBy: map[uuid.UUID][]uuid.UUID{
-				agentZID: {queryZID, queryAID},
-				agentAID: {queryAID},
-			},
-		},
 		zap.NewNop(),
 	)
 
@@ -483,17 +440,12 @@ func TestOntologyExportService_BuildBundle_DeterministicOrdering(t *testing.T) {
 		bundle.ApprovedQueries[1].Key,
 	})
 
-	require.Equal(t, []string{"a-agent", "z-agent"}, []string{
-		bundle.Agents[0].Name,
-		bundle.Agents[1].Name,
-	})
-	require.Equal(t, []string{"query_001", "query_002"}, bundle.Agents[1].QueryKeys)
-
 	firstPayload, err := service.MarshalBundle(bundle)
 	require.NoError(t, err)
 	secondPayload, err := service.MarshalBundle(bundle)
 	require.NoError(t, err)
 	require.Equal(t, string(firstPayload), string(secondPayload))
+	require.NotContains(t, string(firstPayload), "\"agents\"")
 }
 
 func TestOntologyExportService_SuggestedFilename(t *testing.T) {

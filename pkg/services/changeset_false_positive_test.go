@@ -239,6 +239,7 @@ func TestGetOntologyStatus_NoFalsePositivesImmediatelyAfterImport(t *testing.T) 
 		ctx,
 		scope.Conn,
 		tc.projectID,
+		tc.dsID,
 		models.OntologyCompletionProvenanceImported,
 		importedAt,
 	))

@@ -220,7 +220,6 @@ func Run(version string) error {
 		knowledgeRepo,
 		glossaryRepo,
 		queryRepo,
-		agentRepo,
 		logger,
 	)
 	ontologyImportService := services.NewOntologyImportService(
@@ -229,7 +228,6 @@ func Run(version string) error {
 		schemaRepo,
 		ontologyDAGRepo,
 		installedAppService,
-		credentialEncryptor,
 		logger,
 	)
 

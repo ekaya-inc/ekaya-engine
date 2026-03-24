@@ -628,7 +628,6 @@ func (m *mockOntologyExportServiceForRBAC) BuildBundle(ctx context.Context, proj
 			GlossaryTerms:    []models.OntologyExportGlossaryTerm{},
 		},
 		ApprovedQueries: []models.OntologyExportApprovedQuery{},
-		Agents:          []models.OntologyExportAgent{},
 	}, nil
 }
 

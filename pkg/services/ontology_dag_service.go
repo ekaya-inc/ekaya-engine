@@ -449,7 +449,7 @@ func (s *ontologyDAGService) Delete(ctx context.Context, projectID uuid.UUID) er
 	if !ok {
 		return fmt.Errorf("no tenant scope in context")
 	}
-	if err := clearOntologyCompletionState(ctx, scope.Conn, projectID); err != nil {
+	if err := clearOntologyCompletionState(ctx, scope.Conn, projectID, uuid.Nil); err != nil {
 		s.logger.Error("Failed to clear ontology completion state", zap.String("project_id", projectID.String()), zap.Error(err))
 		return fmt.Errorf("clear ontology completion state: %w", err)
 	}
@@ -596,7 +596,7 @@ func (s *ontologyDAGService) executeDAG(projectID, dagID, userID uuid.UUID, chan
 	}
 
 	// All nodes completed successfully
-	s.markDAGCompleted(projectID, dagID)
+	s.markDAGCompleted(projectID, dagRecord.DatasourceID, dagID)
 }
 
 // executeNode runs a single node with retry logic.
@@ -835,7 +835,7 @@ func (s *ontologyDAGService) markDAGFailed(projectID, dagID uuid.UUID, errMsg st
 }
 
 // markDAGCompleted marks the DAG as completed.
-func (s *ontologyDAGService) markDAGCompleted(projectID, dagID uuid.UUID) {
+func (s *ontologyDAGService) markDAGCompleted(projectID, datasourceID, dagID uuid.UUID) {
 	ctx, cleanup, err := s.getTenantCtx(context.Background(), projectID)
 	if err != nil {
 		s.logger.Error("Failed to get tenant context for marking DAG completed", zap.Error(err))
@@ -852,7 +852,7 @@ func (s *ontologyDAGService) markDAGCompleted(projectID, dagID uuid.UUID) {
 		s.logger.Error("Tenant scope missing while marking DAG completed")
 		return
 	}
-	if err := storeOntologyCompletionState(ctx, scope.Conn, projectID, models.OntologyCompletionProvenanceExtracted, time.Now().UTC()); err != nil {
+	if err := storeOntologyCompletionState(ctx, scope.Conn, projectID, datasourceID, models.OntologyCompletionProvenanceExtracted, time.Now().UTC()); err != nil {
 		s.logger.Error("Failed to store ontology completion state", zap.Error(err))
 	}
 

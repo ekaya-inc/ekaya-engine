@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
 
-	"github.com/ekaya-inc/ekaya-engine/pkg/crypto"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	sqlpkg "github.com/ekaya-inc/ekaya-engine/pkg/sql"
@@ -55,7 +54,6 @@ type ontologyImportService struct {
 	schemaRepo          ontologyImportSchemaRepository
 	dagRepo             ontologyImportDAGRepository
 	installedAppService ontologyImportInstalledAppService
-	encryptor           *crypto.CredentialEncryptor
 	logger              *zap.Logger
 }
 
@@ -90,7 +88,6 @@ func NewOntologyImportService(
 	schemaRepo ontologyImportSchemaRepository,
 	dagRepo ontologyImportDAGRepository,
 	installedAppService ontologyImportInstalledAppService,
-	encryptor *crypto.CredentialEncryptor,
 	logger *zap.Logger,
 ) OntologyImportService {
 	return &ontologyImportService{
@@ -99,7 +96,6 @@ func NewOntologyImportService(
 		schemaRepo:          schemaRepo,
 		dagRepo:             dagRepo,
 		installedAppService: installedAppService,
-		encryptor:           encryptor,
 		logger:              logger.Named("ontology-import"),
 	}
 }
@@ -191,7 +187,7 @@ func (s *ontologyImportService) prepareImportPlan(
 	if !ok {
 		return nil, fmt.Errorf("no tenant scope in context")
 	}
-	if completionState, err := loadOntologyCompletionState(ctx, scope.Conn, projectID); err != nil {
+	if completionState, err := loadOntologyCompletionState(ctx, scope.Conn, projectID, datasourceID); err != nil {
 		return nil, fmt.Errorf("load ontology completion state: %w", err)
 	} else if completionState.Provenance.IsValid() {
 		report.Problems = append(report.Problems, models.OntologyImportProblem{
@@ -227,139 +223,113 @@ func (s *ontologyImportService) prepareImportPlan(
 		}
 	}
 
-	selectedTables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
+	availableTables, err := s.schemaRepo.ListAllTablesByDatasource(ctx, projectID, datasourceID)
 	if err != nil {
-		return nil, fmt.Errorf("load selected schema tables: %w", err)
-	}
-	selectedColumns, err := s.schemaRepo.ListColumnsByDatasource(ctx, projectID, datasourceID)
-	if err != nil {
-		return nil, fmt.Errorf("load selected schema columns: %w", err)
+		return nil, fmt.Errorf("load datasource schema tables: %w", err)
 	}
 
-	targetTableByKey := make(map[string]*models.SchemaTable, len(selectedTables))
-	tableIDs := make([]uuid.UUID, 0, len(selectedTables))
-	for _, table := range selectedTables {
+	availableTableByKey := make(map[string]*models.SchemaTable, len(availableTables))
+	availableColumnsByTableKey := make(map[string]map[string]*models.SchemaColumn, len(availableTables))
+	availableColumnByKey := make(map[string]*models.SchemaColumn)
+	for _, table := range availableTables {
 		if table == nil {
 			continue
 		}
 		key := exportTableKey(table.SchemaName, table.TableName)
-		targetTableByKey[key] = table
-		tableIDs = append(tableIDs, table.ID)
+		availableTableByKey[key] = table
+
+		tableColumns, err := s.schemaRepo.ListAllColumnsByTable(ctx, projectID, table.ID)
+		if err != nil {
+			return nil, fmt.Errorf("load datasource schema columns for %s.%s: %w", table.SchemaName, table.TableName, err)
+		}
+
+		availableColumnsByTableKey[key] = make(map[string]*models.SchemaColumn, len(tableColumns))
+		for _, column := range tableColumns {
+			if column == nil {
+				continue
+			}
+			availableColumnsByTableKey[key][column.ColumnName] = column
+			availableColumnByKey[exportColumnKey(table.SchemaName, table.TableName, column.ColumnName)] = column
+		}
 	}
 
-	columnTableByID := make(map[uuid.UUID]*models.SchemaTable, len(selectedTables))
-	for _, table := range selectedTables {
-		if table != nil {
-			columnTableByID[table.ID] = table
-		}
-	}
-
-	targetColumnByKey := make(map[string]*models.SchemaColumn, len(selectedColumns))
-	columnIDs := make([]uuid.UUID, 0, len(selectedColumns))
-	selectedColumnsByTableKey := make(map[string]map[string]*models.SchemaColumn)
-	for _, column := range selectedColumns {
-		if column == nil {
-			continue
-		}
-		table := columnTableByID[column.SchemaTableID]
-		if table == nil {
-			continue
-		}
-		tableKey := exportTableKey(table.SchemaName, table.TableName)
-		key := exportColumnKey(table.SchemaName, table.TableName, column.ColumnName)
-		targetColumnByKey[key] = column
-		columnIDs = append(columnIDs, column.ID)
-		if selectedColumnsByTableKey[tableKey] == nil {
-			selectedColumnsByTableKey[tableKey] = make(map[string]*models.SchemaColumn)
-		}
-		selectedColumnsByTableKey[tableKey][column.ColumnName] = column
-	}
-
-	bundleTableKeys := make(map[string]struct{}, len(importDatasource.SelectedSchema.Tables))
-	bundleColumnKeys := make(map[string]struct{})
+	targetTableByKey := make(map[string]*models.SchemaTable, len(importDatasource.SelectedSchema.Tables))
+	targetColumnByKey := make(map[string]*models.SchemaColumn)
+	tableIDs := make([]uuid.UUID, 0, len(importDatasource.SelectedSchema.Tables))
+	columnIDs := make([]uuid.UUID, 0)
+	selectedTableIDs := make(map[uuid.UUID]struct{}, len(importDatasource.SelectedSchema.Tables))
+	selectedColumnIDs := make(map[uuid.UUID]struct{})
 	for _, table := range importDatasource.SelectedSchema.Tables {
 		tableKey := exportTableKey(table.SchemaName, table.TableName)
-		bundleTableKeys[tableKey] = struct{}{}
-		if _, ok := targetTableByKey[tableKey]; !ok {
+		targetTable, ok := availableTableByKey[tableKey]
+		if !ok {
 			report.MissingTables = append(report.MissingTables, models.OntologyExportTableRef{
 				SchemaName: table.SchemaName,
 				TableName:  table.TableName,
 			})
-		}
-
-		targetColumnsForTable := selectedColumnsByTableKey[tableKey]
-		bundleColumnsForTable := make(map[string]struct{}, len(table.Columns))
-		for _, column := range table.Columns {
-			bundleColumnsForTable[column.ColumnName] = struct{}{}
-			bundleColumnKeys[exportColumnKey(table.SchemaName, table.TableName, column.ColumnName)] = struct{}{}
-			if targetColumnsForTable == nil {
-				report.MissingColumns = append(report.MissingColumns, models.OntologyExportColumnRef{
-					Table: models.OntologyExportTableRef{
-						SchemaName: table.SchemaName,
-						TableName:  table.TableName,
-					},
-					ColumnName: column.ColumnName,
-				})
-				continue
-			}
-			if _, ok := targetColumnsForTable[column.ColumnName]; !ok {
-				report.MissingColumns = append(report.MissingColumns, models.OntologyExportColumnRef{
-					Table: models.OntologyExportTableRef{
-						SchemaName: table.SchemaName,
-						TableName:  table.TableName,
-					},
-					ColumnName: column.ColumnName,
-				})
-			}
-		}
-
-		for selectedColumnName := range targetColumnsForTable {
-			if _, ok := bundleColumnsForTable[selectedColumnName]; ok {
-				continue
-			}
-			report.UnexpectedColumns = append(report.UnexpectedColumns, models.OntologyExportColumnRef{
-				Table: models.OntologyExportTableRef{
-					SchemaName: table.SchemaName,
-					TableName:  table.TableName,
-				},
-				ColumnName: selectedColumnName,
-			})
-		}
-	}
-
-	for key, table := range targetTableByKey {
-		if _, ok := bundleTableKeys[key]; ok {
 			continue
 		}
-		report.UnexpectedTables = append(report.UnexpectedTables, models.OntologyExportTableRef{
-			SchemaName: table.SchemaName,
-			TableName:  table.TableName,
-		})
+
+		targetTableByKey[tableKey] = targetTable
+		if _, alreadySelected := selectedTableIDs[targetTable.ID]; !alreadySelected {
+			tableIDs = append(tableIDs, targetTable.ID)
+			selectedTableIDs[targetTable.ID] = struct{}{}
+		}
+
+		targetColumnsForTable := availableColumnsByTableKey[tableKey]
+		for _, column := range table.Columns {
+			targetColumn, ok := targetColumnsForTable[column.ColumnName]
+			if !ok {
+				report.MissingColumns = append(report.MissingColumns, models.OntologyExportColumnRef{
+					Table: models.OntologyExportTableRef{
+						SchemaName: table.SchemaName,
+						TableName:  table.TableName,
+					},
+					ColumnName: column.ColumnName,
+				})
+				continue
+			}
+
+			columnKey := exportColumnKey(table.SchemaName, table.TableName, column.ColumnName)
+			targetColumnByKey[columnKey] = targetColumn
+			if _, alreadySelected := selectedColumnIDs[targetColumn.ID]; !alreadySelected {
+				columnIDs = append(columnIDs, targetColumn.ID)
+				selectedColumnIDs[targetColumn.ID] = struct{}{}
+			}
+		}
 	}
 
 	for _, relationship := range importDatasource.SelectedSchema.Relationships {
 		sourceKey := exportColumnKey(relationship.Source.Table.SchemaName, relationship.Source.Table.TableName, relationship.Source.ColumnName)
 		targetKey := exportColumnKey(relationship.Target.Table.SchemaName, relationship.Target.Table.TableName, relationship.Target.ColumnName)
 		if _, ok := targetColumnByKey[sourceKey]; !ok {
+			message := "Source column is not included in the imported schema."
+			if _, exists := availableColumnByKey[sourceKey]; !exists {
+				message = "Source column does not exist on the target datasource."
+			}
 			report.UnresolvedRelationships = append(report.UnresolvedRelationships, models.OntologyImportRelationshipIssue{
 				Source:  relationship.Source,
 				Target:  relationship.Target,
-				Message: "Source column is not selected on the target datasource.",
+				Message: message,
 			})
 			continue
 		}
 		if _, ok := targetColumnByKey[targetKey]; !ok {
+			message := "Target column is not included in the imported schema."
+			if _, exists := availableColumnByKey[targetKey]; !exists {
+				message = "Target column does not exist on the target datasource."
+			}
 			report.UnresolvedRelationships = append(report.UnresolvedRelationships, models.OntologyImportRelationshipIssue{
 				Source:  relationship.Source,
 				Target:  relationship.Target,
-				Message: "Target column is not selected on the target datasource.",
+				Message: message,
 			})
 		}
 	}
 
 	if report.HasProblems() {
 		sortOntologyImportReport(&report)
-		return nil, newOntologyImportValidationError(400, "schema_validation_failed", "Ontology bundle does not match the selected datasource schema", report)
+		return nil, newOntologyImportValidationError(400, "schema_validation_failed", "Ontology bundle does not match the target datasource schema", report)
 	}
 
 	if err := normalizeBundleQueries(bundle, &report); err != nil {
@@ -373,21 +343,6 @@ func (s *ontologyImportService) prepareImportPlan(
 	queryIDsByKey := make(map[string]uuid.UUID, len(bundle.ApprovedQueries))
 	for _, query := range bundle.ApprovedQueries {
 		queryIDsByKey[query.Key] = uuid.New()
-	}
-	for _, agent := range bundle.Agents {
-		for _, key := range agent.QueryKeys {
-			if _, ok := queryIDsByKey[key]; ok {
-				continue
-			}
-			report.Problems = append(report.Problems, models.OntologyImportProblem{
-				Code:    "invalid_agent_query_key",
-				Message: fmt.Sprintf("Agent %q references unknown query key %q.", agent.Name, key),
-			})
-		}
-	}
-	if report.HasProblems() {
-		sortOntologyImportReport(&report)
-		return nil, newOntologyImportValidationError(400, "invalid_bundle", "Ontology bundle contains invalid agent mappings", report)
 	}
 
 	return &ontologyImportPlan{
@@ -429,9 +384,6 @@ func (s *ontologyImportService) applyImport(ctx context.Context, tx pgx.Tx, plan
 		return err
 	}
 	if err := s.insertQueries(ctx, tx, plan); err != nil {
-		return err
-	}
-	if err := s.insertAgents(ctx, tx, plan); err != nil {
 		return err
 	}
 	if err := s.updateProjectOntologyState(ctx, tx, plan); err != nil {
@@ -543,9 +495,6 @@ func (s *ontologyImportService) clearExistingImportState(ctx context.Context, tx
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM engine_business_glossary WHERE project_id = $1`, projectID); err != nil {
 		return fmt.Errorf("delete glossary: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM engine_agents WHERE project_id = $1`, projectID); err != nil {
-		return fmt.Errorf("delete agents: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE engine_queries
@@ -788,46 +737,15 @@ func (s *ontologyImportService) insertQueries(ctx context.Context, tx pgx.Tx, pl
 	return nil
 }
 
-func (s *ontologyImportService) insertAgents(ctx context.Context, tx pgx.Tx, plan *ontologyImportPlan) error {
-	for _, agent := range plan.bundle.Agents {
-		plainKey, err := generateAPIKey()
-		if err != nil {
-			return fmt.Errorf("generate API key for agent %q: %w", agent.Name, err)
-		}
-		encryptedKey, err := s.encryptor.Encrypt(plainKey)
-		if err != nil {
-			return fmt.Errorf("encrypt API key for agent %q: %w", agent.Name, err)
-		}
-
-		agentID := uuid.New()
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO engine_agents (id, project_id, name, api_key_encrypted, created_at, updated_at, last_access_at)
-			VALUES ($1, $2, $3, $4, $5, $5, NULL)
-		`, agentID, plan.project.ID, agent.Name, encryptedKey, plan.importedAt); err != nil {
-			return fmt.Errorf("insert agent %q: %w", agent.Name, err)
-		}
-
-		for _, key := range agent.QueryKeys {
-			if _, err := tx.Exec(ctx, `
-				INSERT INTO engine_agent_queries (agent_id, query_id)
-				VALUES ($1, $2)
-			`, agentID, plan.queryIDsByKey[key]); err != nil {
-				return fmt.Errorf("insert agent query access for %q/%q: %w", agent.Name, key, err)
-			}
-		}
-	}
-
-	return nil
-}
-
 func (s *ontologyImportService) updateProjectOntologyState(ctx context.Context, tx pgx.Tx, plan *ontologyImportPlan) error {
 	parameters, err := loadProjectParameters(ctx, tx, plan.project.ID)
 	if err != nil {
 		return err
 	}
 
-	parameters[projectParamOntologyCompletionProvenance] = string(models.OntologyCompletionProvenanceImported)
-	parameters[projectParamOntologyCompletedAt] = plan.importedAt.Format(projectParamOntologyCompletedAtFormat)
+	if err := setOntologyCompletionState(parameters, plan.datasource.ID, models.OntologyCompletionProvenanceImported, plan.importedAt); err != nil {
+		return err
+	}
 
 	parametersJSON, err := json.Marshal(parameters)
 	if err != nil {
