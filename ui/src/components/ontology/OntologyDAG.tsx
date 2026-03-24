@@ -47,25 +47,6 @@ interface OntologyDAGProps {
 const POLL_INTERVAL_MS = 2000;
 const DEFAULT_EXPORT_FILENAME = 'ontology-export.json';
 
-interface FilePickerAcceptType {
-  description?: string;
-  accept: Record<string, string[]>;
-}
-
-interface FilePickerWritable {
-  write(data: Blob): Promise<void>;
-  close(): Promise<void>;
-}
-
-interface FilePickerHandle {
-  createWritable(): Promise<FilePickerWritable>;
-}
-
-interface FilePickerOptions {
-  suggestedName?: string;
-  types?: FilePickerAcceptType[];
-}
-
 // Helper to get status icon for a node
 const getNodeStatusIcon = (status: DAGNodeStatus, isCurrentNode: boolean) => {
   switch (status) {
@@ -148,8 +129,6 @@ export const OntologyDAG = ({
   const [error, setError] = useState<string | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
-  const [showExportDialog, setShowExportDialog] = useState(false);
-  const [exportFilename, setExportFilename] = useState(DEFAULT_EXPORT_FILENAME);
   const [isExporting, setIsExporting] = useState(false);
   const [projectOverview, setProjectOverview] = useState('');
   const [isLoadingOverview, setIsLoadingOverview] = useState(true);
@@ -311,27 +290,14 @@ export const OntologyDAG = ({
   }, [projectId, datasourceId, stopPolling, onError]);
 
   const handleExport = useCallback(async () => {
-    const normalizedFilename = normalizeExportFilename(exportFilename);
-
     try {
       setIsExporting(true);
       setError(null);
 
-      const fileHandle = await pickSaveLocation(normalizedFilename);
       const blob = await engineApi.exportOntologyBundle(projectId, datasourceId);
-
-      if (fileHandle) {
-        const writable = await fileHandle.createWritable();
-        await writable.write(blob);
-        await writable.close();
-      } else {
-        downloadBlob(blob, normalizedFilename);
-      }
+      downloadBlob(blob, DEFAULT_EXPORT_FILENAME);
 
       if (!isMountedRef.current) return;
-
-      setShowExportDialog(false);
-      setExportFilename(normalizedFilename);
     } catch (err) {
       if (!isMountedRef.current) return;
       if (isAbortError(err)) {
@@ -346,7 +312,7 @@ export const OntologyDAG = ({
         setIsExporting(false);
       }
     }
-  }, [datasourceId, exportFilename, onError, projectId]);
+  }, [datasourceId, onError, projectId]);
 
   // Initial load
   useEffect(() => {
@@ -712,7 +678,7 @@ export const OntologyDAG = ({
           {isComplete && (
             <Button
               variant="outline"
-              onClick={() => setShowExportDialog(true)}
+              onClick={() => void handleExport()}
               disabled={isExporting}
             >
               {isExporting ? (
@@ -952,112 +918,14 @@ export const OntologyDAG = ({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <Dialog open={showExportDialog} onOpenChange={(open) => {
-        setShowExportDialog(open);
-        if (!open && !isExporting) {
-          setExportFilename(DEFAULT_EXPORT_FILENAME);
-        }
-      }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Export Ontology Bundle</DialogTitle>
-            <DialogDescription>
-              Save a portable JSON bundle for project seeding. Datasource credentials, AI
-              credentials, and agent API keys are excluded.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-4 space-y-4">
-            <div>
-              <label htmlFor="export-filename" className="block text-sm font-medium text-text-primary mb-2">
-                Filename
-              </label>
-              <Input
-                id="export-filename"
-                type="text"
-                value={exportFilename}
-                onChange={(e) => setExportFilename(e.target.value)}
-                placeholder={DEFAULT_EXPORT_FILENAME}
-                className="w-full"
-              />
-            </div>
-            <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 dark:bg-amber-900/20 dark:border-amber-800">
-              <div className="flex items-start gap-3">
-                <AlertCircle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                <div className="text-sm text-amber-800 dark:text-amber-200">
-                  <p className="font-medium mb-1">Credentials are not exported</p>
-                  <p>
-                    Re-importing this bundle later will still require datasource binding and fresh
-                    agent credentials.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowExportDialog(false);
-                setExportFilename(DEFAULT_EXPORT_FILENAME);
-              }}
-              disabled={isExporting}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => void handleExport()}
-              disabled={isExporting || normalizeExportFilename(exportFilename).length === 0}
-              className="bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50"
-            >
-              {isExporting ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Exporting...
-                </>
-              ) : (
-                'Save Bundle'
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };
 
 export default OntologyDAG;
 
-function normalizeExportFilename(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return '';
-  }
-  return trimmed.toLowerCase().endsWith('.json') ? trimmed : `${trimmed}.json`;
-}
-
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
-}
-
-async function pickSaveLocation(suggestedName: string): Promise<FilePickerHandle | null> {
-  const savePicker = (
-    window as Window & typeof globalThis & { showSaveFilePicker?: (options: FilePickerOptions) => Promise<FilePickerHandle> }
-  ).showSaveFilePicker;
-
-  if (!savePicker) {
-    return null;
-  }
-
-  return savePicker({
-    suggestedName,
-    types: [
-      {
-        description: 'JSON files',
-        accept: { 'application/json': ['.json'] },
-      },
-    ],
-  });
 }
 
 function downloadBlob(blob: Blob, filename: string): void {
