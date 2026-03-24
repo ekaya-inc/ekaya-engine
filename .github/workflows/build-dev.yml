@@ -7,6 +7,13 @@ on:
 env:
   GO_VERSION: '1.25'
   TEST_IMAGE: ghcr.io/ekaya-inc/ekaya-engine-test-image:latest
+  DEV_GCP_PROJECT: ekaya-dev-us-central1
+  DEV_GCP_REGION: us-central1
+  DEV_CLOUD_RUN_SERVICE: ekaya-engine
+  DEV_REGISTRY_HOST: us-central1-docker.pkg.dev
+  DEV_IMAGE_REPOSITORY: us-central1-docker.pkg.dev/ekaya-dev-shared/ekaya-dev-containers/ekaya-engine
+  DEV_WORKLOAD_IDENTITY_PROVIDER: projects/398411665141/locations/global/workloadIdentityPools/github/providers/github-provider
+  DEV_SERVICE_ACCOUNT: ekaya-dev-github-actions@ekaya-dev-shared.iam.gserviceaccount.com
 
 jobs:
   build:
@@ -14,6 +21,7 @@ jobs:
     permissions:
       contents: read
       packages: read
+      id-token: write
 
     steps:
       - name: Checkout code
@@ -62,3 +70,59 @@ jobs:
 
       - name: Frontend tests
         run: cd ui && npm test -- --run
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEV_SERVICE_ACCOUNT }}
+          project_id: ${{ env.DEV_GCP_PROJECT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.DEV_GCP_PROJECT }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.DEV_REGISTRY_HOST }} --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push application image
+        id: build-image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.DEV_IMAGE_REPOSITORY }}:${{ github.sha }}
+
+      - name: Record deployed image reference
+        id: image-ref
+        run: |
+          IMAGE_TAGGED="${DEV_IMAGE_REPOSITORY}:${GITHUB_SHA}"
+          IMAGE_DIGEST="${DEV_IMAGE_REPOSITORY}@${{ steps.build-image.outputs.digest }}"
+          echo "tagged_image=${IMAGE_TAGGED}" >> "${GITHUB_OUTPUT}"
+          echo "digest_image=${IMAGE_DIGEST}" >> "${GITHUB_OUTPUT}"
+          echo "Pushed image tag: ${IMAGE_TAGGED}"
+          echo "Pushed image digest: ${IMAGE_DIGEST}"
+
+      - name: Deploy existing Cloud Run service
+        id: deploy
+        run: |
+          gcloud run services update "${DEV_CLOUD_RUN_SERVICE}" \
+            --project="${DEV_GCP_PROJECT}" \
+            --region="${DEV_GCP_REGION}" \
+            --image="${{ steps.image-ref.outputs.digest_image }}" \
+            --quiet
+
+          REVISION="$(gcloud run services describe "${DEV_CLOUD_RUN_SERVICE}" \
+            --project="${DEV_GCP_PROJECT}" \
+            --region="${DEV_GCP_REGION}" \
+            --format='value(status.latestReadyRevisionName)')"
+
+          echo "revision=${REVISION}" >> "${GITHUB_OUTPUT}"
+          echo "Deployed image: ${{ steps.image-ref.outputs.digest_image }}"
+          echo "Ready revision: ${REVISION}"
