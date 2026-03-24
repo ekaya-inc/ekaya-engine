@@ -7,6 +7,14 @@ on:
 env:
   GO_VERSION: '1.25'
   TEST_IMAGE: ghcr.io/ekaya-inc/ekaya-engine-test-image:latest
+  PROD_GCP_PROJECT: ekaya-prod-us-central1
+  PROD_GCP_REGION: us-central1
+  PROD_CLOUD_RUN_SERVICE: ekaya-engine
+  PROD_REGISTRY_HOST: us-central1-docker.pkg.dev
+  DEV_IMAGE_REPOSITORY: us-central1-docker.pkg.dev/ekaya-dev-shared/ekaya-dev-containers/ekaya-engine
+  PROD_IMAGE_REPOSITORY: us-central1-docker.pkg.dev/ekaya-prod-shared/ekaya-prod-containers/ekaya-engine
+  PROD_WORKLOAD_IDENTITY_PROVIDER: projects/568864889642/locations/global/workloadIdentityPools/github/providers/github-provider
+  PROD_SERVICE_ACCOUNT: ekaya-prod-github-actions@ekaya-prod-shared.iam.gserviceaccount.com
 
 jobs:
   build:
@@ -14,6 +22,7 @@ jobs:
     permissions:
       contents: read
       packages: read
+      id-token: write
 
     steps:
       - name: Checkout code
@@ -62,3 +71,83 @@ jobs:
 
       - name: Frontend tests
         run: cd ui && npm test -- --run
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.PROD_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.PROD_SERVICE_ACCOUNT }}
+          project_id: ${{ env.PROD_GCP_PROJECT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROD_GCP_PROJECT }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.PROD_REGISTRY_HOST }} --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve validated dev image
+        id: resolve-source
+        run: |
+          set -euo pipefail
+
+          SOURCE_IMAGE="${DEV_IMAGE_REPOSITORY}:${GITHUB_SHA}"
+          if ! SOURCE_DIGEST="$(gcloud artifacts docker images describe "${SOURCE_IMAGE}" --format='value(image_summary.digest)' 2>/tmp/dev-image-error.log)"; then
+            echo "Expected validated dev image was not found: ${SOURCE_IMAGE}" >&2
+            echo "Release contract: the commit pushed to origin/prod must already have been built on origin/main with the same GITHUB_SHA. This workflow will not rebuild or guess another tag." >&2
+            cat /tmp/dev-image-error.log >&2
+            exit 1
+          fi
+
+          SOURCE_IMAGE_DIGEST="${DEV_IMAGE_REPOSITORY}@${SOURCE_DIGEST}"
+
+          echo "source_image=${SOURCE_IMAGE}" >> "${GITHUB_OUTPUT}"
+          echo "source_digest=${SOURCE_DIGEST}" >> "${GITHUB_OUTPUT}"
+          echo "source_image_digest=${SOURCE_IMAGE_DIGEST}" >> "${GITHUB_OUTPUT}"
+          echo "Validated source image: ${SOURCE_IMAGE}"
+          echo "Validated source digest: ${SOURCE_IMAGE_DIGEST}"
+
+      - name: Promote image into prod registry
+        id: promote-image
+        run: |
+          set -euo pipefail
+
+          DESTINATION_IMAGE="${PROD_IMAGE_REPOSITORY}:${GITHUB_SHA}"
+          docker buildx imagetools create \
+            --prefer-index=false \
+            --tag "${DESTINATION_IMAGE}" \
+            "${{ steps.resolve-source.outputs.source_image_digest }}"
+
+          DESTINATION_DIGEST="$(gcloud artifacts docker images describe "${DESTINATION_IMAGE}" --format='value(image_summary.digest)')"
+          DESTINATION_IMAGE_DIGEST="${PROD_IMAGE_REPOSITORY}@${DESTINATION_DIGEST}"
+
+          echo "destination_image=${DESTINATION_IMAGE}" >> "${GITHUB_OUTPUT}"
+          echo "destination_digest=${DESTINATION_DIGEST}" >> "${GITHUB_OUTPUT}"
+          echo "destination_image_digest=${DESTINATION_IMAGE_DIGEST}" >> "${GITHUB_OUTPUT}"
+          echo "Promoted source image: ${{ steps.resolve-source.outputs.source_image_digest }}"
+          echo "Promoted destination image: ${DESTINATION_IMAGE}"
+          echo "Promoted destination digest: ${DESTINATION_IMAGE_DIGEST}"
+
+      - name: Deploy existing Cloud Run service
+        id: deploy
+        run: |
+          set -euo pipefail
+
+          gcloud run services update "${PROD_CLOUD_RUN_SERVICE}" \
+            --project="${PROD_GCP_PROJECT}" \
+            --region="${PROD_GCP_REGION}" \
+            --image="${{ steps.promote-image.outputs.destination_image_digest }}" \
+            --quiet
+
+          REVISION="$(gcloud run services describe "${PROD_CLOUD_RUN_SERVICE}" \
+            --project="${PROD_GCP_PROJECT}" \
+            --region="${PROD_GCP_REGION}" \
+            --format='value(status.latestReadyRevisionName)')"
+
+          echo "revision=${REVISION}" >> "${GITHUB_OUTPUT}"
+          echo "Deployed image: ${{ steps.promote-image.outputs.destination_image_digest }}"
+          echo "Ready revision: ${REVISION}"
