@@ -556,8 +556,53 @@ export interface DAGStatusResponse {
 export interface OntologyStatusResponse {
   has_ontology: boolean;
   last_built_at?: string;
+  completion_provenance?: OntologyCompletionProvenance;
   schema_changed_since_build: boolean;
   change_summary?: ChangeSummary;
+}
+
+export type OntologyCompletionProvenance = 'extracted' | 'imported';
+
+export interface OntologyImportResult {
+  imported_at: string;
+  completion_provenance: OntologyCompletionProvenance;
+}
+
+export interface OntologyImportProblem {
+  code: string;
+  message: string;
+}
+
+export interface OntologyImportTableRef {
+  schema_name?: string;
+  table_name: string;
+}
+
+export interface OntologyImportColumnRef {
+  table: OntologyImportTableRef;
+  column_name: string;
+}
+
+export interface OntologyImportDatabaseTypeMismatch {
+  bundle_type: string;
+  target_type: string;
+}
+
+export interface OntologyImportRelationshipIssue {
+  source: OntologyImportColumnRef;
+  target: OntologyImportColumnRef;
+  message: string;
+}
+
+export interface OntologyImportValidationReport {
+  problems?: OntologyImportProblem[];
+  database_type_mismatch?: OntologyImportDatabaseTypeMismatch;
+  missing_tables?: OntologyImportTableRef[];
+  unexpected_tables?: OntologyImportTableRef[];
+  missing_columns?: OntologyImportColumnRef[];
+  unexpected_columns?: OntologyImportColumnRef[];
+  unresolved_relationships?: OntologyImportRelationshipIssue[];
+  missing_required_apps?: string[];
 }
 
 // ===================================================================

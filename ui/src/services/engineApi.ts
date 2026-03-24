@@ -46,6 +46,8 @@ import type {
   MCPAuditEvent,
   MCPConfigResponse,
   OntologyChange,
+  OntologyImportResult,
+  OntologyImportValidationReport,
   OntologyStatusResponse,
   PaginatedResponse,
   ParseProjectKnowledgeResponse,
@@ -76,6 +78,21 @@ import type {
 } from '../types';
 
 const ENGINE_BASE_URL = '/api/projects';
+
+export class OntologyImportError extends Error {
+  code: string | undefined;
+  report: OntologyImportValidationReport | undefined;
+
+  constructor(
+    message: string,
+    options?: { code?: string; report?: OntologyImportValidationReport }
+  ) {
+    super(message);
+    this.name = 'OntologyImportError';
+    this.code = options?.code;
+    this.report = options?.report;
+  }
+}
 
 class EngineApiService {
   private baseURL: string;
@@ -1252,6 +1269,41 @@ class EngineApiService {
   }
 
   /**
+   * Upload ontology import bundle as multipart/form-data.
+   * POST /api/projects/{projectId}/datasources/{datasourceId}/ontology/import
+   */
+  async importOntologyBundle(
+    projectId: string,
+    datasourceId: string,
+    file: File
+  ): Promise<ApiResponse<OntologyImportResult>> {
+    const url = `${this.baseURL}/${projectId}/datasources/${datasourceId}/ontology/import`;
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetchWithAuth(url, {
+      method: 'POST',
+      body: formData,
+    });
+
+    const data = (await response.json()) as ApiResponse<
+      OntologyImportResult | OntologyImportValidationReport
+    >;
+
+    if (!response.ok) {
+      throw new OntologyImportError(
+        data.message ?? data.error ?? `HTTP ${response.status}: ${response.statusText}`,
+        {
+          ...(data.error ? { code: data.error } : {}),
+          ...(isOntologyImportValidationReport(data.data) ? { report: data.data } : {}),
+        }
+      );
+    }
+
+    return data as ApiResponse<OntologyImportResult>;
+  }
+
+  /**
    * Cancel a running ontology DAG
    * POST /api/projects/{projectId}/datasources/{datasourceId}/ontology/dag/cancel
    */
@@ -1539,3 +1591,9 @@ class EngineApiService {
 // Create and export singleton instance
 const engineApi = new EngineApiService();
 export default engineApi;
+
+function isOntologyImportValidationReport(
+  value: unknown
+): value is OntologyImportValidationReport {
+  return typeof value === 'object' && value !== null;
+}
