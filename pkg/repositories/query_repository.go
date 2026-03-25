@@ -139,14 +139,30 @@ func (r *queryRepository) ListByDatasource(ctx context.Context, projectID, datas
 	return queries, nil
 }
 
-func (r *queryRepository) Update(ctx context.Context, query *models.Query) error {
+func (r *queryRepository) withTx(ctx context.Context, action string, fn func(tx pgx.Tx) error) error {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return fmt.Errorf("no tenant scope in context")
 	}
 
-	query.UpdatedAt = time.Now()
+	tx, err := scope.Conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin %s transaction: %w", action, err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // best effort cleanup
 
+	if err := fn(tx); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit %s: %w", action, err)
+	}
+
+	return nil
+}
+
+func (r *queryRepository) updateTx(ctx context.Context, tx pgx.Tx, query *models.Query) error {
 	sql := `
 		UPDATE engine_queries
 		SET natural_language_prompt = $3,
@@ -165,7 +181,7 @@ func (r *queryRepository) Update(ctx context.Context, query *models.Query) error
 		    updated_at = $16
 		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
 
-	result, err := scope.Conn.Exec(ctx, sql,
+	result, err := tx.Exec(ctx, sql,
 		query.ProjectID, query.ID,
 		query.NaturalLanguagePrompt, query.AdditionalContext,
 		query.SQLQuery, query.Dialect, query.IsEnabled, query.Parameters,
@@ -182,6 +198,48 @@ func (r *queryRepository) Update(ctx context.Context, query *models.Query) error
 	}
 
 	return nil
+}
+
+func (r *queryRepository) updateEnabledStatusTx(ctx context.Context, tx pgx.Tx, projectID, queryID uuid.UUID, isEnabled bool) error {
+	sql := `
+		UPDATE engine_queries
+		SET is_enabled = $3, updated_at = NOW()
+		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
+
+	result, err := tx.Exec(ctx, sql, projectID, queryID, isEnabled)
+	if err != nil {
+		return fmt.Errorf("failed to update query enabled status: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("query not found")
+	}
+
+	return nil
+}
+
+func (r *queryRepository) revokeAgentAccessTx(ctx context.Context, tx pgx.Tx, queryID uuid.UUID) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM engine_agent_queries WHERE query_id = $1`, queryID); err != nil {
+		return fmt.Errorf("failed to revoke agent query access: %w", err)
+	}
+
+	return nil
+}
+
+func (r *queryRepository) Update(ctx context.Context, query *models.Query) error {
+	query.UpdatedAt = time.Now()
+
+	return r.withTx(ctx, "query update", func(tx pgx.Tx) error {
+		if err := r.updateTx(ctx, tx, query); err != nil {
+			return err
+		}
+		if !query.IsEnabled {
+			if err := r.revokeAgentAccessTx(ctx, tx, query.ID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (r *queryRepository) SoftDelete(ctx context.Context, projectID, queryID uuid.UUID) error {
@@ -301,26 +359,17 @@ func (r *queryRepository) HasEnabledQueries(ctx context.Context, projectID, data
 }
 
 func (r *queryRepository) UpdateEnabledStatus(ctx context.Context, projectID, queryID uuid.UUID, isEnabled bool) error {
-	scope, ok := database.GetTenantScope(ctx)
-	if !ok {
-		return fmt.Errorf("no tenant scope in context")
-	}
-
-	sql := `
-		UPDATE engine_queries
-		SET is_enabled = $3, updated_at = NOW()
-		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
-
-	result, err := scope.Conn.Exec(ctx, sql, projectID, queryID, isEnabled)
-	if err != nil {
-		return fmt.Errorf("failed to update query enabled status: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return fmt.Errorf("query not found")
-	}
-
-	return nil
+	return r.withTx(ctx, "query enabled status update", func(tx pgx.Tx) error {
+		if err := r.updateEnabledStatusTx(ctx, tx, projectID, queryID, isEnabled); err != nil {
+			return err
+		}
+		if !isEnabled {
+			if err := r.revokeAgentAccessTx(ctx, tx, queryID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (r *queryRepository) IncrementUsageCount(ctx context.Context, queryID uuid.UUID) error {

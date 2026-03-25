@@ -292,10 +292,14 @@ func (r *agentRepository) GetQueryAccess(ctx context.Context, agentID uuid.UUID)
 	}
 
 	rows, err := scope.Conn.Query(ctx, `
-		SELECT query_id
-		FROM engine_agent_queries
-		WHERE agent_id = $1
-		ORDER BY query_id ASC`,
+		SELECT aq.query_id
+		FROM engine_agent_queries aq
+		JOIN engine_queries q ON q.id = aq.query_id
+		WHERE aq.agent_id = $1
+		  AND q.is_enabled = true
+		  AND q.status = 'approved'
+		  AND q.deleted_at IS NULL
+		ORDER BY aq.query_id ASC`,
 		agentID,
 	)
 	if err != nil {
@@ -331,10 +335,14 @@ func (r *agentRepository) GetQueryAccessByAgentIDs(ctx context.Context, agentIDs
 	}
 
 	rows, err := scope.Conn.Query(ctx, `
-		SELECT agent_id, query_id
-		FROM engine_agent_queries
-		WHERE agent_id = ANY($1)
-		ORDER BY agent_id ASC, query_id ASC`,
+		SELECT aq.agent_id, aq.query_id
+		FROM engine_agent_queries aq
+		JOIN engine_queries q ON q.id = aq.query_id
+		WHERE aq.agent_id = ANY($1)
+		  AND q.is_enabled = true
+		  AND q.status = 'approved'
+		  AND q.deleted_at IS NULL
+		ORDER BY aq.agent_id ASC, aq.query_id ASC`,
 		agentIDs,
 	)
 	if err != nil {
@@ -368,8 +376,13 @@ func (r *agentRepository) HasQueryAccess(ctx context.Context, agentID, queryID u
 	err := scope.Conn.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1
-			FROM engine_agent_queries
-			WHERE agent_id = $1 AND query_id = $2
+			FROM engine_agent_queries aq
+			JOIN engine_queries q ON q.id = aq.query_id
+			WHERE aq.agent_id = $1
+			  AND aq.query_id = $2
+			  AND q.is_enabled = true
+			  AND q.status = 'approved'
+			  AND q.deleted_at IS NULL
 		)`,
 		agentID,
 		queryID,

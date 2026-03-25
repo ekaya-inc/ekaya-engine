@@ -145,6 +145,20 @@ func (tc *agentRepositoryTestContext) createPendingQuery(ctx context.Context, na
 	return query
 }
 
+func (tc *agentRepositoryTestContext) disableQueryWithoutCleanup(ctx context.Context, queryID uuid.UUID) {
+	tc.t.Helper()
+
+	scope, ok := database.GetTenantScope(ctx)
+	require.True(tc.t, ok)
+
+	_, err := scope.Conn.Exec(ctx, `
+		UPDATE engine_queries
+		SET is_enabled = false, updated_at = NOW()
+		WHERE id = $1
+	`, queryID)
+	require.NoError(tc.t, err)
+}
+
 func TestAgentRepository_CreateListGetDelete(t *testing.T) {
 	tc := setupAgentRepositoryTest(t)
 	tc.cleanup()
@@ -267,6 +281,42 @@ func TestAgentRepository_GetQueryAccessByAgentIDs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []uuid.UUID{queryA.ID}, access[agentA.ID])
 	assert.Equal(t, []uuid.UUID{queryB.ID}, access[agentB.ID])
+}
+
+func TestAgentRepository_QueryAccessReadsIgnoreDisabledQueries(t *testing.T) {
+	tc := setupAgentRepositoryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	enabledQuery := tc.createApprovedQuery(ctx, "Enabled query")
+	staleDisabledQuery := tc.createApprovedQuery(ctx, "Disabled query")
+
+	agent := &models.Agent{
+		ProjectID:       tc.projectID,
+		Name:            "agent-with-stale-query",
+		APIKeyEncrypted: "encrypted-key",
+	}
+	require.NoError(t, tc.agentRepo.Create(ctx, agent, []uuid.UUID{enabledQuery.ID, staleDisabledQuery.ID}))
+
+	tc.disableQueryWithoutCleanup(ctx, staleDisabledQuery.ID)
+
+	queryIDs, err := tc.agentRepo.GetQueryAccess(ctx, agent.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []uuid.UUID{enabledQuery.ID}, queryIDs)
+
+	accessByAgentID, err := tc.agentRepo.GetQueryAccessByAgentIDs(ctx, []uuid.UUID{agent.ID})
+	require.NoError(t, err)
+	assert.Equal(t, []uuid.UUID{enabledQuery.ID}, accessByAgentID[agent.ID])
+
+	allowed, err := tc.agentRepo.HasQueryAccess(ctx, agent.ID, enabledQuery.ID)
+	require.NoError(t, err)
+	assert.True(t, allowed)
+
+	denied, err := tc.agentRepo.HasQueryAccess(ctx, agent.ID, staleDisabledQuery.ID)
+	require.NoError(t, err)
+	assert.False(t, denied)
 }
 
 func TestAgentRepository_ListAndGetUseTotalMCPAuditEventCount(t *testing.T) {

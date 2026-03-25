@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/crypto"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
@@ -238,6 +239,20 @@ func TestAgentServiceCreateRequiresAtLeastOneQuery(t *testing.T) {
 	assert.Equal(t, "at least one query must be selected", validationErr.Error())
 }
 
+func TestAgentServiceCreateRejectsIneligibleQueries(t *testing.T) {
+	svc, repo := setupAgentServiceTest(t)
+	repo.createErr = apperrors.ErrNotFound
+
+	agent, key, err := svc.Create(context.Background(), uuid.New(), "sales-bot", []uuid.UUID{uuid.New()})
+	require.Error(t, err)
+	assert.Nil(t, agent)
+	assert.Empty(t, key)
+
+	var validationErr *AgentValidationError
+	require.ErrorAs(t, err, &validationErr)
+	assert.Equal(t, agentIneligibleQuerySelectionMessage, validationErr.Error())
+}
+
 func TestAgentServiceCreateAndValidateKey(t *testing.T) {
 	svc, repo := setupAgentServiceTest(t)
 	projectID := uuid.New()
@@ -324,6 +339,22 @@ func TestAgentServiceUpdateQueryAccessRequiresAtLeastOneQuery(t *testing.T) {
 	var validationErr *AgentValidationError
 	require.ErrorAs(t, err, &validationErr)
 	assert.Equal(t, "at least one query must be selected", validationErr.Error())
+}
+
+func TestAgentServiceUpdateQueryAccessRejectsIneligibleQueries(t *testing.T) {
+	svc, repo := setupAgentServiceTest(t)
+	projectID := uuid.New()
+	agentID := uuid.New()
+
+	repo.agents[agentID] = &models.Agent{ID: agentID, ProjectID: projectID, Name: "sales-bot"}
+	repo.setAccessErr = apperrors.ErrNotFound
+
+	err := svc.UpdateQueryAccess(context.Background(), projectID, agentID, []uuid.UUID{uuid.New()})
+	require.Error(t, err)
+
+	var validationErr *AgentValidationError
+	require.ErrorAs(t, err, &validationErr)
+	assert.Equal(t, agentIneligibleQuerySelectionMessage, validationErr.Error())
 }
 
 func TestAgentServiceCreateRequiresName(t *testing.T) {
