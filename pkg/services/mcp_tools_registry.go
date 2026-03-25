@@ -13,6 +13,9 @@ type ToolDefinition struct {
 // ToolGroupDeveloper is the developer tools group identifier.
 const ToolGroupDeveloper = "developer"
 
+// ToolGroupUser is the user tools group identifier.
+const ToolGroupUser = "user"
+
 // ToolGroupAlways is the identifier for tools that are always available.
 const ToolGroupAlways = "always"
 

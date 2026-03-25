@@ -145,8 +145,13 @@ func newMCPScenarioTest(t *testing.T) *mcpScenarioTest {
 
 	// Create MCP config with defaults - this is what provisioning does now
 	defaultToolGroups := `{
-		"user": {"allowOntologyMaintenance": true},
-		"developer": {"addQueryTools": true, "addOntologyMaintenance": true},
+		"tools": {
+			"addDirectDatabaseAccess": true,
+			"addOntologyMaintenanceTools": true,
+			"addOntologySuggestions": true,
+			"addApprovalTools": true,
+			"addRequestTools": true
+		},
 		"agent_tools": {"enabled": true}
 	}`
 	_, err = scope.Conn.Exec(ctx, `
@@ -353,13 +358,19 @@ func TestScenario_NewProject_NoDatasource_MCPConfigCreatedWithDefaults(t *testin
 	require.NoError(t, err)
 	require.NotNil(t, config)
 
-	// Developer tools should have sub-options enabled
-	devConfig := config.ToolGroups["developer"]
-	require.NotNil(t, devConfig, "Developer config should exist")
-	assert.True(t, devConfig.AddQueryTools,
-		"Developer AddQueryTools should default to true")
-	assert.True(t, devConfig.AddOntologyMaintenance,
-		"Developer AddOntologyMaintenance should default to true")
+	// Per-app tools should default to enabled
+	toolsConfig := config.ToolGroups["tools"]
+	require.NotNil(t, toolsConfig, "Tools config should exist")
+	assert.True(t, toolsConfig.AddDirectDatabaseAccess,
+		"Direct database access should default to true")
+	assert.True(t, toolsConfig.AddOntologyMaintenanceTools,
+		"Ontology maintenance tools should default to true")
+	assert.True(t, toolsConfig.AddOntologySuggestions,
+		"Ontology suggestions should default to true")
+	assert.True(t, toolsConfig.AddApprovalTools,
+		"Approval tools should default to true")
+	assert.True(t, toolsConfig.AddRequestTools,
+		"Request tools should default to true")
 
 	// Agent tools should be enabled
 	agentConfig := config.ToolGroups["agent_tools"]

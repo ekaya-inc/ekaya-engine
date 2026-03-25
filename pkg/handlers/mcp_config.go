@@ -20,11 +20,6 @@ type UpdateMCPConfigRequest struct {
 	AddOntologySuggestions      *bool `json:"addOntologySuggestions,omitempty"`
 	AddApprovalTools            *bool `json:"addApprovalTools,omitempty"`
 	AddRequestTools             *bool `json:"addRequestTools,omitempty"`
-
-	// Legacy fields (backward compat)
-	AllowOntologyMaintenance *bool `json:"allowOntologyMaintenance,omitempty"`
-	AddQueryTools            *bool `json:"addQueryTools,omitempty"`
-	AddOntologyMaintenance   *bool `json:"addOntologyMaintenance,omitempty"`
 }
 
 // MCPConfigHandler handles MCP configuration HTTP requests.
@@ -102,10 +97,6 @@ func (h *MCPConfigHandler) Update(w http.ResponseWriter, r *http.Request) {
 		AddOntologySuggestions:      req.AddOntologySuggestions,
 		AddApprovalTools:            req.AddApprovalTools,
 		AddRequestTools:             req.AddRequestTools,
-		// Legacy fields
-		AllowOntologyMaintenance: req.AllowOntologyMaintenance,
-		AddQueryTools:            req.AddQueryTools,
-		AddOntologyMaintenance:   req.AddOntologyMaintenance,
 	}
 
 	config, err := h.mcpConfigService.Update(r.Context(), projectID, serviceReq)

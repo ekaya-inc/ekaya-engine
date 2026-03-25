@@ -5,936 +5,198 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/mark3labs/mcp-go/mcp"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
-	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 	"github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
 )
 
-// TestToolAccessConsistency verifies that if a tool is listed via NewToolFilter,
-// it can also be called via AcquireToolAccess. This ensures no mismatch
-// between what tools are visible and what tools are executable.
-
-// consistencyTestDatasourceID is a fixed UUID used in tests to simulate a configured datasource.
-var consistencyTestDatasourceID = uuid.MustParse("22222222-2222-2222-2222-222222222222")
-
-// consistencyMockProjectService returns a mock project service with a datasource configured.
-func consistencyMockProjectService() *mockProjectService {
-	return &mockProjectService{defaultDatasourceID: consistencyTestDatasourceID}
-}
-
-// setupTestProject creates a project and MCP config for testing.
-func setupTestProject(t *testing.T, db *database.DB, projectID uuid.UUID, toolGroups map[string]*models.ToolGroupConfig) {
-	t.Helper()
-
-	ctx := context.Background()
-	scope, err := db.WithTenant(ctx, projectID)
-	if err != nil {
-		t.Fatalf("failed to get tenant scope: %v", err)
-	}
-	defer scope.Close()
-
-	tenantCtx := database.SetTenantScope(ctx, scope)
-
-	// Create project first (MCP config has FK to projects)
-	_, err = scope.Conn.Exec(tenantCtx, `
-		INSERT INTO engine_projects (id, name, created_at, updated_at)
-		VALUES ($1, 'Test Project', NOW(), NOW())
-		ON CONFLICT (id) DO NOTHING`, projectID)
-	if err != nil {
-		t.Fatalf("failed to create test project: %v", err)
-	}
-
-	if toolGroups != nil {
-		mcpConfig := &models.MCPConfig{
-			ProjectID:  projectID,
-			ToolGroups: toolGroups,
-		}
-
-		repo := repositories.NewMCPConfigRepository()
-		if err := repo.Upsert(tenantCtx, mcpConfig); err != nil {
-			t.Fatalf("failed to create test config: %v", err)
-		}
-	}
-
-	t.Cleanup(func() {
-		cleanupCtx := context.Background()
-		cleanupScope, err := db.WithTenant(cleanupCtx, projectID)
-		if err != nil {
-			return
-		}
-		defer cleanupScope.Close()
-		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_mcp_config WHERE project_id = $1", projectID)
-		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_projects WHERE id = $1", projectID)
-	})
-}
-
-// TestAgentToolsEnabled_ListAndCallConsistency tests that when agent_tools is enabled,
-// the approved queries tools are both listed AND callable for agent authentication.
-// This is a regression test for the bug where tools were listed but calls failed with
-// "approved queries tools are not enabled for this project".
-func TestAgentToolsEnabled_ListAndCallConsistency(t *testing.T) {
+func TestToolAccessConsistency_AgentListingMatchesCalling(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Setup: agent_tools enabled, approved_queries NOT enabled
-	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		"agent_tools": {Enabled: true},
-		// approved_queries is NOT in this config - this is the key test case
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		services.ToolGroupAgentTools: {Enabled: true},
 	})
 
+	installedApps := newMockInstalledAppService(models.AppIDAIAgents)
 	mcpConfigService := services.NewMCPConfigService(
 		repositories.NewMCPConfigRepository(),
-		&mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
-		&mockProjectService{defaultDatasourceID: uuid.New()},
-		nil, // installedAppService - not needed for this test
+		nil,
+		nil,
+		installedApps,
 		"http://localhost",
 		zap.NewNop(),
 	)
 
-	// Part 1: Verify tool LISTING shows approved queries tools for agent auth
-	filterDeps := &MCPToolDeps{
-		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: mcpConfigService,
-			Logger:           zap.NewNop(),
-		},
-		ProjectService: consistencyMockProjectService(),
-	}
-
-	filter := NewToolFilter(filterDeps)
-	allTools := createTestTools()
-
-	// Create agent auth context
-	claims := &auth.Claims{ProjectID: projectID.String()}
-	claims.Subject = "agent:" + uuid.New().String()
-	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
-
-	filteredTools := filter(ctx, allTools)
-
-	// Verify list_approved_queries is in the filtered list
-	if !containsTool(filteredTools, "list_approved_queries") {
-		t.Fatal("LISTING: list_approved_queries should be visible when agent_tools is enabled")
-	}
-	if !containsTool(filteredTools, "execute_approved_query") {
-		t.Fatal("LISTING: execute_approved_query should be visible when agent_tools is enabled")
-	}
-
-	t.Log("LISTING: approved queries tools are correctly visible for agent auth with agent_tools enabled")
-
-	// Part 2: Verify tool CALLING works (this is where the bug was)
-	queryDeps := &QueryToolDeps{
-		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: mcpConfigService,
-			Logger:           zap.NewNop(),
-		},
-		ProjectService: &mockProjectService{defaultDatasourceID: uuid.New()},
-		QueryService:   &mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
-	}
-
-	// AcquireToolAccess is called when executing list_approved_queries or execute_approved_query
-	_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, queryDeps, "list_approved_queries")
-	if err != nil {
-		t.Fatalf("CALLING: AcquireToolAccess failed: %v\n"+
-			"This means tools are LISTED but cannot be CALLED - list/call inconsistency!", err)
-	}
-	if cleanup != nil {
-		defer cleanup()
-	}
-
-	if tenantCtx == nil {
-		t.Fatal("CALLING: expected tenant context to be set")
-	}
-
-	t.Log("CALLING: approved queries tools are correctly callable for agent auth with agent_tools enabled")
-}
-
-// TestApprovedQueriesEnabled_ListAndCallConsistency tests that when AddQueryTools
-// is enabled for regular user auth, Query loadout tools are both listed and callable.
-func TestApprovedQueriesEnabled_ListAndCallConsistency(t *testing.T) {
-	engineDB := testhelpers.GetEngineDB(t)
-	projectID := uuid.New()
-
-	// Setup: All toggles enabled including AddRequestTools for list_approved_queries
-	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		"tools": {AddDirectDatabaseAccess: true, AddApprovalTools: true, AddRequestTools: true},
-	})
-
-	mcpConfigService := services.NewMCPConfigService(
-		repositories.NewMCPConfigRepository(),
-		&mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
-		&mockProjectService{defaultDatasourceID: uuid.New()},
-		nil, // installedAppService - not needed for this test
-		"http://localhost",
-		zap.NewNop(),
-	)
-
-	// Part 1: Verify tool LISTING shows approved queries tools
 	filterDeps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
 			DB:                  engineDB.DB,
 			MCPConfigService:    mcpConfigService,
 			Logger:              zap.NewNop(),
-			InstalledAppService: newMockInstalledAppService(models.AppIDAIDataLiaison),
+			InstalledAppService: installedApps,
 		},
-		ProjectService: consistencyMockProjectService(),
+		ProjectService: mockProjectServiceWithDatasource(),
 	}
 
-	filter := NewToolFilter(filterDeps)
-	allTools := createTestTools()
-
-	// Create user auth context (not agent)
 	claims := &auth.Claims{ProjectID: projectID.String()}
-	claims.Subject = "user-123" // Regular user
+	claims.Subject = "agent:" + uuid.New().String()
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 
-	filteredTools := filter(ctx, allTools)
+	filteredTools := NewToolFilter(filterDeps)(ctx, createTestTools())
+	assertContainsTool(t, filteredTools, "list_approved_queries")
 
-	if !containsTool(filteredTools, "list_approved_queries") {
-		t.Fatal("LISTING: list_approved_queries should be visible when approved_queries is enabled")
-	}
-
-	t.Log("LISTING: approved queries tools are correctly visible for user auth with AddQueryTools enabled")
-
-	// Part 2: Verify tool CALLING works
 	queryDeps := &QueryToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: mcpConfigService,
-			Logger:           zap.NewNop(),
+			DB:                  engineDB.DB,
+			MCPConfigService:    mcpConfigService,
+			Logger:              zap.NewNop(),
+			InstalledAppService: installedApps,
 		},
-		ProjectService: &mockProjectService{defaultDatasourceID: uuid.New()},
-		QueryService:   &mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
 	}
 
 	_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, queryDeps, "list_approved_queries")
-	if err != nil {
-		t.Fatalf("CALLING: AcquireToolAccess failed: %v", err)
-	}
+	requireNoToolAccessError(t, err)
 	if cleanup != nil {
 		defer cleanup()
 	}
-
 	if tenantCtx == nil {
-		t.Fatal("CALLING: expected tenant context to be set")
+		t.Fatal("expected tenant context for allowed agent tool")
 	}
-
-	t.Log("CALLING: approved queries tools are correctly callable for user auth with AddQueryTools enabled")
 }
 
-// TestNeitherEnabled_QueryToolsNotListed tests that when no toggles are enabled,
-// no tools are listed (only health).
-func TestNeitherEnabled_QueryToolsNotListed(t *testing.T) {
+func TestToolAccessConsistency_UserListingMatchesCalling(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Setup: no toggles enabled
-	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		"tools": {}, // No toggles
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		services.ToolGroupTools: {AddRequestTools: true},
 	})
 
+	installedApps := newMockInstalledAppService(models.AppIDAIDataLiaison)
 	mcpConfigService := services.NewMCPConfigService(
 		repositories.NewMCPConfigRepository(),
-		&mockQueryService{},
-		&mockProjectService{},
-		nil, // installedAppService - not needed for this test
+		nil,
+		nil,
+		installedApps,
 		"http://localhost",
 		zap.NewNop(),
 	)
 
-	// Part 1: Verify tool LISTING does NOT show any tools except health
 	filterDeps := &MCPToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: mcpConfigService,
-			Logger:           zap.NewNop(),
+			DB:                  engineDB.DB,
+			MCPConfigService:    mcpConfigService,
+			Logger:              zap.NewNop(),
+			InstalledAppService: installedApps,
 		},
-		ProjectService: consistencyMockProjectService(),
+		ProjectService: mockProjectServiceWithDatasource(),
 	}
 
-	filter := NewToolFilter(filterDeps)
-	allTools := createTestTools()
-
-	// Admin auth
-	claims := &auth.Claims{ProjectID: projectID.String(), Roles: []string{models.RoleAdmin}}
+	claims := &auth.Claims{
+		ProjectID: projectID.String(),
+		Roles:     []string{models.RoleUser},
+	}
 	claims.Subject = "user-123"
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 
-	filteredTools := filter(ctx, allTools)
+	filteredTools := NewToolFilter(filterDeps)(ctx, createTestTools())
+	assertContainsTool(t, filteredTools, "list_approved_queries")
 
-	// No toggles = only health
-	if !containsTool(filteredTools, "health") {
-		t.Error("LISTING: health should be visible")
-	}
-	if containsTool(filteredTools, "list_approved_queries") {
-		t.Error("LISTING: list_approved_queries should NOT be visible without toggles")
-	}
-	if containsTool(filteredTools, "query") {
-		t.Error("LISTING: query should NOT be visible without toggles")
-	}
-	if containsTool(filteredTools, "echo") {
-		t.Error("LISTING: echo should NOT be visible without toggles")
-	}
-	if containsTool(filteredTools, "execute") {
-		t.Error("LISTING: execute should NOT be visible without toggles")
-	}
-
-	t.Log("LISTING: Tools are correctly hidden when no toggles are enabled")
-
-	// Part 2: Verify tool CALLING fails (since not in loadout)
 	queryDeps := &QueryToolDeps{
 		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: mcpConfigService,
-			Logger:           zap.NewNop(),
+			DB:                  engineDB.DB,
+			MCPConfigService:    mcpConfigService,
+			Logger:              zap.NewNop(),
+			InstalledAppService: installedApps,
 		},
-		ProjectService: &mockProjectService{},
-		QueryService:   &mockQueryService{},
+	}
+
+	_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, queryDeps, "list_approved_queries")
+	requireNoToolAccessError(t, err)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if tenantCtx == nil {
+		t.Fatal("expected tenant context for allowed user tool")
+	}
+}
+
+func TestToolAccessConsistency_AppOwnershipFilteringDeniesMissingApp(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		services.ToolGroupTools: {AddRequestTools: true},
+	})
+
+	installedApps := newMockInstalledAppService()
+	mcpConfigService := services.NewMCPConfigService(
+		repositories.NewMCPConfigRepository(),
+		nil,
+		nil,
+		installedApps,
+		"http://localhost",
+		zap.NewNop(),
+	)
+
+	filterDeps := &MCPToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:                  engineDB.DB,
+			MCPConfigService:    mcpConfigService,
+			Logger:              zap.NewNop(),
+			InstalledAppService: installedApps,
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
+	}
+
+	claims := &auth.Claims{
+		ProjectID: projectID.String(),
+		Roles:     []string{models.RoleUser},
+	}
+	claims.Subject = "user-123"
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
+
+	filteredTools := NewToolFilter(filterDeps)(ctx, createTestTools())
+	if containsTool(filteredTools, "list_approved_queries") {
+		t.Fatal("list_approved_queries should be hidden when AI Data Liaison is not installed")
+	}
+
+	queryDeps := &QueryToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:                  engineDB.DB,
+			MCPConfigService:    mcpConfigService,
+			Logger:              zap.NewNop(),
+			InstalledAppService: installedApps,
+		},
 	}
 
 	_, _, cleanup, err := AcquireToolAccess(ctx, queryDeps, "list_approved_queries")
 	if cleanup != nil {
 		defer cleanup()
 	}
-
 	if err == nil {
-		t.Fatal("CALLING: AcquireToolAccess should fail when no toggles are enabled")
+		t.Fatal("expected missing app installation to block list_approved_queries")
 	}
-
-	t.Logf("CALLING: correctly rejected with error: %v", err)
+	if accessErr, ok := err.(*ToolAccessError); !ok || accessErr.Code != "app_not_installed" {
+		t.Fatalf("expected app_not_installed tool access error, got %v", err)
+	}
 }
 
-// TestAgentAuth_AgentToolsDisabled tests that when agent_tools is disabled,
-// agent auth should not see or be able to call approved queries tools.
-func TestAgentAuth_AgentToolsDisabled(t *testing.T) {
-	engineDB := testhelpers.GetEngineDB(t)
-	projectID := uuid.New()
-
-	// Setup: agent_tools disabled (agent auth still checks agent_tools.Enabled)
-	// AddQueryTools is for users, agent_tools.Enabled is for agents
-	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		"agent_tools": {Enabled: false},
-		"developer":   {AddQueryTools: true}, // User has Query loadout, but agent doesn't
-	})
-
-	mcpConfigService := services.NewMCPConfigService(
-		repositories.NewMCPConfigRepository(),
-		&mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
-		&mockProjectService{defaultDatasourceID: uuid.New()},
-		nil, // installedAppService - not needed for this test
-		"http://localhost",
-		zap.NewNop(),
-	)
-
-	// Part 1: Verify tool LISTING does NOT show tools for agent
-	filterDeps := &MCPToolDeps{
-		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: mcpConfigService,
-			Logger:           zap.NewNop(),
-		},
-		ProjectService: consistencyMockProjectService(),
+func assertContainsTool(t *testing.T, tools []mcp.Tool, name string) {
+	t.Helper()
+	if !containsTool(tools, name) {
+		t.Fatalf("expected %s to be present in filtered tool list: %v", name, toolNames(tools))
 	}
-
-	filter := NewToolFilter(filterDeps)
-	allTools := createTestTools()
-
-	// Agent auth
-	claims := &auth.Claims{ProjectID: projectID.String()}
-	claims.Subject = "agent:" + uuid.New().String()
-	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
-
-	filteredTools := filter(ctx, allTools)
-
-	if containsTool(filteredTools, "list_approved_queries") {
-		t.Error("LISTING: list_approved_queries should NOT be visible for agent when agent_tools is disabled")
-	}
-
-	// Only health should be visible
-	if len(filteredTools) != 1 || !containsTool(filteredTools, "health") {
-		t.Errorf("LISTING: only health should be visible, got: %v", toolNames(filteredTools))
-	}
-
-	t.Log("LISTING: correctly hidden for agent when agent_tools is disabled")
 }
 
-// TestBothEnabled_UserSeesApprovedQueries tests that when both agent_tools and
-// AddQueryTools are enabled, a regular user sees Query loadout tools.
-func TestBothEnabled_UserSeesApprovedQueries(t *testing.T) {
-	engineDB := testhelpers.GetEngineDB(t)
-	projectID := uuid.New()
-
-	// Setup: both agent_tools and user-facing tools enabled
-	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		"agent_tools": {Enabled: true},
-		"tools":       {AddDirectDatabaseAccess: true, AddRequestTools: true},
-	})
-
-	mcpConfigService := services.NewMCPConfigService(
-		repositories.NewMCPConfigRepository(),
-		&mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
-		&mockProjectService{defaultDatasourceID: uuid.New()},
-		nil, // installedAppService - not needed for this test
-		"http://localhost",
-		zap.NewNop(),
-	)
-
-	// Part 1: Verify user sees approved queries tools
-	filterDeps := &MCPToolDeps{
-		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:                  engineDB.DB,
-			MCPConfigService:    mcpConfigService,
-			Logger:              zap.NewNop(),
-			InstalledAppService: newMockInstalledAppService(models.AppIDAIDataLiaison),
-		},
-		ProjectService: consistencyMockProjectService(),
-	}
-
-	filter := NewToolFilter(filterDeps)
-	allTools := createTestTools()
-
-	// User auth (not agent)
-	claims := &auth.Claims{ProjectID: projectID.String()}
-	claims.Subject = "user-123"
-	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
-
-	filteredTools := filter(ctx, allTools)
-
-	if !containsTool(filteredTools, "list_approved_queries") {
-		t.Fatal("LISTING: list_approved_queries should be visible for user")
-	}
-
-	t.Log("LISTING: approved queries tools visible for user when both configs enabled")
-
-	// Part 2: Verify calling works for user
-	queryDeps := &QueryToolDeps{
-		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: mcpConfigService,
-			Logger:           zap.NewNop(),
-		},
-		ProjectService: &mockProjectService{defaultDatasourceID: uuid.New()},
-		QueryService:   &mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
-	}
-
-	_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, queryDeps, "list_approved_queries")
+func requireNoToolAccessError(t *testing.T, err error) {
+	t.Helper()
 	if err != nil {
-		t.Fatalf("CALLING: AcquireToolAccess failed for user: %v", err)
+		t.Fatalf("expected tool access to succeed, got %v", err)
 	}
-	if cleanup != nil {
-		defer cleanup()
-	}
-
-	if tenantCtx == nil {
-		t.Fatal("CALLING: expected tenant context to be set")
-	}
-
-	t.Log("CALLING: approved queries tools callable for user")
-}
-
-// TestAgentToolsEnabled_LimitedQueryToolsConsistency tests that when agent_tools is enabled,
-// agents only get Limited Query loadout tools (health, list_approved_queries, execute_approved_query).
-// Echo is a developer tool and should NOT be available to agents.
-func TestAgentToolsEnabled_LimitedQueryToolsConsistency(t *testing.T) {
-	engineDB := testhelpers.GetEngineDB(t)
-	projectID := uuid.New()
-
-	// Setup: agent_tools enabled, developer tools NOT enabled
-	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		"agent_tools": {Enabled: true},
-		// developer tools is NOT in this config
-	})
-
-	mcpConfigService := services.NewMCPConfigService(
-		repositories.NewMCPConfigRepository(),
-		&mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
-		&mockProjectService{defaultDatasourceID: uuid.New()},
-		nil, // installedAppService - not needed for this test
-		"http://localhost",
-		zap.NewNop(),
-	)
-
-	filterDeps := &MCPToolDeps{
-		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: mcpConfigService,
-			Logger:           zap.NewNop(),
-		},
-		ProjectService: consistencyMockProjectService(),
-	}
-
-	filter := NewToolFilter(filterDeps)
-	allTools := createTestTools()
-
-	// Create agent auth context
-	claims := &auth.Claims{ProjectID: projectID.String()}
-	claims.Subject = "agent:" + uuid.New().String()
-	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
-
-	filteredTools := filter(ctx, allTools)
-
-	// Verify Limited Query loadout tools are present
-	if !containsTool(filteredTools, "health") {
-		t.Error("LISTING: health should be visible for agents")
-	}
-	if !containsTool(filteredTools, "list_approved_queries") {
-		t.Error("LISTING: list_approved_queries should be visible for agents")
-	}
-	if !containsTool(filteredTools, "execute_approved_query") {
-		t.Error("LISTING: execute_approved_query should be visible for agents")
-	}
-
-	// Verify echo is NOT available for agents (it's a developer tool)
-	if containsTool(filteredTools, "echo") {
-		t.Error("LISTING: echo should NOT be visible for agents (it's a developer tool)")
-	}
-
-	t.Log("LISTING: agent tools correctly limited to Limited Query loadout")
-
-	// Verify tool CALLING consistency for list_approved_queries
-	devDeps := &MCPToolDeps{
-		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:               engineDB.DB,
-			MCPConfigService: mcpConfigService,
-			Logger:           zap.NewNop(),
-		},
-		ProjectService: &mockProjectService{defaultDatasourceID: uuid.New()},
-	}
-
-	_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, devDeps, "list_approved_queries")
-	if err != nil {
-		t.Fatalf("CALLING: AcquireToolAccess for list_approved_queries failed: %v\n"+
-			"This means it is LISTED but cannot be CALLED - list/call inconsistency!", err)
-	}
-	if cleanup != nil {
-		defer cleanup()
-	}
-
-	if tenantCtx == nil {
-		t.Fatal("CALLING: expected tenant context to be set")
-	}
-
-	t.Log("CALLING: list_approved_queries is correctly callable for agents")
-}
-
-// TestDataLiaison_Uninstalled_ExecutionBlocked tests that data liaison tools
-// cannot be called when the AI Data Liaison app is uninstalled, even if the
-// tool is in the config-enabled set.
-func TestDataLiaison_Uninstalled_ExecutionBlocked(t *testing.T) {
-	engineDB := testhelpers.GetEngineDB(t)
-	projectID := uuid.New()
-
-	// Setup: all toggles enabled including request tools (suggest_approved_query is a user request tool)
-	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		"tools": {
-			AddDirectDatabaseAccess:     true,
-			AddOntologyMaintenanceTools: true,
-			AddOntologySuggestions:      true,
-			AddApprovalTools:            true,
-			AddRequestTools:             true,
-		},
-	})
-
-	mcpConfigService := services.NewMCPConfigService(
-		repositories.NewMCPConfigRepository(),
-		&mockQueryService{},
-		&mockProjectService{defaultDatasourceID: uuid.New()},
-		nil,
-		"http://localhost",
-		zap.NewNop(),
-	)
-
-	// AI Data Liaison NOT installed
-	queryDeps := &QueryToolDeps{
-		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:                  engineDB.DB,
-			MCPConfigService:    mcpConfigService,
-			Logger:              zap.NewNop(),
-			InstalledAppService: newMockInstalledAppService(), // No AI Data Liaison
-		},
-		ProjectService: &mockProjectService{defaultDatasourceID: uuid.New()},
-		QueryService:   &mockQueryService{},
-	}
-
-	// User auth context
-	claims := &auth.Claims{ProjectID: projectID.String()}
-	claims.Subject = "user-123"
-	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
-
-	// Try to call suggest_approved_query (a data liaison tool)
-	_, _, cleanup, err := AcquireToolAccess(ctx, queryDeps, "suggest_approved_query")
-	if cleanup != nil {
-		defer cleanup()
-	}
-
-	if err == nil {
-		t.Fatal("CALLING: AcquireToolAccess should fail for data liaison tool when app is not installed")
-	}
-
-	// Verify it's a ToolAccessError (not a system error)
-	if result := AsToolAccessResult(err); result == nil {
-		t.Fatalf("CALLING: expected ToolAccessError, got system error: %v", err)
-	}
-
-	t.Logf("CALLING: correctly blocked with error: %v", err)
-}
-
-// TestDataLiaison_Installed_ExecutionAllowed tests that data liaison tools
-// can be called when the AI Data Liaison app is installed.
-func TestDataLiaison_Installed_ExecutionAllowed(t *testing.T) {
-	engineDB := testhelpers.GetEngineDB(t)
-	projectID := uuid.New()
-
-	// Setup: all toggles enabled (suggest_approved_query is a user request tool)
-	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		"tools": {
-			AddDirectDatabaseAccess:     true,
-			AddOntologyMaintenanceTools: true,
-			AddOntologySuggestions:      true,
-			AddApprovalTools:            true,
-			AddRequestTools:             true,
-		},
-	})
-
-	mcpConfigService := services.NewMCPConfigService(
-		repositories.NewMCPConfigRepository(),
-		&mockQueryService{},
-		&mockProjectService{defaultDatasourceID: uuid.New()},
-		nil,
-		"http://localhost",
-		zap.NewNop(),
-	)
-
-	// AI Data Liaison IS installed
-	queryDeps := &QueryToolDeps{
-		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:                  engineDB.DB,
-			MCPConfigService:    mcpConfigService,
-			Logger:              zap.NewNop(),
-			InstalledAppService: newMockInstalledAppService(models.AppIDAIDataLiaison),
-		},
-		ProjectService: &mockProjectService{defaultDatasourceID: uuid.New()},
-		QueryService:   &mockQueryService{},
-	}
-
-	// Data role auth context (data liaison tools require at least data role with RBAC)
-	claims := &auth.Claims{ProjectID: projectID.String(), Roles: []string{models.RoleData}}
-	claims.Subject = "user-123"
-	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
-
-	// Try to call suggest_approved_query (a data liaison tool)
-	_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, queryDeps, "suggest_approved_query")
-	if err != nil {
-		t.Fatalf("CALLING: AcquireToolAccess should succeed when app is installed: %v", err)
-	}
-	if cleanup != nil {
-		defer cleanup()
-	}
-	if tenantCtx == nil {
-		t.Fatal("CALLING: expected tenant context to be set")
-	}
-
-	t.Log("CALLING: data liaison tool correctly allowed when app is installed")
-}
-
-func TestSharedQueryTool_MCPServerPath_ListAndCallAllowedWithoutDataLiaison(t *testing.T) {
-	engineDB := testhelpers.GetEngineDB(t)
-	projectID := uuid.New()
-
-	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		"tools": {
-			AddDirectDatabaseAccess: true,
-			AddRequestTools:         true,
-		},
-	})
-
-	mcpConfigService := services.NewMCPConfigService(
-		repositories.NewMCPConfigRepository(),
-		&mockQueryService{},
-		&mockProjectService{defaultDatasourceID: uuid.New()},
-		nil,
-		"http://localhost",
-		zap.NewNop(),
-	)
-
-	appService := newMockInstalledAppService() // MCP Server only
-
-	filterDeps := &MCPToolDeps{
-		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:                  engineDB.DB,
-			MCPConfigService:    mcpConfigService,
-			Logger:              zap.NewNop(),
-			InstalledAppService: appService,
-		},
-		ProjectService: consistencyMockProjectService(),
-	}
-
-	filter := NewToolFilter(filterDeps)
-	allTools := createTestToolsWithDataLiaison()
-
-	claims := &auth.Claims{ProjectID: projectID.String(), Roles: []string{models.RoleAdmin}}
-	claims.Subject = "user-123"
-	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
-
-	filteredTools := filter(ctx, allTools)
-	if !containsTool(filteredTools, "query") {
-		t.Fatal("LISTING: query should remain visible through MCP Server ownership when AI Data Liaison is not installed")
-	}
-
-	queryDeps := &QueryToolDeps{
-		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:                  engineDB.DB,
-			MCPConfigService:    mcpConfigService,
-			Logger:              zap.NewNop(),
-			InstalledAppService: appService,
-		},
-		ProjectService: &mockProjectService{defaultDatasourceID: uuid.New()},
-		QueryService:   &mockQueryService{},
-	}
-
-	_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, queryDeps, "query")
-	if err != nil {
-		t.Fatalf("CALLING: query should remain callable through MCP Server ownership: %v", err)
-	}
-	if cleanup != nil {
-		defer cleanup()
-	}
-	if tenantCtx == nil {
-		t.Fatal("CALLING: expected tenant context to be set")
-	}
-}
-
-func TestGlossary_Uninstalled_ListAndCallBlocked(t *testing.T) {
-	engineDB := testhelpers.GetEngineDB(t)
-	projectID := uuid.New()
-
-	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		"tools": {
-			AddRequestTools: true,
-		},
-	})
-
-	mcpConfigService := services.NewMCPConfigService(
-		repositories.NewMCPConfigRepository(),
-		&mockQueryService{},
-		&mockProjectService{defaultDatasourceID: uuid.New()},
-		nil,
-		"http://localhost",
-		zap.NewNop(),
-	)
-
-	appService := newMockInstalledAppService() // No AI Data Liaison
-
-	filterDeps := &MCPToolDeps{
-		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:                  engineDB.DB,
-			MCPConfigService:    mcpConfigService,
-			Logger:              zap.NewNop(),
-			InstalledAppService: appService,
-		},
-		ProjectService: consistencyMockProjectService(),
-	}
-
-	filter := NewToolFilter(filterDeps)
-	allTools := createTestToolsWithDataLiaison()
-
-	claims := &auth.Claims{ProjectID: projectID.String(), Roles: []string{models.RoleUser}}
-	claims.Subject = "user-123"
-	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
-
-	filteredTools := filter(ctx, allTools)
-	if containsTool(filteredTools, "list_glossary") {
-		t.Fatal("LISTING: list_glossary should be hidden when AI Data Liaison is not installed")
-	}
-	if containsTool(filteredTools, "get_glossary_sql") {
-		t.Fatal("LISTING: get_glossary_sql should be hidden when AI Data Liaison is not installed")
-	}
-
-	queryDeps := &QueryToolDeps{
-		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:                  engineDB.DB,
-			MCPConfigService:    mcpConfigService,
-			Logger:              zap.NewNop(),
-			InstalledAppService: appService,
-		},
-		ProjectService: &mockProjectService{defaultDatasourceID: uuid.New()},
-		QueryService:   &mockQueryService{},
-	}
-
-	_, _, cleanup, err := AcquireToolAccess(ctx, queryDeps, "list_glossary")
-	if cleanup != nil {
-		defer cleanup()
-	}
-	if err == nil {
-		t.Fatal("CALLING: list_glossary should fail when AI Data Liaison is not installed")
-	}
-	if result := AsToolAccessResult(err); result == nil {
-		t.Fatalf("CALLING: expected ToolAccessError, got system error: %v", err)
-	}
-}
-
-// TestAIAgents_Uninstalled_ListAndCallBlocked tests that agent tools are both
-// hidden from listing AND blocked from execution when ai-agents app is uninstalled.
-func TestAIAgents_Uninstalled_ListAndCallBlocked(t *testing.T) {
-	engineDB := testhelpers.GetEngineDB(t)
-	projectID := uuid.New()
-
-	// Setup: agent_tools enabled in config
-	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		"agent_tools": {Enabled: true},
-	})
-
-	mcpConfigService := services.NewMCPConfigService(
-		repositories.NewMCPConfigRepository(),
-		&mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
-		&mockProjectService{defaultDatasourceID: uuid.New()},
-		nil,
-		"http://localhost",
-		zap.NewNop(),
-	)
-
-	// ai-agents NOT installed
-	appService := newMockInstalledAppService() // No ai-agents
-
-	// Part 1: Verify LISTING hides agent tools
-	filterDeps := &MCPToolDeps{
-		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:                  engineDB.DB,
-			MCPConfigService:    mcpConfigService,
-			Logger:              zap.NewNop(),
-			InstalledAppService: appService,
-		},
-		ProjectService: consistencyMockProjectService(),
-	}
-
-	filter := NewToolFilter(filterDeps)
-	allTools := createTestTools()
-
-	claims := &auth.Claims{ProjectID: projectID.String()}
-	claims.Subject = "agent:" + uuid.New().String()
-	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
-
-	filteredTools := filter(ctx, allTools)
-
-	if containsTool(filteredTools, "list_approved_queries") {
-		t.Error("LISTING: list_approved_queries should be hidden when ai-agents app not installed")
-	}
-	if len(filteredTools) != 1 || !containsTool(filteredTools, "health") {
-		t.Errorf("LISTING: expected only health, got: %v", toolNames(filteredTools))
-	}
-
-	t.Log("LISTING: agent tools correctly hidden when ai-agents not installed")
-
-	// Part 2: Verify CALLING is also blocked
-	callDeps := &QueryToolDeps{
-		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:                  engineDB.DB,
-			MCPConfigService:    mcpConfigService,
-			Logger:              zap.NewNop(),
-			InstalledAppService: appService,
-		},
-		ProjectService: &mockProjectService{defaultDatasourceID: uuid.New()},
-		QueryService:   &mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
-	}
-
-	_, _, cleanup, err := AcquireToolAccess(ctx, callDeps, "list_approved_queries")
-	if cleanup != nil {
-		defer cleanup()
-	}
-
-	if err == nil {
-		t.Fatal("CALLING: AcquireToolAccess should fail for agent when ai-agents app not installed")
-	}
-
-	if result := AsToolAccessResult(err); result == nil {
-		t.Fatalf("CALLING: expected ToolAccessError, got system error: %v", err)
-	}
-
-	t.Logf("CALLING: correctly blocked with error: %v", err)
-}
-
-// TestAIAgents_Installed_ListAndCallAllowed tests that agent tools are both
-// visible in listing AND callable when ai-agents app is installed.
-func TestAIAgents_Installed_ListAndCallAllowed(t *testing.T) {
-	engineDB := testhelpers.GetEngineDB(t)
-	projectID := uuid.New()
-
-	// Setup: agent_tools enabled in config
-	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		"agent_tools": {Enabled: true},
-	})
-
-	mcpConfigService := services.NewMCPConfigService(
-		repositories.NewMCPConfigRepository(),
-		&mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
-		&mockProjectService{defaultDatasourceID: uuid.New()},
-		nil,
-		"http://localhost",
-		zap.NewNop(),
-	)
-
-	// ai-agents IS installed
-	appService := newMockInstalledAppService(models.AppIDAIAgents)
-
-	// Part 1: Verify LISTING shows agent tools
-	filterDeps := &MCPToolDeps{
-		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:                  engineDB.DB,
-			MCPConfigService:    mcpConfigService,
-			Logger:              zap.NewNop(),
-			InstalledAppService: appService,
-		},
-		ProjectService: consistencyMockProjectService(),
-	}
-
-	filter := NewToolFilter(filterDeps)
-	allTools := createTestTools()
-
-	claims := &auth.Claims{ProjectID: projectID.String()}
-	claims.Subject = "agent:" + uuid.New().String()
-	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
-
-	filteredTools := filter(ctx, allTools)
-
-	expectedTools := []string{"health", "list_approved_queries", "execute_approved_query"}
-	if len(filteredTools) != len(expectedTools) {
-		t.Errorf("LISTING: expected %d tools, got %d: %v", len(expectedTools), len(filteredTools), toolNames(filteredTools))
-	}
-	for _, name := range expectedTools {
-		if !containsTool(filteredTools, name) {
-			t.Errorf("LISTING: expected tool %s to be present", name)
-		}
-	}
-
-	t.Log("LISTING: agent tools correctly visible when ai-agents installed")
-
-	// Part 2: Verify CALLING works
-	callDeps := &QueryToolDeps{
-		BaseMCPToolDeps: BaseMCPToolDeps{
-			DB:                  engineDB.DB,
-			MCPConfigService:    mcpConfigService,
-			Logger:              zap.NewNop(),
-			InstalledAppService: appService,
-		},
-		ProjectService: &mockProjectService{defaultDatasourceID: uuid.New()},
-		QueryService:   &mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
-	}
-
-	_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, callDeps, "list_approved_queries")
-	if err != nil {
-		t.Fatalf("CALLING: AcquireToolAccess failed: %v", err)
-	}
-	if cleanup != nil {
-		defer cleanup()
-	}
-	if tenantCtx == nil {
-		t.Fatal("CALLING: expected tenant context to be set")
-	}
-
-	t.Log("CALLING: agent tools correctly callable when ai-agents installed")
 }

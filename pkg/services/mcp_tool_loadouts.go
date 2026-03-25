@@ -19,10 +19,6 @@ const (
 	LoadoutOntologyQuestions   = "ontology_questions"
 )
 
-// ToolGroupCustom is the identifier for the custom tools group.
-// Other tool group constants are defined in mcp_config.go and mcp_tools_registry.go.
-const ToolGroupCustom = "custom"
-
 // AllToolsOrdered defines the canonical order for tool presentation in UI and MCP.
 // When merging loadouts, tools should be presented in this order.
 var AllToolsOrdered = []ToolSpec{
@@ -243,12 +239,6 @@ func ComputeEnabledToolsFromConfig(state map[string]*models.ToolGroupConfig, isA
 		return MergeLoadouts(LoadoutDefault)
 	}
 
-	// Custom tools mode
-	customConfig := state[ToolGroupCustom]
-	if customConfig != nil && customConfig.Enabled {
-		return computeCustomTools(customConfig.CustomTools)
-	}
-
 	// Merge developer + user tools (union)
 	devTools := ComputeDeveloperTools(state)
 	userTools := ComputeUserTools(state)
@@ -263,30 +253,6 @@ func ComputeEnabledToolsFromConfig(state map[string]*models.ToolGroupConfig, isA
 	}
 
 	return toolsInCanonicalOrder(enabled)
-}
-
-// computeCustomTools returns tools based on individually selected tool names.
-// Always includes the default loadout (health).
-func computeCustomTools(selectedTools []string) []ToolSpec {
-	// Build set of selected tools
-	selected := make(map[string]bool)
-	for _, name := range selectedTools {
-		selected[name] = true
-	}
-
-	// Always include default loadout tools
-	for _, name := range Loadouts[LoadoutDefault] {
-		selected[name] = true
-	}
-
-	// Return tools in canonical order
-	var result []ToolSpec
-	for _, tool := range AllToolsOrdered {
-		if selected[tool.Name] {
-			result = append(result, tool)
-		}
-	}
-	return result
 }
 
 // IsToolInLoadout checks if a tool is in a specific loadout.
@@ -353,36 +319,12 @@ func ComputeDeveloperTools(state map[string]*models.ToolGroupConfig) []ToolSpec 
 	return toolsInCanonicalOrder(enabled)
 }
 
-// getToolsConfig returns the "tools" config from state, falling back to legacy fields.
-// For backward compatibility: if "tools" key doesn't exist, construct from legacy "developer"/"user" keys.
+// getToolsConfig returns the supported per-app tools config.
 func getToolsConfig(state map[string]*models.ToolGroupConfig) *models.ToolGroupConfig {
-	if cfg, ok := state["tools"]; ok && cfg != nil {
+	if cfg, ok := state[ToolGroupTools]; ok && cfg != nil {
 		return cfg
 	}
-
-	// Backward compat: map legacy fields to new toggles
-	cfg := &models.ToolGroupConfig{}
-
-	// Legacy "developer" key had AddQueryTools and AddOntologyMaintenance
-	if devCfg, ok := state[ToolGroupDeveloper]; ok && devCfg != nil {
-		// AddQueryTools previously controlled schema exploration + query tools
-		// Map to: Direct Database Access (echo/execute/query) + Approval Tools
-		cfg.AddDirectDatabaseAccess = devCfg.AddQueryTools
-		cfg.AddApprovalTools = devCfg.AddQueryTools
-
-		// AddOntologyMaintenance previously controlled ontology maintenance + questions
-		// Map to: Ontology Maintenance Tools
-		cfg.AddOntologyMaintenanceTools = devCfg.AddOntologyMaintenance
-	}
-
-	// Legacy "user" key had AllowOntologyMaintenance
-	if userCfg, ok := state[ToolGroupUser]; ok && userCfg != nil {
-		// Map to: Ontology Suggestions + Request Tools
-		cfg.AddOntologySuggestions = userCfg.AllowOntologyMaintenance
-		cfg.AddRequestTools = userCfg.AllowOntologyMaintenance
-	}
-
-	return cfg
+	return nil
 }
 
 // toolsInCanonicalOrder returns ToolSpecs for the given tool names in AllToolsOrdered order.

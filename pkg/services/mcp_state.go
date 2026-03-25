@@ -19,11 +19,7 @@ func (e *MCPStateError) Error() string {
 
 // Common error codes for state transition failures
 const (
-	ErrCodeAgentToolsConflict = "agent_tools_conflict"
-	ErrCodeForceModeConflict  = "force_mode_conflict"
-	ErrCodeInvalidSubOption   = "invalid_sub_option"
-	ErrCodeNoEnabledQueries   = "no_enabled_queries"
-	ErrCodeUnknownToolGroup   = "unknown_tool_group"
+	ErrCodeUnknownToolGroup = "unknown_tool_group"
 )
 
 // MCPStateTransition represents a request to change MCP config state.
@@ -62,13 +58,10 @@ func NewMCPStateValidator() MCPStateValidator {
 
 // Apply validates and applies the state transition.
 func (v *mcpStateValidator) Apply(transition MCPStateTransition, ctx MCPStateContext) MCPStateResult {
-	// Start with a deep copy of current state
+	_ = ctx
+
 	newState := v.deepCopy(transition.Current)
 
-	// Track which group is being enabled in this transition (for radio button behavior)
-	var newlyEnabledGroup string
-
-	// Validate each update
 	for groupName, updateConfig := range transition.Update {
 		if !validToolGroups[groupName] {
 			originalState := v.deepCopy(transition.Current)
@@ -89,36 +82,9 @@ func (v *mcpStateValidator) Apply(transition MCPStateTransition, ctx MCPStateCon
 			newState[groupName] = currentConfig
 		}
 
-		// Track if this group is being enabled
-		if updateConfig.Enabled && !currentConfig.Enabled {
-			newlyEnabledGroup = groupName
-		}
-
-		// Check if trying to enable this group
-		if updateConfig.Enabled && !currentConfig.Enabled {
-			if err := v.validateEnabling(groupName, newState, ctx); err != nil {
-				originalState := v.deepCopy(transition.Current)
-				return MCPStateResult{
-					State:        originalState,
-					EnabledTools: GetEnabledTools(originalState),
-					Error:        err,
-				}
-			}
-		}
-
-		// Apply the update
 		v.applyUpdate(groupName, currentConfig, updateConfig)
 	}
 
-	// Apply mutual exclusivity rules (radio button behavior)
-	v.applyMutualExclusivity(newState, newlyEnabledGroup)
-
-	// Normalize state (reset sub-options when disabled)
-	v.normalizeState(newState)
-
-	// Compute enabled tools based on the final state
-	// This is for the UI (user perspective) - always compute USER tools
-	// Agent tool filtering happens at MCP connection time, not here
 	enabledTools := GetEnabledTools(newState)
 
 	return MCPStateResult{
@@ -128,62 +94,17 @@ func (v *mcpStateValidator) Apply(transition MCPStateTransition, ctx MCPStateCon
 	}
 }
 
-// validateEnabling checks if a tool group can be enabled.
-// With radio button behavior, any group can always be enabled (it will disable others).
-func (v *mcpStateValidator) validateEnabling(groupName string, state map[string]*models.ToolGroupConfig, ctx MCPStateContext) *MCPStateError {
-	// Radio button behavior: any tool group can be enabled at any time.
-	// The mutual exclusivity is handled in applyMutualExclusivity.
-	return nil
-}
-
 // applyUpdate applies the update config to the current config.
 func (v *mcpStateValidator) applyUpdate(groupName string, current, update *models.ToolGroupConfig) {
-	current.Enabled = update.Enabled
-
-	// New sub-options
-	current.AllowOntologyMaintenance = update.AllowOntologyMaintenance
-	current.AddQueryTools = update.AddQueryTools
-	current.AddOntologyMaintenance = update.AddOntologyMaintenance
-	current.CustomTools = update.CustomTools
-
-	// Per-app toggles
-	current.AddDirectDatabaseAccess = update.AddDirectDatabaseAccess
-	current.AddOntologyMaintenanceTools = update.AddOntologyMaintenanceTools
-	current.AddOntologySuggestions = update.AddOntologySuggestions
-	current.AddApprovalTools = update.AddApprovalTools
-	current.AddRequestTools = update.AddRequestTools
-
-	// Legacy sub-options (backward compatibility)
-	current.ForceMode = update.ForceMode
-	current.AllowClientSuggestions = update.AllowClientSuggestions
-}
-
-// applyMutualExclusivity enforces radio button behavior - only one tool group can be enabled.
-// When a group is being enabled, all others are disabled.
-// newlyEnabledGroup is the group that was just enabled in this transition (may be empty if none).
-func (v *mcpStateValidator) applyMutualExclusivity(state map[string]*models.ToolGroupConfig, newlyEnabledGroup string) {
-	// If a group was just enabled, disable all others (radio button behavior)
-	if newlyEnabledGroup != "" {
-		for groupName, config := range state {
-			if config != nil && groupName != newlyEnabledGroup {
-				config.Enabled = false
-			}
-		}
-	}
-}
-
-// normalizeState ensures legacy sub-options are false when Enabled is false.
-// Note: New sub-options (AllowOntologyMaintenance, AddQueryTools, AddOntologyMaintenance)
-// are NOT reset based on Enabled, because tool groups no longer have enable/disable toggles
-// in the new role-based architecture.
-func (v *mcpStateValidator) normalizeState(state map[string]*models.ToolGroupConfig) {
-	for _, config := range state {
-		if config != nil && !config.Enabled {
-			// Only reset legacy sub-options when Enabled is false
-			config.ForceMode = false
-			config.AllowClientSuggestions = false
-			config.CustomTools = nil
-		}
+	switch groupName {
+	case ToolGroupTools:
+		current.AddDirectDatabaseAccess = update.AddDirectDatabaseAccess
+		current.AddOntologyMaintenanceTools = update.AddOntologyMaintenanceTools
+		current.AddOntologySuggestions = update.AddOntologySuggestions
+		current.AddApprovalTools = update.AddApprovalTools
+		current.AddRequestTools = update.AddRequestTools
+	case ToolGroupAgentTools:
+		current.Enabled = update.Enabled
 	}
 }
 
@@ -194,37 +115,18 @@ func (v *mcpStateValidator) deepCopy(state map[string]*models.ToolGroupConfig) m
 	}
 
 	copy := make(map[string]*models.ToolGroupConfig, len(state))
-	for k, v := range state {
-		if v != nil {
-			// Copy CustomTools slice
-			var customToolsCopy []string
-			if v.CustomTools != nil {
-				customToolsCopy = make([]string, len(v.CustomTools))
-				for i, t := range v.CustomTools {
-					customToolsCopy[i] = t
-				}
-			}
+	for groupName, config := range state {
+		if !validToolGroups[groupName] || config == nil {
+			continue
+		}
 
-			copy[k] = &models.ToolGroupConfig{
-				Enabled: v.Enabled,
-
-				// New sub-options
-				AllowOntologyMaintenance: v.AllowOntologyMaintenance,
-				AddQueryTools:            v.AddQueryTools,
-				AddOntologyMaintenance:   v.AddOntologyMaintenance,
-				CustomTools:              customToolsCopy,
-
-				// Per-app toggles
-				AddDirectDatabaseAccess:     v.AddDirectDatabaseAccess,
-				AddOntologyMaintenanceTools: v.AddOntologyMaintenanceTools,
-				AddOntologySuggestions:      v.AddOntologySuggestions,
-				AddApprovalTools:            v.AddApprovalTools,
-				AddRequestTools:             v.AddRequestTools,
-
-				// Legacy sub-options
-				ForceMode:              v.ForceMode,
-				AllowClientSuggestions: v.AllowClientSuggestions,
-			}
+		copy[groupName] = &models.ToolGroupConfig{
+			Enabled:                     config.Enabled,
+			AddDirectDatabaseAccess:     config.AddDirectDatabaseAccess,
+			AddOntologyMaintenanceTools: config.AddOntologyMaintenanceTools,
+			AddOntologySuggestions:      config.AddOntologySuggestions,
+			AddApprovalTools:            config.AddApprovalTools,
+			AddRequestTools:             config.AddRequestTools,
 		}
 	}
 	return copy

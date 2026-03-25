@@ -13,27 +13,12 @@ import type { ReactNode } from 'react';
 export interface ToolGroupState {
   enabled: boolean;
 
-  // Business Tools (approved_queries) sub-options
-  allowOntologyMaintenance?: boolean;
-
-  // Developer Tools sub-options
-  addQueryTools?: boolean;
-  addOntologyMaintenance?: boolean;
-
-  // Custom Tools - individually selected tool names
-  customTools?: string[];
-
   // Per-app tool toggles
   addDirectDatabaseAccess?: boolean;
   addOntologyMaintenanceTools?: boolean;
   addOntologySuggestions?: boolean;
   addApprovalTools?: boolean;
   addRequestTools?: boolean;
-
-  // Legacy sub-options (backward compatibility)
-  enableExecute?: boolean;
-  forceMode?: boolean;
-  allowClientSuggestions?: boolean;
 }
 
 /**
@@ -60,29 +45,12 @@ export interface MCPConfigResponse {
   developerTools: EnabledToolInfo[];
   agentTools: EnabledToolInfo[];
   appNames: Record<string, string>;
-  /** @deprecated Use userTools, developerTools, or agentTools instead. Kept for backward compatibility. */
-  enabledTools: EnabledToolInfo[];
 }
 
 // API Request Types
 
 export interface ToolGroupConfigUpdate {
   enabled: boolean;
-
-  // Business Tools (approved_queries) sub-options
-  allowOntologyMaintenance?: boolean;
-
-  // Developer Tools sub-options
-  addQueryTools?: boolean;
-  addOntologyMaintenance?: boolean;
-
-  // Custom Tools - individually selected tool names
-  customTools?: string[];
-
-  // Legacy sub-options (backward compatibility)
-  enableExecute?: boolean;
-  forceMode?: boolean;
-  allowClientSuggestions?: boolean;
 }
 
 /**
@@ -90,11 +58,6 @@ export interface ToolGroupConfigUpdate {
  * Only include fields you want to change - omitted fields are not modified.
  */
 export interface UpdateMCPConfigRequest {
-  // User Tools sub-option
-  allowOntologyMaintenance?: boolean;
-  // Developer Tools sub-options
-  addQueryTools?: boolean;
-  addOntologyMaintenance?: boolean;
   // Per-app tool toggles
   addDirectDatabaseAccess?: boolean;
   addOntologyMaintenanceTools?: boolean;

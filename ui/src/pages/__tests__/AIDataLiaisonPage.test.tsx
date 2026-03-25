@@ -66,7 +66,6 @@ const mockMCPConfig: MCPConfigResponse = {
   agentTools: [],
   toolGroups: {},
   appNames: {},
-  enabledTools: [],
 };
 
 const setupMocks = (options: {
@@ -171,10 +170,7 @@ const renderAIDataLiaisonPage = async () => {
     </MemoryRouter>
   );
 
-  // Wait for loading to complete
-  await waitFor(() => {
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
-  });
+  await screen.findByText('AI Data Liaison');
 
   return result;
 };

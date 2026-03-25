@@ -7,39 +7,17 @@ import (
 )
 
 // ToolGroupConfig represents the configuration for a single tool group.
-// Tool groups no longer have enable/disable toggles - tools are filtered by JWT role.
-// The Enabled field is kept for backward compatibility but is ignored.
+// The `tools` group uses per-app toggles, while `agent_tools` uses Enabled.
 type ToolGroupConfig struct {
-	// User Tools options
-	// AllowOntologyMaintenance: When enabled, MCP clients with user role can update ontology
-	// (entities, relationships, etc.). Defaults to true.
-	AllowOntologyMaintenance bool `json:"allowOntologyMaintenance"`
-
-	// Developer Tools options
-	// AddQueryTools: When enabled, adds Query loadout (schema exploration and querying)
-	AddQueryTools bool `json:"addQueryTools"`
-	// AddOntologyMaintenance: When enabled, adds Ontology Maintenance + Ontology Questions tools
-	AddOntologyMaintenance bool `json:"addOntologyMaintenance"`
-
-	// Per-app toggles (new architecture)
-	// MCP Server
-	AddDirectDatabaseAccess bool `json:"addDirectDatabaseAccess"`
-	// Ontology Forge
+	// Per-app toggles under toolGroups["tools"].
+	AddDirectDatabaseAccess     bool `json:"addDirectDatabaseAccess"`
 	AddOntologyMaintenanceTools bool `json:"addOntologyMaintenanceTools"`
 	AddOntologySuggestions      bool `json:"addOntologySuggestions"`
-	// AI Data Liaison
-	AddApprovalTools bool `json:"addApprovalTools"`
-	AddRequestTools  bool `json:"addRequestTools"`
+	AddApprovalTools            bool `json:"addApprovalTools"`
+	AddRequestTools             bool `json:"addRequestTools"`
 
-	// Custom Tools options
-	// CustomTools: List of individually selected tool names (only used when custom group is enabled)
-	CustomTools []string `json:"customTools,omitempty"`
-
-	// Legacy fields (kept for backward compatibility during migration)
-	// Enabled is no longer used for tool selection - tools are filtered by JWT role
-	Enabled                bool `json:"enabled,omitempty"`
-	ForceMode              bool `json:"forceMode,omitempty"`
-	AllowClientSuggestions bool `json:"allowClientSuggestions,omitempty"`
+	// Enabled is only used by groups with a binary on/off switch, currently agent_tools.
+	Enabled bool `json:"enabled,omitempty"`
 }
 
 // MCPConfig represents the MCP server configuration for a project.
@@ -66,11 +44,8 @@ func DefaultMCPConfig(projectID uuid.UUID) *MCPConfig {
 				AddApprovalTools:            true,
 				AddRequestTools:             true,
 			},
-			// Agent tools - enabled by default (Enabled is legacy but still checked for agents)
+			// Agent tools are enabled by default.
 			"agent_tools": {Enabled: true},
-			// Legacy keys for backward compatibility
-			"user":      {AllowOntologyMaintenance: true},
-			"developer": {AddQueryTools: true, AddOntologyMaintenance: true},
 		},
 	}
 }

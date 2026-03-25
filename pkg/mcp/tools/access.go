@@ -103,8 +103,8 @@ type ToolAccessResult struct {
 // This is the shared implementation that all tool-specific check functions should use.
 // Tool access is determined by the JWT role:
 // - Agents (API key auth) get ComputeAgentTools
-// - Admin/Data/Developer roles get ComputeDeveloperTools
-// - Regular users get ComputeUserTools
+// - Admin/Data roles get the union of enabled developer and user toggles
+// - Regular users get only user-toggle tools
 //
 // Returns project ID, tenant-scoped context, cleanup function, and any error.
 // Per CLAUDE.md Rule #6, actionable errors (authentication, invalid parameters, tool not enabled)
@@ -178,12 +178,12 @@ func computeToolsForRole(claims *auth.Claims, state map[string]*models.ToolGroup
 	// Determine the user's effective role
 	role := effectiveRole(claims)
 
-	// User role: limited access — health + approved query execution only
+	// User role: only tools exposed by user-facing toggles.
 	if role == models.RoleUser {
 		return services.ComputeUserTools(state)
 	}
 
-	// Admin and Data roles: full developer tool access based on config
+	// Admin and Data roles get the union of enabled developer and user toggles.
 	return services.ComputeEnabledToolsFromConfig(state, false)
 }
 
