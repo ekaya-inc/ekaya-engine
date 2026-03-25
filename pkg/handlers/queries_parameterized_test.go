@@ -333,11 +333,13 @@ func TestExecuteQueryWithParameters(t *testing.T) {
 	queryID := createData["query_id"].(string)
 
 	tests := []struct {
-		name          string
-		parameters    map[string]any
-		expectStatus  int
-		expectSuccess bool
-		expectRows    bool
+		name                 string
+		parameters           map[string]any
+		expectStatus         int
+		expectSuccess        bool
+		expectRows           bool
+		expectErrorCode      string
+		expectMessageContain string
 	}{
 		{
 			name:          "execute with valid parameters",
@@ -347,18 +349,22 @@ func TestExecuteQueryWithParameters(t *testing.T) {
 			expectRows:    true,
 		},
 		{
-			name:          "execute with missing required parameter",
-			parameters:    map[string]any{},
-			expectStatus:  http.StatusInternalServerError,
-			expectSuccess: false,
-			expectRows:    false,
+			name:                 "execute with missing required parameter",
+			parameters:           map[string]any{},
+			expectStatus:         http.StatusBadRequest,
+			expectSuccess:        false,
+			expectRows:           false,
+			expectErrorCode:      "validation_error",
+			expectMessageContain: "required parameter 'user_id' is missing",
 		},
 		{
-			name:          "execute with SQL injection attempt",
-			parameters:    map[string]any{"user_id": "1; DROP TABLE users--"},
-			expectStatus:  http.StatusInternalServerError,
-			expectSuccess: false,
-			expectRows:    false,
+			name:                 "execute with SQL injection attempt",
+			parameters:           map[string]any{"user_id": "1; DROP TABLE users--"},
+			expectStatus:         http.StatusBadRequest,
+			expectSuccess:        false,
+			expectRows:           false,
+			expectErrorCode:      "validation_error",
+			expectMessageContain: "parameter 'user_id': cannot convert",
 		},
 		{
 			name:          "execute with type coercion (string to int)",
@@ -368,11 +374,13 @@ func TestExecuteQueryWithParameters(t *testing.T) {
 			expectRows:    true,
 		},
 		{
-			name:          "execute with invalid type",
-			parameters:    map[string]any{"user_id": "not-a-number"},
-			expectStatus:  http.StatusInternalServerError,
-			expectSuccess: false,
-			expectRows:    false,
+			name:                 "execute with invalid type",
+			parameters:           map[string]any{"user_id": "not-a-number"},
+			expectStatus:         http.StatusBadRequest,
+			expectSuccess:        false,
+			expectRows:           false,
+			expectErrorCode:      "validation_error",
+			expectMessageContain: "parameter 'user_id': cannot convert",
 		},
 	}
 
@@ -405,6 +413,15 @@ func TestExecuteQueryWithParameters(t *testing.T) {
 				execData, ok := execResp.Data.(map[string]any)
 				if ok && execData != nil {
 					assert.Greater(t, int(execData["row_count"].(float64)), 0)
+				}
+			}
+
+			if !tt.expectSuccess {
+				if tt.expectErrorCode != "" {
+					assert.Equal(t, tt.expectErrorCode, execResp.Error)
+				}
+				if tt.expectMessageContain != "" {
+					assert.Contains(t, execResp.Message, tt.expectMessageContain)
 				}
 			}
 		})
@@ -879,13 +896,15 @@ func TestEndToEndParameterizedQueryFlow(t *testing.T) {
 		injectionRec := httptest.NewRecorder()
 		tc.queriesHandler.Execute(injectionRec, injectionReq)
 
-		// Should fail with internal error (not succeed)
-		assert.Equal(t, http.StatusInternalServerError, injectionRec.Code)
+		// The invalid integer input should fail as a client validation error.
+		assert.Equal(t, http.StatusBadRequest, injectionRec.Code)
 
 		var injectionResp ApiResponse
 		err := json.Unmarshal(injectionRec.Body.Bytes(), &injectionResp)
 		require.NoError(t, err)
 		assert.False(t, injectionResp.Success)
+		assert.Equal(t, "validation_error", injectionResp.Error)
+		assert.Contains(t, injectionResp.Message, "parameter 'min_id': cannot convert")
 	})
 
 	// Step 6: Verify query is in list with parameters

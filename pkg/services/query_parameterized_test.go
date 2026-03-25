@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -47,6 +48,14 @@ func TestValidateRequiredParameters(t *testing.T) {
 			expectedError: "required parameter 'customer_id' is missing",
 		},
 		{
+			name: "required param blank string is missing",
+			paramDefs: []models.QueryParameter{
+				{Name: "customer_id", Type: "string", Required: true},
+			},
+			supplied:      map[string]any{"customer_id": "   "},
+			expectedError: "required parameter 'customer_id' is missing",
+		},
+		{
 			name: "required param nil but has default",
 			paramDefs: []models.QueryParameter{
 				{Name: "customer_id", Type: "uuid", Required: true, Default: "default-uuid"},
@@ -72,6 +81,8 @@ func TestValidateRequiredParameters(t *testing.T) {
 			} else {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.expectedError)
+				var validationErr *QueryExecutionValidationError
+				require.True(t, errors.As(err, &validationErr))
 			}
 		})
 	}
@@ -213,6 +224,8 @@ func TestCoerceParameterTypes(t *testing.T) {
 			} else {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.expectedError)
+				var validationErr *QueryExecutionValidationError
+				require.True(t, errors.As(err, &validationErr))
 			}
 		})
 	}

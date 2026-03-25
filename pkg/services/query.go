@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -144,6 +145,15 @@ type SuggestUpdateRequest struct {
 	AllowsModification       *bool                    `json:"allows_modification,omitempty"`        // Updated modification flag
 	SuggestionContext        map[string]any           `json:"suggestion_context,omitempty"`         // Why this update is needed
 	OutputColumnDescriptions map[string]string        `json:"output_column_descriptions,omitempty"` // For MCP tool compatibility
+}
+
+// QueryExecutionValidationError represents user-correctable saved-query execution input failures.
+type QueryExecutionValidationError struct {
+	Message string
+}
+
+func (e *QueryExecutionValidationError) Error() string {
+	return e.Message
 }
 
 type queryService struct {
@@ -849,14 +859,18 @@ func (s *queryService) validateRequiredParameters(
 	suppliedParams map[string]any,
 ) error {
 	for _, p := range paramDefs {
-		if p.Required {
-			value, exists := suppliedParams[p.Name]
-			// Check if provided and not nil
-			if !exists || value == nil {
-				// Check if there's a default value
-				if p.Default == nil {
-					return fmt.Errorf("required parameter '%s' is missing", p.Name)
-				}
+		if !p.Required {
+			continue
+		}
+
+		value, exists := suppliedParams[p.Name]
+		if exists && hasProvidedQueryParameterValue(value) {
+			continue
+		}
+
+		if !queryParameterHasDefault(p) {
+			return &QueryExecutionValidationError{
+				Message: fmt.Sprintf("required parameter '%s' is missing", p.Name),
 			}
 		}
 	}
@@ -880,7 +894,9 @@ func (s *queryService) coerceParameterTypes(
 	for name, value := range suppliedParams {
 		def, exists := defLookup[name]
 		if !exists {
-			return nil, fmt.Errorf("unknown parameter '%s'", name)
+			return nil, &QueryExecutionValidationError{
+				Message: fmt.Sprintf("unknown parameter '%s'", name),
+			}
 		}
 
 		// Skip nil values - they'll use defaults during substitution
@@ -891,12 +907,34 @@ func (s *queryService) coerceParameterTypes(
 		// Coerce based on type
 		coercedValue, err := s.coerceValue(value, def.Type, name)
 		if err != nil {
-			return nil, err
+			return nil, &QueryExecutionValidationError{Message: err.Error()}
 		}
 		coerced[name] = coercedValue
 	}
 
 	return coerced, nil
+}
+
+func queryParameterHasDefault(param models.QueryParameter) bool {
+	return param.Default != nil
+}
+
+func hasProvidedQueryParameterValue(value any) bool {
+	if value == nil {
+		return false
+	}
+
+	if strValue, ok := value.(string); ok {
+		return strings.TrimSpace(strValue) != ""
+	}
+
+	reflectValue := reflect.ValueOf(value)
+	switch reflectValue.Kind() {
+	case reflect.Array, reflect.Map, reflect.Slice:
+		return reflectValue.Len() > 0
+	}
+
+	return true
 }
 
 // coerceValue attempts to coerce a value to the target type.
