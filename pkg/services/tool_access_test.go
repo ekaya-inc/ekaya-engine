@@ -14,7 +14,7 @@ func TestToolAccessChecker_IsToolAccessible_NonAgentUsesUnionOfEnabledToggles(t 
 	state := map[string]*models.ToolGroupConfig{
 		ToolGroupTools: {
 			AddDirectDatabaseAccess: true,
-			AddRequestTools:         true,
+			AddOntologySuggestions:  true,
 		},
 	}
 
@@ -42,6 +42,42 @@ func TestToolAccessChecker_IsToolAccessible_AgentUsesLimitedLoadout(t *testing.T
 	assert.True(t, checker.IsToolAccessible("execute_approved_query", state, true))
 	assert.False(t, checker.IsToolAccessible("query", state, true))
 	assert.False(t, checker.IsToolAccessible("echo", state, true))
+}
+
+func TestToolAccessChecker_IsToolAccessible_NonAgentOntologyMaintenanceIncludesApprovedQueryCoreTools(t *testing.T) {
+	checker := NewToolAccessChecker()
+
+	state := map[string]*models.ToolGroupConfig{
+		ToolGroupTools: {
+			AddOntologyMaintenanceTools: true,
+		},
+	}
+
+	for _, toolName := range []string{
+		"create_approved_query",
+		"update_approved_query",
+		"delete_approved_query",
+		"list_approved_queries",
+		"execute_approved_query",
+	} {
+		assert.True(t, checker.IsToolAccessible(toolName, state, false), "expected %s to be accessible", toolName)
+	}
+	assert.False(t, checker.IsToolAccessible("suggest_approved_query", state, false))
+}
+
+func TestToolAccessChecker_IsToolAccessible_NonAgentOntologySuggestionsIncludeApprovedQueryExecutionTools(t *testing.T) {
+	checker := NewToolAccessChecker()
+
+	state := map[string]*models.ToolGroupConfig{
+		ToolGroupTools: {
+			AddOntologySuggestions: true,
+		},
+	}
+
+	assert.True(t, checker.IsToolAccessible("list_approved_queries", state, false))
+	assert.True(t, checker.IsToolAccessible("execute_approved_query", state, false))
+	assert.False(t, checker.IsToolAccessible("create_approved_query", state, false))
+	assert.False(t, checker.IsToolAccessible("suggest_approved_query", state, false))
 }
 
 func TestToolAccessChecker_IgnoresUnsupportedGroups(t *testing.T) {

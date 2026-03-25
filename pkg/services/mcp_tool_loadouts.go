@@ -128,7 +128,7 @@ var Loadouts = map[string][]string{
 		"sample",
 	},
 
-	// Ontology Maintenance -- enable MCP Client to manage ontology
+	// Ontology Maintenance -- enable MCP Client to manage ontology and approved query catalogs
 	LoadoutOntologyMaintenance: {
 		"create_glossary_term",
 		"update_column",
@@ -147,13 +147,16 @@ var Loadouts = map[string][]string{
 		"approve_change",
 		"reject_change",
 		"approve_all_changes",
-		// Query management (admin tools)
-		"list_query_suggestions",
-		"approve_query_suggestion",
-		"reject_query_suggestion",
+		// Approved query catalog management (Ontology Forge)
+		"list_approved_queries",
+		"execute_approved_query",
 		"create_approved_query",
 		"update_approved_query",
 		"delete_approved_query",
+		// Query suggestion review workflow (AI Data Liaison)
+		"list_query_suggestions",
+		"approve_query_suggestion",
+		"reject_query_suggestion",
 	},
 
 	// Ontology Questions -- special mode for MCP Client to enumerate and answer pending questions

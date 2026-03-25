@@ -478,8 +478,9 @@ const OntologyForgePage = () => {
                   <div className="flex-1">
                     <span className="text-sm font-medium text-text-primary">Add Ontology Maintenance Tools</span>
                     <p className="text-sm text-text-secondary mt-1">
-                      Include tools to manage the ontology: update columns, relationships, refresh
-                      schema, and review pending changes.
+                      Include tools to manage the ontology and approved query catalog: update
+                      columns, refresh schema, review pending changes, and maintain reusable
+                      approved queries.
                     </p>
                   </div>
                   <Switch
@@ -503,8 +504,8 @@ const OntologyForgePage = () => {
                     <span className="text-sm font-medium text-text-primary">Add Ontology Suggestions</span>
                     <span className="ml-2 text-xs font-medium text-brand-purple">[RECOMMENDED]</span>
                     <p className="text-sm text-text-secondary mt-1">
-                      Enable the MCP Client to suggest updates to columns and relationships as it
-                      learns from user interactions. This helps improve query accuracy over time.
+                      Enable ontology context and reusable approved queries so the MCP Client can
+                      understand your schema and run vetted queries without ad-hoc SQL.
                     </p>
                   </div>
                   <Switch

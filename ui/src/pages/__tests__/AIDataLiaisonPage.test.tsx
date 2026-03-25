@@ -74,6 +74,7 @@ const setupMocks = (options: {
   hasGlossary?: boolean;
   glossaryRequestFails?: boolean;
   isActivated?: boolean;
+  mcpConfig?: MCPConfigResponse;
 } = {}) => {
   const {
     hasOntologyForge = false,
@@ -81,6 +82,7 @@ const setupMocks = (options: {
     hasGlossary = false,
     glossaryRequestFails = false,
     isActivated = false,
+    mcpConfig = mockMCPConfig,
   } = options;
 
   vi.mocked(engineApi.getInstalledApp).mockImplementation((_pid: string, appId: string) => {
@@ -119,7 +121,7 @@ const setupMocks = (options: {
   if (hasMCPConfig) {
     vi.mocked(engineApi.getMCPConfig).mockResolvedValue({
       success: true,
-      data: mockMCPConfig,
+      data: mcpConfig,
     });
   } else {
     vi.mocked(engineApi.getMCPConfig).mockResolvedValue({
@@ -366,14 +368,59 @@ describe('AIDataLiaisonPage', () => {
     it('shows approval tools toggle', async () => {
       await renderAIDataLiaisonPage();
       expect(screen.getByText('Add Approval Tools')).toBeInTheDocument();
-      expect(screen.getByText(/review and manage query suggestions and glossary terms/i)).toBeInTheDocument();
+      expect(screen.getByText(/review query suggestions/i)).toBeInTheDocument();
+      expect(screen.getByText(/maintain shared glossary terminology/i)).toBeInTheDocument();
+      expect(screen.queryByText(/manage approved queries/i)).not.toBeInTheDocument();
     });
 
     it('shows request tools toggle with recommended badge', async () => {
       await renderAIDataLiaisonPage();
       expect(screen.getByText('Add Request Tools')).toBeInTheDocument();
       expect(screen.getByText('[RECOMMENDED]')).toBeInTheDocument();
+      expect(screen.getByText(/review query history/i)).toBeInTheDocument();
       expect(screen.getByText(/access glossary terms through the MCP Client/i)).toBeInTheDocument();
+    });
+
+    it('shows only ai data liaison tool rows on the page', async () => {
+      setupMocks({
+        mcpConfig: {
+          ...mockMCPConfig,
+          developerTools: [
+            {
+              name: 'list_query_suggestions',
+              description: 'List query suggestions awaiting review',
+              appId: 'ai-data-liaison',
+            },
+            {
+              name: 'create_approved_query',
+              description: 'Create a new pre-approved query directly',
+              appId: 'ontology-forge',
+            },
+          ],
+          userTools: [
+            {
+              name: 'suggest_approved_query',
+              description: 'Suggest a reusable parameterized query for approval',
+              appId: 'ai-data-liaison',
+            },
+            {
+              name: 'list_approved_queries',
+              description: 'List pre-approved SQL queries',
+              appId: 'ontology-forge',
+            },
+          ],
+        },
+      });
+      await renderAIDataLiaisonPage();
+
+      for (const button of screen.getAllByRole('button', { name: /tools enabled/i })) {
+        fireEvent.click(button);
+      }
+
+      expect(screen.getByText('list_query_suggestions')).toBeInTheDocument();
+      expect(screen.getByText('suggest_approved_query')).toBeInTheDocument();
+      expect(screen.queryByText('create_approved_query')).not.toBeInTheDocument();
+      expect(screen.queryByText('list_approved_queries')).not.toBeInTheDocument();
     });
   });
 

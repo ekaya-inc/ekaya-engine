@@ -74,7 +74,7 @@ func TestComputeToolsForRole_AdminGetsUnionOfEnabledToggles(t *testing.T) {
 	tools := computeToolsForRole(claims, map[string]*models.ToolGroupConfig{
 		services.ToolGroupTools: {
 			AddDirectDatabaseAccess: true,
-			AddRequestTools:         true,
+			AddOntologySuggestions:  true,
 		},
 	})
 

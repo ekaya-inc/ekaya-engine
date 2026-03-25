@@ -28,6 +28,7 @@ func TestComputeUserTools_UsesUserToggles(t *testing.T) {
 	assert.True(t, toolNames["get_context"])
 	assert.True(t, toolNames["get_ontology"])
 	assert.True(t, toolNames["list_approved_queries"])
+	assert.True(t, toolNames["execute_approved_query"])
 	assert.True(t, toolNames["query"])
 	assert.False(t, toolNames["echo"])
 	assert.False(t, toolNames["get_schema"])
@@ -49,9 +50,76 @@ func TestComputeDeveloperTools_UsesDeveloperToggles(t *testing.T) {
 	assert.True(t, toolNames["query"])
 	assert.True(t, toolNames["get_schema"])
 	assert.True(t, toolNames["update_table"])
+	assert.True(t, toolNames["create_approved_query"])
+	assert.True(t, toolNames["list_approved_queries"])
+	assert.True(t, toolNames["execute_approved_query"])
 	assert.True(t, toolNames["list_query_suggestions"])
 	assert.False(t, toolNames["get_context"])
+}
+
+func TestComputeDeveloperTools_OntologyMaintenanceIncludesApprovedQueryCoreTools(t *testing.T) {
+	tools := ComputeDeveloperTools(map[string]*models.ToolGroupConfig{
+		ToolGroupTools: {
+			AddOntologyMaintenanceTools: true,
+		},
+	})
+
+	toolNames := toolNamesToMap(tools)
+	for _, toolName := range []string{
+		"create_approved_query",
+		"update_approved_query",
+		"delete_approved_query",
+		"list_approved_queries",
+		"execute_approved_query",
+	} {
+		assert.True(t, toolNames[toolName], "expected %s in ontology maintenance tools", toolName)
+	}
+	assert.False(t, toolNames["list_query_suggestions"])
+	assert.False(t, toolNames["suggest_approved_query"])
+}
+
+func TestComputeUserTools_OntologySuggestionsIncludeApprovedQueryExecutionTools(t *testing.T) {
+	tools := ComputeUserTools(map[string]*models.ToolGroupConfig{
+		ToolGroupTools: {
+			AddOntologySuggestions: true,
+		},
+	})
+
+	toolNames := toolNamesToMap(tools)
+	assert.True(t, toolNames["list_approved_queries"])
+	assert.True(t, toolNames["execute_approved_query"])
+	assert.False(t, toolNames["query"])
+	assert.False(t, toolNames["suggest_approved_query"])
+}
+
+func TestComputeDeveloperTools_ApprovalToolsExcludeApprovedQueryCoreTools(t *testing.T) {
+	tools := ComputeDeveloperTools(map[string]*models.ToolGroupConfig{
+		ToolGroupTools: {
+			AddApprovalTools: true,
+		},
+	})
+
+	toolNames := toolNamesToMap(tools)
+	assert.True(t, toolNames["list_query_suggestions"])
+	assert.True(t, toolNames["approve_query_suggestion"])
+	assert.True(t, toolNames["reject_query_suggestion"])
+	assert.False(t, toolNames["create_approved_query"])
 	assert.False(t, toolNames["list_approved_queries"])
+	assert.False(t, toolNames["execute_approved_query"])
+}
+
+func TestComputeUserTools_RequestToolsExcludeApprovedQueryCoreTools(t *testing.T) {
+	tools := ComputeUserTools(map[string]*models.ToolGroupConfig{
+		ToolGroupTools: {
+			AddRequestTools: true,
+		},
+	})
+
+	toolNames := toolNamesToMap(tools)
+	assert.True(t, toolNames["query"])
+	assert.True(t, toolNames["suggest_approved_query"])
+	assert.False(t, toolNames["list_approved_queries"])
+	assert.False(t, toolNames["execute_approved_query"])
 }
 
 func TestComputeEnabledToolsFromConfig_AgentUsesAgentToolsOnly(t *testing.T) {
@@ -79,7 +147,7 @@ func TestComputeEnabledToolsFromConfig_MergesUserAndDeveloperLoadouts(t *testing
 	tools := ComputeEnabledToolsFromConfig(map[string]*models.ToolGroupConfig{
 		ToolGroupTools: {
 			AddDirectDatabaseAccess: true,
-			AddRequestTools:         true,
+			AddOntologySuggestions:  true,
 		},
 	}, false)
 

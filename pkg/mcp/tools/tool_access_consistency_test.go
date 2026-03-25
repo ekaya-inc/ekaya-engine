@@ -69,15 +69,15 @@ func TestToolAccessConsistency_AgentListingMatchesCalling(t *testing.T) {
 	}
 }
 
-func TestToolAccessConsistency_UserListingMatchesCalling(t *testing.T) {
+func TestToolAccessConsistency_UserListingMatchesCallingWithOntologyForge(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
 	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		services.ToolGroupTools: {AddRequestTools: true},
+		services.ToolGroupTools: {AddOntologySuggestions: true},
 	})
 
-	installedApps := newMockInstalledAppService(models.AppIDAIDataLiaison)
+	installedApps := newMockInstalledAppService(models.AppIDOntologyForge)
 	mcpConfigService := services.NewMCPConfigService(
 		repositories.NewMCPConfigRepository(),
 		nil,
@@ -126,12 +126,69 @@ func TestToolAccessConsistency_UserListingMatchesCalling(t *testing.T) {
 	}
 }
 
-func TestToolAccessConsistency_AppOwnershipFilteringDeniesMissingApp(t *testing.T) {
+func TestToolAccessConsistency_AdminListingMatchesCallingWithOntologyForge(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
 	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		services.ToolGroupTools: {AddRequestTools: true},
+		services.ToolGroupTools: {AddOntologyMaintenanceTools: true},
+	})
+
+	installedApps := newMockInstalledAppService(models.AppIDOntologyForge)
+	mcpConfigService := services.NewMCPConfigService(
+		repositories.NewMCPConfigRepository(),
+		nil,
+		nil,
+		installedApps,
+		"http://localhost",
+		zap.NewNop(),
+	)
+
+	filterDeps := &MCPToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:                  engineDB.DB,
+			MCPConfigService:    mcpConfigService,
+			Logger:              zap.NewNop(),
+			InstalledAppService: installedApps,
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
+	}
+
+	claims := &auth.Claims{
+		ProjectID: projectID.String(),
+		Roles:     []string{models.RoleAdmin},
+	}
+	claims.Subject = uuid.New().String()
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
+
+	filteredTools := NewToolFilter(filterDeps)(ctx, createTestToolsWithDataLiaison())
+	assertContainsTool(t, filteredTools, "create_approved_query")
+
+	queryDeps := &QueryToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:                  engineDB.DB,
+			MCPConfigService:    mcpConfigService,
+			Logger:              zap.NewNop(),
+			InstalledAppService: installedApps,
+		},
+	}
+
+	_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, queryDeps, "create_approved_query")
+	requireNoToolAccessError(t, err)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if tenantCtx == nil {
+		t.Fatal("expected tenant context for allowed admin tool")
+	}
+}
+
+func TestToolAccessConsistency_AppOwnershipFilteringDeniesMissingOntologyForge(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		services.ToolGroupTools: {AddOntologySuggestions: true},
 	})
 
 	installedApps := newMockInstalledAppService()
@@ -163,7 +220,7 @@ func TestToolAccessConsistency_AppOwnershipFilteringDeniesMissingApp(t *testing.
 
 	filteredTools := NewToolFilter(filterDeps)(ctx, createTestTools())
 	if containsTool(filteredTools, "list_approved_queries") {
-		t.Fatal("list_approved_queries should be hidden when AI Data Liaison is not installed")
+		t.Fatal("list_approved_queries should be hidden when Ontology Forge is not installed")
 	}
 
 	queryDeps := &QueryToolDeps{

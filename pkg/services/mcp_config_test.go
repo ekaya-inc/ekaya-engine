@@ -124,6 +124,15 @@ func enabledToolNames(tools []EnabledToolInfo) []string {
 	return names
 }
 
+func findEnabledTool(tools []EnabledToolInfo, name string) *EnabledToolInfo {
+	for i := range tools {
+		if tools[i].Name == name {
+			return &tools[i]
+		}
+	}
+	return nil
+}
+
 func responseToolGroupNames(groups map[string]*models.ToolGroupConfig) []string {
 	names := make([]string, 0, len(groups))
 	for name := range groups {
@@ -216,6 +225,38 @@ func TestMCPConfigService_Get_FiltersToolsByInstalledApps(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, enabledToolNames(resp.DeveloperTools), "get_schema")
 	assert.Contains(t, enabledToolNames(resp.UserTools), "get_context")
-	assert.NotContains(t, enabledToolNames(resp.UserTools), "list_approved_queries")
+	assert.Contains(t, enabledToolNames(resp.DeveloperTools), "create_approved_query")
+	assert.Contains(t, enabledToolNames(resp.DeveloperTools), "list_approved_queries")
+	assert.Contains(t, enabledToolNames(resp.DeveloperTools), "execute_approved_query")
+	assert.Contains(t, enabledToolNames(resp.UserTools), "list_approved_queries")
+	assert.Contains(t, enabledToolNames(resp.UserTools), "execute_approved_query")
+	assert.NotContains(t, enabledToolNames(resp.UserTools), "suggest_approved_query")
+	assert.NotContains(t, enabledToolNames(resp.DeveloperTools), "list_query_suggestions")
+
+	require.NotNil(t, findEnabledTool(resp.DeveloperTools, "create_approved_query"))
+	assert.Equal(t, models.AppIDOntologyForge, findEnabledTool(resp.DeveloperTools, "create_approved_query").AppID)
+	require.NotNil(t, findEnabledTool(resp.UserTools, "list_approved_queries"))
+	assert.Equal(t, models.AppIDOntologyForge, findEnabledTool(resp.UserTools, "list_approved_queries").AppID)
+}
+
+func TestMCPConfigService_Get_WithOnlyAIDataLiaisonInstalled_ExcludesCoreApprovedQueryTools(t *testing.T) {
+	projectID := uuid.New()
+	repo := &mockMCPConfigRepository{
+		config: models.DefaultMCPConfig(projectID),
+	}
+	installedApps := newMockInstalledAppServiceForMCP(models.AppIDAIDataLiaison)
+
+	svc := NewMCPConfigService(repo, nil, nil, installedApps, "https://engine.example.com", zap.NewNop())
+	resp, err := svc.Get(context.Background(), projectID)
+
+	require.NoError(t, err)
 	assert.NotContains(t, enabledToolNames(resp.DeveloperTools), "create_approved_query")
+	assert.NotContains(t, enabledToolNames(resp.DeveloperTools), "list_approved_queries")
+	assert.NotContains(t, enabledToolNames(resp.DeveloperTools), "execute_approved_query")
+	assert.NotContains(t, enabledToolNames(resp.UserTools), "list_approved_queries")
+	assert.NotContains(t, enabledToolNames(resp.UserTools), "execute_approved_query")
+	assert.Contains(t, enabledToolNames(resp.DeveloperTools), "list_query_suggestions")
+	assert.Contains(t, enabledToolNames(resp.DeveloperTools), "create_glossary_term")
+	assert.Contains(t, enabledToolNames(resp.UserTools), "suggest_approved_query")
+	assert.Contains(t, enabledToolNames(resp.UserTools), "get_query_history")
 }

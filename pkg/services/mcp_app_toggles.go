@@ -35,6 +35,8 @@ var AppToggles = []AppToggle{
 			"get_schema", "search_schema", "probe_column", "probe_columns", "get_column_metadata",
 			"update_column", "update_columns", "update_table", "list_project_knowledge", "update_project_knowledge",
 			"delete_column_metadata", "delete_table_metadata", "delete_project_knowledge",
+			"create_approved_query", "update_approved_query", "delete_approved_query",
+			"list_approved_queries", "execute_approved_query",
 			"refresh_schema", "scan_data_changes", "list_pending_changes",
 			"approve_change", "reject_change", "approve_all_changes",
 			"list_ontology_questions", "resolve_ontology_question", "skip_ontology_question",
@@ -47,7 +49,7 @@ var AppToggles = []AppToggle{
 		Role:        "user",
 		ToggleKey:   "addOntologySuggestions",
 		DisplayName: "Add Ontology Suggestions",
-		Tools:       []string{"get_context", "get_ontology"},
+		Tools:       []string{"get_context", "get_ontology", "list_approved_queries", "execute_approved_query"},
 	},
 	// AI Data Liaison — Developer
 	{
@@ -57,7 +59,6 @@ var AppToggles = []AppToggle{
 		DisplayName: "Add Approval Tools",
 		Tools: []string{
 			"list_query_suggestions", "approve_query_suggestion", "reject_query_suggestion",
-			"create_approved_query", "update_approved_query", "delete_approved_query",
 			"create_glossary_term", "update_glossary_term", "delete_glossary_term",
 			"explain_query",
 		},
@@ -71,7 +72,6 @@ var AppToggles = []AppToggle{
 		Tools: []string{
 			"query", "sample", "validate",
 			"list_glossary", "get_glossary_sql",
-			"list_approved_queries", "execute_approved_query",
 			"suggest_approved_query", "suggest_query_update",
 			"get_query_history", "record_query_feedback",
 		},
