@@ -32,6 +32,9 @@ type SchemaService interface {
 	// AddManualRelationship creates a user-defined relationship between two columns.
 	AddManualRelationship(ctx context.Context, projectID, datasourceID uuid.UUID, req *models.AddRelationshipRequest) (*models.SchemaRelationship, error)
 
+	// UpdateRelationship curates an existing relationship in place without changing its semantic type.
+	UpdateRelationship(ctx context.Context, projectID, relationshipID uuid.UUID, req *models.UpdateRelationshipRequest) (*models.SchemaRelationship, error)
+
 	// RemoveRelationship marks a relationship as removed (is_approved=false).
 	// The relationship remains in the database to prevent re-inference.
 	RemoveRelationship(ctx context.Context, projectID, relationshipID uuid.UUID) error
@@ -567,6 +570,11 @@ func (s *schemaService) GetDatasourceSchema(ctx context.Context, projectID, data
 			Cardinality:      r.Cardinality,
 			Confidence:       r.Confidence,
 			IsApproved:       r.IsApproved,
+			Source:           r.Source,
+			LastEditSource:   r.LastEditSource,
+			EffectiveSource:  r.EffectiveSource(),
+			CreatedBy:        r.CreatedBy,
+			UpdatedBy:        r.UpdatedBy,
 		}
 		schema.Relationships[i] = dr
 	}
@@ -658,6 +666,9 @@ func (s *schemaService) AddManualRelationship(ctx context.Context, projectID, da
 	if req.TargetTableName == "" || req.TargetColumnName == "" {
 		return nil, fmt.Errorf("target table and column are required")
 	}
+	if req.Cardinality != "" && !models.IsValidCardinality(req.Cardinality) {
+		return nil, fmt.Errorf("invalid cardinality: %s", req.Cardinality)
+	}
 
 	// Parse and validate source table
 	sourceSchema, sourceTableName := parseTableName(req.SourceTableName)
@@ -697,6 +708,10 @@ func (s *schemaService) AddManualRelationship(ctx context.Context, projectID, da
 	// Create relationship
 	isApproved := true
 	manualType := models.RelationshipTypeManual
+	cardinality := models.CardinalityUnknown
+	if req.Cardinality != "" {
+		cardinality = req.Cardinality
+	}
 	rel := &models.SchemaRelationship{
 		ProjectID:        projectID,
 		SourceTableID:    sourceTable.ID,
@@ -704,7 +719,7 @@ func (s *schemaService) AddManualRelationship(ctx context.Context, projectID, da
 		TargetTableID:    targetTable.ID,
 		TargetColumnID:   targetColumn.ID,
 		RelationshipType: manualType,
-		Cardinality:      models.CardinalityUnknown,
+		Cardinality:      cardinality,
 		Confidence:       1.0,
 		InferenceMethod:  &manualType,
 		IsApproved:       &isApproved,
@@ -719,6 +734,46 @@ func (s *schemaService) AddManualRelationship(ctx context.Context, projectID, da
 		zap.String("relationship_id", rel.ID.String()),
 		zap.String("source", req.SourceTableName+"."+req.SourceColumnName),
 		zap.String("target", req.TargetTableName+"."+req.TargetColumnName),
+	)
+
+	return rel, nil
+}
+
+// UpdateRelationship curates an existing relationship without changing its relationship_type.
+func (s *schemaService) UpdateRelationship(ctx context.Context, projectID, relationshipID uuid.UUID, req *models.UpdateRelationshipRequest) (*models.SchemaRelationship, error) {
+	if req == nil {
+		return nil, fmt.Errorf("update request is required")
+	}
+	if req.Cardinality == nil && req.IsApproved == nil {
+		return nil, fmt.Errorf("at least one field must be updated")
+	}
+	if req.Cardinality != nil && !models.IsValidCardinality(*req.Cardinality) {
+		return nil, fmt.Errorf("invalid cardinality: %s", *req.Cardinality)
+	}
+
+	rel, err := s.schemaRepo.GetRelationshipByID(ctx, projectID, relationshipID)
+	if err != nil {
+		return nil, apperrors.ErrNotFound
+	}
+	if rel.ProjectID != projectID {
+		return nil, apperrors.ErrNotFound
+	}
+
+	if req.Cardinality != nil {
+		rel.Cardinality = *req.Cardinality
+	}
+	if req.IsApproved != nil {
+		rel.IsApproved = req.IsApproved
+	}
+
+	if err := s.schemaRepo.UpsertRelationship(ctx, rel); err != nil {
+		return nil, fmt.Errorf("failed to update relationship: %w", err)
+	}
+
+	s.logger.Info("Updated relationship",
+		zap.String("project_id", projectID.String()),
+		zap.String("relationship_id", relationshipID.String()),
+		zap.String("relationship_type", rel.RelationshipType),
 	)
 
 	return rel, nil

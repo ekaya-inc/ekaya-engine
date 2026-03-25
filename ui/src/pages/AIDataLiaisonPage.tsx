@@ -345,9 +345,8 @@ const AIDataLiaisonPage = () => {
                 <div className="flex-1">
                   <span className="text-sm font-medium text-text-primary">Add Approval Tools</span>
                   <p className="text-sm text-text-secondary mt-1">
-                    Include tools to review and manage query suggestions and glossary terms:
-                    approve, reject, manage approved queries, and maintain shared business
-                    terminology.
+                    Include tools to review query suggestions, look up glossary definitions, review
+                    query history, and maintain shared glossary terminology.
                   </p>
                 </div>
                 <Switch
@@ -371,8 +370,8 @@ const AIDataLiaisonPage = () => {
                   <span className="text-sm font-medium text-text-primary">Add Request Tools</span>
                   <span className="ml-2 text-xs font-medium text-brand-purple">[RECOMMENDED]</span>
                   <p className="text-sm text-text-secondary mt-1">
-                    Enable business users to suggest queries, request data access, and access
-                    glossary terms through the MCP Client.
+                    Enable business users to suggest queries, request data access, review query
+                    history, and access glossary terms through the MCP Client.
                   </p>
                 </div>
                 <Switch

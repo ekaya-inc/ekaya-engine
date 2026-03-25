@@ -22,6 +22,8 @@ type schemaTestContext struct {
 	repo      SchemaRepository
 	projectID uuid.UUID
 	dsID      uuid.UUID // test datasource ID
+	userID    uuid.UUID
+	mcpUserID uuid.UUID
 }
 
 // setupSchemaTest creates a test context with real database.
@@ -34,6 +36,8 @@ func setupSchemaTest(t *testing.T) *schemaTestContext {
 	// Use fixed IDs for consistent testing
 	projectID := uuid.MustParse("00000000-0000-0000-0000-000000000002")
 	dsID := uuid.MustParse("00000000-0000-0000-0000-000000000003")
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000004")
+	mcpUserID := uuid.MustParse("00000000-0000-0000-0000-000000000005")
 
 	tc := &schemaTestContext{
 		t:         t,
@@ -41,10 +45,14 @@ func setupSchemaTest(t *testing.T) *schemaTestContext {
 		repo:      repo,
 		projectID: projectID,
 		dsID:      dsID,
+		userID:    userID,
+		mcpUserID: mcpUserID,
 	}
 
 	// Ensure project and datasource exist
 	tc.ensureTestProject()
+	tc.ensureTestUser(tc.userID)
+	tc.ensureTestUser(tc.mcpUserID)
 	tc.ensureTestDatasource()
 
 	return tc
@@ -67,6 +75,18 @@ func (tc *schemaTestContext) createTestContext() (context.Context, func()) {
 	}
 }
 
+// createTestContextWithSource creates a tenant-scoped context with provenance.
+func (tc *schemaTestContext) createTestContextWithSource(source models.ProvenanceSource, userID uuid.UUID) (context.Context, func()) {
+	tc.t.Helper()
+
+	ctx, cleanup := tc.createTestContext()
+	ctx = models.WithProvenance(ctx, models.ProvenanceContext{
+		Source: source,
+		UserID: userID,
+	})
+	return ctx, cleanup
+}
+
 // ensureTestProject creates the test project if it doesn't exist.
 func (tc *schemaTestContext) ensureTestProject() {
 	tc.t.Helper()
@@ -85,6 +105,26 @@ func (tc *schemaTestContext) ensureTestProject() {
 	`, tc.projectID, "Schema Test Project")
 	if err != nil {
 		tc.t.Fatalf("Failed to ensure test project: %v", err)
+	}
+}
+
+func (tc *schemaTestContext) ensureTestUser(userID uuid.UUID) {
+	tc.t.Helper()
+
+	ctx := context.Background()
+	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
+	if err != nil {
+		tc.t.Fatalf("Failed to create tenant scope for user setup: %v", err)
+	}
+	defer scope.Close()
+
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_users (project_id, user_id, role, email)
+		VALUES ($1, $2, 'admin', $3)
+		ON CONFLICT (project_id, user_id) DO NOTHING
+	`, tc.projectID, userID, userID.String()+"@example.com")
+	if err != nil {
+		tc.t.Fatalf("Failed to ensure test user: %v", err)
 	}
 }
 
@@ -1167,6 +1207,145 @@ func TestSchemaRepository_UpsertRelationship_Create(t *testing.T) {
 	}
 }
 
+func TestSchemaRepository_UpsertRelationship_Create_WithManualProvenance(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContextWithSource(models.SourceManual, tc.userID)
+	defer cleanup()
+
+	usersTable := tc.createTestTable(ctx, "public", "users")
+	userIDCol := tc.createTestColumn(ctx, usersTable.ID, "id", 1)
+
+	ordersTable := tc.createTestTable(ctx, "public", "orders")
+	orderUserIDCol := tc.createTestColumn(ctx, ordersTable.ID, "user_id", 2)
+
+	rel := &models.SchemaRelationship{
+		ProjectID:        tc.projectID,
+		SourceTableID:    ordersTable.ID,
+		SourceColumnID:   orderUserIDCol.ID,
+		TargetTableID:    usersTable.ID,
+		TargetColumnID:   userIDCol.ID,
+		RelationshipType: models.RelationshipTypeManual,
+		Cardinality:      models.Cardinality1ToN,
+		Confidence:       1.0,
+	}
+
+	if err := tc.repo.UpsertRelationship(ctx, rel); err != nil {
+		t.Fatalf("UpsertRelationship failed: %v", err)
+	}
+
+	retrieved, err := tc.repo.GetRelationshipByID(ctx, tc.projectID, rel.ID)
+	if err != nil {
+		t.Fatalf("GetRelationshipByID failed: %v", err)
+	}
+
+	if retrieved.Source != models.ProvenanceManual {
+		t.Fatalf("expected source %q, got %q", models.ProvenanceManual, retrieved.Source)
+	}
+	if retrieved.LastEditSource != nil {
+		t.Fatalf("expected last_edit_source to be nil, got %v", *retrieved.LastEditSource)
+	}
+	if retrieved.CreatedBy == nil || *retrieved.CreatedBy != tc.userID {
+		t.Fatalf("expected created_by %s, got %v", tc.userID, retrieved.CreatedBy)
+	}
+	if retrieved.UpdatedBy != nil {
+		t.Fatalf("expected updated_by to be nil, got %v", *retrieved.UpdatedBy)
+	}
+}
+
+func TestSchemaRepository_UpsertRelationshipWithMetrics_PreservesCuratedFields(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	inferredCtx, inferredCleanup := tc.createTestContextWithSource(models.SourceInferred, tc.userID)
+	defer inferredCleanup()
+
+	manualCtx, manualCleanup := tc.createTestContextWithSource(models.SourceManual, tc.userID)
+	defer manualCleanup()
+
+	usersTable := tc.createTestTable(inferredCtx, "public", "users")
+	userIDCol := tc.createTestColumn(inferredCtx, usersTable.ID, "id", 1)
+
+	ordersTable := tc.createTestTable(inferredCtx, "public", "orders")
+	orderUserIDCol := tc.createTestColumn(inferredCtx, ordersTable.ID, "user_id", 2)
+
+	rel := &models.SchemaRelationship{
+		ProjectID:        tc.projectID,
+		SourceTableID:    ordersTable.ID,
+		SourceColumnID:   orderUserIDCol.ID,
+		TargetTableID:    usersTable.ID,
+		TargetColumnID:   userIDCol.ID,
+		RelationshipType: models.RelationshipTypeInferred,
+		Cardinality:      models.CardinalityNTo1,
+		Confidence:       0.82,
+	}
+	if err := tc.repo.UpsertRelationship(inferredCtx, rel); err != nil {
+		t.Fatalf("initial UpsertRelationship failed: %v", err)
+	}
+
+	isApproved := false
+	manualEdit := &models.SchemaRelationship{
+		ID:               rel.ID,
+		ProjectID:        tc.projectID,
+		SourceTableID:    rel.SourceTableID,
+		SourceColumnID:   rel.SourceColumnID,
+		TargetTableID:    rel.TargetTableID,
+		TargetColumnID:   rel.TargetColumnID,
+		RelationshipType: models.RelationshipTypeInferred,
+		Cardinality:      models.Cardinality1To1,
+		Confidence:       0.95,
+		IsApproved:       &isApproved,
+	}
+	if err := tc.repo.UpsertRelationship(manualCtx, manualEdit); err != nil {
+		t.Fatalf("manual UpsertRelationship failed: %v", err)
+	}
+
+	refreshedInference := &models.SchemaRelationship{
+		ProjectID:        tc.projectID,
+		SourceTableID:    rel.SourceTableID,
+		SourceColumnID:   rel.SourceColumnID,
+		TargetTableID:    rel.TargetTableID,
+		TargetColumnID:   rel.TargetColumnID,
+		RelationshipType: models.RelationshipTypeInferred,
+		Cardinality:      models.CardinalityNTo1,
+		Confidence:       0.41,
+	}
+	metrics := &models.DiscoveryMetrics{
+		MatchRate:      0.91,
+		SourceDistinct: 10,
+		TargetDistinct: 10,
+		MatchedCount:   9,
+	}
+	if err := tc.repo.UpsertRelationshipWithMetrics(inferredCtx, refreshedInference, metrics); err != nil {
+		t.Fatalf("UpsertRelationshipWithMetrics failed: %v", err)
+	}
+
+	retrieved, err := tc.repo.GetRelationshipByID(inferredCtx, tc.projectID, rel.ID)
+	if err != nil {
+		t.Fatalf("GetRelationshipByID failed: %v", err)
+	}
+
+	if retrieved.Cardinality != models.Cardinality1To1 {
+		t.Fatalf("expected curated cardinality %q, got %q", models.Cardinality1To1, retrieved.Cardinality)
+	}
+	if retrieved.IsApproved == nil || *retrieved.IsApproved {
+		t.Fatalf("expected curated is_approved=false, got %v", retrieved.IsApproved)
+	}
+	if retrieved.LastEditSource == nil || *retrieved.LastEditSource != models.ProvenanceManual {
+		t.Fatalf("expected last_edit_source=%q, got %v", models.ProvenanceManual, retrieved.LastEditSource)
+	}
+	if retrieved.UpdatedBy == nil || *retrieved.UpdatedBy != tc.userID {
+		t.Fatalf("expected updated_by=%s, got %v", tc.userID, retrieved.UpdatedBy)
+	}
+	if retrieved.MatchRate == nil || *retrieved.MatchRate != metrics.MatchRate {
+		t.Fatalf("expected match_rate %.2f, got %v", metrics.MatchRate, retrieved.MatchRate)
+	}
+	if retrieved.Confidence != refreshedInference.Confidence {
+		t.Fatalf("expected refreshed confidence %.2f, got %.2f", refreshedInference.Confidence, retrieved.Confidence)
+	}
+}
+
 func TestSchemaRepository_UpsertRelationship_RespectsSoftDelete(t *testing.T) {
 	tc := setupSchemaTest(t)
 	tc.cleanup()
@@ -1460,6 +1639,166 @@ func TestSchemaRepository_GetRelationshipByColumns_NotFound(t *testing.T) {
 
 	if retrieved != nil {
 		t.Error("expected nil result when relationship not found")
+	}
+}
+
+func TestSchemaRepository_DeleteInferredRelationshipsByProject_PreservesCuratedActiveRelationshipsAndClearsTombstones(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	inferredCtx, inferredCleanup := tc.createTestContextWithSource(models.SourceInferred, tc.userID)
+	defer inferredCleanup()
+
+	mcpCtx, mcpCleanup := tc.createTestContextWithSource(models.SourceMCP, tc.mcpUserID)
+	defer mcpCleanup()
+
+	manualCtx, manualCleanup := tc.createTestContextWithSource(models.SourceManual, tc.userID)
+	defer manualCleanup()
+
+	usersTable := tc.createTestTable(inferredCtx, "public", "users")
+	userIDCol := tc.createTestColumn(inferredCtx, usersTable.ID, "id", 1)
+
+	ordersTable := tc.createTestTable(inferredCtx, "public", "orders")
+	orderUserIDCol := tc.createTestColumn(inferredCtx, ordersTable.ID, "user_id", 2)
+
+	reviewsTable := tc.createTestTable(inferredCtx, "public", "reviews")
+	reviewUserIDCol := tc.createTestColumn(inferredCtx, reviewsTable.ID, "user_id", 1)
+
+	curatedTable := tc.createTestTable(inferredCtx, "public", "curated_links")
+	curatedUserIDCol := tc.createTestColumn(inferredCtx, curatedTable.ID, "user_id", 1)
+
+	tombstoneTable := tc.createTestTable(inferredCtx, "public", "tombstones")
+	tombstoneUserIDCol := tc.createTestColumn(inferredCtx, tombstoneTable.ID, "user_id", 1)
+
+	manualTable := tc.createTestTable(inferredCtx, "public", "manual_links")
+	manualUserIDCol := tc.createTestColumn(inferredCtx, manualTable.ID, "user_id", 1)
+
+	fkTable := tc.createTestTable(inferredCtx, "public", "fk_links")
+	fkUserIDCol := tc.createTestColumn(inferredCtx, fkTable.ID, "user_id", 1)
+
+	createRelationship := func(ctx context.Context, sourceTableID, sourceColumnID uuid.UUID, relType string) *models.SchemaRelationship {
+		t.Helper()
+		rel := &models.SchemaRelationship{
+			ProjectID:        tc.projectID,
+			SourceTableID:    sourceTableID,
+			SourceColumnID:   sourceColumnID,
+			TargetTableID:    usersTable.ID,
+			TargetColumnID:   userIDCol.ID,
+			RelationshipType: relType,
+			Cardinality:      models.CardinalityNTo1,
+			Confidence:       0.8,
+		}
+		if err := tc.repo.UpsertRelationship(ctx, rel); err != nil {
+			t.Fatalf("UpsertRelationship failed: %v", err)
+		}
+		return rel
+	}
+
+	engineOwned := createRelationship(inferredCtx, ordersTable.ID, orderUserIDCol.ID, models.RelationshipTypeInferred)
+	reviewOwned := createRelationship(inferredCtx, reviewsTable.ID, reviewUserIDCol.ID, models.RelationshipTypeReview)
+
+	curated := createRelationship(inferredCtx, curatedTable.ID, curatedUserIDCol.ID, models.RelationshipTypeInferred)
+	curatedEdit := &models.SchemaRelationship{
+		ID:               curated.ID,
+		ProjectID:        tc.projectID,
+		SourceTableID:    curated.SourceTableID,
+		SourceColumnID:   curated.SourceColumnID,
+		TargetTableID:    curated.TargetTableID,
+		TargetColumnID:   curated.TargetColumnID,
+		RelationshipType: curated.RelationshipType,
+		Cardinality:      models.Cardinality1To1,
+		Confidence:       0.92,
+	}
+	if err := tc.repo.UpsertRelationship(mcpCtx, curatedEdit); err != nil {
+		t.Fatalf("curated UpsertRelationship failed: %v", err)
+	}
+
+	tombstone := createRelationship(inferredCtx, tombstoneTable.ID, tombstoneUserIDCol.ID, models.RelationshipTypeInferred)
+	if err := tc.repo.SoftDeleteRelationship(manualCtx, tc.projectID, tombstone.ID); err != nil {
+		t.Fatalf("SoftDeleteRelationship failed: %v", err)
+	}
+
+	manualRel := &models.SchemaRelationship{
+		ProjectID:        tc.projectID,
+		SourceTableID:    manualTable.ID,
+		SourceColumnID:   manualUserIDCol.ID,
+		TargetTableID:    usersTable.ID,
+		TargetColumnID:   userIDCol.ID,
+		RelationshipType: models.RelationshipTypeManual,
+		Cardinality:      models.CardinalityNTo1,
+		Confidence:       1.0,
+	}
+	if err := tc.repo.UpsertRelationship(manualCtx, manualRel); err != nil {
+		t.Fatalf("manual UpsertRelationship failed: %v", err)
+	}
+
+	fkRel := &models.SchemaRelationship{
+		ProjectID:        tc.projectID,
+		SourceTableID:    fkTable.ID,
+		SourceColumnID:   fkUserIDCol.ID,
+		TargetTableID:    usersTable.ID,
+		TargetColumnID:   userIDCol.ID,
+		RelationshipType: models.RelationshipTypeFK,
+		Cardinality:      models.CardinalityNTo1,
+		Confidence:       1.0,
+	}
+	if err := tc.repo.UpsertRelationship(inferredCtx, fkRel); err != nil {
+		t.Fatalf("fk UpsertRelationship failed: %v", err)
+	}
+
+	deletedCount, err := tc.repo.DeleteInferredRelationshipsByProject(inferredCtx, tc.projectID)
+	if err != nil {
+		t.Fatalf("DeleteInferredRelationshipsByProject failed: %v", err)
+	}
+
+	if deletedCount != 3 {
+		t.Fatalf("expected 3 reset-scoped relationships to be deleted, got %d", deletedCount)
+	}
+
+	scope, ok := database.GetTenantScope(inferredCtx)
+	if !ok {
+		t.Fatal("no tenant scope in context")
+	}
+
+	assertExists := func(relID uuid.UUID, want bool) {
+		t.Helper()
+		var exists bool
+		err := scope.Conn.QueryRow(inferredCtx, `SELECT EXISTS(SELECT 1 FROM engine_schema_relationships WHERE id = $1)`, relID).Scan(&exists)
+		if err != nil {
+			t.Fatalf("failed to query relationship existence: %v", err)
+		}
+		if exists != want {
+			t.Fatalf("expected exists=%v for %s, got %v", want, relID, exists)
+		}
+	}
+
+	assertExists(engineOwned.ID, false)
+	assertExists(reviewOwned.ID, false)
+	assertExists(curated.ID, true)
+	assertExists(tombstone.ID, false)
+	assertExists(manualRel.ID, true)
+	assertExists(fkRel.ID, true)
+
+	rediscovered := &models.SchemaRelationship{
+		ProjectID:        tc.projectID,
+		SourceTableID:    tombstoneTable.ID,
+		SourceColumnID:   tombstoneUserIDCol.ID,
+		TargetTableID:    usersTable.ID,
+		TargetColumnID:   userIDCol.ID,
+		RelationshipType: models.RelationshipTypeInferred,
+		Cardinality:      models.CardinalityNTo1,
+		Confidence:       0.88,
+	}
+	if err := tc.repo.UpsertRelationship(inferredCtx, rediscovered); err != nil {
+		t.Fatalf("rediscovered UpsertRelationship failed: %v", err)
+	}
+
+	retrieved, err := tc.repo.GetRelationshipByID(inferredCtx, tc.projectID, rediscovered.ID)
+	if err != nil {
+		t.Fatalf("GetRelationshipByID failed after rediscovery: %v", err)
+	}
+	if retrieved.SourceColumnID != tombstoneUserIDCol.ID || retrieved.TargetColumnID != userIDCol.ID {
+		t.Fatalf("unexpected rediscovered relationship columns: got %s -> %s", retrieved.SourceColumnID, retrieved.TargetColumnID)
 	}
 }
 

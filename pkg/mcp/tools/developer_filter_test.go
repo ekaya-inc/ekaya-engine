@@ -387,8 +387,8 @@ func TestNewToolFilter_DeveloperEnabled_ApprovedQueriesOff(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Direct Database Access = health + echo + execute + query = 4 tools
-	expectedTools := []string{"health", "echo", "execute", "query"}
+	// Direct Database Access = health + echo + execute + query + sample + validate.
+	expectedTools := []string{"health", "echo", "execute", "query", "sample", "validate"}
 	if len(filtered) != len(expectedTools) {
 		t.Errorf("expected %d tools, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
 	}
@@ -446,9 +446,13 @@ func TestNewToolFilter_ApprovedQueriesEnabledWithQueries(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Only AddRequestTools enabled (user-facing request tools)
+	// Enable both request tools and ontology suggestions so query access and
+	// approved-query listing can coexist through their owning apps.
 	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		"tools": {AddRequestTools: true},
+		"tools": {
+			AddOntologySuggestions: true,
+			AddRequestTools:        true,
+		},
 	})
 
 	// Mock with queries - query count doesn't affect tool filtering
@@ -459,7 +463,7 @@ func TestNewToolFilter_ApprovedQueriesEnabledWithQueries(t *testing.T) {
 			DB:                  engineDB.DB,
 			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, testProjectService, nil, "http://localhost", zap.NewNop()),
 			Logger:              zap.NewNop(),
-			InstalledAppService: newMockInstalledAppService(models.AppIDAIDataLiaison),
+			InstalledAppService: newMockInstalledAppService(models.AppIDOntologyForge, models.AppIDAIDataLiaison),
 		},
 		ProjectService: testProjectService,
 	}
@@ -470,17 +474,19 @@ func TestNewToolFilter_ApprovedQueriesEnabledWithQueries(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// AddRequestTools enables user-facing request tools: query, sample, validate,
-	// list_approved_queries, execute_approved_query, etc.
-	// Health always included.
+	// Health is always included. Ontology suggestions provide approved-query access,
+	// while AI Data Liaison request tools provide glossary discovery.
 	if !containsTool(filtered, "health") {
 		t.Error("expected health tool to be present")
 	}
-	if !containsTool(filtered, "query") {
-		t.Error("expected query tool to be present with AddRequestTools")
-	}
 	if !containsTool(filtered, "list_approved_queries") {
-		t.Error("expected list_approved_queries to be present with AddRequestTools")
+		t.Error("expected list_approved_queries to be present with AddOntologySuggestions")
+	}
+	if !containsTool(filtered, "list_glossary") {
+		t.Error("expected list_glossary to be present with AddRequestTools")
+	}
+	if containsTool(filtered, "query") {
+		t.Error("query should not be present without AddDirectDatabaseAccess")
 	}
 
 	// Developer-only tools should NOT be present
@@ -522,7 +528,7 @@ func TestFilterTools(t *testing.T) {
 
 	// Test developer enabled, execute disabled, approved_queries disabled
 	// Developer tools now: echo, execute (but execute disabled), get_schema
-	// Business user tools (query, sample, validate) are now in approved_queries
+	// Direct-query tools are hidden when user-facing tools are disabled.
 	filtered = filterTools(tools, true, false, false)
 	if len(filtered) != 3 {
 		t.Errorf("expected 3 tools (health + echo + get_schema), got %d: %v", len(filtered), toolNames(filtered))
@@ -673,13 +679,19 @@ func TestNewToolFilter_ApprovedQueriesOn_DeveloperOff(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// AddRequestTools enables user request tools: query, sample, validate,
-	// list_approved_queries, execute_approved_query, etc.
+	// AddRequestTools enables AI Data Liaison user tools such as glossary access,
+	// but not direct SQL query tools.
 	if !containsTool(filtered, "health") {
 		t.Error("expected health tool to be present")
 	}
-	if !containsTool(filtered, "query") {
-		t.Error("expected query tool to be present with AddRequestTools")
+	if !containsTool(filtered, "list_glossary") {
+		t.Error("expected list_glossary to be present with AddRequestTools")
+	}
+	if !containsTool(filtered, "get_glossary_sql") {
+		t.Error("expected get_glossary_sql to be present with AddRequestTools")
+	}
+	if containsTool(filtered, "query") {
+		t.Error("query should not be present without AddDirectDatabaseAccess")
 	}
 
 	// Developer-only tools should NOT be present
@@ -750,8 +762,8 @@ func TestNewToolFilter_DeveloperOnly_CoreToolsOnly(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// AddDirectDatabaseAccess = health + echo + execute + query = 4 tools
-	expectedTools := []string{"health", "echo", "execute", "query"}
+	// AddDirectDatabaseAccess = health + echo + execute + query + sample + validate.
+	expectedTools := []string{"health", "echo", "execute", "query", "sample", "validate"}
 	if len(filtered) != len(expectedTools) {
 		t.Errorf("expected %d tools, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
 	}
@@ -786,9 +798,9 @@ func TestFilterTools_OntologyToolsFilteredWithApprovedQueries(t *testing.T) {
 
 	// Test ontology and business user tools present with approved_queries even when developer tools disabled
 	filtered = filterTools(tools, false, false, true)
-	// query, sample, validate are now in approved_queries group, so they should be present
+	// Direct-query tools should be present when user-facing tools are enabled.
 	if !containsTool(filtered, "query") {
-		t.Error("query should be present when approved_queries enabled (now in approved_queries group)")
+		t.Error("query should be present when user-facing tools are enabled")
 	}
 	if !containsTool(filtered, "get_ontology") {
 		t.Error("get_ontology should be present when approved_queries enabled, regardless of developer tools")
@@ -1170,6 +1182,12 @@ func TestNewToolFilter_DataLiaisonNotInstalled_BusinessTools(t *testing.T) {
 		}
 	}
 
+	for _, name := range []string{"list_approved_queries", "execute_approved_query"} {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be present when Ontology Forge is installed", name)
+		}
+	}
+
 	// MCP Server tools should be present (always installed)
 	for _, name := range []string{"health", "echo", "execute", "query"} {
 		if !containsTool(filtered, name) {
@@ -1224,6 +1242,12 @@ func TestNewToolFilter_DataLiaisonInstalled_BusinessTools(t *testing.T) {
 			t.Errorf("expected tool %s to be present when AI Data Liaison is installed", name)
 		}
 	}
+
+	for _, name := range []string{"list_approved_queries", "execute_approved_query"} {
+		if containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be hidden when Ontology Forge is not installed", name)
+		}
+	}
 }
 
 func TestNewToolFilter_DataLiaisonNotInstalled_DeveloperTools(t *testing.T) {
@@ -1260,14 +1284,11 @@ func TestNewToolFilter_DataLiaisonNotInstalled_DeveloperTools(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 	filtered := filter(ctx, tools)
 
-	// Developer Data Liaison tools should NOT be present
+	// AI Data Liaison-only developer tools should NOT be present
 	devDataLiaisonTools := []string{
 		"list_query_suggestions",
 		"approve_query_suggestion",
 		"reject_query_suggestion",
-		"create_approved_query",
-		"update_approved_query",
-		"delete_approved_query",
 	}
 	for _, name := range devDataLiaisonTools {
 		if containsTool(filtered, name) {
@@ -1276,7 +1297,15 @@ func TestNewToolFilter_DataLiaisonNotInstalled_DeveloperTools(t *testing.T) {
 	}
 
 	// Core developer tools should still be present (MCP Server + Ontology Forge)
-	coreDevTools := []string{"health", "echo", "execute", "get_schema"}
+	coreDevTools := []string{
+		"health",
+		"echo",
+		"execute",
+		"get_schema",
+		"create_approved_query",
+		"update_approved_query",
+		"delete_approved_query",
+	}
 	for _, name := range coreDevTools {
 		if !containsTool(filtered, name) {
 			t.Errorf("expected tool %s to be present", name)
@@ -1318,18 +1347,21 @@ func TestNewToolFilter_DataLiaisonInstalled_DeveloperTools(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 	filtered := filter(ctx, tools)
 
-	// Developer Data Liaison tools SHOULD be present when app is installed
+	// AI Data Liaison-only developer tools SHOULD be present when app is installed
 	devDataLiaisonTools := []string{
 		"list_query_suggestions",
 		"approve_query_suggestion",
 		"reject_query_suggestion",
-		"create_approved_query",
-		"update_approved_query",
-		"delete_approved_query",
 	}
 	for _, name := range devDataLiaisonTools {
 		if !containsTool(filtered, name) {
 			t.Errorf("expected tool %s to be present when AI Data Liaison is installed", name)
+		}
+	}
+
+	for _, name := range []string{"create_approved_query", "update_approved_query", "delete_approved_query"} {
+		if containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be hidden when Ontology Forge is not installed", name)
 		}
 	}
 }
@@ -1551,9 +1583,15 @@ func TestNewToolFilter_PerRoleInstallationFiltering(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 	filtered := filter(ctx, tools)
 
-	// "query" should be present — enabled via MCP Server developer toggle (app always installed)
+	// Direct Database Access is enabled through MCP Server, so the direct-read tools should be present.
 	if !containsTool(filtered, "query") {
 		t.Error("query should be present via MCP Server developer toggle (Direct Database Access ON)")
+	}
+	if !containsTool(filtered, "sample") {
+		t.Error("sample should be present via MCP Server toggle")
+	}
+	if !containsTool(filtered, "validate") {
+		t.Error("validate should be present via MCP Server toggle")
 	}
 	// "echo" and "execute" should also be present (MCP Server developer toggle)
 	if !containsTool(filtered, "echo") {
@@ -1564,10 +1602,108 @@ func TestNewToolFilter_PerRoleInstallationFiltering(t *testing.T) {
 	}
 
 	// AI Data Liaison-only tools should NOT be present (app not installed)
-	for _, name := range []string{"sample", "validate", "suggest_approved_query", "suggest_query_update"} {
+	for _, name := range []string{"suggest_approved_query", "suggest_query_update"} {
 		if containsTool(filtered, name) {
 			t.Errorf("tool %s should NOT be present: AI Data Liaison is not installed", name)
 		}
+	}
+}
+
+func TestNewToolFilter_OntologySuggestionsExposeExpandedReadTools(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		"tools": {
+			AddOntologySuggestions: true,
+		},
+	})
+
+	deps := &MCPToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:                  engineDB.DB,
+			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:              zap.NewNop(),
+			InstalledAppService: newMockInstalledAppService(models.AppIDOntologyForge),
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createAllTools()
+
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	claims.Subject = "user-123"
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	filtered := filter(ctx, tools)
+
+	for _, name := range []string{
+		"get_context",
+		"get_ontology",
+		"search_schema",
+		"get_schema",
+		"get_column_metadata",
+		"probe_column",
+		"probe_columns",
+		"list_project_knowledge",
+		"list_relationships",
+		"list_approved_queries",
+		"execute_approved_query",
+	} {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected ontology suggestion tool %s to be present", name)
+		}
+	}
+	if containsTool(filtered, "query") {
+		t.Error("query should not be present without Direct Database Access")
+	}
+}
+
+func TestNewToolFilter_ApprovalToolsExposeGlossaryReadsAndHistory(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		"tools": {
+			AddApprovalTools: true,
+		},
+	})
+
+	deps := &MCPToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:                  engineDB.DB,
+			MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, mockProjectServiceWithDatasource(), nil, "http://localhost", zap.NewNop()),
+			Logger:              zap.NewNop(),
+			InstalledAppService: newMockInstalledAppService(models.AppIDAIDataLiaison),
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createAllTools()
+
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	claims.Subject = "user-123"
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	filtered := filter(ctx, tools)
+
+	for _, name := range []string{
+		"list_query_suggestions",
+		"approve_query_suggestion",
+		"reject_query_suggestion",
+		"create_glossary_term",
+		"update_glossary_term",
+		"delete_glossary_term",
+		"list_glossary",
+		"get_glossary_sql",
+		"get_query_history",
+	} {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected approval tool %s to be present", name)
+		}
+	}
+	if containsTool(filtered, "explain_query") {
+		t.Error("explain_query should not be present via AI Data Liaison approval tools")
 	}
 }
 

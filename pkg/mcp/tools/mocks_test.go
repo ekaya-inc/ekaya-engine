@@ -313,6 +313,10 @@ func (m *mockSchemaService) AddManualRelationship(ctx context.Context, projectID
 	return nil, nil
 }
 
+func (m *mockSchemaService) UpdateRelationship(ctx context.Context, projectID, relationshipID uuid.UUID, req *models.UpdateRelationshipRequest) (*models.SchemaRelationship, error) {
+	return nil, nil
+}
+
 func (m *mockSchemaService) RemoveRelationship(ctx context.Context, projectID, relationshipID uuid.UUID) error {
 	return nil
 }

@@ -78,16 +78,14 @@ var (
 	// developerToolNames lists all tools in the developer group.
 	developerToolNames map[string]bool
 
-	// businessUserToolNames lists read-only query tools that are part of the approved_queries group.
-	// These tools enable business users to answer ad-hoc questions when pre-approved queries don't match.
+	// businessUserToolNames lists read-only direct-query tools exposed to users.
 	businessUserToolNames map[string]bool
 
-	// ontologyToolNames lists all ontology tools (grouped with approved_queries visibility).
-	// This includes get_glossary since business glossary is part of semantic context.
+	// ontologyToolNames lists user-facing ontology read tools exposed by suggestion toggles.
 	ontologyToolNames map[string]bool
 
 	// agentToolNames lists tools available to agents when agent_tools is enabled.
-	// Agents can access echo for testing and approved_queries tools for data access.
+	// Agents only get the limited-query loadout for data access.
 	agentToolNames map[string]bool
 )
 
@@ -110,9 +108,7 @@ func buildToolNameMap(group string) map[string]bool {
 	return m
 }
 
-// buildBusinessUserToolMap returns tools from approved_queries group that are business user tools.
-// These are the read-only query tools (query, sample, validate) as opposed to
-// the approved query tools (list_approved_queries, execute_approved_query) or ontology tools.
+// buildBusinessUserToolMap returns the read-only direct-query tools exposed to users.
 func buildBusinessUserToolMap() map[string]bool {
 	return map[string]bool{
 		"query":    true,
@@ -121,18 +117,22 @@ func buildBusinessUserToolMap() map[string]bool {
 	}
 }
 
-// buildOntologyToolMap returns ontology-related tools from the approved_queries group.
-// This includes glossary tools since business glossary is part of semantic context.
+// buildOntologyToolMap returns user-facing ontology context tools for the
+// legacy three-flag filter helper. Keep this limited to tools that are treated
+// purely as user-facing context in that helper so shared developer tools such as
+// get_schema are not hidden when developer access is enabled.
 func buildOntologyToolMap() map[string]bool {
 	return map[string]bool{
-		"get_ontology":     true,
-		"list_glossary":    true,
-		"get_glossary_sql": true,
+		"get_context":            true,
+		"get_ontology":           true,
+		"list_glossary":          true,
+		"get_glossary_sql":       true,
+		"execute_approved_query": true,
+		"list_approved_queries":  true,
 	}
 }
 
 // buildAgentToolMap returns tools available to agents (Limited Query loadout).
-// Agents get only approved query tools - echo is a developer testing tool.
 // Note: health is handled separately in filterAgentTools.
 func buildAgentToolMap() map[string]bool {
 	return map[string]bool{
@@ -323,7 +323,7 @@ func filterTools(tools []mcp.Tool, showDeveloper, showExecute, showApprovedQueri
 			continue
 		}
 
-		// Check business user tools (query, sample, validate) - tied to approved_queries visibility
+		// Check business user tools (query, sample, validate).
 		if businessUserToolNames[tool.Name] && !showApprovedQueries {
 			continue
 		}
@@ -333,7 +333,7 @@ func filterTools(tools []mcp.Tool, showDeveloper, showExecute, showApprovedQueri
 			continue
 		}
 
-		// Check ontology tools - tied to approved_queries visibility
+		// Check ontology context tools.
 		if ontologyToolNames[tool.Name] && !showApprovedQueries {
 			continue
 		}
@@ -344,8 +344,8 @@ func filterTools(tools []mcp.Tool, showDeveloper, showExecute, showApprovedQueri
 }
 
 // filterAgentTools filters tools for agent authentication.
-// When agent_tools is enabled, only approved_queries tools (list_approved_queries, execute_approved_query) are allowed.
-// When disabled, no tools are available (except health which is always available).
+// When agent_tools is enabled, only the limited-query tools are allowed.
+// When disabled, no tools are available except health.
 func filterAgentTools(tools []mcp.Tool, agentToolsEnabled bool) []mcp.Tool {
 	filtered := make([]mcp.Tool, 0, len(tools))
 	for _, tool := range tools {
@@ -360,7 +360,7 @@ func filterAgentTools(tools []mcp.Tool, agentToolsEnabled bool) []mcp.Tool {
 			continue
 		}
 
-		// When agent_tools enabled, only allow approved_queries tools
+		// When agent_tools is enabled, only allow limited-query tools.
 		if agentToolNames[tool.Name] {
 			filtered = append(filtered, tool)
 		}

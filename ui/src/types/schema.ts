@@ -103,7 +103,9 @@ export interface SaveSelectionsResponse {
 /**
  * Relationship type constants
  */
-export type RelationshipType = 'fk' | 'inferred' | 'manual';
+export type RelationshipType = 'fk' | 'inferred' | 'manual' | 'review';
+
+export type RelationshipProvenance = 'inferred' | 'manual' | 'mcp';
 
 /**
  * Cardinality type constants
@@ -127,6 +129,11 @@ export interface RelationshipDetail {
   inference_method: string | null;
   is_validated: boolean;
   is_approved: boolean | null; // null = pending, true = approved, false = rejected
+  source: RelationshipProvenance;
+  last_edit_source?: RelationshipProvenance;
+  effective_source: RelationshipProvenance;
+  created_by?: string;
+  updated_by?: string;
   description?: string;
   created_at: string;
   updated_at: string;
@@ -152,4 +159,3 @@ export interface CreateRelationshipRequest {
   target_table: string;
   target_column: string;
 }
-

@@ -101,6 +101,9 @@ func (m *mockSchemaServiceForSeeding) GetDatasourceTable(ctx context.Context, pr
 func (m *mockSchemaServiceForSeeding) AddManualRelationship(ctx context.Context, projectID, datasourceID uuid.UUID, req *models.AddRelationshipRequest) (*models.SchemaRelationship, error) {
 	return nil, nil
 }
+func (m *mockSchemaServiceForSeeding) UpdateRelationship(ctx context.Context, projectID, relationshipID uuid.UUID, req *models.UpdateRelationshipRequest) (*models.SchemaRelationship, error) {
+	return nil, nil
+}
 func (m *mockSchemaServiceForSeeding) RemoveRelationship(ctx context.Context, projectID, relationshipID uuid.UUID) error {
 	return nil
 }

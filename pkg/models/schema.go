@@ -66,6 +66,10 @@ type SchemaRelationship struct {
 	IsValidated       bool               `json:"is_validated"`
 	ValidationResults *ValidationResults `json:"validation_results,omitempty"`
 	IsApproved        *bool              `json:"is_approved,omitempty"`
+	Source            string             `json:"source"`
+	LastEditSource    *string            `json:"last_edit_source,omitempty"`
+	CreatedBy         *uuid.UUID         `json:"created_by,omitempty"`
+	UpdatedBy         *uuid.UUID         `json:"updated_by,omitempty"`
 	CreatedAt         time.Time          `json:"created_at"`
 	UpdatedAt         time.Time          `json:"updated_at"`
 	// Discovery metrics (populated during relationship discovery)
@@ -292,6 +296,11 @@ type DatasourceRelationship struct {
 	Cardinality      string
 	Confidence       float64
 	IsApproved       *bool
+	Source           string
+	LastEditSource   *string
+	EffectiveSource  string
+	CreatedBy        *uuid.UUID
+	UpdatedBy        *uuid.UUID
 }
 
 // AddRelationshipRequest contains input for creating a manual relationship.
@@ -300,6 +309,13 @@ type AddRelationshipRequest struct {
 	SourceColumnName string `json:"source_column"`
 	TargetTableName  string `json:"target_table"`
 	TargetColumnName string `json:"target_column"`
+	Cardinality      string `json:"cardinality,omitempty"`
+}
+
+// UpdateRelationshipRequest contains input for curating an existing relationship.
+type UpdateRelationshipRequest struct {
+	Cardinality *string `json:"cardinality,omitempty"`
+	IsApproved  *bool   `json:"is_approved,omitempty"`
 }
 
 // ============================================================================
@@ -308,21 +324,26 @@ type AddRelationshipRequest struct {
 
 // RelationshipDetail provides enriched relationship data with resolved names and types.
 type RelationshipDetail struct {
-	ID               uuid.UUID `json:"id"`
-	SourceTableName  string    `json:"source_table_name"`
-	SourceColumnName string    `json:"source_column_name"`
-	SourceColumnType string    `json:"source_column_type"`
-	TargetTableName  string    `json:"target_table_name"`
-	TargetColumnName string    `json:"target_column_name"`
-	TargetColumnType string    `json:"target_column_type"`
-	RelationshipType string    `json:"relationship_type"`
-	Cardinality      string    `json:"cardinality"`
-	Confidence       float64   `json:"confidence"`
-	InferenceMethod  *string   `json:"inference_method,omitempty"`
-	IsValidated      bool      `json:"is_validated"`
-	IsApproved       *bool     `json:"is_approved,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID               uuid.UUID  `json:"id"`
+	SourceTableName  string     `json:"source_table_name"`
+	SourceColumnName string     `json:"source_column_name"`
+	SourceColumnType string     `json:"source_column_type"`
+	TargetTableName  string     `json:"target_table_name"`
+	TargetColumnName string     `json:"target_column_name"`
+	TargetColumnType string     `json:"target_column_type"`
+	RelationshipType string     `json:"relationship_type"`
+	Cardinality      string     `json:"cardinality"`
+	Confidence       float64    `json:"confidence"`
+	InferenceMethod  *string    `json:"inference_method,omitempty"`
+	IsValidated      bool       `json:"is_validated"`
+	IsApproved       *bool      `json:"is_approved,omitempty"`
+	Source           string     `json:"source"`
+	LastEditSource   *string    `json:"last_edit_source,omitempty"`
+	EffectiveSource  string     `json:"effective_source"`
+	CreatedBy        *uuid.UUID `json:"created_by,omitempty"`
+	UpdatedBy        *uuid.UUID `json:"updated_by,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 // RelationshipsResponse contains the full response for GET /relationships endpoint.
@@ -339,4 +360,21 @@ type DiscoveryMetrics struct {
 	SourceDistinct int64
 	TargetDistinct int64
 	MatchedCount   int64
+}
+
+// EffectiveProvenance returns the effective source for an ontology-backed row.
+// last_edit_source takes precedence when present.
+func EffectiveProvenance(source string, lastEditSource *string) string {
+	if lastEditSource != nil && *lastEditSource != "" {
+		return *lastEditSource
+	}
+	return source
+}
+
+// EffectiveSource returns the relationship's effective provenance source.
+func (r *SchemaRelationship) EffectiveSource() string {
+	if r == nil {
+		return ""
+	}
+	return EffectiveProvenance(r.Source, r.LastEditSource)
 }

@@ -106,6 +106,9 @@ func newStrictClientCompatibilityTestServer() *server.MCPServer {
 	RegisterTableTools(mcpServer, &TableToolDeps{
 		BaseMCPToolDeps: baseDeps,
 	})
+	RegisterRelationshipTools(mcpServer, &RelationshipToolDeps{
+		BaseMCPToolDeps: baseDeps,
+	})
 	RegisterProbeTools(mcpServer, &ProbeToolDeps{
 		BaseMCPToolDeps: baseDeps,
 	})

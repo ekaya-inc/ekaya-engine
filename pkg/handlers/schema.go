@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -74,6 +75,11 @@ type RelationshipResponse struct {
 	Cardinality      string  `json:"cardinality"`
 	Confidence       float64 `json:"confidence"`
 	IsApproved       *bool   `json:"is_approved,omitempty"`
+	Source           string  `json:"source"`
+	LastEditSource   *string `json:"last_edit_source,omitempty"`
+	EffectiveSource  string  `json:"effective_source"`
+	CreatedBy        *string `json:"created_by,omitempty"`
+	UpdatedBy        *string `json:"updated_by,omitempty"`
 }
 
 // RefreshSchemaResponse contains statistics from a schema refresh operation.
@@ -130,6 +136,11 @@ type RelationshipDetailResponse struct {
 	InferenceMethod  *string `json:"inference_method,omitempty"`
 	IsValidated      bool    `json:"is_validated"`
 	IsApproved       *bool   `json:"is_approved"`
+	Source           string  `json:"source"`
+	LastEditSource   *string `json:"last_edit_source,omitempty"`
+	EffectiveSource  string  `json:"effective_source"`
+	CreatedBy        *string `json:"created_by,omitempty"`
+	UpdatedBy        *string `json:"updated_by,omitempty"`
 	CreatedAt        string  `json:"created_at"`
 	UpdatedAt        string  `json:"updated_at"`
 }
@@ -617,7 +628,18 @@ func (h *SchemaHandler) AddRelationship(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	relationship, err := h.schemaService.AddManualRelationship(r.Context(), projectID, datasourceID, &req)
+	manualCtx, provenanceErr := withManualRelationshipProvenance(r.Context())
+	if provenanceErr != nil {
+		h.logger.Error("Failed to set manual relationship provenance",
+			zap.String("project_id", projectID.String()),
+			zap.Error(provenanceErr))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "relationship_provenance_failed", "Failed to record relationship provenance"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	relationship, err := h.schemaService.AddManualRelationship(manualCtx, projectID, datasourceID, &req)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrConflict) {
 			if err := ErrorResponse(w, http.StatusConflict, "relationship_exists", "A relationship between these columns already exists"); err != nil {
@@ -664,7 +686,18 @@ func (h *SchemaHandler) RemoveRelationship(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if err := h.schemaService.RemoveRelationship(r.Context(), projectID, relationshipID); err != nil {
+	manualCtx, provenanceErr := withManualRelationshipProvenance(r.Context())
+	if provenanceErr != nil {
+		h.logger.Error("Failed to set manual relationship provenance",
+			zap.String("project_id", projectID.String()),
+			zap.Error(provenanceErr))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "relationship_provenance_failed", "Failed to record relationship provenance"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if err := h.schemaService.RemoveRelationship(manualCtx, projectID, relationshipID); err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			if err := ErrorResponse(w, http.StatusNotFound, "relationship_not_found", "Relationship not found"); err != nil {
 				h.logger.Error("Failed to write error response", zap.Error(err))
@@ -762,6 +795,11 @@ func (h *SchemaHandler) toDatasourceRelationshipResponse(rel *models.DatasourceR
 		Cardinality:      rel.Cardinality,
 		Confidence:       rel.Confidence,
 		IsApproved:       rel.IsApproved,
+		Source:           rel.Source,
+		LastEditSource:   rel.LastEditSource,
+		EffectiveSource:  rel.EffectiveSource,
+		CreatedBy:        uuidPtrToString(rel.CreatedBy),
+		UpdatedBy:        uuidPtrToString(rel.UpdatedBy),
 	}
 }
 
@@ -778,6 +816,11 @@ func (h *SchemaHandler) toSchemaRelationshipResponse(rel *models.SchemaRelations
 		Cardinality:      rel.Cardinality,
 		Confidence:       rel.Confidence,
 		IsApproved:       rel.IsApproved,
+		Source:           rel.Source,
+		LastEditSource:   rel.LastEditSource,
+		EffectiveSource:  rel.EffectiveSource(),
+		CreatedBy:        uuidPtrToString(rel.CreatedBy),
+		UpdatedBy:        uuidPtrToString(rel.UpdatedBy),
 	}
 }
 
@@ -802,7 +845,28 @@ func (h *SchemaHandler) toRelationshipDetailResponse(rel *models.RelationshipDet
 		InferenceMethod:  rel.InferenceMethod,
 		IsValidated:      rel.IsValidated,
 		IsApproved:       rel.IsApproved,
+		Source:           rel.Source,
+		LastEditSource:   rel.LastEditSource,
+		EffectiveSource:  rel.EffectiveSource,
+		CreatedBy:        uuidPtrToString(rel.CreatedBy),
+		UpdatedBy:        uuidPtrToString(rel.UpdatedBy),
 		CreatedAt:        jsonutil.FormatUTCTime(rel.CreatedAt),
 		UpdatedAt:        jsonutil.FormatUTCTime(rel.UpdatedAt),
 	}
+}
+
+func withManualRelationshipProvenance(ctx context.Context) (context.Context, error) {
+	userID, err := auth.RequireUserUUIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return models.WithManualProvenance(ctx, userID), nil
+}
+
+func uuidPtrToString(id *uuid.UUID) *string {
+	if id == nil {
+		return nil
+	}
+	s := id.String()
+	return &s
 }

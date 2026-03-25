@@ -13,6 +13,9 @@ type ToolDefinition struct {
 // ToolGroupDeveloper is the developer tools group identifier.
 const ToolGroupDeveloper = "developer"
 
+// ToolGroupUser is the user tools group identifier.
+const ToolGroupUser = "user"
+
 // ToolGroupAlways is the identifier for tools that are always available.
 const ToolGroupAlways = "always"
 
@@ -45,6 +48,10 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "dismiss_ontology_question", Description: "Mark a question as not worth pursuing (e.g., 'Column appears unused, legacy')", ToolGroup: ToolGroupDeveloper},
 	{Name: "search_schema", Description: "Full-text search across tables and columns using pattern matching with relevance ranking", ToolGroup: ToolGroupDeveloper},
 	{Name: "explain_query", Description: "Analyze a read-only SQL query plan without executing it", ToolGroup: ToolGroupDeveloper},
+	{Name: "list_relationships", Description: "List schema relationships with semantic type and provenance details", ToolGroup: ToolGroupDeveloper},
+	{Name: "create_relationship", Description: "Create a schema relationship between two columns", ToolGroup: ToolGroupDeveloper},
+	{Name: "update_relationship", Description: "Update cardinality or approval state for an existing relationship", ToolGroup: ToolGroupDeveloper},
+	{Name: "delete_relationship", Description: "Soft-delete a schema relationship while preserving the tombstone", ToolGroup: ToolGroupDeveloper},
 	{Name: "refresh_schema", Description: "Refresh schema from datasource and auto-select new tables/columns", ToolGroup: ToolGroupDeveloper},
 	{Name: "scan_data_changes", Description: "Scan data for changes like new enum values and potential FK patterns", ToolGroup: ToolGroupDeveloper},
 	{Name: "list_pending_changes", Description: "List pending ontology changes detected from schema or data analysis", ToolGroup: ToolGroupDeveloper},
@@ -60,11 +67,11 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "validate", Description: "Check SQL syntax without executing", ToolGroup: ToolGroupUser},
 	{Name: "get_context", Description: "Get unified database context with progressive depth (consolidates ontology, schema, glossary)", ToolGroup: ToolGroupUser},
 	{Name: "get_ontology", Description: "Get business ontology for query generation", ToolGroup: ToolGroupUser},
-	{Name: "list_glossary", Description: "List all business glossary terms", ToolGroup: ToolGroupUser},
-	{Name: "get_glossary_sql", Description: "Get SQL definition for a business term", ToolGroup: ToolGroupUser},
-	{Name: "update_glossary_term", Description: "Create or update a business glossary term with upsert semantics (definition, sql, aliases)", ToolGroup: ToolGroupDeveloper},
+	{Name: "list_glossary", Description: "List business glossary terms with definitions and SQL availability", ToolGroup: ToolGroupUser},
+	{Name: "get_glossary_sql", Description: "Get a business term's glossary entry, including SQL when available", ToolGroup: ToolGroupUser},
+	{Name: "update_glossary_term", Description: "Create or update a business glossary term with optional SQL and aliases", ToolGroup: ToolGroupDeveloper},
 	{Name: "delete_glossary_term", Description: "Delete a business glossary term that's no longer relevant", ToolGroup: ToolGroupDeveloper},
-	{Name: "create_glossary_term", Description: "Create a new business glossary term with SQL definition", ToolGroup: ToolGroupDeveloper},
+	{Name: "create_glossary_term", Description: "Create a business glossary term with optional SQL", ToolGroup: ToolGroupDeveloper},
 	{Name: "list_approved_queries", Description: "List pre-approved SQL queries", ToolGroup: ToolGroupUser},
 	{Name: "execute_approved_query", Description: "Execute a pre-approved query by ID", ToolGroup: ToolGroupUser},
 	{Name: "suggest_approved_query", Description: "Suggest a reusable parameterized query for approval", ToolGroup: ToolGroupUser},

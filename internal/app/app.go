@@ -624,6 +624,18 @@ func Run(version string) error {
 	}
 	mcptools.RegisterTableTools(mcpServer.MCP(), tableToolDeps)
 
+	relationshipToolDeps := &mcptools.RelationshipToolDeps{
+		BaseMCPToolDeps: mcptools.BaseMCPToolDeps{
+			DB:                  db,
+			MCPConfigService:    mcpConfigService,
+			Logger:              logger,
+			InstalledAppService: installedAppService,
+		},
+		ProjectService: projectService,
+		SchemaService:  schemaService,
+	}
+	mcptools.RegisterRelationshipTools(mcpServer.MCP(), relationshipToolDeps)
+
 	// Register column probe tools (for deep-diving into column statistics and semantics)
 	probeToolDeps := &mcptools.ProbeToolDeps{
 		BaseMCPToolDeps: mcptools.BaseMCPToolDeps{

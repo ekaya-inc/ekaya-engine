@@ -66,6 +66,9 @@ describe('RelationshipsPage - Description Rendering', () => {
     inference_method: null,
     is_validated: true,
     is_approved: true,
+    source: 'inferred',
+    effective_source: 'mcp',
+    last_edit_source: 'mcp',
     description: 'Orders belong to users. Each order is placed by exactly one user.',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
@@ -85,6 +88,8 @@ describe('RelationshipsPage - Description Rendering', () => {
     inference_method: null,
     is_validated: true,
     is_approved: true,
+    source: 'inferred',
+    effective_source: 'inferred',
     // description intentionally omitted to test absence case
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
@@ -131,6 +136,8 @@ describe('RelationshipsPage - Description Rendering', () => {
     await waitFor(() => {
       expect(screen.getByText('Orders belong to users. Each order is placed by exactly one user.')).toBeInTheDocument();
     });
+
+    expect(screen.getAllByText('MCP').length).toBeGreaterThan(0);
   });
 
   it('does not render description when absent', async () => {

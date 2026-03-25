@@ -338,8 +338,8 @@ func buildGlossaryResponse(terms []*models.BusinessGlossaryTerm) []map[string]an
 		if len(term.Aliases) > 0 {
 			termData["aliases"] = term.Aliases
 		}
-		if term.DefiningSQL != "" {
-			termData["sql_pattern"] = term.DefiningSQL
+		if glossaryTermHasSQL(term) {
+			termData["sql_pattern"] = glossaryTermDefiningSQL(term)
 		}
 		result = append(result, termData)
 	}

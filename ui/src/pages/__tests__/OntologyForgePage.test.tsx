@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -84,7 +84,6 @@ const mockMCPConfig: MCPConfigResponse = {
   agentTools: [],
   toolGroups: {},
   appNames: {},
-  enabledTools: [],
 };
 
 const setupMocks = (options: {
@@ -95,6 +94,7 @@ const setupMocks = (options: {
   questionCounts?: { required: number; optional: number } | null;
   hasApprovedQueries?: boolean;
   isActivated?: boolean;
+  mcpConfig?: MCPConfigResponse;
 } = {}) => {
   const {
     hasDatasource = true,
@@ -104,11 +104,12 @@ const setupMocks = (options: {
     questionCounts = { required: 0, optional: 0 },
     hasApprovedQueries = false,
     isActivated = false,
+    mcpConfig = mockMCPConfig,
   } = options;
 
   vi.mocked(engineApi.getMCPConfig).mockResolvedValue({
     success: true,
-    data: mockMCPConfig,
+    data: mcpConfig,
   });
 
   vi.mocked(engineApi.listDataSources).mockResolvedValue({
@@ -666,5 +667,84 @@ describe('OntologyForgePage - Role-based access', () => {
     // Should NOT show admin config UI
     expect(screen.queryByText('Setup Checklist')).not.toBeInTheDocument();
     expect(screen.queryByText('Danger Zone')).not.toBeInTheDocument();
+  });
+});
+
+describe('OntologyForgePage - Tool Configuration', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(authToken.getUserRoles).mockReturnValue(['admin']);
+  });
+
+  it('describes approved query catalog management under ontology maintenance tools', async () => {
+    setupMocks();
+    await renderPage();
+
+    expect(
+      screen.getByText(/manage the ontology and approved query catalog/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/schema search, column probing, project knowledge discovery/i),
+    ).toBeInTheDocument();
+  });
+
+  it('shows approved query tools under ontology forge tool lists', async () => {
+    setupMocks({
+      mcpConfig: {
+        ...mockMCPConfig,
+        developerTools: [
+          {
+            name: 'create_approved_query',
+            description: 'Create a new pre-approved query directly',
+            appId: 'ontology-forge',
+          },
+          {
+            name: 'list_approved_queries',
+            description: 'List pre-approved SQL queries',
+            appId: 'ontology-forge',
+          },
+          {
+            name: 'list_query_suggestions',
+            description: 'List query suggestions awaiting review',
+            appId: 'ai-data-liaison',
+          },
+        ],
+        userTools: [
+          {
+            name: 'execute_approved_query',
+            description: 'Execute a pre-approved query by ID',
+            appId: 'ontology-forge',
+          },
+          {
+            name: 'search_schema',
+            description: 'Search schema objects',
+            appId: 'ontology-forge',
+          },
+          {
+            name: 'list_project_knowledge',
+            description: 'List project knowledge facts',
+            appId: 'ontology-forge',
+          },
+          {
+            name: 'suggest_approved_query',
+            description: 'Suggest a reusable parameterized query for approval',
+            appId: 'ai-data-liaison',
+          },
+        ],
+      },
+    });
+    await renderPage();
+
+    for (const button of screen.getAllByRole('button', { name: /tools enabled/i })) {
+      fireEvent.click(button);
+    }
+
+    expect(screen.getByText('create_approved_query')).toBeInTheDocument();
+    expect(screen.getByText('list_approved_queries')).toBeInTheDocument();
+    expect(screen.getByText('execute_approved_query')).toBeInTheDocument();
+    expect(screen.getByText('search_schema')).toBeInTheDocument();
+    expect(screen.getByText('list_project_knowledge')).toBeInTheDocument();
+    expect(screen.queryByText('list_query_suggestions')).not.toBeInTheDocument();
+    expect(screen.queryByText('suggest_approved_query')).not.toBeInTheDocument();
   });
 });

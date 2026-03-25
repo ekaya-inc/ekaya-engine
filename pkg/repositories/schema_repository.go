@@ -93,11 +93,9 @@ type SchemaRepository interface {
 	// Used after schema refresh to auto-select newly discovered tables.
 	SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error
 
-	// DeleteInferredRelationshipsByProject hard-deletes all relationships for a project.
-	// This includes both inferred relationships (column_features, relationship_discovery) and DB-declared FKs.
-	// Returns the count of deleted relationships.
-	// Used when deleting ontology to give a clean slate - DB-declared FKs will be
-	// re-imported during the next schema refresh.
+	// DeleteInferredRelationshipsByProject hard-deletes inferred/review relationships for a project.
+	// Active relationships curated by MCP or the UI are preserved, but inferred/review tombstones are
+	// cleared so a full ontology reset can rediscover them later.
 	DeleteInferredRelationshipsByProject(ctx context.Context, projectID uuid.UUID) (int64, error)
 }
 
@@ -941,7 +939,8 @@ func (r *schemaRepository) ListRelationshipsByDatasource(ctx context.Context, pr
 		SELECT r.id, r.project_id, r.source_table_id, r.source_column_id,
 		       r.target_table_id, r.target_column_id, r.relationship_type,
 		       r.cardinality, r.confidence, r.inference_method, r.is_validated,
-		       r.validation_results, r.is_approved, r.created_at, r.updated_at
+		       r.validation_results, r.is_approved, r.source, r.last_edit_source,
+		       r.created_by, r.updated_by, r.created_at, r.updated_at
 		FROM engine_schema_relationships r
 		JOIN engine_schema_tables st ON r.source_table_id = st.id
 		WHERE r.project_id = $1 AND st.datasource_id = $2
@@ -979,7 +978,8 @@ func (r *schemaRepository) GetRelationshipByID(ctx context.Context, projectID, r
 		SELECT id, project_id, source_table_id, source_column_id,
 		       target_table_id, target_column_id, relationship_type,
 		       cardinality, confidence, inference_method, is_validated,
-		       validation_results, is_approved, created_at, updated_at,
+		       validation_results, is_approved, source, last_edit_source,
+		       created_by, updated_by, created_at, updated_at,
 		       match_rate, source_distinct, target_distinct, matched_count, rejection_reason
 		FROM engine_schema_relationships
 		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
@@ -1006,7 +1006,8 @@ func (r *schemaRepository) GetRelationshipByColumns(ctx context.Context, sourceC
 		SELECT id, project_id, source_table_id, source_column_id,
 		       target_table_id, target_column_id, relationship_type,
 		       cardinality, confidence, inference_method, is_validated,
-		       validation_results, is_approved, created_at, updated_at,
+		       validation_results, is_approved, source, last_edit_source,
+		       created_by, updated_by, created_at, updated_at,
 		       match_rate, source_distinct, target_distinct, matched_count, rejection_reason
 		FROM engine_schema_relationships
 		WHERE source_column_id = $1 AND target_column_id = $2 AND deleted_at IS NULL`
@@ -1031,6 +1032,7 @@ func (r *schemaRepository) UpsertRelationship(ctx context.Context, rel *models.S
 
 	now := time.Now()
 	rel.UpdatedAt = now
+	wasNewRelationship := rel.ID == uuid.Nil
 	if rel.ID == uuid.Nil {
 		rel.ID = uuid.New()
 		rel.CreatedAt = now
@@ -1065,24 +1067,51 @@ func (r *schemaRepository) UpsertRelationship(ctx context.Context, rel *models.S
 		return nil
 	}
 
+	insertSource, createdBy, insertLastEditSource, insertUpdatedBy, updateEditSource, updateUpdatedBy, protectCuratedState := relationshipWriteMetadata(ctx, rel)
+
 	// No soft-deleted record exists, do standard upsert on active records
 	upsertQuery := `
 		INSERT INTO engine_schema_relationships (
 			id, project_id, source_table_id, source_column_id,
 			target_table_id, target_column_id, relationship_type,
 			cardinality, confidence, inference_method, is_validated,
-			validation_results, is_approved, rejection_reason, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+			validation_results, is_approved, source, last_edit_source,
+			created_by, updated_by, rejection_reason, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 		ON CONFLICT (source_column_id, target_column_id)
 			WHERE deleted_at IS NULL
 		DO UPDATE SET
 			relationship_type = EXCLUDED.relationship_type,
-			cardinality = EXCLUDED.cardinality,
+			cardinality = CASE
+				WHEN $21 AND (
+					engine_schema_relationships.last_edit_source IN ('mcp', 'manual')
+					OR (engine_schema_relationships.last_edit_source IS NULL
+					    AND engine_schema_relationships.source IN ('mcp', 'manual'))
+				)
+				THEN engine_schema_relationships.cardinality
+				ELSE EXCLUDED.cardinality
+			END,
 			confidence = EXCLUDED.confidence,
 			inference_method = EXCLUDED.inference_method,
 			is_validated = EXCLUDED.is_validated,
 			validation_results = EXCLUDED.validation_results,
-			is_approved = EXCLUDED.is_approved,
+			is_approved = CASE
+				WHEN $21 AND (
+					engine_schema_relationships.last_edit_source IN ('mcp', 'manual')
+					OR (engine_schema_relationships.last_edit_source IS NULL
+					    AND engine_schema_relationships.source IN ('mcp', 'manual'))
+				)
+				THEN engine_schema_relationships.is_approved
+				ELSE EXCLUDED.is_approved
+			END,
+			last_edit_source = CASE
+				WHEN $22::text IS NULL THEN engine_schema_relationships.last_edit_source
+				ELSE $22::text
+			END,
+			updated_by = CASE
+				WHEN $23::uuid IS NULL THEN engine_schema_relationships.updated_by
+				ELSE $23::uuid
+			END,
 			rejection_reason = EXCLUDED.rejection_reason,
 			updated_at = EXCLUDED.updated_at
 		RETURNING id, created_at`
@@ -1091,11 +1120,23 @@ func (r *schemaRepository) UpsertRelationship(ctx context.Context, rel *models.S
 		rel.ID, rel.ProjectID, rel.SourceTableID, rel.SourceColumnID,
 		rel.TargetTableID, rel.TargetColumnID, rel.RelationshipType,
 		rel.Cardinality, rel.Confidence, rel.InferenceMethod, rel.IsValidated,
-		validationResultsJSON, rel.IsApproved, rel.RejectionReason, rel.CreatedAt, rel.UpdatedAt,
+		validationResultsJSON, rel.IsApproved, insertSource, insertLastEditSource,
+		createdBy, insertUpdatedBy, rel.RejectionReason, rel.CreatedAt, rel.UpdatedAt,
+		protectCuratedState, updateEditSource, updateUpdatedBy,
 	).Scan(&rel.ID, &rel.CreatedAt)
 
 	if err != nil {
 		return fmt.Errorf("failed to upsert relationship: %w", err)
+	}
+
+	rel.Source = insertSource
+	rel.CreatedBy = createdBy
+	if wasNewRelationship {
+		rel.LastEditSource = insertLastEditSource
+		rel.UpdatedBy = insertUpdatedBy
+	} else {
+		rel.LastEditSource = updateEditSource
+		rel.UpdatedBy = updateUpdatedBy
 	}
 
 	return nil
@@ -1109,10 +1150,21 @@ func (r *schemaRepository) UpdateRelationshipApproval(ctx context.Context, proje
 
 	query := `
 		UPDATE engine_schema_relationships
-		SET is_approved = $3, updated_at = NOW()
+		SET is_approved = $3,
+		    last_edit_source = CASE
+			    WHEN $4::text IS NULL THEN last_edit_source
+			    ELSE $4::text
+		    END,
+		    updated_by = CASE
+			    WHEN $5::uuid IS NULL THEN updated_by
+			    ELSE $5::uuid
+		    END,
+		    updated_at = NOW()
 		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
 
-	result, err := scope.Conn.Exec(ctx, query, projectID, relationshipID, isApproved)
+	_, _, _, _, updateEditSource, updateUpdatedBy, _ := relationshipWriteMetadata(ctx, &models.SchemaRelationship{})
+
+	result, err := scope.Conn.Exec(ctx, query, projectID, relationshipID, isApproved, updateEditSource, updateUpdatedBy)
 	if err != nil {
 		return fmt.Errorf("failed to update relationship approval: %w", err)
 	}
@@ -1132,10 +1184,20 @@ func (r *schemaRepository) SoftDeleteRelationship(ctx context.Context, projectID
 
 	query := `
 		UPDATE engine_schema_relationships
-		SET deleted_at = NOW()
+		SET deleted_at = NOW(),
+		    last_edit_source = CASE
+			    WHEN $3::text IS NULL THEN last_edit_source
+			    ELSE $3::text
+		    END,
+		    updated_by = CASE
+			    WHEN $4::uuid IS NULL THEN updated_by
+			    ELSE $4::uuid
+		    END
 		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
 
-	result, err := scope.Conn.Exec(ctx, query, projectID, relationshipID)
+	_, _, _, _, updateEditSource, updateUpdatedBy, _ := relationshipWriteMetadata(ctx, &models.SchemaRelationship{})
+
+	result, err := scope.Conn.Exec(ctx, query, projectID, relationshipID, updateEditSource, updateUpdatedBy)
 	if err != nil {
 		return fmt.Errorf("failed to soft-delete relationship: %w", err)
 	}
@@ -1188,7 +1250,8 @@ func (r *schemaRepository) GetRelationshipsByMethod(ctx context.Context, project
 		SELECT r.id, r.project_id, r.source_table_id, r.source_column_id,
 		       r.target_table_id, r.target_column_id, r.relationship_type,
 		       r.cardinality, r.confidence, r.inference_method, r.is_validated,
-		       r.validation_results, r.is_approved, r.created_at, r.updated_at,
+		       r.validation_results, r.is_approved, r.source, r.last_edit_source,
+		       r.created_by, r.updated_by, r.created_at, r.updated_at,
 		       r.match_rate, r.source_distinct, r.target_distinct, r.matched_count, r.rejection_reason
 		FROM engine_schema_relationships r
 		JOIN engine_schema_tables st ON r.source_table_id = st.id
@@ -1244,6 +1307,11 @@ func (r *schemaRepository) GetRelationshipDetails(ctx context.Context, projectID
 			r.inference_method,
 			r.is_validated,
 			r.is_approved,
+			r.source,
+			r.last_edit_source,
+			COALESCE(r.last_edit_source, r.source) AS effective_source,
+			r.created_by,
+			r.updated_by,
 			r.created_at,
 			r.updated_at
 		FROM engine_schema_relationships r
@@ -1285,6 +1353,7 @@ func (r *schemaRepository) GetRelationshipDetails(ctx context.Context, projectID
 			&d.TargetTableName, &d.TargetColumnName, &d.TargetColumnType,
 			&d.RelationshipType, &d.Cardinality, &d.Confidence,
 			&d.InferenceMethod, &d.IsValidated, &d.IsApproved,
+			&d.Source, &d.LastEditSource, &d.EffectiveSource, &d.CreatedBy, &d.UpdatedBy,
 			&d.CreatedAt, &d.UpdatedAt,
 		)
 		if err != nil {
@@ -1416,6 +1485,7 @@ func (r *schemaRepository) UpsertRelationshipWithMetrics(ctx context.Context, re
 
 	now := time.Now()
 	rel.UpdatedAt = now
+	wasNewRelationship := rel.ID == uuid.Nil
 	if rel.ID == uuid.Nil {
 		rel.ID = uuid.New()
 		rel.CreatedAt = now
@@ -1458,6 +1528,8 @@ func (r *schemaRepository) UpsertRelationshipWithMetrics(ctx context.Context, re
 		return nil
 	}
 
+	insertSource, createdBy, insertLastEditSource, insertUpdatedBy, updateEditSource, updateUpdatedBy, protectCuratedState := relationshipWriteMetadata(ctx, rel)
+
 	// No soft-deleted record exists, do standard upsert on active records
 	upsertQuery := `
 		INSERT INTO engine_schema_relationships (
@@ -1465,23 +1537,47 @@ func (r *schemaRepository) UpsertRelationshipWithMetrics(ctx context.Context, re
 			target_table_id, target_column_id, relationship_type,
 			cardinality, confidence, inference_method, is_validated,
 			validation_results, is_approved, match_rate, source_distinct,
-			target_distinct, matched_count, rejection_reason,
-			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+			target_distinct, matched_count, source, last_edit_source,
+			created_by, updated_by, rejection_reason, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
 		ON CONFLICT (source_column_id, target_column_id)
 			WHERE deleted_at IS NULL
 		DO UPDATE SET
 			relationship_type = EXCLUDED.relationship_type,
-			cardinality = EXCLUDED.cardinality,
+			cardinality = CASE
+				WHEN $25 AND (
+					engine_schema_relationships.last_edit_source IN ('mcp', 'manual')
+					OR (engine_schema_relationships.last_edit_source IS NULL
+					    AND engine_schema_relationships.source IN ('mcp', 'manual'))
+				)
+				THEN engine_schema_relationships.cardinality
+				ELSE EXCLUDED.cardinality
+			END,
 			confidence = EXCLUDED.confidence,
 			inference_method = EXCLUDED.inference_method,
 			is_validated = EXCLUDED.is_validated,
 			validation_results = EXCLUDED.validation_results,
-			is_approved = EXCLUDED.is_approved,
+			is_approved = CASE
+				WHEN $25 AND (
+					engine_schema_relationships.last_edit_source IN ('mcp', 'manual')
+					OR (engine_schema_relationships.last_edit_source IS NULL
+					    AND engine_schema_relationships.source IN ('mcp', 'manual'))
+				)
+				THEN engine_schema_relationships.is_approved
+				ELSE EXCLUDED.is_approved
+			END,
 			match_rate = EXCLUDED.match_rate,
 			source_distinct = EXCLUDED.source_distinct,
 			target_distinct = EXCLUDED.target_distinct,
 			matched_count = EXCLUDED.matched_count,
+			last_edit_source = CASE
+				WHEN $26::text IS NULL THEN engine_schema_relationships.last_edit_source
+				ELSE $26::text
+			END,
+			updated_by = CASE
+				WHEN $27::uuid IS NULL THEN engine_schema_relationships.updated_by
+				ELSE $27::uuid
+			END,
 			rejection_reason = EXCLUDED.rejection_reason,
 			updated_at = EXCLUDED.updated_at
 		RETURNING id, created_at`
@@ -1491,12 +1587,23 @@ func (r *schemaRepository) UpsertRelationshipWithMetrics(ctx context.Context, re
 		rel.TargetTableID, rel.TargetColumnID, rel.RelationshipType,
 		rel.Cardinality, rel.Confidence, rel.InferenceMethod, rel.IsValidated,
 		validationResultsJSON, rel.IsApproved, rel.MatchRate, rel.SourceDistinct,
-		rel.TargetDistinct, rel.MatchedCount, rel.RejectionReason,
-		rel.CreatedAt, rel.UpdatedAt,
+		rel.TargetDistinct, rel.MatchedCount, insertSource, insertLastEditSource,
+		createdBy, insertUpdatedBy, rel.RejectionReason, rel.CreatedAt, rel.UpdatedAt,
+		protectCuratedState, updateEditSource, updateUpdatedBy,
 	).Scan(&rel.ID, &rel.CreatedAt)
 
 	if err != nil {
 		return fmt.Errorf("failed to upsert relationship with metrics: %w", err)
+	}
+
+	rel.Source = insertSource
+	rel.CreatedBy = createdBy
+	if wasNewRelationship {
+		rel.LastEditSource = insertLastEditSource
+		rel.UpdatedBy = insertUpdatedBy
+	} else {
+		rel.LastEditSource = updateEditSource
+		rel.UpdatedBy = updateUpdatedBy
 	}
 
 	return nil
@@ -1737,7 +1844,8 @@ func scanSchemaRelationship(rows pgx.Rows) (*models.SchemaRelationship, error) {
 		&rel.ID, &rel.ProjectID, &rel.SourceTableID, &rel.SourceColumnID,
 		&rel.TargetTableID, &rel.TargetColumnID, &rel.RelationshipType,
 		&rel.Cardinality, &rel.Confidence, &rel.InferenceMethod, &rel.IsValidated,
-		&validationResultsJSON, &rel.IsApproved, &rel.CreatedAt, &rel.UpdatedAt,
+		&validationResultsJSON, &rel.IsApproved, &rel.Source, &rel.LastEditSource,
+		&rel.CreatedBy, &rel.UpdatedBy, &rel.CreatedAt, &rel.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan relationship: %w", err)
@@ -1758,7 +1866,8 @@ func scanSchemaRelationshipRow(row pgx.Row) (*models.SchemaRelationship, error) 
 		&rel.ID, &rel.ProjectID, &rel.SourceTableID, &rel.SourceColumnID,
 		&rel.TargetTableID, &rel.TargetColumnID, &rel.RelationshipType,
 		&rel.Cardinality, &rel.Confidence, &rel.InferenceMethod, &rel.IsValidated,
-		&validationResultsJSON, &rel.IsApproved, &rel.CreatedAt, &rel.UpdatedAt,
+		&validationResultsJSON, &rel.IsApproved, &rel.Source, &rel.LastEditSource,
+		&rel.CreatedBy, &rel.UpdatedBy, &rel.CreatedAt, &rel.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -1780,7 +1889,8 @@ func scanSchemaRelationshipWithDiscovery(rows pgx.Rows) (*models.SchemaRelations
 		&rel.ID, &rel.ProjectID, &rel.SourceTableID, &rel.SourceColumnID,
 		&rel.TargetTableID, &rel.TargetColumnID, &rel.RelationshipType,
 		&rel.Cardinality, &rel.Confidence, &rel.InferenceMethod, &rel.IsValidated,
-		&validationResultsJSON, &rel.IsApproved, &rel.CreatedAt, &rel.UpdatedAt,
+		&validationResultsJSON, &rel.IsApproved, &rel.Source, &rel.LastEditSource,
+		&rel.CreatedBy, &rel.UpdatedBy, &rel.CreatedAt, &rel.UpdatedAt,
 		&rel.MatchRate, &rel.SourceDistinct, &rel.TargetDistinct, &rel.MatchedCount, &rel.RejectionReason,
 	)
 	if err != nil {
@@ -1803,7 +1913,8 @@ func scanSchemaRelationshipRowWithDiscovery(row pgx.Row) (*models.SchemaRelation
 		&rel.ID, &rel.ProjectID, &rel.SourceTableID, &rel.SourceColumnID,
 		&rel.TargetTableID, &rel.TargetColumnID, &rel.RelationshipType,
 		&rel.Cardinality, &rel.Confidence, &rel.InferenceMethod, &rel.IsValidated,
-		&validationResultsJSON, &rel.IsApproved, &rel.CreatedAt, &rel.UpdatedAt,
+		&validationResultsJSON, &rel.IsApproved, &rel.Source, &rel.LastEditSource,
+		&rel.CreatedBy, &rel.UpdatedBy, &rel.CreatedAt, &rel.UpdatedAt,
 		&rel.MatchRate, &rel.SourceDistinct, &rel.TargetDistinct, &rel.MatchedCount, &rel.RejectionReason,
 	)
 	if err != nil {
@@ -1876,28 +1987,85 @@ func (r *schemaRepository) SelectAllTablesAndColumns(ctx context.Context, projec
 	return nil
 }
 
-// DeleteInferredRelationshipsByProject hard-deletes inferred relationships for a project.
-// Only deletes relationships with relationship_type = 'inferred' or 'review'.
+func relationshipWriteMetadata(
+	ctx context.Context,
+	rel *models.SchemaRelationship,
+) (
+	insertSource string,
+	createdBy *uuid.UUID,
+	insertLastEditSource *string,
+	insertUpdatedBy *uuid.UUID,
+	updateEditSource *string,
+	updateUpdatedBy *uuid.UUID,
+	protectCuratedState bool,
+) {
+	insertSource = rel.Source
+	if insertSource == "" || !models.ProvenanceSource(insertSource).IsValid() {
+		if rel.RelationshipType == models.RelationshipTypeManual {
+			insertSource = models.ProvenanceManual
+		} else {
+			insertSource = models.ProvenanceInferred
+		}
+	}
+
+	createdBy = rel.CreatedBy
+	insertUpdatedBy = rel.UpdatedBy
+	insertLastEditSource = rel.LastEditSource
+	updateUpdatedBy = rel.UpdatedBy
+	updateEditSource = rel.LastEditSource
+
+	if prov, ok := models.GetProvenance(ctx); ok {
+		if rel.Source == "" && rel.RelationshipType == models.RelationshipTypeManual &&
+			(prov.Source == models.SourceManual || prov.Source == models.SourceMCP) {
+			insertSource = prov.Source.String()
+		}
+		if createdBy == nil && prov.UserID != uuid.Nil {
+			createdBy = &prov.UserID
+		}
+		if updateEditSource == nil && (prov.Source == models.SourceManual || prov.Source == models.SourceMCP) {
+			source := prov.Source.String()
+			updateEditSource = &source
+		}
+		if updateUpdatedBy == nil && updateEditSource != nil && prov.UserID != uuid.Nil {
+			updateUpdatedBy = &prov.UserID
+		}
+	}
+
+	if insertLastEditSource != nil && !models.ProvenanceSource(*insertLastEditSource).IsValid() {
+		insertLastEditSource = nil
+	}
+	if updateEditSource != nil && !models.ProvenanceSource(*updateEditSource).IsValid() {
+		updateEditSource = nil
+	}
+
+	protectCuratedState = insertSource == models.ProvenanceInferred && updateEditSource == nil
+	return insertSource, createdBy, insertLastEditSource, insertUpdatedBy, updateEditSource, updateUpdatedBy, protectCuratedState
+}
+
+// DeleteInferredRelationshipsByProject hard-deletes reset-scoped inferred/review relationships.
 // Preserves:
-//   - 'fk' (DB-declared foreign keys from schema discovery)
-//   - 'manual' (user-created relationships)
+//   - FK relationships
+//   - manual relationships
+//   - active inferred/review relationships curated via MCP or the UI
 //
-// This is a hard delete (not soft delete) because inferred relationships are re-generated
-// during ontology extraction. Soft-deleted records would block re-discovery due to upsert key conflicts.
+// Deletes:
+//   - engine-owned inferred/review relationships
+//   - inferred/review tombstones, even if their tombstone provenance is manual/mcp
+//     so a full ontology reset can recreate them later
 func (r *schemaRepository) DeleteInferredRelationshipsByProject(ctx context.Context, projectID uuid.UUID) (int64, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return 0, fmt.Errorf("no tenant scope in context")
 	}
 
-	// Only delete inferred and review relationships.
-	// FK and manual relationships are preserved because they represent:
-	// - FK: Database-declared constraints (source of truth is the DB schema)
-	// - Manual: User-specified relationships (should persist across re-extractions)
 	query := `
 		DELETE FROM engine_schema_relationships
 		WHERE project_id = $1
-		  AND relationship_type IN ('inferred', 'review')`
+		  AND relationship_type IN ('inferred', 'review')
+		  AND (
+		  	deleted_at IS NOT NULL
+		  	OR COALESCE(last_edit_source, source) = 'inferred'
+		  )`
 
 	result, err := scope.Conn.Exec(ctx, query, projectID)
 	if err != nil {

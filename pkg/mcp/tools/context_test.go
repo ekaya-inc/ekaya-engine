@@ -209,6 +209,17 @@ func TestBuildGlossaryResponse(t *testing.T) {
 			},
 			expected: 2,
 		},
+		{
+			name: "whitespace only sql is omitted",
+			terms: []*models.BusinessGlossaryTerm{
+				{
+					Term:        "Soft Definition",
+					Definition:  "Definition-only term",
+					DefiningSQL: " \n ",
+				},
+			},
+			expected: 1,
+		},
 	}
 
 	for _, tt := range tests {
@@ -225,8 +236,10 @@ func TestBuildGlossaryResponse(t *testing.T) {
 				if len(tt.terms[0].Aliases) > 0 {
 					assert.NotNil(t, result[0]["aliases"])
 				}
-				if tt.terms[0].DefiningSQL != "" {
+				if glossaryTermHasSQL(tt.terms[0]) {
 					assert.Equal(t, tt.terms[0].DefiningSQL, result[0]["sql_pattern"])
+				} else {
+					assert.Nil(t, result[0]["sql_pattern"])
 				}
 			}
 		})

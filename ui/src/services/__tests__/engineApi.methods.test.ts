@@ -1414,11 +1414,14 @@ describe('engineApi MCP config methods', () => {
       const responseData = {
         data: {
           serverUrl: 'https://mcp.example.com',
-          toolGroups: { approved_queries: { enabled: true } },
+          toolGroups: {
+            tools: { addRequestTools: true },
+            agent_tools: { enabled: true },
+          },
           userTools: [{ name: 'query_tool', description: 'Run queries' }],
           developerTools: [],
           agentTools: [],
-          enabledTools: [{ name: 'query_tool', description: 'Run queries' }],
+          appNames: {},
         },
       };
       mockJsonResponse(responseData);
@@ -1440,17 +1443,20 @@ describe('engineApi MCP config methods', () => {
   describe('updateMCPConfig', () => {
     it('sends PATCH to /{projectId}/mcp/config with request body', async () => {
       const request = {
-        allowOntologyMaintenance: true,
-        addQueryTools: false,
+        addRequestTools: true,
+        addApprovalTools: false,
       };
       const responseData = {
         data: {
           serverUrl: 'https://mcp.example.com',
-          toolGroups: { approved_queries: { enabled: true, allowOntologyMaintenance: true } },
+          toolGroups: {
+            tools: { addRequestTools: true, addApprovalTools: false },
+            agent_tools: { enabled: true },
+          },
           userTools: [],
           developerTools: [],
           agentTools: [],
-          enabledTools: [],
+          appNames: {},
         },
       };
       mockJsonResponse(responseData);

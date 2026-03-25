@@ -19,10 +19,6 @@ const (
 	LoadoutOntologyQuestions   = "ontology_questions"
 )
 
-// ToolGroupCustom is the identifier for the custom tools group.
-// Other tool group constants are defined in mcp_config.go and mcp_tools_registry.go.
-const ToolGroupCustom = "custom"
-
 // AllToolsOrdered defines the canonical order for tool presentation in UI and MCP.
 // When merging loadouts, tools should be presented in this order.
 var AllToolsOrdered = []ToolSpec{
@@ -52,11 +48,11 @@ var AllToolsOrdered = []ToolSpec{
 	{Name: "get_schema", Description: "Get database schema with semantic annotations"},
 	{Name: "get_context", Description: "Get unified database context with progressive depth (consolidates ontology, schema, glossary)"},
 	{Name: "get_column_metadata", Description: "Get current ontology metadata for a column (description, enum_values, role, schema info)"},
-	{Name: "get_glossary_sql", Description: "Get SQL definition for a business term"},
+	{Name: "get_glossary_sql", Description: "Get a business term's glossary entry, including SQL when available"},
 	{Name: "get_ontology", Description: "Get business ontology for query generation"},
 	{Name: "get_query_history", Description: "Get recent query execution history to avoid rewriting queries"},
 	{Name: "record_query_feedback", Description: "Record whether a generated query was helpful"},
-	{Name: "list_glossary", Description: "List all business glossary terms"},
+	{Name: "list_glossary", Description: "List business glossary terms with definitions and SQL availability"},
 	{Name: "probe_column", Description: "Deep-dive into specific column with statistics, joinability, and semantic information"},
 	{Name: "probe_columns", Description: "Batch variant of probe_column for analyzing multiple columns at once"},
 	{Name: "sample", Description: "Quick data preview from a table"},
@@ -69,10 +65,10 @@ var AllToolsOrdered = []ToolSpec{
 	{Name: "skip_ontology_question", Description: "Mark a question as skipped for revisiting later (e.g., 'Need access to frontend repo')"},
 
 	// Ontology Maintenance
-	{Name: "create_glossary_term", Description: "Create a new business glossary term with SQL definition"},
+	{Name: "create_glossary_term", Description: "Create a business glossary term with optional SQL"},
 	{Name: "update_column", Description: "Add or update semantic information about a column (description, enum_values, role)"},
 	{Name: "update_columns", Description: "Batch update metadata for multiple columns (up to 50) in a single transaction"},
-	{Name: "update_glossary_term", Description: "Create or update a business glossary term with upsert semantics (definition, sql, aliases)"},
+	{Name: "update_glossary_term", Description: "Create or update a business glossary term with optional SQL and aliases"},
 	{Name: "list_project_knowledge", Description: "List all project knowledge facts with fact IDs for discovery and maintenance"},
 	{Name: "update_project_knowledge", Description: "Create or update writable domain facts (terminology, business rules, enumerations, conventions); project_overview is read-only here"},
 	{Name: "update_table", Description: "Add or update table-level metadata (description, usage notes, ephemeral status, alternatives)"},
@@ -80,6 +76,10 @@ var AllToolsOrdered = []ToolSpec{
 	{Name: "delete_glossary_term", Description: "Delete a business glossary term that's no longer relevant"},
 	{Name: "delete_project_knowledge", Description: "Remove writable domain facts by fact_id; project_overview is read-only here"},
 	{Name: "delete_table_metadata", Description: "Clear custom metadata for a table, removing semantic enrichment"},
+	{Name: "list_relationships", Description: "List schema relationships with semantic type and provenance details"},
+	{Name: "create_relationship", Description: "Create a schema relationship between two columns"},
+	{Name: "update_relationship", Description: "Update cardinality or approval state for an existing relationship"},
+	{Name: "delete_relationship", Description: "Soft-delete a schema relationship while preserving the tombstone"},
 
 	// Schema Management (Living Ontology)
 	{Name: "refresh_schema", Description: "Refresh schema from datasource and detect changes (new tables, columns, etc.)"},
@@ -132,7 +132,7 @@ var Loadouts = map[string][]string{
 		"sample",
 	},
 
-	// Ontology Maintenance -- enable MCP Client to manage ontology
+	// Ontology Maintenance -- enable MCP Client to manage ontology and approved query catalogs
 	LoadoutOntologyMaintenance: {
 		"create_glossary_term",
 		"update_column",
@@ -144,6 +144,10 @@ var Loadouts = map[string][]string{
 		"delete_glossary_term",
 		"delete_project_knowledge",
 		"delete_table_metadata",
+		"list_relationships",
+		"create_relationship",
+		"update_relationship",
+		"delete_relationship",
 		// Schema management (living ontology) tools
 		"refresh_schema",
 		"scan_data_changes",
@@ -151,13 +155,16 @@ var Loadouts = map[string][]string{
 		"approve_change",
 		"reject_change",
 		"approve_all_changes",
-		// Query management (admin tools)
-		"list_query_suggestions",
-		"approve_query_suggestion",
-		"reject_query_suggestion",
+		// Approved query catalog management (Ontology Forge)
+		"list_approved_queries",
+		"execute_approved_query",
 		"create_approved_query",
 		"update_approved_query",
 		"delete_approved_query",
+		// Query suggestion review workflow (AI Data Liaison)
+		"list_query_suggestions",
+		"approve_query_suggestion",
+		"reject_query_suggestion",
 	},
 
 	// Ontology Questions -- special mode for MCP Client to enumerate and answer pending questions
@@ -243,12 +250,6 @@ func ComputeEnabledToolsFromConfig(state map[string]*models.ToolGroupConfig, isA
 		return MergeLoadouts(LoadoutDefault)
 	}
 
-	// Custom tools mode
-	customConfig := state[ToolGroupCustom]
-	if customConfig != nil && customConfig.Enabled {
-		return computeCustomTools(customConfig.CustomTools)
-	}
-
 	// Merge developer + user tools (union)
 	devTools := ComputeDeveloperTools(state)
 	userTools := ComputeUserTools(state)
@@ -263,30 +264,6 @@ func ComputeEnabledToolsFromConfig(state map[string]*models.ToolGroupConfig, isA
 	}
 
 	return toolsInCanonicalOrder(enabled)
-}
-
-// computeCustomTools returns tools based on individually selected tool names.
-// Always includes the default loadout (health).
-func computeCustomTools(selectedTools []string) []ToolSpec {
-	// Build set of selected tools
-	selected := make(map[string]bool)
-	for _, name := range selectedTools {
-		selected[name] = true
-	}
-
-	// Always include default loadout tools
-	for _, name := range Loadouts[LoadoutDefault] {
-		selected[name] = true
-	}
-
-	// Return tools in canonical order
-	var result []ToolSpec
-	for _, tool := range AllToolsOrdered {
-		if selected[tool.Name] {
-			result = append(result, tool)
-		}
-	}
-	return result
 }
 
 // IsToolInLoadout checks if a tool is in a specific loadout.
@@ -353,36 +330,12 @@ func ComputeDeveloperTools(state map[string]*models.ToolGroupConfig) []ToolSpec 
 	return toolsInCanonicalOrder(enabled)
 }
 
-// getToolsConfig returns the "tools" config from state, falling back to legacy fields.
-// For backward compatibility: if "tools" key doesn't exist, construct from legacy "developer"/"user" keys.
+// getToolsConfig returns the supported per-app tools config.
 func getToolsConfig(state map[string]*models.ToolGroupConfig) *models.ToolGroupConfig {
-	if cfg, ok := state["tools"]; ok && cfg != nil {
+	if cfg, ok := state[ToolGroupTools]; ok && cfg != nil {
 		return cfg
 	}
-
-	// Backward compat: map legacy fields to new toggles
-	cfg := &models.ToolGroupConfig{}
-
-	// Legacy "developer" key had AddQueryTools and AddOntologyMaintenance
-	if devCfg, ok := state[ToolGroupDeveloper]; ok && devCfg != nil {
-		// AddQueryTools previously controlled schema exploration + query tools
-		// Map to: Direct Database Access (echo/execute/query) + Approval Tools
-		cfg.AddDirectDatabaseAccess = devCfg.AddQueryTools
-		cfg.AddApprovalTools = devCfg.AddQueryTools
-
-		// AddOntologyMaintenance previously controlled ontology maintenance + questions
-		// Map to: Ontology Maintenance Tools
-		cfg.AddOntologyMaintenanceTools = devCfg.AddOntologyMaintenance
-	}
-
-	// Legacy "user" key had AllowOntologyMaintenance
-	if userCfg, ok := state[ToolGroupUser]; ok && userCfg != nil {
-		// Map to: Ontology Suggestions + Request Tools
-		cfg.AddOntologySuggestions = userCfg.AllowOntologyMaintenance
-		cfg.AddRequestTools = userCfg.AllowOntologyMaintenance
-	}
-
-	return cfg
+	return nil
 }
 
 // toolsInCanonicalOrder returns ToolSpecs for the given tool names in AllToolsOrdered order.

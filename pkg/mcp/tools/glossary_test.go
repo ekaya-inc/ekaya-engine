@@ -238,17 +238,19 @@ func TestCheckGlossaryToolsEnabled(t *testing.T) {
 func TestToListGlossaryResponse(t *testing.T) {
 	t.Run("term with aliases", func(t *testing.T) {
 		term := &models.BusinessGlossaryTerm{
-			ID:         uuid.New(),
-			ProjectID:  uuid.New(),
-			Term:       "Revenue",
-			Definition: "Total earned amount from completed transactions",
-			Aliases:    []string{"Total Revenue", "Gross Revenue"},
+			ID:          uuid.New(),
+			ProjectID:   uuid.New(),
+			Term:        "Revenue",
+			Definition:  "Total earned amount from completed transactions",
+			DefiningSQL: "SELECT SUM(earned_amount) FROM billing_transactions",
+			Aliases:     []string{"Total Revenue", "Gross Revenue"},
 		}
 
 		resp := toListGlossaryResponse(term)
 
 		assert.Equal(t, "Revenue", resp.Term)
 		assert.Equal(t, "Total earned amount from completed transactions", resp.Definition)
+		assert.True(t, resp.HasSQL)
 		assert.Equal(t, []string{"Total Revenue", "Gross Revenue"}, resp.Aliases)
 	})
 
@@ -265,6 +267,7 @@ func TestToListGlossaryResponse(t *testing.T) {
 
 		assert.Equal(t, "Active User", resp.Term)
 		assert.Equal(t, "User with recent activity", resp.Definition)
+		assert.False(t, resp.HasSQL)
 		assert.Nil(t, resp.Aliases)
 	})
 
@@ -280,6 +283,7 @@ func TestToListGlossaryResponse(t *testing.T) {
 		resp := toListGlossaryResponse(term)
 
 		assert.Equal(t, "Revenue", resp.Term)
+		assert.False(t, resp.HasSQL)
 		assert.Equal(t, models.GlossaryEnrichmentSuccess, resp.EnrichmentStatus)
 		assert.Empty(t, resp.EnrichmentError)
 	})
@@ -297,6 +301,7 @@ func TestToListGlossaryResponse(t *testing.T) {
 		resp := toListGlossaryResponse(term)
 
 		assert.Equal(t, "Offer Utilization Rate", resp.Term)
+		assert.False(t, resp.HasSQL)
 		assert.Equal(t, models.GlossaryEnrichmentFailed, resp.EnrichmentStatus)
 		assert.Equal(t, "LLM returned empty SQL", resp.EnrichmentError)
 	})
@@ -313,8 +318,23 @@ func TestToListGlossaryResponse(t *testing.T) {
 		resp := toListGlossaryResponse(term)
 
 		assert.Equal(t, "New Metric", resp.Term)
+		assert.False(t, resp.HasSQL)
 		assert.Equal(t, models.GlossaryEnrichmentPending, resp.EnrichmentStatus)
 		assert.Empty(t, resp.EnrichmentError)
+	})
+
+	t.Run("whitespace-only SQL does not count as SQL", func(t *testing.T) {
+		term := &models.BusinessGlossaryTerm{
+			ID:          uuid.New(),
+			ProjectID:   uuid.New(),
+			Term:        "Soft Definition",
+			Definition:  "Definition-only term",
+			DefiningSQL: "   \n\t ",
+		}
+
+		resp := toListGlossaryResponse(term)
+
+		assert.False(t, resp.HasSQL)
 	})
 }
 
@@ -341,6 +361,7 @@ WHERE transaction_state = 'completed'`,
 
 		assert.Equal(t, "Revenue", resp.Term)
 		assert.Equal(t, "Total earned amount from completed transactions", resp.Definition)
+		assert.True(t, resp.HasSQL)
 		assert.Contains(t, resp.DefiningSQL, "SUM(earned_amount)")
 		assert.Equal(t, "billing_transactions", resp.BaseTable)
 		assert.Equal(t, 1, len(resp.OutputColumns))
@@ -364,6 +385,7 @@ WHERE transaction_state = 'completed'`,
 
 		assert.Equal(t, "Active User", resp.Term)
 		assert.Equal(t, "User with recent activity", resp.Definition)
+		assert.True(t, resp.HasSQL)
 		assert.Equal(t, "SELECT COUNT(*) FROM users WHERE active = true", resp.DefiningSQL)
 		assert.Equal(t, "", resp.BaseTable)
 		assert.Nil(t, resp.OutputColumns)
@@ -384,9 +406,25 @@ WHERE transaction_state = 'completed'`,
 		resp := toGetGlossarySQLResponse(term)
 
 		assert.Equal(t, "Offer Utilization Rate", resp.Term)
+		assert.False(t, resp.HasSQL)
 		assert.Equal(t, "", resp.DefiningSQL)
 		assert.Equal(t, models.GlossaryEnrichmentFailed, resp.EnrichmentStatus)
 		assert.Equal(t, "SQL validation failed: column 'used_count' not found in table 'offers'", resp.EnrichmentError)
+	})
+
+	t.Run("whitespace-only SQL reports has_sql false", func(t *testing.T) {
+		term := &models.BusinessGlossaryTerm{
+			ID:          uuid.New(),
+			ProjectID:   uuid.New(),
+			Term:        "Soft Definition",
+			Definition:  "Definition-only term",
+			DefiningSQL: " \n ",
+		}
+
+		resp := toGetGlossarySQLResponse(term)
+
+		assert.False(t, resp.HasSQL)
+		assert.Equal(t, "", resp.DefiningSQL)
 	})
 }
 
@@ -450,9 +488,11 @@ func TestListGlossaryTool_Integration(t *testing.T) {
 		assert.Equal(t, 2, result.Count)
 		assert.Equal(t, "Revenue", result.Terms[0].Term)
 		assert.Equal(t, "Total earned amount", result.Terms[0].Definition)
+		assert.True(t, result.Terms[0].HasSQL)
 		assert.Equal(t, []string{"Total Revenue"}, result.Terms[0].Aliases)
 
 		assert.Equal(t, "Active Users", result.Terms[1].Term)
+		assert.True(t, result.Terms[1].HasSQL)
 		assert.Equal(t, []string{"MAU", "Monthly Active Users"}, result.Terms[1].Aliases)
 	})
 }
@@ -494,6 +534,7 @@ WHERE transaction_state = 'completed'`,
 
 		assert.Equal(t, "Revenue", result.Term)
 		assert.Equal(t, "Total earned amount from completed transactions", result.Definition)
+		assert.True(t, result.HasSQL)
 		assert.Contains(t, result.DefiningSQL, "SUM(earned_amount)")
 		assert.Equal(t, "billing_transactions", result.BaseTable)
 		assert.Equal(t, 1, len(result.OutputColumns))
@@ -562,6 +603,47 @@ func TestUpdateGlossaryTermTool_ToolStructure(t *testing.T) {
 	assert.Equal(t, "update_glossary_term", updateToolName)
 	assert.Contains(t, updateToolDesc, "upsert")
 	assert.Contains(t, updateToolDesc, "business glossary term")
+	assert.Contains(t, updateToolDesc, "SQL is optional")
+}
+
+func TestGlossaryToolDescriptionsMentionOptionalSQLBehavior(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &GlossaryToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			Logger: zap.NewNop(),
+		},
+	}
+
+	RegisterGlossaryTools(mcpServer, deps)
+
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resultBytes, &response))
+
+	descriptions := make(map[string]string, len(response.Result.Tools))
+	for _, tool := range response.Result.Tools {
+		descriptions[tool.Name] = tool.Description
+	}
+
+	assert.Contains(t, descriptions["list_glossary"], "whether each term has a SQL definition")
+	assert.Contains(t, descriptions["list_glossary"], "Definition-only terms are valid")
+	assert.Contains(t, descriptions["get_glossary_sql"], "has_sql")
+	assert.Contains(t, descriptions["get_glossary_sql"], "has_sql = false")
+	assert.Contains(t, descriptions["create_glossary_term"], "SQL is optional")
+	assert.Contains(t, descriptions["update_glossary_term"], "SQL is optional")
 }
 
 // TestUpdateGlossaryTermTool_ResponseStructure verifies response format.
