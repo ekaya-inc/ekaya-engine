@@ -311,3 +311,41 @@ func TestAgentRepository_ListAndGetUseTotalMCPAuditEventCount(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), retrieved.MCPCallCount)
 }
+
+func TestAgentRepository_FindByAPIKeyDoesNotPopulateMCPAuditCounts(t *testing.T) {
+	tc := setupAgentRepositoryTest(t)
+	tc.cleanup()
+	t.Cleanup(tc.cleanup)
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	agent := &models.Agent{
+		ProjectID:       tc.projectID,
+		Name:            "auth-bot",
+		APIKeyEncrypted: "encrypted-key",
+	}
+	require.NoError(t, tc.agentRepo.Create(ctx, agent, nil))
+
+	scope, ok := database.GetTenantScope(ctx)
+	require.True(t, ok)
+
+	_, err := scope.Conn.Exec(ctx, `
+		INSERT INTO engine_mcp_audit_log (
+			id, project_id, user_id, user_email, event_type, tool_name,
+			was_successful, security_level, created_at
+		) VALUES
+			($1, $2, $3, $4, 'tool_call', 'list_approved_queries', true, 'normal', $5),
+			($6, $2, $3, $4, 'tool_error', 'execute_approved_query', false, 'warning', $7)
+	`,
+		uuid.New(), tc.projectID, "agent:"+agent.ID.String(), agent.Name, time.Now().UTC().Add(-2*time.Minute),
+		uuid.New(), time.Now().UTC().Add(-time.Minute),
+	)
+	require.NoError(t, err)
+
+	found, err := tc.agentRepo.FindByAPIKey(ctx, tc.projectID)
+	require.NoError(t, err)
+	require.Len(t, found, 1)
+	assert.Equal(t, agent.ID, found[0].ID)
+	assert.Equal(t, int64(0), found[0].MCPCallCount)
+}
