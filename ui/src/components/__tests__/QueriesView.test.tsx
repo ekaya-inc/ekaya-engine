@@ -9,6 +9,7 @@ import QueriesView from '../QueriesView';
 vi.mock('../../services/engineApi', () => ({
   default: {
     listQueries: vi.fn(),
+    getQuery: vi.fn(),
     createQuery: vi.fn(),
     updateQuery: vi.fn(),
     deleteQuery: vi.fn(),
@@ -428,5 +429,237 @@ describe('QueriesView', () => {
 
     expect(screen.queryByText('Approved query')).not.toBeInTheDocument();
     expect(screen.queryByText('Pending query')).not.toBeInTheDocument();
+  });
+
+  it('keeps executed results scoped to the selected routed query', async () => {
+    vi.mocked(engineApi.listQueries).mockResolvedValue({
+      success: true,
+      data: { queries: mockQueries },
+    });
+    vi.mocked(engineApi.executeQuery).mockImplementation(async (_projectId, _datasourceId, queryId) => {
+      if (queryId === 'query-1') {
+        return {
+          success: true,
+          data: {
+            columns: [{ name: 'customer', type: 'text' }],
+            rows: [{ customer: 'Alice' }],
+            row_count: 1,
+          },
+        };
+      }
+
+      return {
+        success: true,
+        data: {
+          columns: [{ name: 'report_total', type: 'integer' }],
+          rows: [{ report_total: 42 }],
+          row_count: 1,
+        },
+      };
+    });
+
+    const { rerender } = render(
+      <QueriesView
+        projectId="proj-1"
+        datasourceId="ds-1"
+        dialect="PostgreSQL"
+        filter="approved"
+        initialQueryId="query-1"
+        onQuerySelect={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('SELECT * FROM customers ORDER BY revenue DESC LIMIT 10')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /execute query/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Query Results')).toBeInTheDocument();
+      expect(screen.getByText('Alice')).toBeInTheDocument();
+    });
+
+    rerender(
+      <QueriesView
+        projectId="proj-1"
+        datasourceId="ds-1"
+        dialect="PostgreSQL"
+        filter="approved"
+        initialQueryId="query-2"
+        onQuerySelect={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('SELECT date, SUM(amount) FROM sales GROUP BY date')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('Query Results')).not.toBeInTheDocument();
+    expect(screen.queryByText('Alice')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /execute query/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Query Results')).toBeInTheDocument();
+      expect(screen.getByText('42')).toBeInTheDocument();
+    });
+
+    rerender(
+      <QueriesView
+        projectId="proj-1"
+        datasourceId="ds-1"
+        dialect="PostgreSQL"
+        filter="approved"
+        initialQueryId="query-1"
+        onQuerySelect={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('SELECT * FROM customers ORDER BY revenue DESC LIMIT 10')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Query Results')).toBeInTheDocument();
+    expect(screen.getByText('Alice')).toBeInTheDocument();
+    expect(screen.queryByText('42')).not.toBeInTheDocument();
+  });
+
+  it('keeps executed results scoped to the selected pending query', async () => {
+    const basePendingQuery = mockQueriesWithStatuses[1]!;
+    const pendingQueries = [
+      {
+        ...basePendingQuery,
+        query_id: 'query-pending-a',
+        natural_language_prompt: 'Pending query A',
+        sql_query: 'SELECT * FROM pending_a',
+      },
+      {
+        ...basePendingQuery,
+        query_id: 'query-pending-b',
+        natural_language_prompt: 'Pending query B',
+        sql_query: 'SELECT * FROM pending_b',
+      },
+    ] satisfies Query[];
+
+    vi.mocked(engineApi.listQueries).mockResolvedValue({
+      success: true,
+      data: { queries: pendingQueries },
+    });
+    vi.mocked(engineApi.executeQuery).mockImplementation(async (_projectId, _datasourceId, queryId) => {
+      if (queryId === 'query-pending-a') {
+        return {
+          success: true,
+          data: {
+            columns: [{ name: 'pending_value', type: 'text' }],
+            rows: [{ pending_value: 'pending-a-row' }],
+            row_count: 1,
+          },
+        };
+      }
+
+      return {
+        success: true,
+        data: {
+          columns: [{ name: 'pending_value', type: 'text' }],
+          rows: [{ pending_value: 'pending-b-row' }],
+          row_count: 1,
+        },
+      };
+    });
+
+    const { rerender } = render(
+      <QueriesView
+        projectId="proj-1"
+        datasourceId="ds-1"
+        dialect="PostgreSQL"
+        filter="pending"
+        initialQueryId="query-pending-a"
+        onQuerySelect={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('SELECT * FROM pending_a')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /^execute$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('pending-a-row')).toBeInTheDocument();
+    });
+
+    rerender(
+      <QueriesView
+        projectId="proj-1"
+        datasourceId="ds-1"
+        dialect="PostgreSQL"
+        filter="pending"
+        initialQueryId="query-pending-b"
+        onQuerySelect={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('SELECT * FROM pending_b')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('Query Results')).not.toBeInTheDocument();
+    expect(screen.queryByText('pending-a-row')).not.toBeInTheDocument();
+  });
+
+  it('does not show stale results when switching from an executed query to a rejected query', async () => {
+    vi.mocked(engineApi.listQueries).mockResolvedValue({
+      success: true,
+      data: { queries: mockQueriesWithStatuses },
+    });
+    vi.mocked(engineApi.executeQuery).mockResolvedValue({
+      success: true,
+      data: {
+        columns: [{ name: 'approved_value', type: 'text' }],
+        rows: [{ approved_value: 'approved-row' }],
+        row_count: 1,
+      },
+    });
+
+    const { rerender } = render(
+      <QueriesView
+        projectId="proj-1"
+        datasourceId="ds-1"
+        dialect="PostgreSQL"
+        filter="approved"
+        initialQueryId="query-approved"
+        onQuerySelect={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('SELECT * FROM approved')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /execute query/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('approved-row')).toBeInTheDocument();
+    });
+
+    rerender(
+      <QueriesView
+        projectId="proj-1"
+        datasourceId="ds-1"
+        dialect="PostgreSQL"
+        filter="rejected"
+        initialQueryId="query-rejected"
+        onQuerySelect={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('SELECT * FROM rejected')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('Query Results')).not.toBeInTheDocument();
+    expect(screen.queryByText('approved-row')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /execute query/i })).not.toBeInTheDocument();
   });
 });

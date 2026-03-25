@@ -110,7 +110,8 @@ const QueriesView = ({
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [schema, setSchema] = useState<DatasourceSchema | null>(null);
-  const [queryResults, setQueryResults] = useState<ExecuteQueryResponse | null>(null);
+  const [testQueryResults, setTestQueryResults] = useState<ExecuteQueryResponse | null>(null);
+  const [executedQueryResults, setExecutedQueryResults] = useState<Record<string, ExecuteQueryResponse>>({});
 
   // UI state
   const [selectedQuery, setSelectedQuery] = useState<Query | null>(null);
@@ -227,7 +228,7 @@ const QueriesView = ({
           output_columns: foundQuery.output_columns ?? [],
           constraints: foundQuery.constraints ?? '',
         });
-        setQueryResults(null);
+        setTestQueryResults(null);
         editValidation.reset();
         setEditTestPassed(false);
         setTestParameterValues({});
@@ -260,7 +261,7 @@ const QueriesView = ({
                 output_columns: query.output_columns ?? [],
                 constraints: query.constraints ?? '',
               });
-              setQueryResults(null);
+              setTestQueryResults(null);
               editValidation.reset();
               setEditTestPassed(false);
               setTestParameterValues({});
@@ -297,7 +298,7 @@ const QueriesView = ({
       setSelectedQuery(null);
       setEditingQueryId(null);
       setEditingState(null);
-      setQueryResults(null);
+      setTestQueryResults(null);
     }
   }, [initialMode, isCreating]);
 
@@ -310,7 +311,7 @@ const QueriesView = ({
         setSelectedQuery(null);
         setEditingQueryId(null);
         setEditingState(null);
-        setQueryResults(null);
+        setTestQueryResults(null);
         setIsCreating(false);
       }
     }
@@ -330,7 +331,7 @@ const QueriesView = ({
         output_columns: selectedQuery.output_columns ?? [],
         constraints: selectedQuery.constraints ?? '',
       });
-      setQueryResults(null);
+      setTestQueryResults(null);
       editValidation.reset();
       setEditTestPassed(false);
       setTestParameterValues({});
@@ -382,6 +383,10 @@ const QueriesView = ({
     () => toCodeMirrorSchema(schema),
     [schema]
   );
+
+  const selectedQueryResults = selectedQuery
+    ? executedQueryResults[selectedQuery.query_id] ?? null
+    : null;
 
   // Check if SQL has undefined parameters (used in SQL but not defined)
   const hasUndefinedParams = useCallback(
@@ -456,6 +461,7 @@ const QueriesView = ({
       output_columns: [],
       constraints: '',
     });
+    setTestQueryResults(null);
     setTestPassed(false);
     setTestParameterValues({});
     createValidation.reset();
@@ -482,7 +488,7 @@ const QueriesView = ({
 
       if (response.success) {
         if (response.data) {
-          setQueryResults(response.data);
+          setTestQueryResults(response.data);
 
           // Auto-populate output columns from test results
           const newOutputColumns: OutputColumn[] = response.data.columns.map((col) => ({
@@ -509,7 +515,7 @@ const QueriesView = ({
         }
         return true;
       } else {
-        setQueryResults(null);
+        setTestQueryResults(null);
         toast({
           title: 'Query execution failed',
           description: response.error ?? 'Unknown error',
@@ -518,7 +524,7 @@ const QueriesView = ({
         return false;
       }
     } catch (err) {
-      setQueryResults(null);
+      setTestQueryResults(null);
       toast({
         title: 'Query execution failed',
         description: err instanceof Error ? err.message : 'Unknown error',
@@ -634,7 +640,7 @@ const QueriesView = ({
         output_columns: query.output_columns ?? [],
         constraints: query.constraints ?? '',
       });
-      setQueryResults(null);
+      setTestQueryResults(null);
       editValidation.reset();
       setEditTestPassed(false);
       setTestParameterValues({});
@@ -698,6 +704,16 @@ const QueriesView = ({
         setSelectedQuery(response.data as Query);
         setEditingQueryId(null);
         setEditingState(null);
+        setTestQueryResults(null);
+        setExecutedQueryResults((prev) => {
+          if (!(editingQueryId in prev)) {
+            return prev;
+          }
+
+          const next = { ...prev };
+          delete next[editingQueryId];
+          return next;
+        });
         editValidation.reset();
         // Navigate back to view mode
         if (onQuerySelect) {
@@ -734,6 +750,15 @@ const QueriesView = ({
    */
   const handleQueryDeleted = (queryId: string) => {
     setQueries((prev) => prev.filter((q) => q.query_id !== queryId));
+    setExecutedQueryResults((prev) => {
+      if (!(queryId in prev)) {
+        return prev;
+      }
+
+      const next = { ...prev };
+      delete next[queryId];
+      return next;
+    });
     if (selectedQuery?.query_id === queryId) {
       setSelectedQuery(null);
       onCancelEdit?.();
@@ -918,16 +943,29 @@ const QueriesView = ({
       );
 
       if (response.success && response.data) {
-        setQueryResults(response.data);
+        const queryResult = response.data;
+
+        setExecutedQueryResults((prev) => ({
+          ...prev,
+          [query.query_id]: queryResult,
+        }));
         toast({
           title: 'Query executed successfully',
-          description: `Returned ${response.data.row_count} rows`,
+          description: `Returned ${queryResult.row_count} rows`,
           variant: 'success',
         });
         // Refresh to get updated usage count
         await loadQueries();
       } else {
-        setQueryResults(null);
+        setExecutedQueryResults((prev) => {
+          if (!(query.query_id in prev)) {
+            return prev;
+          }
+
+          const next = { ...prev };
+          delete next[query.query_id];
+          return next;
+        });
         toast({
           title: 'Query execution failed',
           description: response.error ?? 'Unknown error',
@@ -935,7 +973,15 @@ const QueriesView = ({
         });
       }
     } catch (err) {
-      setQueryResults(null);
+      setExecutedQueryResults((prev) => {
+        if (!(query.query_id in prev)) {
+          return prev;
+        }
+
+        const next = { ...prev };
+        delete next[query.query_id];
+        return next;
+      });
       toast({
         title: 'Query execution failed',
         description: err instanceof Error ? err.message : 'Unknown error',
@@ -970,7 +1016,7 @@ const QueriesView = ({
       setIsCreating(false);
       setEditingQueryId(null);
       setEditingState(null);
-      setQueryResults(null);
+      setTestQueryResults(null);
     }
   };
 
@@ -986,7 +1032,7 @@ const QueriesView = ({
       setSelectedQuery(null);
       setEditingQueryId(null);
       setEditingState(null);
-      setQueryResults(null);
+      setTestQueryResults(null);
       resetCreateForm();
     }
   };
@@ -1002,6 +1048,7 @@ const QueriesView = ({
       setIsCreating(false);
       setEditingQueryId(null);
       setEditingState(null);
+      setTestQueryResults(null);
       resetCreateForm();
       editValidation.reset();
     }
@@ -1359,11 +1406,11 @@ const QueriesView = ({
                     </Button>
                   </div>
 
-                  {queryResults && (
+                  {testQueryResults && (
                     <QueryResultsTable
-                      columns={queryResults.columns}
-                      rows={queryResults.rows}
-                      totalRowCount={queryResults.row_count}
+                      columns={testQueryResults.columns}
+                      rows={testQueryResults.rows}
+                      totalRowCount={testQueryResults.row_count}
                       maxRows={10}
                       maxColumns={20}
                     />
@@ -1633,11 +1680,11 @@ const QueriesView = ({
                     </Button>
                   </div>
 
-                  {queryResults && (
+                  {testQueryResults && (
                     <QueryResultsTable
-                      columns={queryResults.columns}
-                      rows={queryResults.rows}
-                      totalRowCount={queryResults.row_count}
+                      columns={testQueryResults.columns}
+                      rows={testQueryResults.rows}
+                      totalRowCount={testQueryResults.row_count}
                       maxRows={10}
                       maxColumns={20}
                     />
@@ -2061,11 +2108,11 @@ const QueriesView = ({
                     </div>
                   )}
 
-                  {queryResults && (
+                  {selectedQueryResults && (
                     <QueryResultsTable
-                      columns={queryResults.columns}
-                      rows={queryResults.rows}
-                      totalRowCount={queryResults.row_count}
+                      columns={selectedQueryResults.columns}
+                      rows={selectedQueryResults.rows}
+                      totalRowCount={selectedQueryResults.row_count}
                       maxRows={10}
                       maxColumns={20}
                     />
