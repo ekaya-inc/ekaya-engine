@@ -76,6 +76,10 @@ var AllToolsOrdered = []ToolSpec{
 	{Name: "delete_glossary_term", Description: "Delete a business glossary term that's no longer relevant"},
 	{Name: "delete_project_knowledge", Description: "Remove writable domain facts by fact_id; project_overview is read-only here"},
 	{Name: "delete_table_metadata", Description: "Clear custom metadata for a table, removing semantic enrichment"},
+	{Name: "list_relationships", Description: "List schema relationships with semantic type and provenance details"},
+	{Name: "create_relationship", Description: "Create a schema relationship between two columns"},
+	{Name: "update_relationship", Description: "Update cardinality or approval state for an existing relationship"},
+	{Name: "delete_relationship", Description: "Soft-delete a schema relationship while preserving the tombstone"},
 
 	// Schema Management (Living Ontology)
 	{Name: "refresh_schema", Description: "Refresh schema from datasource and detect changes (new tables, columns, etc.)"},
@@ -140,6 +144,10 @@ var Loadouts = map[string][]string{
 		"delete_glossary_term",
 		"delete_project_knowledge",
 		"delete_table_metadata",
+		"list_relationships",
+		"create_relationship",
+		"update_relationship",
+		"delete_relationship",
 		// Schema management (living ontology) tools
 		"refresh_schema",
 		"scan_data_changes",

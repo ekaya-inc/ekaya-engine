@@ -230,6 +230,7 @@ func TestMCPConfigService_Get_FiltersToolsByInstalledApps(t *testing.T) {
 	assert.Contains(t, enabledToolNames(resp.UserTools), "get_schema")
 	assert.Contains(t, enabledToolNames(resp.UserTools), "probe_column")
 	assert.Contains(t, enabledToolNames(resp.UserTools), "list_project_knowledge")
+	assert.Contains(t, enabledToolNames(resp.UserTools), "list_relationships")
 	assert.Contains(t, enabledToolNames(resp.UserTools), "get_context")
 	assert.Contains(t, enabledToolNames(resp.DeveloperTools), "explain_query")
 	assert.Contains(t, enabledToolNames(resp.DeveloperTools), "create_approved_query")
@@ -246,6 +247,8 @@ func TestMCPConfigService_Get_FiltersToolsByInstalledApps(t *testing.T) {
 	assert.Equal(t, models.AppIDOntologyForge, findEnabledTool(resp.DeveloperTools, "create_approved_query").AppID)
 	require.NotNil(t, findEnabledTool(resp.UserTools, "list_approved_queries"))
 	assert.Equal(t, models.AppIDOntologyForge, findEnabledTool(resp.UserTools, "list_approved_queries").AppID)
+	require.NotNil(t, findEnabledTool(resp.UserTools, "list_relationships"))
+	assert.Equal(t, models.AppIDOntologyForge, findEnabledTool(resp.UserTools, "list_relationships").AppID)
 	require.NotNil(t, findEnabledTool(resp.UserTools, "query"))
 	assert.Equal(t, models.AppIDMCPServer, findEnabledTool(resp.UserTools, "query").AppID)
 }

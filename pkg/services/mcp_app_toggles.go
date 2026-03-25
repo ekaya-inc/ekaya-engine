@@ -45,6 +45,7 @@ var AppToggles = []AppToggle{
 			"delete_column_metadata", "delete_table_metadata", "delete_project_knowledge",
 			"create_approved_query", "update_approved_query", "delete_approved_query",
 			"list_approved_queries", "execute_approved_query",
+			"list_relationships", "create_relationship", "update_relationship", "delete_relationship",
 			"refresh_schema", "scan_data_changes", "list_pending_changes",
 			"approve_change", "reject_change", "approve_all_changes",
 			"list_ontology_questions", "resolve_ontology_question", "skip_ontology_question",
@@ -60,7 +61,7 @@ var AppToggles = []AppToggle{
 		Tools: []string{
 			"get_context", "get_ontology", "list_approved_queries", "execute_approved_query",
 			"search_schema", "get_schema", "get_column_metadata", "probe_column", "probe_columns",
-			"list_project_knowledge",
+			"list_project_knowledge", "list_relationships",
 		},
 	},
 	// AI Data Liaison — Developer

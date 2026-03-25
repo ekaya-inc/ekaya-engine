@@ -1646,6 +1646,7 @@ func TestNewToolFilter_OntologySuggestionsExposeExpandedReadTools(t *testing.T) 
 		"probe_column",
 		"probe_columns",
 		"list_project_knowledge",
+		"list_relationships",
 		"list_approved_queries",
 		"execute_approved_query",
 	} {
