@@ -52,6 +52,7 @@ func TestRegisteredToolCatalog_StrictClientsRequirePropertiesOnObjectSchemas(t *
 		"get_schema",
 		"health",
 		"list_glossary",
+		"list_project_knowledge",
 	} {
 		tool := findStrictClientTool(t, tools, name)
 		require.Equal(t, "object", tool.InputSchema["type"], "expected %s to use an object input schema", name)

@@ -30,6 +30,7 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "probe_column", Description: "Deep-dive into specific column with statistics, joinability, and semantic information", ToolGroup: ToolGroupDeveloper},
 	{Name: "probe_columns", Description: "Batch variant of probe_column for analyzing multiple columns at once", ToolGroup: ToolGroupDeveloper},
 	{Name: "get_column_metadata", Description: "Get current ontology metadata for a column (description, enum_values, role, schema info)", ToolGroup: ToolGroupDeveloper},
+	{Name: "list_project_knowledge", Description: "List all project knowledge facts with fact IDs for discovery and maintenance", ToolGroup: ToolGroupDeveloper},
 	{Name: "update_project_knowledge", Description: "Create or update domain facts (terminology, business rules, enumerations, conventions)", ToolGroup: ToolGroupDeveloper},
 	{Name: "delete_project_knowledge", Description: "Remove incorrect or outdated domain facts", ToolGroup: ToolGroupDeveloper},
 	{Name: "update_column", Description: "Add or update semantic information about a column (description, enum_values, role)", ToolGroup: ToolGroupDeveloper},

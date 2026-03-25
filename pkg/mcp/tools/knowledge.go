@@ -24,8 +24,55 @@ type KnowledgeToolDeps struct {
 
 // RegisterKnowledgeTools registers project knowledge MCP tools.
 func RegisterKnowledgeTools(s *server.MCPServer, deps *KnowledgeToolDeps) {
+	registerListProjectKnowledgeTool(s, deps)
 	registerUpdateProjectKnowledgeTool(s, deps)
 	registerDeleteProjectKnowledgeTool(s, deps)
+}
+
+// registerListProjectKnowledgeTool adds the list_project_knowledge tool for discovering project knowledge fact IDs.
+func registerListProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeToolDeps) {
+	tool := mcp.NewTool(
+		"list_project_knowledge",
+		mcp.WithDescription(
+			"List all project knowledge facts for the current project so an MCP client can discover stable fact_id values before updating or deleting existing facts. "+
+				"Returns fact_id, category, fact, optional context, provenance fields, and timestamps for maintenance workflows.",
+		),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "list_project_knowledge")
+		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
+			return nil, err
+		}
+		defer cleanup()
+
+		facts, err := deps.KnowledgeRepository.GetByProject(tenantCtx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list project knowledge: %w", err)
+		}
+
+		result := listProjectKnowledgeResponse{
+			Facts: make([]projectKnowledgeListItem, 0, len(facts)),
+			Count: len(facts),
+		}
+		for _, fact := range facts {
+			result.Facts = append(result.Facts, toProjectKnowledgeListItem(fact))
+		}
+
+		jsonResult, err := json.Marshal(result)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
 }
 
 // registerUpdateProjectKnowledgeTool adds the update_project_knowledge tool for creating/updating domain facts.
@@ -35,7 +82,8 @@ func registerUpdateProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 		mcp.WithDescription(
 			"Create or update a domain fact that persists across sessions. "+
 				"Use this to capture business rules, terminology, enumerations, or conventions learned during analysis. "+
-				"Facts are upserted by (category, fact) pair - the same fact can be updated with new context. "+
+				"Provide fact_id to update an existing fact; if fact_id is omitted, this creates a new fact. "+
+				"Use list_project_knowledge first when you need to discover an existing fact_id from an earlier session. "+
 				"Categories: 'terminology' (domain-specific terms), 'business_rule' (validation rules, calculations), "+
 				"'enumeration' (status values, type codes), 'convention' (naming patterns, soft deletes). "+
 				"For table-specific metadata (ephemeral tables, usage notes, preferred alternatives), use update_table instead. "+
@@ -48,7 +96,7 @@ func registerUpdateProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 		),
 		mcp.WithString(
 			"fact_id",
-			mcp.Description("Optional - UUID of existing fact to update. If omitted, upserts by (category, fact) match"),
+			mcp.Description("Optional - UUID of existing fact to update. If omitted, a new fact is created"),
 		),
 		mcp.WithString(
 			"context",
@@ -174,6 +222,7 @@ func registerDeleteProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 		mcp.WithDescription(
 			"Remove a domain fact that is incorrect or outdated. "+
 				"Requires the fact_id (UUID) of the knowledge entry to delete. "+
+				"Use list_project_knowledge first to discover existing fact_id values. "+
 				"Use this sparingly - only when a fact is wrong, not just when updating it (use update_project_knowledge for updates).",
 		),
 		mcp.WithString(
@@ -242,6 +291,40 @@ func registerDeleteProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 
 		return mcp.NewToolResultText(string(jsonResult)), nil
 	})
+}
+
+func toProjectKnowledgeListItem(fact *models.KnowledgeFact) projectKnowledgeListItem {
+	item := projectKnowledgeListItem{
+		FactID:    fact.ID.String(),
+		Category:  fact.FactType,
+		Fact:      fact.Value,
+		Context:   fact.Context,
+		Source:    fact.Source,
+		CreatedAt: jsonutil.FormatUTCTime(fact.CreatedAt),
+		UpdatedAt: jsonutil.FormatUTCTime(fact.UpdatedAt),
+	}
+	if fact.LastEditSource != nil {
+		item.LastEditSource = *fact.LastEditSource
+	}
+	return item
+}
+
+// listProjectKnowledgeResponse is the response format for list_project_knowledge tool.
+type listProjectKnowledgeResponse struct {
+	Facts []projectKnowledgeListItem `json:"facts"`
+	Count int                        `json:"count"`
+}
+
+// projectKnowledgeListItem is the MCP-friendly response item for a project knowledge fact.
+type projectKnowledgeListItem struct {
+	FactID         string `json:"fact_id"`
+	Category       string `json:"category"`
+	Fact           string `json:"fact"`
+	Context        string `json:"context,omitempty"`
+	Source         string `json:"source,omitempty"`
+	LastEditSource string `json:"last_edit_source,omitempty"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
 }
 
 // updateProjectKnowledgeResponse is the response format for update_project_knowledge tool.

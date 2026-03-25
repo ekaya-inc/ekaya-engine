@@ -119,6 +119,7 @@ func TestComputeDeveloperTools(t *testing.T) {
 
 		assert.True(t, toolNames["health"], "health should be included")
 		assert.True(t, toolNames["get_schema"], "get_schema should be included")
+		assert.True(t, toolNames["list_project_knowledge"], "list_project_knowledge should be included")
 		assert.True(t, toolNames["update_table"], "update_table should be included")
 		assert.True(t, toolNames["update_column"], "update_column should be included")
 		assert.True(t, toolNames["list_ontology_questions"], "list_ontology_questions should be included")
@@ -160,6 +161,7 @@ func TestComputeDeveloperTools(t *testing.T) {
 		assert.True(t, toolNames["execute"], "execute should be included")
 		assert.True(t, toolNames["query"], "query should be included")
 		assert.True(t, toolNames["get_schema"], "get_schema should be included")
+		assert.True(t, toolNames["list_project_knowledge"], "list_project_knowledge should be included")
 		assert.True(t, toolNames["update_table"], "update_table should be included")
 		assert.True(t, toolNames["list_ontology_questions"], "list_ontology_questions should be included")
 		assert.True(t, toolNames["list_query_suggestions"], "list_query_suggestions should be included")

@@ -167,6 +167,79 @@ func (e *mcpError) Error() string {
 }
 
 // ============================================================================
+// Integration Tests: list_project_knowledge
+// ============================================================================
+
+func TestListProjectKnowledgeTool_Integration_EmptyProject(t *testing.T) {
+	tc := setupKnowledgeToolIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	result, err := tc.callTool(ctx, "list_project_knowledge", map[string]any{})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.IsError, "should not return error result")
+
+	var response listProjectKnowledgeResponse
+	require.Len(t, result.Content, 1)
+	err = json.Unmarshal([]byte(result.Content[0].(mcp.TextContent).Text), &response)
+	require.NoError(t, err)
+
+	assert.Empty(t, response.Facts)
+	assert.Equal(t, 0, response.Count)
+}
+
+func TestListProjectKnowledgeTool_Integration_ListExistingFacts(t *testing.T) {
+	tc := setupKnowledgeToolIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	facts := []*models.KnowledgeFact{
+		{
+			ProjectID: tc.projectID,
+			FactType:  "business_rule",
+			Value:     "Platform fees are ~33% of total_amount",
+			Context:   "Verified from billing rows",
+		},
+		{
+			ProjectID: tc.projectID,
+			FactType:  "terminology",
+			Value:     "GMV means Gross Merchandise Value",
+			Context:   "Observed in dashboards",
+		},
+	}
+	for _, fact := range facts {
+		err := tc.knowledgeRepository.Create(ctx, fact)
+		require.NoError(t, err)
+	}
+
+	result, err := tc.callTool(ctx, "list_project_knowledge", map[string]any{})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.IsError, "should not return error result")
+
+	var response listProjectKnowledgeResponse
+	require.Len(t, result.Content, 1)
+	err = json.Unmarshal([]byte(result.Content[0].(mcp.TextContent).Text), &response)
+	require.NoError(t, err)
+
+	require.Len(t, response.Facts, 2)
+	assert.Equal(t, 2, response.Count)
+	assert.Equal(t, facts[0].ID.String(), response.Facts[0].FactID)
+	assert.Equal(t, facts[0].FactType, response.Facts[0].Category)
+	assert.Equal(t, facts[0].Value, response.Facts[0].Fact)
+	assert.Equal(t, "mcp", response.Facts[0].Source)
+	assert.NotEmpty(t, response.Facts[0].CreatedAt)
+	assert.NotEmpty(t, response.Facts[0].UpdatedAt)
+}
+
+// ============================================================================
 // Integration Tests: update_project_knowledge
 // ============================================================================
 
@@ -539,9 +612,23 @@ func TestKnowledgeTools_Integration_CreateUpdateDeleteWorkflow(t *testing.T) {
 	require.Len(t, createResult.Content, 1)
 	err = json.Unmarshal([]byte(createResult.Content[0].(mcp.TextContent).Text), &createResponse)
 	require.NoError(t, err)
-	factID := createResponse.FactID
 
-	// Step 2: Update the fact with additional context
+	// Step 2: List facts and capture the fact_id through the discovery tool
+	listResult, err := tc.callTool(ctx, "list_project_knowledge", map[string]any{})
+	require.NoError(t, err)
+	require.NotNil(t, listResult)
+	assert.False(t, listResult.IsError, "list_project_knowledge should succeed")
+
+	var listResponse listProjectKnowledgeResponse
+	require.Len(t, listResult.Content, 1)
+	err = json.Unmarshal([]byte(listResult.Content[0].(mcp.TextContent).Text), &listResponse)
+	require.NoError(t, err)
+	require.Len(t, listResponse.Facts, 1)
+
+	factID := listResponse.Facts[0].FactID
+	assert.Equal(t, createResponse.FactID, factID, "list_project_knowledge should expose the created fact_id")
+
+	// Step 3: Update the fact with additional context
 	updateResult, err := tc.callTool(ctx, "update_project_knowledge", map[string]any{
 		"fact":     "User accounts expire after 90 days of inactivity",
 		"category": "business_rule",
@@ -559,7 +646,7 @@ func TestKnowledgeTools_Integration_CreateUpdateDeleteWorkflow(t *testing.T) {
 	assert.Equal(t, factID, updateResponse.FactID, "fact_id should be preserved")
 	assert.Contains(t, updateResponse.Context, "accounts_service.go:123")
 
-	// Step 3: Delete the fact
+	// Step 4: Delete the fact
 	deleteResult, err := tc.callTool(ctx, "delete_project_knowledge", map[string]any{
 		"fact_id": factID,
 	})
@@ -574,7 +661,19 @@ func TestKnowledgeTools_Integration_CreateUpdateDeleteWorkflow(t *testing.T) {
 	assert.Equal(t, factID, deleteResponse.FactID)
 	assert.True(t, deleteResponse.Deleted)
 
-	// Step 4: Verify deletion - try to delete again
+	// Step 5: List again and confirm the fact is gone
+	listAfterDeleteResult, err := tc.callTool(ctx, "list_project_knowledge", map[string]any{})
+	require.NoError(t, err)
+	require.NotNil(t, listAfterDeleteResult)
+
+	var listAfterDeleteResponse listProjectKnowledgeResponse
+	require.Len(t, listAfterDeleteResult.Content, 1)
+	err = json.Unmarshal([]byte(listAfterDeleteResult.Content[0].(mcp.TextContent).Text), &listAfterDeleteResponse)
+	require.NoError(t, err)
+	assert.Empty(t, listAfterDeleteResponse.Facts)
+	assert.Equal(t, 0, listAfterDeleteResponse.Count)
+
+	// Step 6: Verify deletion - try to delete again
 	deleteAgainResult, err := tc.callTool(ctx, "delete_project_knowledge", map[string]any{
 		"fact_id": factID,
 	})
