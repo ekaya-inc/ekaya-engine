@@ -58,10 +58,16 @@ func TestComputeToolsForRole_UserUsesOnlyUserToggles(t *testing.T) {
 
 	toolNames := toolSpecNamesToMap(tools)
 	assert.True(t, toolNames["health"])
+	assert.True(t, toolNames["query"])
+	assert.True(t, toolNames["validate"])
+	assert.True(t, toolNames["sample"])
 	assert.True(t, toolNames["get_context"])
+	assert.True(t, toolNames["get_schema"])
+	assert.True(t, toolNames["probe_column"])
+	assert.True(t, toolNames["list_project_knowledge"])
 	assert.True(t, toolNames["list_approved_queries"])
 	assert.False(t, toolNames["echo"])
-	assert.False(t, toolNames["get_schema"])
+	assert.False(t, toolNames["list_query_suggestions"])
 }
 
 func TestComputeToolsForRole_AdminGetsUnionOfEnabledToggles(t *testing.T) {
@@ -81,7 +87,10 @@ func TestComputeToolsForRole_AdminGetsUnionOfEnabledToggles(t *testing.T) {
 	toolNames := toolSpecNamesToMap(tools)
 	assert.True(t, toolNames["echo"])
 	assert.True(t, toolNames["query"])
+	assert.True(t, toolNames["validate"])
+	assert.True(t, toolNames["sample"])
 	assert.True(t, toolNames["list_approved_queries"])
+	assert.True(t, toolNames["get_schema"])
 }
 
 func TestEffectiveRole(t *testing.T) {

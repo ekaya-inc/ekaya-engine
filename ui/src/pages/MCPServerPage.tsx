@@ -320,8 +320,9 @@ const MCPServerPage = () => {
                   <div className="flex-1">
                     <span className="text-sm font-medium text-text-primary">Direct Database Access</span>
                     <p className="text-sm text-text-secondary mt-1">
-                      Include tools for direct database access: echo, execute, and query.
-                      Enables the MCP Client to run arbitrary SQL against the datasource.
+                      Include direct database access tools for query, validate, sample, execute,
+                      explain_query, and echo. Enables the MCP Client to inspect data, validate SQL,
+                      and run arbitrary SQL against the datasource.
                     </p>
                   </div>
                   <Switch

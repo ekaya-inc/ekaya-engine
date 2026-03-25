@@ -23,7 +23,15 @@ var AppToggles = []AppToggle{
 		Role:        "developer",
 		ToggleKey:   "addDirectDatabaseAccess",
 		DisplayName: "Direct Database Access",
-		Tools:       []string{"echo", "execute", "query"},
+		Tools:       []string{"echo", "execute", "query", "validate", "sample", "explain_query"},
+	},
+	// MCP Server — User
+	{
+		AppID:       models.AppIDMCPServer,
+		Role:        "user",
+		ToggleKey:   "addDirectDatabaseAccess",
+		DisplayName: "Direct Database Access",
+		Tools:       []string{"query", "validate", "sample"},
 	},
 	// Ontology Forge — Developer
 	{
@@ -49,7 +57,11 @@ var AppToggles = []AppToggle{
 		Role:        "user",
 		ToggleKey:   "addOntologySuggestions",
 		DisplayName: "Add Ontology Suggestions",
-		Tools:       []string{"get_context", "get_ontology", "list_approved_queries", "execute_approved_query"},
+		Tools: []string{
+			"get_context", "get_ontology", "list_approved_queries", "execute_approved_query",
+			"search_schema", "get_schema", "get_column_metadata", "probe_column", "probe_columns",
+			"list_project_knowledge",
+		},
 	},
 	// AI Data Liaison — Developer
 	{
@@ -60,7 +72,7 @@ var AppToggles = []AppToggle{
 		Tools: []string{
 			"list_query_suggestions", "approve_query_suggestion", "reject_query_suggestion",
 			"create_glossary_term", "update_glossary_term", "delete_glossary_term",
-			"explain_query",
+			"list_glossary", "get_glossary_sql", "get_query_history",
 		},
 	},
 	// AI Data Liaison — User
@@ -70,7 +82,6 @@ var AppToggles = []AppToggle{
 		ToggleKey:   "addRequestTools",
 		DisplayName: "Add Request Tools",
 		Tools: []string{
-			"query", "sample", "validate",
 			"list_glossary", "get_glossary_sql",
 			"suggest_approved_query", "suggest_query_update",
 			"get_query_history", "record_query_feedback",

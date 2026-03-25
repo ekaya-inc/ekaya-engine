@@ -504,8 +504,9 @@ const OntologyForgePage = () => {
                     <span className="text-sm font-medium text-text-primary">Add Ontology Suggestions</span>
                     <span className="ml-2 text-xs font-medium text-brand-purple">[RECOMMENDED]</span>
                     <p className="text-sm text-text-secondary mt-1">
-                      Enable ontology context and reusable approved queries so the MCP Client can
-                      understand your schema and run vetted queries without ad-hoc SQL.
+                      Enable ontology context, schema search, column probing, project knowledge
+                      discovery, and reusable approved queries so the MCP Client can understand your
+                      schema and run vetted queries without ad-hoc SQL.
                     </p>
                   </div>
                   <Switch

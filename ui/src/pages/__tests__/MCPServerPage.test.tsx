@@ -211,6 +211,7 @@ describe('MCPServerPage - Role-based access', () => {
       expect(screen.getByText('Setup Checklist')).toBeInTheDocument();
     });
     expect(screen.getByText('MCP Server Addresses')).toBeInTheDocument();
+    expect(screen.getByText(/query, validate, sample, execute, explain_query, and echo/i)).toBeInTheDocument();
   });
 
   it('shows full config UI for data role', async () => {

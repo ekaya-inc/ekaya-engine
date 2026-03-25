@@ -244,6 +244,127 @@ func TestToolAccessConsistency_AppOwnershipFilteringDeniesMissingOntologyForge(t
 	}
 }
 
+func TestToolAccessConsistency_UserQueryOwnedByMCPServerToggle(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		services.ToolGroupTools: {AddDirectDatabaseAccess: true},
+	})
+
+	installedApps := newMockInstalledAppService()
+	mcpConfigService := services.NewMCPConfigService(
+		repositories.NewMCPConfigRepository(),
+		nil,
+		nil,
+		installedApps,
+		"http://localhost",
+		zap.NewNop(),
+	)
+
+	filterDeps := &MCPToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:                  engineDB.DB,
+			MCPConfigService:    mcpConfigService,
+			Logger:              zap.NewNop(),
+			InstalledAppService: installedApps,
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
+	}
+
+	claims := &auth.Claims{
+		ProjectID: projectID.String(),
+		Roles:     []string{models.RoleUser},
+	}
+	claims.Subject = "user-123"
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
+
+	filteredTools := NewToolFilter(filterDeps)(ctx, createAllTools())
+	assertContainsTool(t, filteredTools, "query")
+
+	queryDeps := &QueryToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:                  engineDB.DB,
+			MCPConfigService:    mcpConfigService,
+			Logger:              zap.NewNop(),
+			InstalledAppService: installedApps,
+		},
+	}
+
+	_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, queryDeps, "query")
+	requireNoToolAccessError(t, err)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if tenantCtx == nil {
+		t.Fatal("expected tenant context for MCP Server-owned user query tool")
+	}
+}
+
+func TestToolAccessConsistency_UserQueryNotExposedViaAIDataLiaisonRequestTools(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	setupTestConfigWithToolGroups(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
+		services.ToolGroupTools: {
+			AddDirectDatabaseAccess: false,
+			AddRequestTools:         true,
+		},
+	})
+
+	installedApps := newMockInstalledAppService(models.AppIDAIDataLiaison)
+	mcpConfigService := services.NewMCPConfigService(
+		repositories.NewMCPConfigRepository(),
+		nil,
+		nil,
+		installedApps,
+		"http://localhost",
+		zap.NewNop(),
+	)
+
+	filterDeps := &MCPToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:                  engineDB.DB,
+			MCPConfigService:    mcpConfigService,
+			Logger:              zap.NewNop(),
+			InstalledAppService: installedApps,
+		},
+		ProjectService: mockProjectServiceWithDatasource(),
+	}
+
+	claims := &auth.Claims{
+		ProjectID: projectID.String(),
+		Roles:     []string{models.RoleUser},
+	}
+	claims.Subject = "user-123"
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
+
+	filteredTools := NewToolFilter(filterDeps)(ctx, createAllTools())
+	if containsTool(filteredTools, "query") {
+		t.Fatal("query should be hidden when Direct Database Access is off, even if AI Data Liaison request tools are enabled")
+	}
+
+	queryDeps := &QueryToolDeps{
+		BaseMCPToolDeps: BaseMCPToolDeps{
+			DB:                  engineDB.DB,
+			MCPConfigService:    mcpConfigService,
+			Logger:              zap.NewNop(),
+			InstalledAppService: installedApps,
+		},
+	}
+
+	_, _, cleanup, err := AcquireToolAccess(ctx, queryDeps, "query")
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err == nil {
+		t.Fatal("expected query access to be denied without Direct Database Access")
+	}
+	if accessErr, ok := err.(*ToolAccessError); !ok || accessErr.Code != "tool_not_enabled" {
+		t.Fatalf("expected tool_not_enabled tool access error, got %v", err)
+	}
+}
+
 func assertContainsTool(t *testing.T, tools []mcp.Tool, name string) {
 	t.Helper()
 	if !containsTool(tools, name) {

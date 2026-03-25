@@ -369,15 +369,15 @@ describe('AIDataLiaisonPage', () => {
       await renderAIDataLiaisonPage();
       expect(screen.getByText('Add Approval Tools')).toBeInTheDocument();
       expect(screen.getByText(/review query suggestions/i)).toBeInTheDocument();
+      expect(screen.getByText(/look up glossary definitions/i)).toBeInTheDocument();
       expect(screen.getByText(/maintain shared glossary terminology/i)).toBeInTheDocument();
-      expect(screen.queryByText(/manage approved queries/i)).not.toBeInTheDocument();
     });
 
     it('shows request tools toggle with recommended badge', async () => {
       await renderAIDataLiaisonPage();
       expect(screen.getByText('Add Request Tools')).toBeInTheDocument();
       expect(screen.getByText('[RECOMMENDED]')).toBeInTheDocument();
-      expect(screen.getByText(/review query history/i)).toBeInTheDocument();
+      expect(screen.getByText(/suggest queries, request data access/i)).toBeInTheDocument();
       expect(screen.getByText(/access glossary terms through the MCP Client/i)).toBeInTheDocument();
     });
 
@@ -389,6 +389,16 @@ describe('AIDataLiaisonPage', () => {
             {
               name: 'list_query_suggestions',
               description: 'List query suggestions awaiting review',
+              appId: 'ai-data-liaison',
+            },
+            {
+              name: 'list_glossary',
+              description: 'List glossary terms',
+              appId: 'ai-data-liaison',
+            },
+            {
+              name: 'get_query_history',
+              description: 'Get recent query execution history',
               appId: 'ai-data-liaison',
             },
             {
@@ -418,6 +428,8 @@ describe('AIDataLiaisonPage', () => {
       }
 
       expect(screen.getByText('list_query_suggestions')).toBeInTheDocument();
+      expect(screen.getByText('list_glossary')).toBeInTheDocument();
+      expect(screen.getByText('get_query_history')).toBeInTheDocument();
       expect(screen.getByText('suggest_approved_query')).toBeInTheDocument();
       expect(screen.queryByText('create_approved_query')).not.toBeInTheDocument();
       expect(screen.queryByText('list_approved_queries')).not.toBeInTheDocument();

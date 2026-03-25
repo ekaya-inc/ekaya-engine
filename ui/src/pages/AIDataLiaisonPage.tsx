@@ -346,8 +346,8 @@ const AIDataLiaisonPage = () => {
                 <div className="flex-1">
                   <span className="text-sm font-medium text-text-primary">Add Approval Tools</span>
                   <p className="text-sm text-text-secondary mt-1">
-                    Include tools to review query suggestions, explain query plans, and maintain
-                    shared glossary terminology.
+                    Include tools to review query suggestions, look up glossary definitions, review
+                    query history, and maintain shared glossary terminology.
                   </p>
                 </div>
                 <Switch

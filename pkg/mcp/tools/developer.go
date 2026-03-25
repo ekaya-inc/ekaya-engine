@@ -78,7 +78,7 @@ var (
 	// developerToolNames lists all tools in the developer group.
 	developerToolNames map[string]bool
 
-	// businessUserToolNames lists read-only query tools exposed by user-facing request toggles.
+	// businessUserToolNames lists read-only direct-query tools exposed to users.
 	businessUserToolNames map[string]bool
 
 	// ontologyToolNames lists user-facing ontology read tools exposed by suggestion toggles.
@@ -108,7 +108,7 @@ func buildToolNameMap(group string) map[string]bool {
 	return m
 }
 
-// buildBusinessUserToolMap returns the ad-hoc read-only query tools exposed to business users.
+// buildBusinessUserToolMap returns the read-only direct-query tools exposed to users.
 func buildBusinessUserToolMap() map[string]bool {
 	return map[string]bool{
 		"query":    true,
@@ -117,13 +117,18 @@ func buildBusinessUserToolMap() map[string]bool {
 	}
 }
 
-// buildOntologyToolMap returns user-facing ontology context tools.
-// This includes glossary tools since business glossary is part of semantic context.
+// buildOntologyToolMap returns user-facing ontology context tools for the
+// legacy three-flag filter helper. Keep this limited to tools that are treated
+// purely as user-facing context in that helper so shared developer tools such as
+// get_schema are not hidden when developer access is enabled.
 func buildOntologyToolMap() map[string]bool {
 	return map[string]bool{
-		"get_ontology":     true,
-		"list_glossary":    true,
-		"get_glossary_sql": true,
+		"get_context":            true,
+		"get_ontology":           true,
+		"list_glossary":          true,
+		"get_glossary_sql":       true,
+		"execute_approved_query": true,
+		"list_approved_queries":  true,
 	}
 }
 

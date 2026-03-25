@@ -38,8 +38,8 @@ func TestGetEnabledTools_UsesSupportedToolGroups(t *testing.T) {
 	assert.Contains(t, toolNames, "health")
 	assert.Contains(t, toolNames, "get_schema")
 	assert.Contains(t, toolNames, "update_table")
-	assert.Contains(t, toolNames, "list_approved_queries")
-	assert.Contains(t, toolNames, "query")
+	assert.Contains(t, toolNames, "suggest_approved_query")
+	assert.Contains(t, toolNames, "list_glossary")
 	assert.NotContains(t, toolNames, "echo")
 }
 

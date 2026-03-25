@@ -633,6 +633,9 @@ describe('OntologyForgePage - Tool Configuration', () => {
     expect(
       screen.getByText(/manage the ontology and approved query catalog/i),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(/schema search, column probing, project knowledge discovery/i),
+    ).toBeInTheDocument();
   });
 
   it('shows approved query tools under ontology forge tool lists', async () => {
@@ -663,6 +666,16 @@ describe('OntologyForgePage - Tool Configuration', () => {
             appId: 'ontology-forge',
           },
           {
+            name: 'search_schema',
+            description: 'Search schema objects',
+            appId: 'ontology-forge',
+          },
+          {
+            name: 'list_project_knowledge',
+            description: 'List project knowledge facts',
+            appId: 'ontology-forge',
+          },
+          {
             name: 'suggest_approved_query',
             description: 'Suggest a reusable parameterized query for approval',
             appId: 'ai-data-liaison',
@@ -679,6 +692,8 @@ describe('OntologyForgePage - Tool Configuration', () => {
     expect(screen.getByText('create_approved_query')).toBeInTheDocument();
     expect(screen.getByText('list_approved_queries')).toBeInTheDocument();
     expect(screen.getByText('execute_approved_query')).toBeInTheDocument();
+    expect(screen.getByText('search_schema')).toBeInTheDocument();
+    expect(screen.getByText('list_project_knowledge')).toBeInTheDocument();
     expect(screen.queryByText('list_query_suggestions')).not.toBeInTheDocument();
     expect(screen.queryByText('suggest_approved_query')).not.toBeInTheDocument();
   });

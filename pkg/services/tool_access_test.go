@@ -21,8 +21,11 @@ func TestToolAccessChecker_IsToolAccessible_NonAgentUsesUnionOfEnabledToggles(t 
 	assert.True(t, checker.IsToolAccessible("health", state, false))
 	assert.True(t, checker.IsToolAccessible("echo", state, false))
 	assert.True(t, checker.IsToolAccessible("query", state, false))
+	assert.True(t, checker.IsToolAccessible("validate", state, false))
+	assert.True(t, checker.IsToolAccessible("sample", state, false))
 	assert.True(t, checker.IsToolAccessible("list_approved_queries", state, false))
-	assert.False(t, checker.IsToolAccessible("get_schema", state, false))
+	assert.True(t, checker.IsToolAccessible("get_schema", state, false))
+	assert.True(t, checker.IsToolAccessible("list_project_knowledge", state, false))
 }
 
 func TestToolAccessChecker_IsToolAccessible_AgentUsesLimitedLoadout(t *testing.T) {
@@ -76,6 +79,9 @@ func TestToolAccessChecker_IsToolAccessible_NonAgentOntologySuggestionsIncludeAp
 
 	assert.True(t, checker.IsToolAccessible("list_approved_queries", state, false))
 	assert.True(t, checker.IsToolAccessible("execute_approved_query", state, false))
+	assert.True(t, checker.IsToolAccessible("get_schema", state, false))
+	assert.True(t, checker.IsToolAccessible("probe_column", state, false))
+	assert.True(t, checker.IsToolAccessible("list_project_knowledge", state, false))
 	assert.False(t, checker.IsToolAccessible("create_approved_query", state, false))
 	assert.False(t, checker.IsToolAccessible("suggest_approved_query", state, false))
 }
