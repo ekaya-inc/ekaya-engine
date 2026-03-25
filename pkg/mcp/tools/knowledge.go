@@ -16,6 +16,22 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
 
+const projectOverviewFactType = "project_overview"
+
+var writableProjectKnowledgeCategories = []string{
+	models.FactTypeTerminology,
+	models.FactTypeBusinessRule,
+	models.FactTypeEnumeration,
+	models.FactTypeConvention,
+}
+
+var writableProjectKnowledgeCategoryMap = map[string]bool{
+	models.FactTypeTerminology:  true,
+	models.FactTypeBusinessRule: true,
+	models.FactTypeEnumeration:  true,
+	models.FactTypeConvention:   true,
+}
+
 // KnowledgeToolDeps contains dependencies for project knowledge tools.
 type KnowledgeToolDeps struct {
 	BaseMCPToolDeps
@@ -24,8 +40,56 @@ type KnowledgeToolDeps struct {
 
 // RegisterKnowledgeTools registers project knowledge MCP tools.
 func RegisterKnowledgeTools(s *server.MCPServer, deps *KnowledgeToolDeps) {
+	registerListProjectKnowledgeTool(s, deps)
 	registerUpdateProjectKnowledgeTool(s, deps)
 	registerDeleteProjectKnowledgeTool(s, deps)
+}
+
+// registerListProjectKnowledgeTool adds the list_project_knowledge tool for discovering project knowledge fact IDs.
+func registerListProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeToolDeps) {
+	tool := mcp.NewTool(
+		"list_project_knowledge",
+		mcp.WithDescription(
+			"List all project knowledge facts for the current project so an MCP client can discover stable fact_id values before updating or deleting existing facts. "+
+				"Returns fact_id, category, fact, optional context, provenance fields, and timestamps for maintenance workflows. "+
+				"This can include read-only project_overview entries managed through the ontology extraction flow.",
+		),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "list_project_knowledge")
+		if err != nil {
+			if result := AsToolAccessResult(err); result != nil {
+				return result, nil
+			}
+			return nil, err
+		}
+		defer cleanup()
+
+		facts, err := deps.KnowledgeRepository.GetByProject(tenantCtx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list project knowledge: %w", err)
+		}
+
+		result := listProjectKnowledgeResponse{
+			Facts: make([]projectKnowledgeListItem, 0, len(facts)),
+			Count: len(facts),
+		}
+		for _, fact := range facts {
+			result.Facts = append(result.Facts, toProjectKnowledgeListItem(fact))
+		}
+
+		jsonResult, err := json.Marshal(result)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
 }
 
 // registerUpdateProjectKnowledgeTool adds the update_project_knowledge tool for creating/updating domain facts.
@@ -35,9 +99,11 @@ func registerUpdateProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 		mcp.WithDescription(
 			"Create or update a domain fact that persists across sessions. "+
 				"Use this to capture business rules, terminology, enumerations, or conventions learned during analysis. "+
-				"Facts are upserted by (category, fact) pair - the same fact can be updated with new context. "+
+				"Provide fact_id to update an existing fact; if fact_id is omitted, this creates a new fact. "+
+				"Use list_project_knowledge first when you need to discover an existing fact_id from an earlier session. "+
 				"Categories: 'terminology' (domain-specific terms), 'business_rule' (validation rules, calculations), "+
 				"'enumeration' (status values, type codes), 'convention' (naming patterns, soft deletes). "+
+				"'project_overview' may appear in list_project_knowledge but is read-only here and must be managed through the ontology extraction project_overview input. "+
 				"For table-specific metadata (ephemeral tables, usage notes, preferred alternatives), use update_table instead. "+
 				"Example: fact='A tik represents 6 seconds of engagement', category='terminology', context='Inferred from billing_engagements table'",
 		),
@@ -48,7 +114,7 @@ func registerUpdateProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 		),
 		mcp.WithString(
 			"fact_id",
-			mcp.Description("Optional - UUID of existing fact to update. If omitted, upserts by (category, fact) match"),
+			mcp.Description("Optional - UUID of existing fact to update. If omitted, a new fact is created"),
 		),
 		mcp.WithString(
 			"context",
@@ -93,24 +159,21 @@ func registerUpdateProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 
 		// Default category to terminology if not specified
 		if category == "" {
-			category = "terminology"
+			category = models.FactTypeTerminology
+		}
+
+		if category == projectOverviewFactType {
+			return newProjectOverviewReadOnlyResult("update", ""), nil
 		}
 
 		// Validate category
-		validCategories := []string{"terminology", "business_rule", "enumeration", "convention"}
-		validCategoryMap := map[string]bool{
-			"terminology":   true,
-			"business_rule": true,
-			"enumeration":   true,
-			"convention":    true,
-		}
-		if !validCategoryMap[category] {
+		if !writableProjectKnowledgeCategoryMap[category] {
 			return NewErrorResultWithDetails(
 				"invalid_parameters",
 				"invalid category value",
 				map[string]any{
 					"parameter": "category",
-					"expected":  validCategories,
+					"expected":  writableProjectKnowledgeCategories,
 					"actual":    category,
 				},
 			), nil
@@ -174,6 +237,8 @@ func registerDeleteProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 		mcp.WithDescription(
 			"Remove a domain fact that is incorrect or outdated. "+
 				"Requires the fact_id (UUID) of the knowledge entry to delete. "+
+				"Use list_project_knowledge first to discover existing fact_id values. "+
+				"project_overview entries may appear in list_project_knowledge but are read-only here and cannot be deleted through this tool. "+
 				"Use this sparingly - only when a fact is wrong, not just when updating it (use update_project_knowledge for updates).",
 		),
 		mcp.WithString(
@@ -218,14 +283,24 @@ func registerDeleteProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 			), nil
 		}
 
-		// Delete the fact
-		err = deps.KnowledgeRepository.Delete(tenantCtx, factID)
+		fact, err := deps.KnowledgeRepository.GetByID(tenantCtx, factID)
 		if err != nil {
-			// Check if fact was not found
 			if err == apperrors.ErrNotFound {
 				return NewErrorResult("FACT_NOT_FOUND", fmt.Sprintf("fact %q not found", factIDStr)), nil
 			}
-			// Database/system errors remain as Go errors
+			return HandleServiceError(err, "get_knowledge_failed")
+		}
+
+		if fact.FactType == projectOverviewFactType {
+			return newProjectOverviewReadOnlyResult("delete", factIDStr), nil
+		}
+
+		// Delete the fact
+		err = deps.KnowledgeRepository.Delete(tenantCtx, factID)
+		if err != nil {
+			if err == apperrors.ErrNotFound {
+				return NewErrorResult("FACT_NOT_FOUND", fmt.Sprintf("fact %q not found", factIDStr)), nil
+			}
 			return HandleServiceError(err, "delete_knowledge_failed")
 		}
 
@@ -244,6 +319,40 @@ func registerDeleteProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 	})
 }
 
+func toProjectKnowledgeListItem(fact *models.KnowledgeFact) projectKnowledgeListItem {
+	item := projectKnowledgeListItem{
+		FactID:    fact.ID.String(),
+		Category:  fact.FactType,
+		Fact:      fact.Value,
+		Context:   fact.Context,
+		Source:    fact.Source,
+		CreatedAt: jsonutil.FormatUTCTime(fact.CreatedAt),
+		UpdatedAt: jsonutil.FormatUTCTime(fact.UpdatedAt),
+	}
+	if fact.LastEditSource != nil {
+		item.LastEditSource = *fact.LastEditSource
+	}
+	return item
+}
+
+// listProjectKnowledgeResponse is the response format for list_project_knowledge tool.
+type listProjectKnowledgeResponse struct {
+	Facts []projectKnowledgeListItem `json:"facts"`
+	Count int                        `json:"count"`
+}
+
+// projectKnowledgeListItem is the MCP-friendly response item for a project knowledge fact.
+type projectKnowledgeListItem struct {
+	FactID         string `json:"fact_id"`
+	Category       string `json:"category"`
+	Fact           string `json:"fact"`
+	Context        string `json:"context,omitempty"`
+	Source         string `json:"source,omitempty"`
+	LastEditSource string `json:"last_edit_source,omitempty"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+}
+
 // updateProjectKnowledgeResponse is the response format for update_project_knowledge tool.
 type updateProjectKnowledgeResponse struct {
 	FactID    string `json:"fact_id"`
@@ -258,4 +367,21 @@ type updateProjectKnowledgeResponse struct {
 type deleteProjectKnowledgeResponse struct {
 	FactID  string `json:"fact_id"`
 	Deleted bool   `json:"deleted"`
+}
+
+func newProjectOverviewReadOnlyResult(action, factID string) *mcp.CallToolResult {
+	details := map[string]any{
+		"action":     action,
+		"category":   projectOverviewFactType,
+		"manage_via": "ontology extraction project_overview input",
+	}
+	if factID != "" {
+		details["fact_id"] = factID
+	}
+
+	return NewErrorResultWithDetails(
+		"invalid_parameters",
+		"project_overview is read-only in project knowledge tools; manage it through the ontology extraction project_overview input",
+		details,
+	)
 }

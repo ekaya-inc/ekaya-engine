@@ -76,6 +76,7 @@ func TestToolAccessChecker_DeveloperToolsEnabled(t *testing.T) {
 
 		// Ontology Maintenance tools
 		assert.True(t, checker.IsToolAccessible("get_schema", state, false))
+		assert.True(t, checker.IsToolAccessible("list_project_knowledge", state, false))
 		assert.True(t, checker.IsToolAccessible("update_table", state, false))
 		assert.True(t, checker.IsToolAccessible("update_column", state, false))
 		assert.True(t, checker.IsToolAccessible("list_ontology_questions", state, false))
@@ -242,6 +243,7 @@ func TestToolAccessChecker_GetAccessibleTools(t *testing.T) {
 
 		assert.True(t, toolNames["echo"])
 		assert.True(t, toolNames["get_schema"])
+		assert.True(t, toolNames["list_project_knowledge"])
 		assert.True(t, toolNames["update_table"])
 		assert.True(t, toolNames["list_query_suggestions"])
 		assert.True(t, toolNames["get_context"])

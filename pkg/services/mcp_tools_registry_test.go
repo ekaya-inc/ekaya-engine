@@ -74,6 +74,7 @@ func TestGetEnabledTools_DeveloperWithOntologyMaintenance(t *testing.T) {
 	assert.Contains(t, toolNames, "health")
 	// Ontology Maintenance tools
 	assert.Contains(t, toolNames, "get_schema")
+	assert.Contains(t, toolNames, "list_project_knowledge")
 	assert.Contains(t, toolNames, "update_table")
 	assert.Contains(t, toolNames, "update_column")
 	assert.Contains(t, toolNames, "list_ontology_questions")
@@ -107,6 +108,7 @@ func TestGetEnabledTools_WithToolsKey(t *testing.T) {
 	assert.Contains(t, toolNames, "execute")
 	assert.Contains(t, toolNames, "query")
 	assert.Contains(t, toolNames, "get_schema")
+	assert.Contains(t, toolNames, "list_project_knowledge")
 	assert.Contains(t, toolNames, "update_table")
 	assert.Contains(t, toolNames, "list_ontology_questions")
 	assert.Contains(t, toolNames, "list_query_suggestions")

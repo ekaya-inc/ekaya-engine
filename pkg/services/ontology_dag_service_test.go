@@ -255,6 +255,10 @@ func (m *mockKnowledgeRepository) Update(ctx context.Context, fact *models.Knowl
 	return nil
 }
 
+func (m *mockKnowledgeRepository) GetByID(_ context.Context, _ uuid.UUID) (*models.KnowledgeFact, error) {
+	return nil, nil
+}
+
 func (m *mockKnowledgeRepository) GetByProject(_ context.Context, _ uuid.UUID) ([]*models.KnowledgeFact, error) {
 	return nil, nil
 }

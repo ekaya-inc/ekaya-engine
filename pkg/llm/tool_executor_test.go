@@ -65,6 +65,9 @@ func (m *mockKnowledgeRepo) Create(ctx context.Context, fact *models.KnowledgeFa
 func (m *mockKnowledgeRepo) Update(ctx context.Context, fact *models.KnowledgeFact) error {
 	return nil
 }
+func (m *mockKnowledgeRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.KnowledgeFact, error) {
+	return nil, nil
+}
 func (m *mockKnowledgeRepo) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.KnowledgeFact, error) {
 	return nil, nil
 }

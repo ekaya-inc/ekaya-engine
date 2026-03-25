@@ -29,6 +29,15 @@ func assertToolDestructiveHint(t *testing.T, mcpServer *server.MCPServer, toolNa
 	assert.Equal(t, want, *tool.Tool.Annotations.DestructiveHint)
 }
 
+func assertToolReadOnlyHint(t *testing.T, mcpServer *server.MCPServer, toolName string, want bool) {
+	t.Helper()
+
+	tool := mcpServer.GetTool(toolName)
+	require.NotNil(t, tool, "tool should be registered")
+	require.NotNil(t, tool.Tool.Annotations.ReadOnlyHint, "tool should declare read-only hint")
+	assert.Equal(t, want, *tool.Tool.Annotations.ReadOnlyHint)
+}
+
 func assertToolIdempotentHint(t *testing.T, mcpServer *server.MCPServer, toolName string, want bool) {
 	t.Helper()
 
@@ -63,6 +72,18 @@ func TestCustomerDatasourceWriteToolsAreDestructive(t *testing.T) {
 }
 
 func TestMetadataDeleteToolsAreNotDestructive(t *testing.T) {
+	t.Run("list_project_knowledge", func(t *testing.T) {
+		mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+		registerListProjectKnowledgeTool(mcpServer, &KnowledgeToolDeps{
+			BaseMCPToolDeps:     testEnabledBaseDeps(),
+			KnowledgeRepository: &mockKnowledgeRepository{},
+		})
+
+		assertToolReadOnlyHint(t, mcpServer, "list_project_knowledge", true)
+		assertToolDestructiveHint(t, mcpServer, "list_project_knowledge", false)
+	})
+
 	t.Run("delete_approved_query", func(t *testing.T) {
 		mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 
@@ -138,6 +159,17 @@ func TestCallerVisibleIdempotencyHints(t *testing.T) {
 		})
 
 		assertToolIdempotentHint(t, mcpServer, "update_project_knowledge", false)
+	})
+
+	t.Run("project knowledge listing is idempotent", func(t *testing.T) {
+		mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+		registerListProjectKnowledgeTool(mcpServer, &KnowledgeToolDeps{
+			BaseMCPToolDeps:     testEnabledBaseDeps(),
+			KnowledgeRepository: &mockKnowledgeRepository{},
+		})
+
+		assertToolIdempotentHint(t, mcpServer, "list_project_knowledge", true)
 	})
 
 	t.Run("ontology question transitions are non-idempotent", func(t *testing.T) {

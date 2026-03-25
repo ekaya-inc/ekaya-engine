@@ -17,6 +17,7 @@ import (
 type KnowledgeRepository interface {
 	Create(ctx context.Context, fact *models.KnowledgeFact) error
 	Update(ctx context.Context, fact *models.KnowledgeFact) error
+	GetByID(ctx context.Context, id uuid.UUID) (*models.KnowledgeFact, error)
 	GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.KnowledgeFact, error)
 	GetByType(ctx context.Context, projectID uuid.UUID, factType string) ([]*models.KnowledgeFact, error)
 	Delete(ctx context.Context, id uuid.UUID) error
@@ -118,6 +119,29 @@ func (r *knowledgeRepository) Update(ctx context.Context, fact *models.Knowledge
 	}
 
 	return nil
+}
+
+func (r *knowledgeRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.KnowledgeFact, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT id, project_id, fact_type, value, context,
+		       source, last_edit_source, created_by, updated_by, created_at, updated_at
+		FROM engine_project_knowledge
+		WHERE id = $1`
+
+	fact, err := scanKnowledgeFactRow(scope.Conn.QueryRow(ctx, query, id))
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, apperrors.ErrNotFound
+		}
+		return nil, err
+	}
+
+	return fact, nil
 }
 
 func (r *knowledgeRepository) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.KnowledgeFact, error) {

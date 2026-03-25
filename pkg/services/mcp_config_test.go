@@ -1497,6 +1497,7 @@ func TestMCPConfigService_Get_DeveloperToolsContainsDevCore(t *testing.T) {
 
 	// Ontology Maintenance tools (Ontology Forge)
 	assert.Contains(t, devToolNames, "get_schema", "DeveloperTools should include get_schema")
+	assert.Contains(t, devToolNames, "list_project_knowledge", "DeveloperTools should include list_project_knowledge")
 	assert.Contains(t, devToolNames, "update_table", "DeveloperTools should include update_table")
 
 	// Approval tools (AI Data Liaison)
@@ -1555,6 +1556,7 @@ func TestMCPConfigService_Get_GlossaryToolsOwnedByAIDataLiaison(t *testing.T) {
 
 	assert.Equal(t, models.AppIDOntologyForge, userToolApps["get_context"])
 	assert.Equal(t, models.AppIDOntologyForge, userToolApps["get_ontology"])
+	assert.Equal(t, models.AppIDOntologyForge, devToolApps["list_project_knowledge"])
 	assert.Equal(t, models.AppIDAIDataLiaison, userToolApps["list_glossary"])
 	assert.Equal(t, models.AppIDAIDataLiaison, userToolApps["get_glossary_sql"])
 	assert.Equal(t, models.AppIDAIDataLiaison, devToolApps["create_glossary_term"])

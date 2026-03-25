@@ -1365,6 +1365,10 @@ func (m *mockKnowledgeRepoForGlossary) Update(ctx context.Context, fact *models.
 	return nil
 }
 
+func (m *mockKnowledgeRepoForGlossary) GetByID(ctx context.Context, id uuid.UUID) (*models.KnowledgeFact, error) {
+	return nil, nil
+}
+
 func (m *mockKnowledgeRepoForGlossary) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }

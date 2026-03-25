@@ -33,7 +33,7 @@ var AppToggles = []AppToggle{
 		DisplayName: "Add Ontology Maintenance Tools",
 		Tools: []string{
 			"get_schema", "search_schema", "probe_column", "probe_columns", "get_column_metadata",
-			"update_column", "update_columns", "update_table", "update_project_knowledge",
+			"update_column", "update_columns", "update_table", "list_project_knowledge", "update_project_knowledge",
 			"delete_column_metadata", "delete_table_metadata", "delete_project_knowledge",
 			"refresh_schema", "scan_data_changes", "list_pending_changes",
 			"approve_change", "reject_change", "approve_all_changes",

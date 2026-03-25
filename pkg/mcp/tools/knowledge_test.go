@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/server"
@@ -21,6 +22,18 @@ import (
 type mockKnowledgeRepository struct {
 	facts []*models.KnowledgeFact
 	err   error
+}
+
+func (m *mockKnowledgeRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.KnowledgeFact, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	for _, f := range m.facts {
+		if f.ID == id {
+			return f, nil
+		}
+	}
+	return nil, apperrors.ErrNotFound
 }
 
 func (m *mockKnowledgeRepository) Create(ctx context.Context, fact *models.KnowledgeFact) error {
@@ -192,14 +205,79 @@ func TestRegisterKnowledgeTools(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(resultBytes, &response))
 
-	// Check both knowledge tools are registered
+	// Check all knowledge tools are registered
 	toolNames := make(map[string]bool)
 	for _, tool := range response.Result.Tools {
 		toolNames[tool.Name] = true
 	}
 
+	assert.True(t, toolNames["list_project_knowledge"], "list_project_knowledge tool should be registered")
 	assert.True(t, toolNames["update_project_knowledge"], "update_project_knowledge tool should be registered")
 	assert.True(t, toolNames["delete_project_knowledge"], "delete_project_knowledge tool should be registered")
+}
+
+// TestListProjectKnowledge_ResponseStructure verifies the response structure.
+func TestListProjectKnowledge_ResponseStructure(t *testing.T) {
+	lastEditSource := "manual"
+	response := listProjectKnowledgeResponse{
+		Facts: []projectKnowledgeListItem{
+			{
+				FactID:         uuid.New().String(),
+				Category:       "business_rule",
+				Fact:           "Platform fees are ~33% of total_amount",
+				Context:        "Verified from billing rows",
+				Source:         "mcp",
+				LastEditSource: lastEditSource,
+				CreatedAt:      "2026-03-20T09:15:00Z",
+				UpdatedAt:      "2026-03-20T09:20:00Z",
+			},
+		},
+		Count: 1,
+	}
+
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	facts, ok := parsed["facts"].([]any)
+	require.True(t, ok)
+	require.Len(t, facts, 1)
+
+	firstFact, ok := facts[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "business_rule", firstFact["category"])
+	assert.Equal(t, "Platform fees are ~33% of total_amount", firstFact["fact"])
+	assert.Equal(t, "mcp", firstFact["source"])
+	assert.Equal(t, lastEditSource, firstFact["last_edit_source"])
+	assert.Equal(t, float64(1), parsed["count"])
+}
+
+func TestToProjectKnowledgeListItem(t *testing.T) {
+	lastEditSource := "manual"
+	now := time.Date(2026, time.March, 20, 9, 15, 0, 0, time.UTC)
+	fact := &models.KnowledgeFact{
+		ID:             uuid.New(),
+		FactType:       "terminology",
+		Value:          "GMV means Gross Merchandise Value",
+		Context:        "Observed in revenue dashboards",
+		Source:         "mcp",
+		LastEditSource: &lastEditSource,
+		CreatedAt:      now,
+		UpdatedAt:      now.Add(5 * time.Minute),
+	}
+
+	item := toProjectKnowledgeListItem(fact)
+
+	assert.Equal(t, fact.ID.String(), item.FactID)
+	assert.Equal(t, fact.FactType, item.Category)
+	assert.Equal(t, fact.Value, item.Fact)
+	assert.Equal(t, fact.Context, item.Context)
+	assert.Equal(t, fact.Source, item.Source)
+	assert.Equal(t, lastEditSource, item.LastEditSource)
+	assert.Equal(t, jsonutil.FormatUTCTime(fact.CreatedAt), item.CreatedAt)
+	assert.Equal(t, jsonutil.FormatUTCTime(fact.UpdatedAt), item.UpdatedAt)
 }
 
 // TestUpdateProjectKnowledge_ResponseStructure verifies the response structure.
@@ -643,13 +721,11 @@ func TestUpdateProjectKnowledgeTool_ParameterValidation(t *testing.T) {
 	})
 
 	t.Run("edge case: empty string fact_id", func(t *testing.T) {
-		// Empty string fact_id should be treated as not provided (optional parameter)
-		factIDStr := ""
+		factIDStr := "   "
 		factIDStr = trimString(factIDStr)
 
-		// The implementation treats empty fact_id as not provided (doesn't validate)
-		// This test documents that behavior - empty fact_id is silently ignored
-		assert.Empty(t, factIDStr, "empty fact_id should remain empty after trimming")
+		_, err := uuid.Parse(factIDStr)
+		require.Error(t, err, "blank fact_id should fail UUID parsing after trimming")
 	})
 }
 
