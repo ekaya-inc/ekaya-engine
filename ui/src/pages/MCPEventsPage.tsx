@@ -25,6 +25,12 @@ import type { MCPAuditEvent, PaginatedResponse } from '../types';
 // Time range presets
 type TimeRange = '24h' | '7d' | '30d' | 'all';
 
+const SECURITY_LEVEL_OPTIONS = [
+  { value: 'normal', label: 'Normal' },
+  { value: 'warning', label: 'Warning' },
+  { value: 'critical', label: 'Critical' },
+] as const;
+
 function getTimeRangeSince(range: TimeRange): string | undefined {
   if (range === 'all') return undefined;
   const now = new Date();
@@ -189,7 +195,7 @@ const MCPEventsPage = () => {
 
   const securityColor = (level: string) => {
     switch (level) {
-      case 'elevated': return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
+      case 'warning': return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
       case 'critical': return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
       default: return 'bg-surface-secondary text-text-secondary';
     }
@@ -246,9 +252,11 @@ const MCPEventsPage = () => {
               className="text-xs px-2 py-1 rounded border border-border-light bg-surface-primary text-text-primary"
             >
               <option value="">All Security Levels</option>
-              <option value="normal">Normal</option>
-              <option value="elevated">Elevated</option>
-              <option value="critical">Critical</option>
+              {SECURITY_LEVEL_OPTIONS.map(({ value, label }) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
             </select>
             <input
               type="text"
@@ -279,17 +287,17 @@ const MCPEventsPage = () => {
           ) : (
             <>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full table-fixed text-sm">
                   <thead>
                     <tr className="border-b border-border-light text-left text-text-secondary">
                       <th className="pb-2 pr-3 font-medium w-6"></th>
-                      <th className="pb-2 pr-3 font-medium">Time</th>
-                      <th className="pb-2 pr-3 font-medium">User</th>
+                      <th className="pb-2 pr-3 font-medium w-44">Time</th>
+                      <th className="pb-2 pr-3 font-medium w-48">User</th>
                       <th className="pb-2 pr-3 font-medium">Tool</th>
                       <th className="pb-2 pr-3 font-medium">Event</th>
-                      <th className="pb-2 pr-3 font-medium text-right">Duration</th>
-                      <th className="pb-2 pr-3 font-medium">Status</th>
-                      <th className="pb-2 pr-3 font-medium">Security</th>
+                      <th className="pb-2 pr-3 font-medium text-right w-24">Duration</th>
+                      <th className="pb-2 pr-3 font-medium w-24">Status</th>
+                      <th className="pb-2 pr-3 font-medium w-24">Security</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -319,13 +327,13 @@ const MCPEventsPage = () => {
                             <td className="py-2 pr-3 text-text-primary truncate max-w-[140px]" title={row.user_email ?? row.user_id}>
                               {row.user_email ?? row.user_id}
                             </td>
-                            <td className="py-2 pr-3">
-                              <span className="px-1.5 py-0.5 text-xs rounded bg-surface-secondary text-text-primary font-mono">
+                            <td className="py-2 pr-3 max-w-0">
+                              <span className="block truncate px-1.5 py-0.5 text-xs rounded bg-surface-secondary text-text-primary font-mono">
                                 {row.tool_name ?? '–'}
                               </span>
                             </td>
-                            <td className="py-2 pr-3">
-                              <span className={`px-1.5 py-0.5 text-xs rounded ${
+                            <td className="py-2 pr-3 max-w-0">
+                              <span className={`inline-block max-w-full truncate px-1.5 py-0.5 text-xs rounded ${
                                 row.event_type === 'tool_error'
                                   ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
                                   : 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
@@ -355,8 +363,8 @@ const MCPEventsPage = () => {
                           </tr>
                           {isExpanded && hasDetails && (
                             <tr>
-                              <td colSpan={8} className="py-3 px-4 bg-surface-secondary/30">
-                                <div className="space-y-2 text-xs">
+                              <td colSpan={8} className="max-w-0 py-3 px-4 bg-surface-secondary/30">
+                                <div className="space-y-2 text-xs max-w-full min-w-0 overflow-hidden">
                                   {row.error_message && (
                                     <div>
                                       <span className="font-semibold text-red-600 dark:text-red-400">Error:</span>
@@ -364,25 +372,31 @@ const MCPEventsPage = () => {
                                     </div>
                                   )}
                                   {row.sql_query && (
-                                    <div>
+                                    <div className="max-w-full">
                                       <span className="font-semibold text-text-secondary">SQL:</span>
-                                      <pre className="mt-1 p-2 rounded bg-surface-primary font-mono text-text-primary overflow-x-auto">{row.sql_query}</pre>
+                                      <div className="mt-1 max-w-full overflow-auto rounded bg-surface-primary">
+                                        <pre className="min-w-max p-2 font-mono text-text-primary">{row.sql_query}</pre>
+                                      </div>
                                     </div>
                                   )}
                                   {row.request_params && Object.keys(row.request_params).length > 0 && (
-                                    <div>
+                                    <div className="max-w-full">
                                       <span className="font-semibold text-text-secondary">Request Params:</span>
-                                      <pre className="mt-1 p-2 rounded bg-surface-primary font-mono text-text-primary overflow-x-auto max-h-40">
-                                        {JSON.stringify(row.request_params, null, 2)}
-                                      </pre>
+                                      <div className="mt-1 max-w-full max-h-40 overflow-auto rounded bg-surface-primary">
+                                        <pre className="min-w-max p-2 font-mono text-text-primary">
+                                          {JSON.stringify(row.request_params, null, 2)}
+                                        </pre>
+                                      </div>
                                     </div>
                                   )}
                                   {row.result_summary && Object.keys(row.result_summary).length > 0 && (
-                                    <div>
+                                    <div className="max-w-full">
                                       <span className="font-semibold text-text-secondary">Result Summary:</span>
-                                      <pre className="mt-1 p-2 rounded bg-surface-primary font-mono text-text-primary overflow-x-auto max-h-40">
-                                        {JSON.stringify(row.result_summary, null, 2)}
-                                      </pre>
+                                      <div className="mt-1 max-w-full max-h-40 overflow-auto rounded bg-surface-primary">
+                                        <pre className="min-w-max p-2 font-mono text-text-primary">
+                                          {JSON.stringify(row.result_summary, null, 2)}
+                                        </pre>
+                                      </div>
                                     </div>
                                   )}
                                   {row.security_flags && row.security_flags.length > 0 && (

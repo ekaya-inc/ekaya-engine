@@ -58,7 +58,14 @@ vi.mock('../../contexts/ConfigContext', () => ({
   }),
 }));
 
-function setupPageMocks(options: { agents?: Array<{ id: string; name: string; query_ids: string[]; created_at: string; mcp_call_count: number }>; approvedQueries?: Array<{ query_id: string; natural_language_prompt: string }>; } = {}) {
+type QueryFixture = {
+  query_id: string;
+  natural_language_prompt: string;
+  is_enabled?: boolean;
+  status?: string;
+};
+
+function setupPageMocks(options: { agents?: Array<{ id: string; name: string; query_ids: string[]; created_at: string; mcp_call_count: number }>; approvedQueries?: QueryFixture[]; } = {}) {
   const {
     agents = [],
     approvedQueries = [
@@ -93,14 +100,14 @@ function setupPageMocks(options: { agents?: Array<{ id: string; name: string; qu
         datasource_id: 'ds-1',
         sql_query: 'SELECT 1',
         dialect: 'postgres',
-        is_enabled: true,
+        is_enabled: query.is_enabled ?? true,
         allows_modification: false,
         usage_count: 0,
         last_used_at: null,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
         parameters: [],
-        status: 'approved',
+        status: query.status ?? 'approved',
       })),
     },
   } as any);
@@ -194,6 +201,40 @@ describe('AIAgentsPage', () => {
 
     fireEvent.click(screen.getByLabelText(/top customers/i));
     expect(saveButton).toBeEnabled();
+  });
+
+  it('excludes disabled or non-approved queries from the agent query picker', async () => {
+    setupPageMocks({
+      approvedQueries: [
+        { query_id: 'query-1', natural_language_prompt: 'Top customers', is_enabled: true, status: 'approved' },
+        { query_id: 'query-2', natural_language_prompt: 'Disabled revenue', is_enabled: false, status: 'approved' },
+        { query_id: 'query-3', natural_language_prompt: 'Pending query', is_enabled: true, status: 'pending' },
+      ],
+    });
+
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: /add agent/i }));
+
+    expect(screen.getByLabelText(/top customers/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/disabled revenue/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/pending query/i)).not.toBeInTheDocument();
+  });
+
+  it('treats disabled approved queries as unavailable for agent readiness', async () => {
+    setupPageMocks({
+      approvedQueries: [
+        { query_id: 'query-1', natural_language_prompt: 'Disabled revenue', is_enabled: false, status: 'approved' },
+      ],
+    });
+
+    await renderPage();
+
+    expect(screen.getByText('Create queries that agents can run')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /add agent/i }));
+
+    expect(screen.getByText('No enabled approved queries available yet.')).toBeInTheDocument();
   });
 
   it('shows non-editable name on edit dialog', async () => {

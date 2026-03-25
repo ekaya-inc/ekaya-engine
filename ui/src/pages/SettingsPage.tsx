@@ -52,11 +52,6 @@ const SettingsPage = () => {
     // Clear callback params from URL immediately to prevent re-processing
     setSearchParams({}, { replace: true });
 
-    if (callbackStatus === "cancelled") {
-      toast({ title: "Deletion cancelled", description: "Project was not deleted." });
-      return;
-    }
-
     const processCallback = async () => {
       try {
         const response = await engineApi.completeDeleteCallback(
@@ -64,6 +59,10 @@ const SettingsPage = () => {
         );
         if (response.error) {
           toast({ title: "Error", description: response.error, variant: "destructive" });
+          return;
+        }
+        if (callbackStatus === "cancelled") {
+          toast({ title: "Deletion cancelled", description: "Project was not deleted." });
           return;
         }
         // Project deleted — redirect to central projects list
@@ -82,7 +81,7 @@ const SettingsPage = () => {
       }
     };
 
-    processCallback();
+    void processCallback();
   }, [searchParams, setSearchParams, pid, urls.projectsPageUrl, toast]);
 
   const handleDeleteProject = async () => {

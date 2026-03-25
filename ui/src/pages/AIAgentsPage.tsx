@@ -124,7 +124,10 @@ const AIAgentsPage = () => {
       const datasource = datasourcesRes.data?.datasources?.[0] ?? null;
       if (datasource) {
         const queriesRes = await engineApi.listQueries(pid, datasource.datasource_id);
-        const approved = queriesRes.data?.queries?.filter((query) => query.status === 'approved') ?? [];
+        const approved =
+          queriesRes.data?.queries?.filter(
+            (query) => query.status === 'approved' && query.is_enabled
+          ) ?? [];
         setApprovedQueries(approved);
         setHasQueries(approved.length > 0);
       } else {
@@ -1084,7 +1087,9 @@ function QuerySelectionList({
       </div>
       <div className="space-y-2 rounded-lg border border-border-light p-3">
         {queryOptions.length === 0 ? (
-          <div className="text-sm text-text-secondary">No approved queries available yet.</div>
+          <div className="text-sm text-text-secondary">
+            No enabled approved queries available yet.
+          </div>
         ) : (
           queryOptions.map((query) => (
             <label key={query.id} className="flex items-center gap-3 text-sm text-text-primary">

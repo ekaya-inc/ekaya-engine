@@ -65,6 +65,10 @@ func WriteState(configPath string, state *State) error {
 	statePath := StatePath(configPath)
 	dir := filepath.Dir(statePath)
 
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("create runtime state directory: %w", err)
+	}
+
 	tmpFile, err := os.CreateTemp(dir, ".ekaya-engine-runtime-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create runtime state temp file: %w", err)

@@ -577,6 +577,116 @@ func TestProjectService_Provision_WithNonMCPApp_SkipsMCPSetup(t *testing.T) {
 	}
 }
 
+func TestProjectService_CompleteDeleteCallback_DeletesProjectAndReturnsRedirectURL(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.MustParse("00000000-0000-0000-0000-000000000233")
+	ctx := context.Background()
+
+	cleanupProject(t, engineDB, projectID)
+	defer cleanupProject(t, engineDB, projectID)
+
+	scope, err := engineDB.DB.WithoutTenant(ctx)
+	if err != nil {
+		t.Fatalf("failed to create scope for project setup: %v", err)
+	}
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_projects (id, name, status, parameters)
+		VALUES ($1, $2, 'active', $3::jsonb)
+	`, projectID, "Delete Callback Test", `{"projects_page_url":"https://central.example.com/projects"}`)
+	scope.Close()
+	if err != nil {
+		t.Fatalf("failed to create test project: %v", err)
+	}
+
+	tenantScope, err := engineDB.DB.WithTenant(ctx, projectID)
+	if err != nil {
+		t.Fatalf("failed to create tenant scope: %v", err)
+	}
+	tenantCtx := database.SetTenantScope(ctx, tenantScope)
+	defer tenantScope.Close()
+
+	nonceStore := newTestNonceStore()
+	nonce, err := nonceStore.Generate(tenantCtx, "delete", projectID.String(), "project")
+	if err != nil {
+		t.Fatalf("failed to generate nonce: %v", err)
+	}
+
+	projectRepo := repositories.NewProjectRepository()
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nonceStore, "", zap.NewNop())
+
+	result, err := service.CompleteDeleteCallback(tenantCtx, projectID, "delete", "success", nonce)
+	if err != nil {
+		t.Fatalf("CompleteDeleteCallback failed: %v", err)
+	}
+	if result.ProjectsPageURL != "https://central.example.com/projects" {
+		t.Fatalf("expected redirect URL to be preserved, got %q", result.ProjectsPageURL)
+	}
+
+	verifyScope, err := engineDB.DB.WithoutTenant(ctx)
+	if err != nil {
+		t.Fatalf("failed to create verify scope: %v", err)
+	}
+	defer verifyScope.Close()
+
+	var count int
+	err = verifyScope.Conn.QueryRow(ctx, `SELECT COUNT(*) FROM engine_projects WHERE id = $1`, projectID).Scan(&count)
+	if err != nil {
+		t.Fatalf("failed to verify project deletion: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected project to be deleted, got %d rows", count)
+	}
+}
+
+func TestProjectService_CompleteDeleteCallback_CancelledLeavesProjectInPlace(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.MustParse("00000000-0000-0000-0000-000000000234")
+	ctx := context.Background()
+
+	cleanupProject(t, engineDB, projectID)
+	defer cleanupProject(t, engineDB, projectID)
+	ensureTestProject(t, engineDB, projectID, "Delete Callback Cancelled Test")
+
+	tenantScope, err := engineDB.DB.WithTenant(ctx, projectID)
+	if err != nil {
+		t.Fatalf("failed to create tenant scope: %v", err)
+	}
+	tenantCtx := database.SetTenantScope(ctx, tenantScope)
+	defer tenantScope.Close()
+
+	nonceStore := newTestNonceStore()
+	nonce, err := nonceStore.Generate(tenantCtx, "delete", projectID.String(), "project")
+	if err != nil {
+		t.Fatalf("failed to generate nonce: %v", err)
+	}
+
+	projectRepo := repositories.NewProjectRepository()
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, nil, nonceStore, "", zap.NewNop())
+
+	result, err := service.CompleteDeleteCallback(tenantCtx, projectID, "delete", "cancelled", nonce)
+	if err != nil {
+		t.Fatalf("CompleteDeleteCallback failed: %v", err)
+	}
+	if result.ProjectsPageURL != "" {
+		t.Fatalf("expected empty redirect URL on cancelled delete, got %q", result.ProjectsPageURL)
+	}
+
+	verifyScope, err := engineDB.DB.WithoutTenant(ctx)
+	if err != nil {
+		t.Fatalf("failed to create verify scope: %v", err)
+	}
+	defer verifyScope.Close()
+
+	var count int
+	err = verifyScope.Conn.QueryRow(ctx, `SELECT COUNT(*) FROM engine_projects WHERE id = $1`, projectID).Scan(&count)
+	if err != nil {
+		t.Fatalf("failed to verify project still exists: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected project to remain, got %d rows", count)
+	}
+}
+
 func cleanupProject(t *testing.T, engineDB *testhelpers.EngineDB, projectID uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()

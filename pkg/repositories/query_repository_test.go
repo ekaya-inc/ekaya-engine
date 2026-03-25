@@ -121,6 +121,22 @@ func (tc *queryTestContext) cleanup() {
 	defer scope.Close()
 
 	_, err = scope.Conn.Exec(ctx, `
+		DELETE FROM engine_agent_queries
+		WHERE agent_id IN (SELECT id FROM engine_agents WHERE project_id = $1)
+	`, tc.projectID)
+	if err != nil {
+		tc.t.Fatalf("Failed to cleanup agent query access: %v", err)
+	}
+
+	_, err = scope.Conn.Exec(ctx, `
+		DELETE FROM engine_agents
+		WHERE project_id = $1
+	`, tc.projectID)
+	if err != nil {
+		tc.t.Fatalf("Failed to cleanup agents: %v", err)
+	}
+
+	_, err = scope.Conn.Exec(ctx, `
 		DELETE FROM engine_queries
 		WHERE project_id = $1
 	`, tc.projectID)
@@ -151,6 +167,65 @@ func (tc *queryTestContext) createTestQuery(ctx context.Context, prompt, sqlQuer
 	}
 
 	return query
+}
+
+func (tc *queryTestContext) createTestAgent(ctx context.Context, name string) uuid.UUID {
+	tc.t.Helper()
+
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		tc.t.Fatal("missing tenant scope in context")
+	}
+
+	agentID := uuid.New()
+	now := time.Now().UTC()
+	_, err := scope.Conn.Exec(ctx, `
+		INSERT INTO engine_agents (id, project_id, name, api_key_encrypted, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, agentID, tc.projectID, name, "encrypted-key", now, now)
+	if err != nil {
+		tc.t.Fatalf("Failed to create test agent: %v", err)
+	}
+
+	return agentID
+}
+
+func (tc *queryTestContext) assignQueryToAgent(ctx context.Context, agentID, queryID uuid.UUID) {
+	tc.t.Helper()
+
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		tc.t.Fatal("missing tenant scope in context")
+	}
+
+	_, err := scope.Conn.Exec(ctx, `
+		INSERT INTO engine_agent_queries (agent_id, query_id)
+		VALUES ($1, $2)
+	`, agentID, queryID)
+	if err != nil {
+		tc.t.Fatalf("Failed to assign query to agent: %v", err)
+	}
+}
+
+func (tc *queryTestContext) countAgentAssignmentsForQuery(ctx context.Context, queryID uuid.UUID) int {
+	tc.t.Helper()
+
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		tc.t.Fatal("missing tenant scope in context")
+	}
+
+	var count int
+	err := scope.Conn.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM engine_agent_queries
+		WHERE query_id = $1
+	`, queryID).Scan(&count)
+	if err != nil {
+		tc.t.Fatalf("Failed to count agent assignments: %v", err)
+	}
+
+	return count
 }
 
 // ============================================================================
@@ -368,6 +443,38 @@ func TestQueryRepository_Update(t *testing.T) {
 	}
 }
 
+func TestQueryRepository_Update_DisablingQueryRevokesAgentAccess(t *testing.T) {
+	tc := setupQueryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	query := tc.createTestQuery(ctx, "Original prompt", "SELECT 1")
+	agentA := tc.createTestAgent(ctx, "agent-a")
+	agentB := tc.createTestAgent(ctx, "agent-b")
+	tc.assignQueryToAgent(ctx, agentA, query.ID)
+	tc.assignQueryToAgent(ctx, agentB, query.ID)
+
+	query.IsEnabled = false
+
+	err := tc.repo.Update(ctx, query)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	retrieved, err := tc.repo.GetByID(ctx, tc.projectID, query.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if retrieved.IsEnabled {
+		t.Error("expected IsEnabled to be false")
+	}
+	if count := tc.countAgentAssignmentsForQuery(ctx, query.ID); count != 0 {
+		t.Fatalf("expected all agent assignments to be revoked, got %d", count)
+	}
+}
+
 func TestQueryRepository_Update_NotFound(t *testing.T) {
 	tc := setupQueryTest(t)
 	tc.cleanup()
@@ -493,7 +600,7 @@ func TestQueryRepository_ListEnabled(t *testing.T) {
 // Status Tests
 // ============================================================================
 
-func TestQueryRepository_UpdateEnabledStatus(t *testing.T) {
+func TestQueryRepository_UpdateEnabledStatus_RevokesAgentAccessAndDoesNotRestoreOnReenable(t *testing.T) {
 	tc := setupQueryTest(t)
 	tc.cleanup()
 
@@ -501,6 +608,10 @@ func TestQueryRepository_UpdateEnabledStatus(t *testing.T) {
 	defer cleanup()
 
 	query := tc.createTestQuery(ctx, "Test", "SELECT 1")
+	agentA := tc.createTestAgent(ctx, "status-agent-a")
+	agentB := tc.createTestAgent(ctx, "status-agent-b")
+	tc.assignQueryToAgent(ctx, agentA, query.ID)
+	tc.assignQueryToAgent(ctx, agentB, query.ID)
 
 	// Disable
 	err := tc.repo.UpdateEnabledStatus(ctx, tc.projectID, query.ID, false)
@@ -515,6 +626,9 @@ func TestQueryRepository_UpdateEnabledStatus(t *testing.T) {
 	if retrieved.IsEnabled {
 		t.Error("expected IsEnabled to be false")
 	}
+	if count := tc.countAgentAssignmentsForQuery(ctx, query.ID); count != 0 {
+		t.Fatalf("expected all agent assignments to be revoked, got %d", count)
+	}
 
 	// Re-enable
 	err = tc.repo.UpdateEnabledStatus(ctx, tc.projectID, query.ID, true)
@@ -528,6 +642,9 @@ func TestQueryRepository_UpdateEnabledStatus(t *testing.T) {
 	}
 	if !retrieved.IsEnabled {
 		t.Error("expected IsEnabled to be true")
+	}
+	if count := tc.countAgentAssignmentsForQuery(ctx, query.ID); count != 0 {
+		t.Fatalf("expected revoked assignments not to be restored, got %d", count)
 	}
 }
 

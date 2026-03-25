@@ -3,12 +3,14 @@ package services
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/crypto"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -57,6 +59,8 @@ func (e *AgentValidationError) Error() string {
 	return e.Message
 }
 
+const agentIneligibleQuerySelectionMessage = "One or more selected queries are no longer eligible for AI Agent access"
+
 type agentService struct {
 	repo      repositories.AgentRepository
 	encryptor *crypto.CredentialEncryptor
@@ -97,6 +101,9 @@ func (s *agentService) Create(ctx context.Context, projectID uuid.UUID, name str
 	}
 
 	if err := s.repo.Create(ctx, agent, uniqueQueryIDs(queryIDs)); err != nil {
+		if errors.Is(err, apperrors.ErrNotFound) {
+			return nil, "", &AgentValidationError{Message: agentIneligibleQuerySelectionMessage}
+		}
 		return nil, "", err
 	}
 
@@ -175,7 +182,14 @@ func (s *agentService) UpdateQueryAccess(ctx context.Context, projectID, agentID
 		return err
 	}
 
-	return s.repo.SetQueryAccess(ctx, agentID, uniqueQueryIDs(queryIDs))
+	if err := s.repo.SetQueryAccess(ctx, agentID, uniqueQueryIDs(queryIDs)); err != nil {
+		if errors.Is(err, apperrors.ErrNotFound) {
+			return &AgentValidationError{Message: agentIneligibleQuerySelectionMessage}
+		}
+		return err
+	}
+
+	return nil
 }
 
 func (s *agentService) RotateKey(ctx context.Context, projectID, agentID uuid.UUID) (string, error) {

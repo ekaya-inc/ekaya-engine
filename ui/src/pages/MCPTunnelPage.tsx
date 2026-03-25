@@ -154,10 +154,6 @@ const MCPTunnelPage = () => {
 
     setSearchParams({}, { replace: true });
 
-    if (callbackStatus === 'cancelled') {
-      return;
-    }
-
     const processCallback = async () => {
       try {
         const response = await engineApi.completeAppCallback(
@@ -173,6 +169,11 @@ const MCPTunnelPage = () => {
             description: response.error,
             variant: 'destructive',
           });
+          return;
+        }
+
+        if (callbackStatus === 'cancelled') {
+          await fetchPageData(false);
           return;
         }
 

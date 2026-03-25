@@ -114,7 +114,7 @@ func (m *mockInstalledAppRepository) UpdateSettings(ctx context.Context, project
 // newTestInstalledAppService creates an InstalledAppService with nil central client (tests that don't
 // call Install/Activate/Uninstall don't need it).
 func newTestInstalledAppService(repo *mockInstalledAppRepository) InstalledAppService {
-	return NewInstalledAppService(repo, nil, NewNonceStore(), "http://localhost:3443", zap.NewNop())
+	return NewInstalledAppService(repo, nil, newTestNonceStore(), "http://localhost:3443", zap.NewNop())
 }
 
 // Mock central client for testing app lifecycle methods.
@@ -140,7 +140,7 @@ func (m *mockCentralClient) UninstallApp(_ context.Context, _, _, _, _, _ string
 }
 
 func newTestInstalledAppServiceWithCentral(repo *mockInstalledAppRepository, cc CentralAppClient) InstalledAppService {
-	return NewInstalledAppService(repo, cc, NewNonceStore(), "http://localhost:3443", zap.NewNop())
+	return NewInstalledAppService(repo, cc, newTestNonceStore(), "http://localhost:3443", zap.NewNop())
 }
 
 func testAuthContext() context.Context {
@@ -534,11 +534,12 @@ func TestInstalledAppService_CompleteCallback_CompletesActivate(t *testing.T) {
 		Settings:  make(map[string]any),
 	}
 
-	nonceStore := NewNonceStore()
+	nonceStore := newTestNonceStore()
 	svc := NewInstalledAppService(repo, nil, nonceStore, "http://localhost:3443", zap.NewNop())
-	nonce := nonceStore.Generate("activate", projectID.String(), models.AppIDAIDataLiaison)
+	nonce, err := nonceStore.Generate(context.Background(), "activate", projectID.String(), models.AppIDAIDataLiaison)
+	require.NoError(t, err)
 
-	err := svc.CompleteCallback(context.Background(), projectID, models.AppIDAIDataLiaison, "activate", "success", nonce, "user@example.com")
+	err = svc.CompleteCallback(context.Background(), projectID, models.AppIDAIDataLiaison, "activate", "success", nonce, "user@example.com")
 	require.NoError(t, err)
 
 	app := repo.apps[repo.key(projectID, models.AppIDAIDataLiaison)]
@@ -555,11 +556,12 @@ func TestInstalledAppService_CompleteCallback_CompletesUninstall(t *testing.T) {
 		Settings:  make(map[string]any),
 	}
 
-	nonceStore := NewNonceStore()
+	nonceStore := newTestNonceStore()
 	svc := NewInstalledAppService(repo, nil, nonceStore, "http://localhost:3443", zap.NewNop())
-	nonce := nonceStore.Generate("uninstall", projectID.String(), models.AppIDAIDataLiaison)
+	nonce, err := nonceStore.Generate(context.Background(), "uninstall", projectID.String(), models.AppIDAIDataLiaison)
+	require.NoError(t, err)
 
-	err := svc.CompleteCallback(context.Background(), projectID, models.AppIDAIDataLiaison, "uninstall", "success", nonce, "user@example.com")
+	err = svc.CompleteCallback(context.Background(), projectID, models.AppIDAIDataLiaison, "uninstall", "success", nonce, "user@example.com")
 	require.NoError(t, err)
 
 	_, exists := repo.apps[repo.key(projectID, models.AppIDAIDataLiaison)]
@@ -654,11 +656,12 @@ func TestInstalledAppService_CompleteCallback_CancelledNoOps(t *testing.T) {
 		Settings:  make(map[string]any),
 	}
 
-	nonceStore := NewNonceStore()
+	nonceStore := newTestNonceStore()
 	svc := NewInstalledAppService(repo, nil, nonceStore, "http://localhost:3443", zap.NewNop())
-	nonce := nonceStore.Generate("activate", projectID.String(), models.AppIDAIDataLiaison)
+	nonce, err := nonceStore.Generate(context.Background(), "activate", projectID.String(), models.AppIDAIDataLiaison)
+	require.NoError(t, err)
 
-	err := svc.CompleteCallback(context.Background(), projectID, models.AppIDAIDataLiaison, "activate", "cancelled", nonce, "user@example.com")
+	err = svc.CompleteCallback(context.Background(), projectID, models.AppIDAIDataLiaison, "activate", "cancelled", nonce, "user@example.com")
 	require.NoError(t, err)
 
 	// App should NOT have been activated

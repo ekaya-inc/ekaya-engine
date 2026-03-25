@@ -151,6 +151,11 @@ const setupMocks = (options: {
       },
     });
   }
+
+  vi.mocked(engineApi.completeAppCallback).mockResolvedValue({
+    success: true,
+    data: { action: 'activate', status: 'success' },
+  });
 };
 
 const setupAllCompleteMocks = (options: { isActivated?: boolean } = {}) => {
@@ -163,9 +168,11 @@ const setupAllCompleteMocks = (options: { isActivated?: boolean } = {}) => {
   });
 };
 
-const renderAIDataLiaisonPage = async () => {
+const renderAIDataLiaisonPage = async (
+  initialEntry = '/projects/proj-1/ai-data-liaison'
+) => {
   const result = render(
-    <MemoryRouter initialEntries={['/projects/proj-1/ai-data-liaison']}>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/projects/:pid/ai-data-liaison" element={<AIDataLiaisonPage />} />
       </Routes>
@@ -351,6 +358,49 @@ describe('AIDataLiaisonPage', () => {
         writable: true,
         configurable: true,
       });
+    });
+  });
+
+  describe('Callback Handling', () => {
+    it('completes lifecycle callbacks from the URL', async () => {
+      setupAllCompleteMocks({ isActivated: false });
+
+      await renderAIDataLiaisonPage(
+        '/projects/proj-1/ai-data-liaison?callback_action=activate&callback_state=test-state&callback_app=ai-data-liaison&callback_status=success'
+      );
+
+      await waitFor(() => {
+        expect(engineApi.completeAppCallback).toHaveBeenCalledWith(
+          'proj-1',
+          'ai-data-liaison',
+          'activate',
+          'success',
+          'test-state',
+        );
+      });
+    });
+
+    it('completes cancelled callbacks without navigating away', async () => {
+      setupAllCompleteMocks({ isActivated: true });
+      vi.mocked(engineApi.completeAppCallback).mockResolvedValue({
+        success: true,
+        data: { action: 'uninstall', status: 'cancelled' },
+      });
+
+      await renderAIDataLiaisonPage(
+        '/projects/proj-1/ai-data-liaison?callback_action=uninstall&callback_state=test-state&callback_app=ai-data-liaison&callback_status=cancelled'
+      );
+
+      await waitFor(() => {
+        expect(engineApi.completeAppCallback).toHaveBeenCalledWith(
+          'proj-1',
+          'ai-data-liaison',
+          'uninstall',
+          'cancelled',
+          'test-state',
+        );
+      });
+      expect(mockNavigate).not.toHaveBeenCalledWith('/projects/proj-1');
     });
   });
 

@@ -368,3 +368,31 @@ func TestAgentHandlerCreateMapsValidationErrorsToBadRequest(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), `"error":"invalid_request"`)
 	assert.Contains(t, rec.Body.String(), "name is required")
 }
+
+func TestAgentHandlerUpdateMapsIneligibleQuerySelectionToBadRequest(t *testing.T) {
+	projectID := uuid.New()
+	agentID := uuid.New()
+	queryID := uuid.New()
+	handler := NewAgentHandler(&mockAgentService{
+		updateQueryAccessFn: func(ctx context.Context, gotProjectID, gotAgentID uuid.UUID, queryIDs []uuid.UUID) error {
+			assert.Equal(t, projectID, gotProjectID)
+			assert.Equal(t, agentID, gotAgentID)
+			assert.Equal(t, []uuid.UUID{queryID}, queryIDs)
+			return &services.AgentValidationError{
+				Message: "One or more selected queries are no longer eligible for AI Agent access",
+			}
+		},
+	}, zap.NewNop())
+
+	reqBody := `{"query_ids":["` + queryID.String() + `"]}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/projects/"+projectID.String()+"/agents/"+agentID.String(), strings.NewReader(reqBody))
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("aid", agentID.String())
+
+	rec := httptest.NewRecorder()
+	handler.Update(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"error":"invalid_request"`)
+	assert.Contains(t, rec.Body.String(), "One or more selected queries are no longer eligible for AI Agent access")
+}

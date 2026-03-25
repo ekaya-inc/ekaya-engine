@@ -32,34 +32,46 @@ import {
   GitCompare,
   User,
   Bot,
-} from 'lucide-react';
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+} from "lucide-react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
-import { useSqlValidation, type ValidationStatus } from '../hooks/useSqlValidation';
-import { useToast } from '../hooks/useToast';
-import engineApi from '../services/engineApi';
-import type { DatasourceSchema, Query, SqlDialect, CreateQueryRequest, UpdateQueryRequest, QueryParameter, OutputColumn, ExecuteQueryResponse } from '../types';
-import { toCodeMirrorSchema } from '../utils/schemaUtils';
+import {
+  useSqlValidation,
+  type ValidationStatus,
+} from "../hooks/useSqlValidation";
+import { useToast } from "../hooks/useToast";
+import engineApi from "../services/engineApi";
+import type {
+  DatasourceSchema,
+  Query,
+  SqlDialect,
+  CreateQueryRequest,
+  UpdateQueryRequest,
+  QueryParameter,
+  OutputColumn,
+  ExecuteQueryResponse,
+} from "../types";
+import { toCodeMirrorSchema } from "../utils/schemaUtils";
 
-import { DeleteQueryDialog } from './DeleteQueryDialog';
-import { OutputColumnEditor } from './OutputColumnEditor';
-import { ParameterEditor } from './ParameterEditor';
-import { ParameterInputForm } from './ParameterInputForm';
-import { QueryResultsTable } from './QueryResultsTable';
-import { RejectionReasonDialog } from './RejectionReasonDialog';
-import { SqlEditor } from './SqlEditor';
-import { Button } from './ui/Button';
+import { DeleteQueryDialog } from "./DeleteQueryDialog";
+import { OutputColumnEditor } from "./OutputColumnEditor";
+import { ParameterEditor } from "./ParameterEditor";
+import { ParameterInputForm } from "./ParameterInputForm";
+import { QueryResultsTable } from "./QueryResultsTable";
+import { RejectionReasonDialog } from "./RejectionReasonDialog";
+import { SqlEditor } from "./SqlEditor";
+import { Button } from "./ui/Button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from './ui/Card';
-import { Input } from './ui/Input';
+} from "./ui/Card";
+import { Input } from "./ui/Input";
 
-export type QueryFilterType = 'approved' | 'pending' | 'rejected';
-export type ViewMode = 'list' | 'view' | 'edit' | 'new';
+export type QueryFilterType = "approved" | "pending" | "rejected";
+export type ViewMode = "list" | "view" | "edit" | "new";
 
 interface QueriesViewProps {
   projectId: string;
@@ -88,13 +100,53 @@ interface EditingState {
   constraints: string;
 }
 
+const queryParameterHasDefault = (parameter: QueryParameter): boolean =>
+  parameter.default !== null && parameter.default !== undefined;
+
+const hasProvidedQueryParameterValue = (value: unknown): boolean => {
+  if (value === null || value === undefined) {
+    return false;
+  }
+
+  if (typeof value === "string") {
+    return value.trim() !== "";
+  }
+
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+
+  return true;
+};
+
+const canExecuteSavedQuery = (
+  query: Query,
+  values: Record<string, unknown>,
+): boolean =>
+  (query.parameters ?? []).every((parameter) => {
+    if (!parameter.required) {
+      return true;
+    }
+
+    const hasExplicitValue = Object.prototype.hasOwnProperty.call(
+      values,
+      parameter.name,
+    );
+
+    if (hasExplicitValue) {
+      return hasProvidedQueryParameterValue(values[parameter.name]);
+    }
+
+    return queryParameterHasDefault(parameter);
+  });
+
 const QueriesView = ({
   projectId,
   datasourceId,
   dialect,
   filter,
   initialQueryId,
-  initialMode = 'list',
+  initialMode = "list",
   onPendingCountChange,
   onQuerySelect,
   onEditQuery,
@@ -110,35 +162,43 @@ const QueriesView = ({
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [schema, setSchema] = useState<DatasourceSchema | null>(null);
-  const [queryResults, setQueryResults] = useState<ExecuteQueryResponse | null>(null);
+  const [testQueryResults, setTestQueryResults] =
+    useState<ExecuteQueryResponse | null>(null);
+  const [executedQueryResults, setExecutedQueryResults] = useState<
+    Record<string, ExecuteQueryResponse>
+  >({});
 
   // UI state
   const [selectedQuery, setSelectedQuery] = useState<Query | null>(null);
-  const [isCreating, setIsCreating] = useState(initialMode === 'new');
+  const [isCreating, setIsCreating] = useState(initialMode === "new");
   const [editingQueryId, setEditingQueryId] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
 
   // Track if we've processed the initial query ID
   const processedInitialQueryRef = useRef<string | null>(null);
 
   // Form state for creating
   const [newQuery, setNewQuery] = useState<EditingState>({
-    natural_language_prompt: '',
-    additional_context: '',
-    sql_query: '',
+    natural_language_prompt: "",
+    additional_context: "",
+    sql_query: "",
     is_enabled: true,
     allows_modification: false,
     parameters: [],
     output_columns: [],
-    constraints: '',
+    constraints: "",
   });
 
   // Form state for editing
   const [editingState, setEditingState] = useState<EditingState | null>(null);
 
   // Parameter values for test/execute
-  const [testParameterValues, setTestParameterValues] = useState<Record<string, unknown>>({});
-  const [executeParameterValues, setExecuteParameterValues] = useState<Record<string, unknown>>({});
+  const [testParameterValues, setTestParameterValues] = useState<
+    Record<string, unknown>
+  >({});
+  const [executeParameterValues, setExecuteParameterValues] = useState<
+    Record<string, unknown>
+  >({});
 
   // Action states
   const [isSaving, setIsSaving] = useState(false);
@@ -182,10 +242,12 @@ const QueriesView = ({
       if (response.success && response.data) {
         setQueries(response.data.queries);
       } else {
-        setLoadError(response.error ?? 'Failed to load queries');
+        setLoadError(response.error ?? "Failed to load queries");
       }
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Failed to load queries');
+      setLoadError(
+        err instanceof Error ? err.message : "Failed to load queries",
+      );
     } finally {
       setIsLoading(false);
     }
@@ -198,12 +260,16 @@ const QueriesView = ({
 
   // Handle initial query ID from URL after queries are loaded
   useEffect(() => {
-    if (isLoading || !initialQueryId || processedInitialQueryRef.current === initialQueryId) {
+    if (
+      isLoading ||
+      !initialQueryId ||
+      processedInitialQueryRef.current === initialQueryId
+    ) {
       return;
     }
 
     // Find query in loaded list first
-    const foundQuery = queries.find(q => q.query_id === initialQueryId);
+    const foundQuery = queries.find((q) => q.query_id === initialQueryId);
 
     if (foundQuery) {
       processedInitialQueryRef.current = initialQueryId;
@@ -215,19 +281,19 @@ const QueriesView = ({
       }
 
       // If mode is 'edit', start editing
-      if (initialMode === 'edit') {
+      if (initialMode === "edit") {
         setEditingQueryId(foundQuery.query_id);
         setEditingState({
           natural_language_prompt: foundQuery.natural_language_prompt,
-          additional_context: foundQuery.additional_context ?? '',
+          additional_context: foundQuery.additional_context ?? "",
           sql_query: foundQuery.sql_query,
           is_enabled: foundQuery.is_enabled,
           allows_modification: foundQuery.allows_modification,
           parameters: foundQuery.parameters ?? [],
           output_columns: foundQuery.output_columns ?? [],
-          constraints: foundQuery.constraints ?? '',
+          constraints: foundQuery.constraints ?? "",
         });
-        setQueryResults(null);
+        setTestQueryResults(null);
         editValidation.reset();
         setEditTestPassed(false);
         setTestParameterValues({});
@@ -236,7 +302,11 @@ const QueriesView = ({
       // Query not in list, try to fetch it directly
       const fetchQuery = async () => {
         try {
-          const response = await engineApi.getQuery(projectId, datasourceId, initialQueryId);
+          const response = await engineApi.getQuery(
+            projectId,
+            datasourceId,
+            initialQueryId,
+          );
           if (response.success && response.data) {
             processedInitialQueryRef.current = initialQueryId;
             const query = response.data;
@@ -248,19 +318,19 @@ const QueriesView = ({
             }
 
             // If mode is 'edit', start editing
-            if (initialMode === 'edit') {
+            if (initialMode === "edit") {
               setEditingQueryId(query.query_id);
               setEditingState({
                 natural_language_prompt: query.natural_language_prompt,
-                additional_context: query.additional_context ?? '',
+                additional_context: query.additional_context ?? "",
                 sql_query: query.sql_query,
                 is_enabled: query.is_enabled,
                 allows_modification: query.allows_modification,
                 parameters: query.parameters ?? [],
                 output_columns: query.output_columns ?? [],
-                constraints: query.constraints ?? '',
+                constraints: query.constraints ?? "",
               });
-              setQueryResults(null);
+              setTestQueryResults(null);
               editValidation.reset();
               setEditTestPassed(false);
               setTestParameterValues({});
@@ -269,9 +339,9 @@ const QueriesView = ({
             // Query not found - show error and redirect
             processedInitialQueryRef.current = initialQueryId;
             toast({
-              title: 'Query not found',
-              description: 'The requested query could not be found.',
-              variant: 'destructive',
+              title: "Query not found",
+              description: "The requested query could not be found.",
+              variant: "destructive",
             });
             onCancelEdit?.();
           }
@@ -279,25 +349,38 @@ const QueriesView = ({
           // API error - show error and redirect
           processedInitialQueryRef.current = initialQueryId;
           toast({
-            title: 'Query not found',
-            description: err instanceof Error ? err.message : 'Failed to load query.',
-            variant: 'destructive',
+            title: "Query not found",
+            description:
+              err instanceof Error ? err.message : "Failed to load query.",
+            variant: "destructive",
           });
           onCancelEdit?.();
         }
       };
       fetchQuery();
     }
-  }, [isLoading, initialQueryId, initialMode, queries, filter, projectId, datasourceId, editValidation, onFilterChange, onCancelEdit, toast]);
+  }, [
+    isLoading,
+    initialQueryId,
+    initialMode,
+    queries,
+    filter,
+    projectId,
+    datasourceId,
+    editValidation,
+    onFilterChange,
+    onCancelEdit,
+    toast,
+  ]);
 
   // Handle initial mode 'new'
   useEffect(() => {
-    if (initialMode === 'new' && !isCreating) {
+    if (initialMode === "new" && !isCreating) {
       setIsCreating(true);
       setSelectedQuery(null);
       setEditingQueryId(null);
       setEditingState(null);
-      setQueryResults(null);
+      setTestQueryResults(null);
     }
   }, [initialMode, isCreating]);
 
@@ -310,7 +393,7 @@ const QueriesView = ({
         setSelectedQuery(null);
         setEditingQueryId(null);
         setEditingState(null);
-        setQueryResults(null);
+        setTestQueryResults(null);
         setIsCreating(false);
       }
     }
@@ -318,23 +401,23 @@ const QueriesView = ({
 
   // Handle mode changes (e.g., from 'view' to 'edit' for same query)
   useEffect(() => {
-    if (selectedQuery && initialMode === 'edit' && !editingQueryId) {
+    if (selectedQuery && initialMode === "edit" && !editingQueryId) {
       setEditingQueryId(selectedQuery.query_id);
       setEditingState({
         natural_language_prompt: selectedQuery.natural_language_prompt,
-        additional_context: selectedQuery.additional_context ?? '',
+        additional_context: selectedQuery.additional_context ?? "",
         sql_query: selectedQuery.sql_query,
         is_enabled: selectedQuery.is_enabled,
         allows_modification: selectedQuery.allows_modification,
         parameters: selectedQuery.parameters ?? [],
         output_columns: selectedQuery.output_columns ?? [],
-        constraints: selectedQuery.constraints ?? '',
+        constraints: selectedQuery.constraints ?? "",
       });
-      setQueryResults(null);
+      setTestQueryResults(null);
       editValidation.reset();
       setEditTestPassed(false);
       setTestParameterValues({});
-    } else if (initialMode === 'view' && editingQueryId) {
+    } else if (initialMode === "view" && editingQueryId) {
       // Switching from edit to view mode
       setEditingQueryId(null);
       setEditingState(null);
@@ -357,13 +440,13 @@ const QueriesView = ({
   useEffect(() => {
     const fetchParentQuery = async () => {
       if (
-        selectedQuery?.status === 'pending' &&
+        selectedQuery?.status === "pending" &&
         selectedQuery.parent_query_id
       ) {
         const response = await engineApi.getQuery(
           projectId,
           datasourceId,
-          selectedQuery.parent_query_id
+          selectedQuery.parent_query_id,
         );
         if (response.success && response.data) {
           setParentQuery(response.data);
@@ -375,12 +458,26 @@ const QueriesView = ({
       }
     };
     fetchParentQuery();
-  }, [projectId, datasourceId, selectedQuery?.query_id, selectedQuery?.status, selectedQuery?.parent_query_id]);
+  }, [
+    projectId,
+    datasourceId,
+    selectedQuery?.query_id,
+    selectedQuery?.status,
+    selectedQuery?.parent_query_id,
+  ]);
 
   // Transform schema to CodeMirror format for autocomplete
-  const codeMirrorSchema = useMemo(
-    () => toCodeMirrorSchema(schema),
-    [schema]
+  const codeMirrorSchema = useMemo(() => toCodeMirrorSchema(schema), [schema]);
+
+  const selectedQueryResults = selectedQuery
+    ? (executedQueryResults[selectedQuery.query_id] ?? null)
+    : null;
+  const canExecuteSelectedQuery = useMemo(
+    () =>
+      selectedQuery
+        ? canExecuteSavedQuery(selectedQuery, executeParameterValues)
+        : false,
+    [selectedQuery, executeParameterValues],
   );
 
   // Check if SQL has undefined parameters (used in SQL but not defined)
@@ -403,7 +500,7 @@ const QueriesView = ({
       }
       return false;
     },
-    []
+    [],
   );
 
   // Check if modifying query is missing RETURNING clause
@@ -415,16 +512,16 @@ const QueriesView = ({
 
       // Check if it's a modifying statement (INSERT, UPDATE, DELETE)
       const isModifying =
-        normalizedSql.startsWith('INSERT') ||
-        normalizedSql.startsWith('UPDATE') ||
-        normalizedSql.startsWith('DELETE');
+        normalizedSql.startsWith("INSERT") ||
+        normalizedSql.startsWith("UPDATE") ||
+        normalizedSql.startsWith("DELETE");
 
       if (!isModifying) return false;
 
       // Check if RETURNING clause is present
-      return !normalizedSql.includes('RETURNING');
+      return !normalizedSql.includes("RETURNING");
     },
-    []
+    [],
   );
 
   // Filter queries based on search and status filter (from parent)
@@ -447,15 +544,16 @@ const QueriesView = ({
    */
   const resetCreateForm = () => {
     setNewQuery({
-      natural_language_prompt: '',
-      additional_context: '',
-      sql_query: '',
+      natural_language_prompt: "",
+      additional_context: "",
+      sql_query: "",
       is_enabled: true,
       allows_modification: false,
       parameters: [],
       output_columns: [],
-      constraints: '',
+      constraints: "",
     });
+    setTestQueryResults(null);
     setTestPassed(false);
     setTestParameterValues({});
     createValidation.reset();
@@ -468,7 +566,7 @@ const QueriesView = ({
     sql: string,
     isCreateMode: boolean,
     parameters?: QueryParameter[],
-    parameterValues?: Record<string, unknown>
+    parameterValues?: Record<string, unknown>,
   ) => {
     setIsTesting(true);
 
@@ -477,30 +575,39 @@ const QueriesView = ({
         sql_query: sql,
         limit: 10,
         ...(parameters !== undefined && { parameter_definitions: parameters }),
-        ...(parameterValues !== undefined && { parameter_values: parameterValues }),
+        ...(parameterValues !== undefined && {
+          parameter_values: parameterValues,
+        }),
       });
 
       if (response.success) {
         if (response.data) {
-          setQueryResults(response.data);
+          setTestQueryResults(response.data);
 
           // Auto-populate output columns from test results
-          const newOutputColumns: OutputColumn[] = response.data.columns.map((col) => ({
-            name: col.name,
-            type: col.type,
-            description: '',
-          }));
+          const newOutputColumns: OutputColumn[] = response.data.columns.map(
+            (col) => ({
+              name: col.name,
+              type: col.type,
+              description: "",
+            }),
+          );
 
           if (isCreateMode) {
-            setNewQuery((prev) => ({ ...prev, output_columns: newOutputColumns }));
+            setNewQuery((prev) => ({
+              ...prev,
+              output_columns: newOutputColumns,
+            }));
           } else {
-            setEditingState((prev) => prev ? { ...prev, output_columns: newOutputColumns } : prev);
+            setEditingState((prev) =>
+              prev ? { ...prev, output_columns: newOutputColumns } : prev,
+            );
           }
         }
         toast({
-          title: 'Query executed successfully',
+          title: "Query executed successfully",
           description: `Returned ${response.data?.row_count ?? 0} rows`,
-          variant: 'success',
+          variant: "success",
         });
         if (isCreateMode) {
           setTestPassed(true);
@@ -509,20 +616,20 @@ const QueriesView = ({
         }
         return true;
       } else {
-        setQueryResults(null);
+        setTestQueryResults(null);
         toast({
-          title: 'Query execution failed',
-          description: response.error ?? 'Unknown error',
-          variant: 'destructive',
+          title: "Query execution failed",
+          description: response.error ?? "Unknown error",
+          variant: "destructive",
         });
         return false;
       }
     } catch (err) {
-      setQueryResults(null);
+      setTestQueryResults(null);
       toast({
-        title: 'Query execution failed',
-        description: err instanceof Error ? err.message : 'Unknown error',
-        variant: 'destructive',
+        title: "Query execution failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
       });
       return false;
     } finally {
@@ -534,16 +641,19 @@ const QueriesView = ({
    * Create new query
    */
   const handleCreateQuery = async () => {
-    if (!newQuery.natural_language_prompt.trim() || !newQuery.sql_query.trim()) {
+    if (
+      !newQuery.natural_language_prompt.trim() ||
+      !newQuery.sql_query.trim()
+    ) {
       return;
     }
 
     // Require test to pass before saving
     if (!testPassed) {
       toast({
-        title: 'Test required',
-        description: 'Please test the query before saving',
-        variant: 'destructive',
+        title: "Test required",
+        description: "Please test the query before saving",
+        variant: "destructive",
       });
       return;
     }
@@ -552,14 +662,14 @@ const QueriesView = ({
 
     try {
       // When creating from Pending tab, create as pending for admin approval
-      const isPendingCreate = filter === 'pending';
+      const isPendingCreate = filter === "pending";
 
       const request: CreateQueryRequest = {
         natural_language_prompt: newQuery.natural_language_prompt.trim(),
         sql_query: newQuery.sql_query.trim(),
         is_enabled: isPendingCreate ? false : newQuery.is_enabled,
         allows_modification: newQuery.allows_modification,
-        ...(isPendingCreate && { status: 'pending' }),
+        ...(isPendingCreate && { status: "pending" }),
       };
 
       if (newQuery.additional_context.trim()) {
@@ -578,13 +688,21 @@ const QueriesView = ({
         request.constraints = newQuery.constraints.trim();
       }
 
-      const response = await engineApi.createQuery(projectId, datasourceId, request);
+      const response = await engineApi.createQuery(
+        projectId,
+        datasourceId,
+        request,
+      );
 
       if (response.success && response.data) {
         toast({
-          title: isPendingCreate ? 'Query submitted for approval' : 'Query created',
-          description: isPendingCreate ? 'Query is pending admin approval' : 'Your query has been saved',
-          variant: 'success',
+          title: isPendingCreate
+            ? "Query submitted for approval"
+            : "Query created",
+          description: isPendingCreate
+            ? "Query is pending admin approval"
+            : "Your query has been saved",
+          variant: "success",
         });
         setQueries((prev) => [...prev, response.data as Query]);
         setSelectedQuery(response.data as Query);
@@ -598,16 +716,16 @@ const QueriesView = ({
         onQuerySelect?.(response.data.query_id);
       } else {
         toast({
-          title: 'Failed to create query',
-          description: response.error ?? 'Unknown error',
-          variant: 'destructive',
+          title: "Failed to create query",
+          description: response.error ?? "Unknown error",
+          variant: "destructive",
         });
       }
     } catch (err) {
       toast({
-        title: 'Failed to create query',
-        description: err instanceof Error ? err.message : 'Unknown error',
-        variant: 'destructive',
+        title: "Failed to create query",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
       });
     } finally {
       setIsSaving(false);
@@ -626,15 +744,15 @@ const QueriesView = ({
       setEditingQueryId(query.query_id);
       setEditingState({
         natural_language_prompt: query.natural_language_prompt,
-        additional_context: query.additional_context ?? '',
+        additional_context: query.additional_context ?? "",
         sql_query: query.sql_query,
         is_enabled: query.is_enabled,
         allows_modification: query.allows_modification,
         parameters: query.parameters ?? [],
         output_columns: query.output_columns ?? [],
-        constraints: query.constraints ?? '',
+        constraints: query.constraints ?? "",
       });
-      setQueryResults(null);
+      setTestQueryResults(null);
       editValidation.reset();
       setEditTestPassed(false);
       setTestParameterValues({});
@@ -666,7 +784,8 @@ const QueriesView = ({
       };
 
       if (editingState.additional_context.trim()) {
-        updateRequest.additional_context = editingState.additional_context.trim();
+        updateRequest.additional_context =
+          editingState.additional_context.trim();
       }
 
       if (editingState.output_columns.length > 0) {
@@ -681,23 +800,33 @@ const QueriesView = ({
         projectId,
         datasourceId,
         editingQueryId,
-        updateRequest
+        updateRequest,
       );
 
       if (response.success && response.data) {
         toast({
-          title: 'Query updated',
-          description: 'Your changes have been saved',
-          variant: 'success',
+          title: "Query updated",
+          description: "Your changes have been saved",
+          variant: "success",
         });
         setQueries((prev) =>
           prev.map((q) =>
-            q.query_id === editingQueryId ? (response.data as Query) : q
-          )
+            q.query_id === editingQueryId ? (response.data as Query) : q,
+          ),
         );
         setSelectedQuery(response.data as Query);
         setEditingQueryId(null);
         setEditingState(null);
+        setTestQueryResults(null);
+        setExecutedQueryResults((prev) => {
+          if (!(editingQueryId in prev)) {
+            return prev;
+          }
+
+          const next = { ...prev };
+          delete next[editingQueryId];
+          return next;
+        });
         editValidation.reset();
         // Navigate back to view mode
         if (onQuerySelect) {
@@ -705,16 +834,16 @@ const QueriesView = ({
         }
       } else {
         toast({
-          title: 'Failed to update query',
-          description: response.error ?? 'Unknown error',
-          variant: 'destructive',
+          title: "Failed to update query",
+          description: response.error ?? "Unknown error",
+          variant: "destructive",
         });
       }
     } catch (err) {
       toast({
-        title: 'Failed to update query',
-        description: err instanceof Error ? err.message : 'Unknown error',
-        variant: 'destructive',
+        title: "Failed to update query",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
       });
     } finally {
       setIsSaving(false);
@@ -734,6 +863,15 @@ const QueriesView = ({
    */
   const handleQueryDeleted = (queryId: string) => {
     setQueries((prev) => prev.filter((q) => q.query_id !== queryId));
+    setExecutedQueryResults((prev) => {
+      if (!(queryId in prev)) {
+        return prev;
+      }
+
+      const next = { ...prev };
+      delete next[queryId];
+      return next;
+    });
     if (selectedQuery?.query_id === queryId) {
       setSelectedQuery(null);
       onCancelEdit?.();
@@ -741,8 +879,8 @@ const QueriesView = ({
     setDeleteDialogOpen(false);
     setQueryToDelete(null);
     toast({
-      title: 'Query deleted',
-      variant: 'success',
+      title: "Query deleted",
+      variant: "success",
     });
   };
 
@@ -757,9 +895,10 @@ const QueriesView = ({
 
       if (response.success) {
         toast({
-          title: 'Query approved',
-          description: response.data?.message ?? 'Query has been approved and enabled',
-          variant: 'success',
+          title: "Query approved",
+          description:
+            response.data?.message ?? "Query has been approved and enabled",
+          variant: "success",
         });
 
         // Reload queries to reflect the change
@@ -770,19 +909,19 @@ const QueriesView = ({
         // Notify parent to update pending count and switch to approved tab
         // onQueryStatusChangeComplete handles navigation
         onPendingCountChange?.();
-        onQueryStatusChangeComplete?.('approved');
+        onQueryStatusChangeComplete?.("approved");
       } else {
         toast({
-          title: 'Failed to approve query',
-          description: response.error ?? 'Unknown error',
-          variant: 'destructive',
+          title: "Failed to approve query",
+          description: response.error ?? "Unknown error",
+          variant: "destructive",
         });
       }
     } catch (err) {
       toast({
-        title: 'Failed to approve query',
-        description: err instanceof Error ? err.message : 'Unknown error',
-        variant: 'destructive',
+        title: "Failed to approve query",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
       });
     } finally {
       setIsApproving(false);
@@ -798,14 +937,14 @@ const QueriesView = ({
     const response = await engineApi.rejectQuery(
       projectId,
       selectedQuery.query_id,
-      reason
+      reason,
     );
 
     if (response.success) {
       toast({
-        title: 'Query rejected',
-        description: 'Query has been rejected',
-        variant: 'success',
+        title: "Query rejected",
+        description: "Query has been rejected",
+        variant: "success",
       });
 
       // Reload queries to reflect the change
@@ -816,9 +955,9 @@ const QueriesView = ({
       // Notify parent to update pending count and switch to rejected tab
       // onQueryStatusChangeComplete handles navigation
       onPendingCountChange?.();
-      onQueryStatusChangeComplete?.('rejected');
+      onQueryStatusChangeComplete?.("rejected");
     } else {
-      throw new Error(response.error ?? 'Failed to reject query');
+      throw new Error(response.error ?? "Failed to reject query");
     }
   };
 
@@ -833,9 +972,9 @@ const QueriesView = ({
 
       if (response.success) {
         toast({
-          title: 'Query moved to pending',
-          description: 'Query is now pending approval',
-          variant: 'success',
+          title: "Query moved to pending",
+          description: "Query is now pending approval",
+          variant: "success",
         });
 
         // Reload queries to reflect the change
@@ -845,19 +984,19 @@ const QueriesView = ({
         // Notify parent to update pending count and switch to pending tab
         // onQueryStatusChangeComplete handles navigation
         onPendingCountChange?.();
-        onQueryStatusChangeComplete?.('pending');
+        onQueryStatusChangeComplete?.("pending");
       } else {
         toast({
-          title: 'Failed to move query',
-          description: response.error ?? 'Unknown error',
-          variant: 'destructive',
+          title: "Failed to move query",
+          description: response.error ?? "Unknown error",
+          variant: "destructive",
         });
       }
     } catch (err) {
       toast({
-        title: 'Failed to move query',
-        description: err instanceof Error ? err.message : 'Unknown error',
-        variant: 'destructive',
+        title: "Failed to move query",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
       });
     } finally {
       setIsMovingToPending(false);
@@ -873,28 +1012,28 @@ const QueriesView = ({
         projectId,
         datasourceId,
         query.query_id,
-        { is_enabled: !query.is_enabled }
+        { is_enabled: !query.is_enabled },
       );
 
       if (response.success && response.data) {
         setQueries((prev) =>
           prev.map((q) =>
-            q.query_id === query.query_id ? (response.data as Query) : q
-          )
+            q.query_id === query.query_id ? (response.data as Query) : q,
+          ),
         );
         if (selectedQuery?.query_id === query.query_id) {
           setSelectedQuery(response.data as Query);
         }
         toast({
-          title: query.is_enabled ? 'Query disabled' : 'Query enabled',
-          variant: 'success',
+          title: query.is_enabled ? "Query disabled" : "Query enabled",
+          variant: "success",
         });
       }
     } catch (err) {
       toast({
-        title: 'Failed to update query',
-        description: err instanceof Error ? err.message : 'Unknown error',
-        variant: 'destructive',
+        title: "Failed to update query",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
       });
     }
   };
@@ -903,6 +1042,10 @@ const QueriesView = ({
    * Execute a saved query
    */
   const handleExecuteQuery = async (query: Query) => {
+    if (!canExecuteSavedQuery(query, executeParameterValues)) {
+      return;
+    }
+
     setIsTesting(true);
 
     try {
@@ -914,32 +1057,53 @@ const QueriesView = ({
         projectId,
         datasourceId,
         query.query_id,
-        executeRequest
+        executeRequest,
       );
 
       if (response.success && response.data) {
-        setQueryResults(response.data);
+        const queryResult = response.data;
+
+        setExecutedQueryResults((prev) => ({
+          ...prev,
+          [query.query_id]: queryResult,
+        }));
         toast({
-          title: 'Query executed successfully',
-          description: `Returned ${response.data.row_count} rows`,
-          variant: 'success',
+          title: "Query executed successfully",
+          description: `Returned ${queryResult.row_count} rows`,
+          variant: "success",
         });
         // Refresh to get updated usage count
         await loadQueries();
       } else {
-        setQueryResults(null);
+        setExecutedQueryResults((prev) => {
+          if (!(query.query_id in prev)) {
+            return prev;
+          }
+
+          const next = { ...prev };
+          delete next[query.query_id];
+          return next;
+        });
         toast({
-          title: 'Query execution failed',
-          description: response.error ?? 'Unknown error',
-          variant: 'destructive',
+          title: "Query execution failed",
+          description: response.error ?? "Unknown error",
+          variant: "destructive",
         });
       }
     } catch (err) {
-      setQueryResults(null);
+      setExecutedQueryResults((prev) => {
+        if (!(query.query_id in prev)) {
+          return prev;
+        }
+
+        const next = { ...prev };
+        delete next[query.query_id];
+        return next;
+      });
       toast({
-        title: 'Query execution failed',
-        description: err instanceof Error ? err.message : 'Unknown error',
-        variant: 'destructive',
+        title: "Query execution failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
       });
     } finally {
       setIsTesting(false);
@@ -952,8 +1116,8 @@ const QueriesView = ({
   const handleCopyQuery = (sqlQuery: string) => {
     navigator.clipboard.writeText(sqlQuery);
     toast({
-      title: 'Copied to clipboard',
-      variant: 'success',
+      title: "Copied to clipboard",
+      variant: "success",
       duration: 2000,
     });
   };
@@ -970,7 +1134,7 @@ const QueriesView = ({
       setIsCreating(false);
       setEditingQueryId(null);
       setEditingState(null);
-      setQueryResults(null);
+      setTestQueryResults(null);
     }
   };
 
@@ -986,7 +1150,7 @@ const QueriesView = ({
       setSelectedQuery(null);
       setEditingQueryId(null);
       setEditingState(null);
-      setQueryResults(null);
+      setTestQueryResults(null);
       resetCreateForm();
     }
   };
@@ -1002,6 +1166,7 @@ const QueriesView = ({
       setIsCreating(false);
       setEditingQueryId(null);
       setEditingState(null);
+      setTestQueryResults(null);
       resetCreateForm();
       editValidation.reset();
     }
@@ -1032,7 +1197,9 @@ const QueriesView = ({
       <div className="flex h-[calc(100vh-12rem)] items-center justify-center">
         <div className="text-center">
           <AlertCircle className="h-8 w-8 mx-auto mb-4 text-red-500" />
-          <p className="text-text-primary font-medium mb-2">Failed to load queries</p>
+          <p className="text-text-primary font-medium mb-2">
+            Failed to load queries
+          </p>
           <p className="text-text-secondary mb-4">{loadError}</p>
           <Button onClick={loadQueries}>
             <RefreshCw className="mr-2 h-4 w-4" />
@@ -1052,7 +1219,7 @@ const QueriesView = ({
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between mb-2">
                 <CardTitle className="text-lg">Queries</CardTitle>
-                {filter !== 'rejected' && (
+                {filter !== "rejected" && (
                   <Button
                     size="sm"
                     onClick={handleCreateButtonClick}
@@ -1078,12 +1245,12 @@ const QueriesView = ({
                   <Database className="h-8 w-8 text-text-tertiary mx-auto mb-2" />
                   <p className="text-sm text-text-secondary">
                     {searchTerm
-                      ? 'No queries found'
-                      : filter === 'approved'
-                        ? 'No approved queries yet'
-                        : filter === 'pending'
-                          ? 'No queries pending approval'
-                          : 'No rejected queries'}
+                      ? "No queries found"
+                      : filter === "approved"
+                        ? "No approved queries yet"
+                        : filter === "pending"
+                          ? "No queries pending approval"
+                          : "No rejected queries"}
                   </p>
                 </div>
               ) : (
@@ -1092,37 +1259,38 @@ const QueriesView = ({
                     <button
                       key={query.query_id}
                       onClick={() => handleQuerySelectClick(query)}
-                      className={`w-full text-left p-2 rounded-lg transition-colors ${selectedQuery?.query_id === query.query_id
-                        ? 'bg-purple-500/10 border border-purple-500/30'
-                        : 'hover:bg-surface-secondary/50'
-                        } ${!query.is_enabled && query.status === 'approved' ? 'opacity-50' : ''}`}
+                      className={`w-full text-left p-2 rounded-lg transition-colors ${
+                        selectedQuery?.query_id === query.query_id
+                          ? "bg-purple-500/10 border border-purple-500/30"
+                          : "hover:bg-surface-secondary/50"
+                      } ${!query.is_enabled && query.status === "approved" ? "opacity-50" : ""}`}
                     >
                       <div className="flex items-center justify-between mb-0.5">
                         <div className="flex items-center gap-1.5">
-                          {query.status === 'pending' ? (
+                          {query.status === "pending" ? (
                             <Clock className="h-3 w-3 text-amber-500" />
-                          ) : query.status === 'rejected' ? (
+                          ) : query.status === "rejected" ? (
                             <XCircle className="h-3 w-3 text-red-500" />
                           ) : (
                             <div
-                              className={`h-1.5 w-1.5 rounded-full ${query.is_enabled ? 'bg-green-500' : 'bg-gray-500'}`}
+                              className={`h-1.5 w-1.5 rounded-full ${query.is_enabled ? "bg-green-500" : "bg-gray-500"}`}
                             />
                           )}
                           <span className="text-xs text-text-tertiary">
                             {query.dialect}
                           </span>
                         </div>
-                        {query.status === 'pending' && (
+                        {query.status === "pending" && (
                           <span className="text-xs text-amber-500 font-medium">
                             Pending
                           </span>
                         )}
-                        {query.status === 'rejected' && (
+                        {query.status === "rejected" && (
                           <span className="text-xs text-red-500 font-medium">
                             Rejected
                           </span>
                         )}
-                        {query.status === 'approved' && !query.is_enabled && (
+                        {query.status === "approved" && !query.is_enabled && (
                           <AlertCircle className="h-3 w-3 text-gray-500" />
                         )}
                       </div>
@@ -1136,7 +1304,7 @@ const QueriesView = ({
                           </span>
                         )}
                       </div>
-                      {query.status === 'approved' && query.usage_count > 0 && (
+                      {query.status === "approved" && query.usage_count > 0 && (
                         <div className="text-xs text-text-tertiary mt-0.5">
                           Used {query.usage_count} times
                         </div>
@@ -1158,11 +1326,7 @@ const QueriesView = ({
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <CardTitle>Create New Query</CardTitle>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={handleCancel}
-                    >
+                    <Button variant="ghost" size="icon" onClick={handleCancel}>
                       <X className="h-4 w-4" />
                     </Button>
                   </div>
@@ -1170,7 +1334,7 @@ const QueriesView = ({
                 <CardContent className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-text-primary mb-2">
-                      Natural Language Prompt{' '}
+                      Natural Language Prompt{" "}
                       <span className="text-red-500">*</span>
                     </label>
                     <textarea
@@ -1217,7 +1381,9 @@ const QueriesView = ({
                       }}
                       dialect={dialect}
                       schema={codeMirrorSchema}
-                      validationStatus={getValidationStatus(createValidation.status)}
+                      validationStatus={getValidationStatus(
+                        createValidation.status,
+                      )}
                       validationError={createValidation.error ?? undefined}
                       placeholder="SELECT * FROM users WHERE status = {{status}} LIMIT {{limit}}"
                       minHeight="200px"
@@ -1269,14 +1435,18 @@ const QueriesView = ({
                           <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
                           <div className="flex-1">
                             <p className="text-sm text-amber-600 dark:text-amber-400">
-                              This query will be able to add, modify or delete data. Ensure the SQL
-                              and parameters are thoroughly reviewed before enabling.
+                              This query will be able to add, modify or delete
+                              data. Ensure the SQL and parameters are thoroughly
+                              reviewed before enabling.
                             </p>
                           </div>
                         </div>
                       </div>
                     )}
-                    {isModifyingQueryMissingReturning(newQuery.sql_query, newQuery.allows_modification) && (
+                    {isModifyingQueryMissingReturning(
+                      newQuery.sql_query,
+                      newQuery.allows_modification,
+                    ) && (
                       <div className="mt-2 bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
                         <div className="flex items-start gap-2">
                           <MessageSquare className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
@@ -1285,7 +1455,11 @@ const QueriesView = ({
                               Suggestion: Add RETURNING clause
                             </p>
                             <p className="text-xs text-blue-600/80 dark:text-blue-400/80 mt-1">
-                              Consider adding a RETURNING clause (e.g., <code className="bg-blue-500/20 px-1 rounded">RETURNING id, name</code>) to see which rows were affected.
+                              Consider adding a RETURNING clause (e.g.,{" "}
+                              <code className="bg-blue-500/20 px-1 rounded">
+                                RETURNING id, name
+                              </code>
+                              ) to see which rows were affected.
                             </p>
                           </div>
                         </div>
@@ -1325,27 +1499,33 @@ const QueriesView = ({
                               Warning: Testing modifies live data
                             </p>
                             <p className="text-xs text-red-600/80 dark:text-red-400/80 mt-1">
-                              Testing this query will execute it against your live database and may
-                              modify data. Use test parameters that won&apos;t cause harm.
+                              Testing this query will execute it against your
+                              live database and may modify data. Use test
+                              parameters that won&apos;t cause harm.
                             </p>
                           </div>
                         </div>
                       </div>
                     )}
                     <Button
-                      variant={newQuery.allows_modification ? 'destructive' : 'outline'}
+                      variant={
+                        newQuery.allows_modification ? "destructive" : "outline"
+                      }
                       onClick={() =>
                         handleTestQuery(
                           newQuery.sql_query,
                           true,
                           newQuery.parameters,
-                          testParameterValues
+                          testParameterValues,
                         )
                       }
                       disabled={
                         !newQuery.sql_query.trim() ||
                         isTesting ||
-                        hasUndefinedParams(newQuery.sql_query, newQuery.parameters)
+                        hasUndefinedParams(
+                          newQuery.sql_query,
+                          newQuery.parameters,
+                        )
                       }
                     >
                       {isTesting ? (
@@ -1354,16 +1534,16 @@ const QueriesView = ({
                         <Play className="mr-2 h-4 w-4" />
                       )}
                       {newQuery.allows_modification
-                        ? 'Test Query (Modifies Data)'
-                        : 'Test Query'}
+                        ? "Test Query (Modifies Data)"
+                        : "Test Query"}
                     </Button>
                   </div>
 
-                  {queryResults && (
+                  {testQueryResults && (
                     <QueryResultsTable
-                      columns={queryResults.columns}
-                      rows={queryResults.rows}
-                      totalRowCount={queryResults.row_count}
+                      columns={testQueryResults.columns}
+                      rows={testQueryResults.rows}
+                      totalRowCount={testQueryResults.row_count}
                       maxRows={10}
                       maxColumns={20}
                     />
@@ -1395,10 +1575,7 @@ const QueriesView = ({
 
                   <div className="pt-4 border-t border-border-light">
                     <div className="flex justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        onClick={handleCancel}
-                      >
+                      <Button variant="outline" onClick={handleCancel}>
                         Cancel
                       </Button>
                       <Button
@@ -1408,7 +1585,10 @@ const QueriesView = ({
                           !newQuery.sql_query.trim() ||
                           !testPassed ||
                           isSaving ||
-                          hasUndefinedParams(newQuery.sql_query, newQuery.parameters)
+                          hasUndefinedParams(
+                            newQuery.sql_query,
+                            newQuery.parameters,
+                          )
                         }
                       >
                         {isSaving ? (
@@ -1433,11 +1613,7 @@ const QueriesView = ({
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <CardTitle>Edit Query</CardTitle>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={handleCancel}
-                    >
+                    <Button variant="ghost" size="icon" onClick={handleCancel}>
                       <X className="h-4 w-4" />
                     </Button>
                   </div>
@@ -1445,7 +1621,7 @@ const QueriesView = ({
                 <CardContent className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-text-primary mb-2">
-                      Natural Language Prompt{' '}
+                      Natural Language Prompt{" "}
                       <span className="text-red-500">*</span>
                     </label>
                     <textarea
@@ -1491,7 +1667,9 @@ const QueriesView = ({
                       }}
                       dialect={dialect}
                       schema={codeMirrorSchema}
-                      validationStatus={getValidationStatus(editValidation.status)}
+                      validationStatus={getValidationStatus(
+                        editValidation.status,
+                      )}
                       validationError={editValidation.error ?? undefined}
                       placeholder="SELECT * FROM users WHERE status = {{status}} LIMIT {{limit}}"
                       minHeight="200px"
@@ -1543,14 +1721,18 @@ const QueriesView = ({
                           <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
                           <div className="flex-1">
                             <p className="text-sm text-amber-600 dark:text-amber-400">
-                              This query will be able to add, modify or delete data. Ensure the SQL
-                              and parameters are thoroughly reviewed before enabling.
+                              This query will be able to add, modify or delete
+                              data. Ensure the SQL and parameters are thoroughly
+                              reviewed before enabling.
                             </p>
                           </div>
                         </div>
                       </div>
                     )}
-                    {isModifyingQueryMissingReturning(editingState.sql_query, editingState.allows_modification) && (
+                    {isModifyingQueryMissingReturning(
+                      editingState.sql_query,
+                      editingState.allows_modification,
+                    ) && (
                       <div className="mt-2 bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
                         <div className="flex items-start gap-2">
                           <MessageSquare className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
@@ -1559,7 +1741,11 @@ const QueriesView = ({
                               Suggestion: Add RETURNING clause
                             </p>
                             <p className="text-xs text-blue-600/80 dark:text-blue-400/80 mt-1">
-                              Consider adding a RETURNING clause (e.g., <code className="bg-blue-500/20 px-1 rounded">RETURNING id, name</code>) to see which rows were affected.
+                              Consider adding a RETURNING clause (e.g.,{" "}
+                              <code className="bg-blue-500/20 px-1 rounded">
+                                RETURNING id, name
+                              </code>
+                              ) to see which rows were affected.
                             </p>
                           </div>
                         </div>
@@ -1599,27 +1785,35 @@ const QueriesView = ({
                               Warning: Testing modifies live data
                             </p>
                             <p className="text-xs text-red-600/80 dark:text-red-400/80 mt-1">
-                              Testing this query will execute it against your live database and may
-                              modify data. Use test parameters that won&apos;t cause harm.
+                              Testing this query will execute it against your
+                              live database and may modify data. Use test
+                              parameters that won&apos;t cause harm.
                             </p>
                           </div>
                         </div>
                       </div>
                     )}
                     <Button
-                      variant={editingState.allows_modification ? 'destructive' : 'outline'}
+                      variant={
+                        editingState.allows_modification
+                          ? "destructive"
+                          : "outline"
+                      }
                       onClick={() =>
                         handleTestQuery(
                           editingState.sql_query,
                           false,
                           editingState.parameters,
-                          testParameterValues
+                          testParameterValues,
                         )
                       }
                       disabled={
                         !editingState.sql_query.trim() ||
                         isTesting ||
-                        hasUndefinedParams(editingState.sql_query, editingState.parameters)
+                        hasUndefinedParams(
+                          editingState.sql_query,
+                          editingState.parameters,
+                        )
                       }
                     >
                       {isTesting ? (
@@ -1628,16 +1822,16 @@ const QueriesView = ({
                         <Play className="mr-2 h-4 w-4" />
                       )}
                       {editingState.allows_modification
-                        ? 'Test Query (Modifies Data)'
-                        : 'Test Query'}
+                        ? "Test Query (Modifies Data)"
+                        : "Test Query"}
                     </Button>
                   </div>
 
-                  {queryResults && (
+                  {testQueryResults && (
                     <QueryResultsTable
-                      columns={queryResults.columns}
-                      rows={queryResults.rows}
-                      totalRowCount={queryResults.row_count}
+                      columns={testQueryResults.columns}
+                      rows={testQueryResults.rows}
+                      totalRowCount={testQueryResults.row_count}
                       maxRows={10}
                       maxColumns={20}
                     />
@@ -1669,10 +1863,7 @@ const QueriesView = ({
 
                   <div className="pt-4 border-t border-border-light">
                     <div className="flex justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        onClick={handleCancel}
-                      >
+                      <Button variant="outline" onClick={handleCancel}>
                         Cancel
                       </Button>
                       <Button
@@ -1682,7 +1873,10 @@ const QueriesView = ({
                           !editingState.sql_query.trim() ||
                           !editTestPassed ||
                           isSaving ||
-                          hasUndefinedParams(editingState.sql_query, editingState.parameters)
+                          hasUndefinedParams(
+                            editingState.sql_query,
+                            editingState.parameters,
+                          )
                         }
                       >
                         {isSaving ? (
@@ -1718,13 +1912,13 @@ const QueriesView = ({
                           </span>
                         )}
                         {/* Status badges for pending/rejected queries */}
-                        {selectedQuery.status === 'pending' && (
+                        {selectedQuery.status === "pending" && (
                           <span className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded bg-amber-500/10 text-amber-600 dark:text-amber-400">
                             <Clock className="h-3 w-3" />
                             Pending Review
                           </span>
                         )}
-                        {selectedQuery.status === 'rejected' && (
+                        {selectedQuery.status === "rejected" && (
                           <span className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded bg-red-500/10 text-red-600 dark:text-red-400">
                             <XCircle className="h-3 w-3" />
                             Rejected
@@ -1732,36 +1926,42 @@ const QueriesView = ({
                         )}
                       </div>
                       <CardDescription>
-                        {selectedQuery.status === 'pending' ? (
+                        {selectedQuery.status === "pending" ? (
                           <>
-                            Suggested{' '}
-                            {new Date(selectedQuery.created_at).toLocaleDateString()}{' '}
-                            by{' '}
-                            {selectedQuery.suggested_by === 'agent' ? (
+                            Suggested{" "}
+                            {new Date(
+                              selectedQuery.created_at,
+                            ).toLocaleDateString()}{" "}
+                            by{" "}
+                            {selectedQuery.suggested_by === "agent" ? (
                               <span className="inline-flex items-center gap-1">
                                 <Bot className="h-3 w-3" /> AI Agent
                               </span>
                             ) : (
                               <span className="inline-flex items-center gap-1">
-                                <User className="h-3 w-3" /> {selectedQuery.suggested_by ?? 'Unknown'}
+                                <User className="h-3 w-3" />{" "}
+                                {selectedQuery.suggested_by ?? "Unknown"}
                               </span>
                             )}
                             {selectedQuery.parent_query_id && (
                               <>
-                                {' '}
-                                • <GitCompare className="inline h-3 w-3" /> Update suggestion
+                                {" "}
+                                • <GitCompare className="inline h-3 w-3" />{" "}
+                                Update suggestion
                               </>
                             )}
                           </>
                         ) : (
                           <>
-                            Created{' '}
-                            {new Date(selectedQuery.created_at).toLocaleDateString()}{' '}
+                            Created{" "}
+                            {new Date(
+                              selectedQuery.created_at,
+                            ).toLocaleDateString()}{" "}
                             {selectedQuery.usage_count > 0 && (
                               <>
-                                {' '}
+                                {" "}
                                 • Used {selectedQuery.usage_count} time
-                                {selectedQuery.usage_count !== 1 ? 's' : ''}
+                                {selectedQuery.usage_count !== 1 ? "s" : ""}
                               </>
                             )}
                           </>
@@ -1769,7 +1969,7 @@ const QueriesView = ({
                       </CardDescription>
                     </div>
                     {/* Edit/delete buttons for approved queries */}
-                    {selectedQuery.status === 'approved' && (
+                    {selectedQuery.status === "approved" && (
                       <div className="flex gap-2">
                         <Button
                           variant="ghost"
@@ -1777,8 +1977,8 @@ const QueriesView = ({
                           onClick={() => handleToggleEnabled(selectedQuery)}
                           title={
                             selectedQuery.is_enabled
-                              ? 'Disable query'
-                              : 'Enable query'
+                              ? "Disable query"
+                              : "Enable query"
                           }
                         >
                           {selectedQuery.is_enabled ? (
@@ -1804,7 +2004,7 @@ const QueriesView = ({
                       </div>
                     )}
                     {/* Edit/delete buttons for pending queries (no enable/disable toggle) */}
-                    {selectedQuery.status === 'pending' && (
+                    {selectedQuery.status === "pending" && (
                       <div className="flex gap-2">
                         <Button
                           variant="ghost"
@@ -1825,7 +2025,7 @@ const QueriesView = ({
                       </div>
                     )}
                     {/* Delete button for rejected queries */}
-                    {selectedQuery.status === 'rejected' && (
+                    {selectedQuery.status === "rejected" && (
                       <div className="flex gap-2">
                         <Button
                           variant="ghost"
@@ -1840,44 +2040,54 @@ const QueriesView = ({
                 </CardHeader>
                 <CardContent className="space-y-6">
                   {/* Suggestion context for pending queries */}
-                  {selectedQuery.status === 'pending' && selectedQuery.suggestion_context && (
-                    <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-                      <div className="flex items-center gap-2 mb-2">
-                        <MessageSquare className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                        <h3 className="text-sm font-medium text-blue-700 dark:text-blue-300">
-                          Suggestion Context
-                        </h3>
+                  {selectedQuery.status === "pending" &&
+                    selectedQuery.suggestion_context && (
+                      <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <MessageSquare className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                          <h3 className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                            Suggestion Context
+                          </h3>
+                        </div>
+                        <p className="text-sm text-blue-600 dark:text-blue-400">
+                          {typeof selectedQuery.suggestion_context ===
+                            "object" &&
+                          "reason" in selectedQuery.suggestion_context
+                            ? String(selectedQuery.suggestion_context.reason)
+                            : JSON.stringify(selectedQuery.suggestion_context)}
+                        </p>
                       </div>
-                      <p className="text-sm text-blue-600 dark:text-blue-400">
-                        {typeof selectedQuery.suggestion_context === 'object' && 'reason' in selectedQuery.suggestion_context
-                          ? String(selectedQuery.suggestion_context.reason)
-                          : JSON.stringify(selectedQuery.suggestion_context)}
-                      </p>
-                    </div>
-                  )}
+                    )}
 
                   {/* Rejection reason for rejected queries */}
-                  {selectedQuery.status === 'rejected' && selectedQuery.rejection_reason && (
-                    <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-4">
-                      <div className="flex items-center gap-2 mb-2">
-                        <XCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
-                        <h3 className="text-sm font-medium text-red-700 dark:text-red-300">
-                          Rejection Reason
-                        </h3>
-                      </div>
-                      <p className="text-sm text-red-600 dark:text-red-400">
-                        {selectedQuery.rejection_reason}
-                      </p>
-                      {selectedQuery.reviewed_by && (
-                        <p className="text-xs text-red-500 dark:text-red-500 mt-2">
-                          Rejected by {selectedQuery.reviewed_by}
-                          {selectedQuery.reviewed_at && (
-                            <> on {new Date(selectedQuery.reviewed_at).toLocaleDateString()}</>
-                          )}
+                  {selectedQuery.status === "rejected" &&
+                    selectedQuery.rejection_reason && (
+                      <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <XCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
+                          <h3 className="text-sm font-medium text-red-700 dark:text-red-300">
+                            Rejection Reason
+                          </h3>
+                        </div>
+                        <p className="text-sm text-red-600 dark:text-red-400">
+                          {selectedQuery.rejection_reason}
                         </p>
-                      )}
-                    </div>
-                  )}
+                        {selectedQuery.reviewed_by && (
+                          <p className="text-xs text-red-500 dark:text-red-500 mt-2">
+                            Rejected by {selectedQuery.reviewed_by}
+                            {selectedQuery.reviewed_at && (
+                              <>
+                                {" "}
+                                on{" "}
+                                {new Date(
+                                  selectedQuery.reviewed_at,
+                                ).toLocaleDateString()}
+                              </>
+                            )}
+                          </p>
+                        )}
+                      </div>
+                    )}
 
                   {selectedQuery.additional_context && (
                     <div>
@@ -1894,7 +2104,7 @@ const QueriesView = ({
                   )}
 
                   {/* Side-by-side diff for update suggestions */}
-                  {selectedQuery.status === 'pending' && parentQuery ? (
+                  {selectedQuery.status === "pending" && parentQuery ? (
                     <div>
                       <div className="flex items-center gap-2 mb-3">
                         <GitCompare className="h-4 w-4 text-text-tertiary" />
@@ -1939,8 +2149,10 @@ const QueriesView = ({
                         </div>
                       </div>
                       {/* Show parameter changes if any */}
-                      {(parentQuery.parameters?.length !== selectedQuery.parameters?.length ||
-                        JSON.stringify(parentQuery.parameters) !== JSON.stringify(selectedQuery.parameters)) && (
+                      {(parentQuery.parameters?.length !==
+                        selectedQuery.parameters?.length ||
+                        JSON.stringify(parentQuery.parameters) !==
+                          JSON.stringify(selectedQuery.parameters)) && (
                         <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg">
                           <p className="text-sm text-amber-700 dark:text-amber-300 flex items-center gap-2">
                             <AlertTriangle className="h-4 w-4" />
@@ -1961,7 +2173,9 @@ const QueriesView = ({
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleCopyQuery(selectedQuery.sql_query)}
+                          onClick={() =>
+                            handleCopyQuery(selectedQuery.sql_query)
+                          }
                         >
                           <Copy className="h-3 w-3 mr-1" />
                           Copy
@@ -1969,7 +2183,7 @@ const QueriesView = ({
                       </div>
                       <SqlEditor
                         value={selectedQuery.sql_query}
-                        onChange={() => { }}
+                        onChange={() => {}}
                         dialect={dialect}
                         schema={codeMirrorSchema}
                         readOnly
@@ -1978,18 +2192,19 @@ const QueriesView = ({
                     </div>
                   )}
 
-                  {selectedQuery.parameters && selectedQuery.parameters.length > 0 && (
-                    <div className="border-t border-border-light pt-4">
-                      <ParameterInputForm
-                        parameters={selectedQuery.parameters}
-                        values={executeParameterValues}
-                        onChange={setExecuteParameterValues}
-                      />
-                    </div>
-                  )}
+                  {selectedQuery.parameters &&
+                    selectedQuery.parameters.length > 0 && (
+                      <div className="border-t border-border-light pt-4">
+                        <ParameterInputForm
+                          parameters={selectedQuery.parameters}
+                          values={executeParameterValues}
+                          onChange={setExecuteParameterValues}
+                        />
+                      </div>
+                    )}
 
                   {/* Approve/Reject/Execute buttons for pending queries */}
-                  {selectedQuery.status === 'pending' && (
+                  {selectedQuery.status === "pending" && (
                     <div className="flex gap-3 pt-4 border-t border-border-light">
                       <Button
                         onClick={() => handleApproveQuery(selectedQuery)}
@@ -2014,7 +2229,7 @@ const QueriesView = ({
                       <Button
                         variant="outline"
                         onClick={() => handleExecuteQuery(selectedQuery)}
-                        disabled={isTesting}
+                        disabled={isTesting || !canExecuteSelectedQuery}
                       >
                         {isTesting ? (
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -2027,11 +2242,11 @@ const QueriesView = ({
                   )}
 
                   {/* Execute button only for approved queries */}
-                  {selectedQuery.status === 'approved' && (
+                  {selectedQuery.status === "approved" && (
                     <div className="flex gap-2 pt-4 border-t border-border-light">
                       <Button
                         onClick={() => handleExecuteQuery(selectedQuery)}
-                        disabled={isTesting}
+                        disabled={isTesting || !canExecuteSelectedQuery}
                       >
                         {isTesting ? (
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -2044,7 +2259,7 @@ const QueriesView = ({
                   )}
 
                   {/* Move to Pending button for rejected queries */}
-                  {selectedQuery.status === 'rejected' && (
+                  {selectedQuery.status === "rejected" && (
                     <div className="flex gap-2 pt-4 border-t border-border-light">
                       <Button
                         variant="outline"
@@ -2061,11 +2276,11 @@ const QueriesView = ({
                     </div>
                   )}
 
-                  {queryResults && (
+                  {selectedQueryResults && (
                     <QueryResultsTable
-                      columns={queryResults.columns}
-                      rows={queryResults.rows}
-                      totalRowCount={queryResults.row_count}
+                      columns={selectedQueryResults.columns}
+                      rows={selectedQueryResults.rows}
+                      totalRowCount={selectedQueryResults.row_count}
                       maxRows={10}
                       maxColumns={20}
                     />
@@ -2080,7 +2295,7 @@ const QueriesView = ({
                   <h3 className="text-lg font-medium text-text-primary mb-2">
                     No Query Selected
                   </h3>
-                  {filter !== 'rejected' && (
+                  {filter !== "rejected" && (
                     <>
                       <p className="text-sm text-text-secondary mb-4">
                         Select a query from the list or create a new one
@@ -2110,7 +2325,7 @@ const QueriesView = ({
       <RejectionReasonDialog
         open={rejectionDialogOpen}
         onOpenChange={setRejectionDialogOpen}
-        queryName={selectedQuery?.natural_language_prompt ?? ''}
+        queryName={selectedQuery?.natural_language_prompt ?? ""}
         onReject={handleRejectQuery}
       />
     </>

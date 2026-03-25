@@ -253,6 +253,28 @@ describe('MCPTunnelPage', () => {
     });
   });
 
+  it('completes cancelled callbacks without navigating away', async () => {
+    vi.mocked(engineApi.completeAppCallback).mockResolvedValue({
+      success: true,
+      data: { action: 'uninstall', status: 'cancelled' },
+    });
+
+    await renderMCPTunnelPage(
+      '/projects/proj-1/mcp-tunnel?callback_action=uninstall&callback_state=test-state&callback_app=mcp-tunnel&callback_status=cancelled'
+    );
+
+    await waitFor(() => {
+      expect(engineApi.completeAppCallback).toHaveBeenCalledWith(
+        'proj-1',
+        'mcp-tunnel',
+        'uninstall',
+        'cancelled',
+        'test-state'
+      );
+    });
+    expect(mockNavigate).not.toHaveBeenCalledWith('/projects/proj-1');
+  });
+
   it('redirects to central when uninstallApp returns a redirect URL', async () => {
     vi.mocked(engineApi.uninstallApp).mockResolvedValue({
       success: true,

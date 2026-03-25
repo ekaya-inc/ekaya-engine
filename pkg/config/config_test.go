@@ -57,6 +57,34 @@ func assertSamePath(t *testing.T, got, want string) {
 	}
 }
 
+func unsetEnvVars(t *testing.T, keys ...string) {
+	t.Helper()
+
+	previous := make(map[string]*string, len(keys))
+	for _, key := range keys {
+		if value, ok := os.LookupEnv(key); ok {
+			valueCopy := value
+			previous[key] = &valueCopy
+		} else {
+			previous[key] = nil
+		}
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("failed to unset %s: %v", key, err)
+		}
+	}
+
+	t.Cleanup(func() {
+		for _, key := range keys {
+			value := previous[key]
+			if value == nil {
+				_ = os.Unsetenv(key)
+				continue
+			}
+			_ = os.Setenv(key, *value)
+		}
+	})
+}
+
 // tlsTestFiles holds paths to TLS test files created by setupTLSFiles.
 type tlsTestFiles struct {
 	CertPath string
@@ -261,7 +289,7 @@ engine_database:
 	}
 }
 
-func TestLoad_MissingConfigFile(t *testing.T) {
+func TestLoad_MissingConfigFileFallsBackToEnvAndDefaults(t *testing.T) {
 	tmpDir := t.TempDir()
 	originalDir, _ := os.Getwd()
 	_ = os.Chdir(tmpDir)
@@ -269,13 +297,171 @@ func TestLoad_MissingConfigFile(t *testing.T) {
 
 	// Override HOME so the fallback doesn't find a real ~/.ekaya/config.yaml
 	t.Setenv("HOME", tmpDir)
+	unsetEnvVars(t,
+		"BIND_ADDR",
+		"PORT",
+		"ENVIRONMENT",
+		"BASE_URL",
+		"PGHOST",
+		"PGPORT",
+		"PGUSER",
+		"PGPASSWORD",
+		"PGDATABASE",
+		"PGSSLMODE",
+		"PGMAX_CONNECTIONS",
+		"PGMAX_IDLE_CONNS",
+		"DATASOURCE_CONNECTION_TTL_MINUTES",
+		"DATASOURCE_MAX_CONNECTIONS_PER_USER",
+		"DATASOURCE_POOL_MAX_CONNS",
+		"DATASOURCE_POOL_MIN_CONNS",
+		"TUNNEL_LOCAL_BASE_URL",
+	)
 
-	_, err := Load("test-version")
-	if err == nil {
-		t.Error("expected error when config.yaml is missing")
+	cfg, err := Load("test-version")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
 	}
-	if !strings.Contains(err.Error(), "not found") {
-		t.Errorf("expected 'not found' in error, got: %v", err)
+
+	if cfg.HasConfigFile {
+		t.Fatal("expected env-only mode when config.yaml is missing")
+	}
+	if cfg.Port != "3443" {
+		t.Errorf("expected Port=3443 (default), got %s", cfg.Port)
+	}
+	if cfg.Env != "local" {
+		t.Errorf("expected Env=local (default), got %s", cfg.Env)
+	}
+	if cfg.EngineDatabase.Host != "localhost" {
+		t.Errorf("expected EngineDatabase.Host=localhost (default), got %s", cfg.EngineDatabase.Host)
+	}
+	if cfg.Datasource.ConnectionTTLMinutes != 5 {
+		t.Errorf("expected ConnectionTTLMinutes=5 (default), got %d", cfg.Datasource.ConnectionTTLMinutes)
+	}
+	if cfg.BaseURL != "http://localhost:3443" {
+		t.Errorf("expected BaseURL=http://localhost:3443 (auto-derived from defaults), got %s", cfg.BaseURL)
+	}
+	if cfg.Tunnel.LocalBaseURL != "http://127.0.0.1:3443" {
+		t.Errorf("expected Tunnel.LocalBaseURL=http://127.0.0.1:3443 (auto-derived from defaults), got %s", cfg.Tunnel.LocalBaseURL)
+	}
+	expectedConfigPath, err := envOnlyConfigPath(cfg.BindAddr, cfg.Port)
+	if err != nil {
+		t.Fatalf("envOnlyConfigPath() failed: %v", err)
+	}
+	assertSamePath(t, cfg.ConfigPath, expectedConfigPath)
+	expectedRoot := filepath.Join(tmpDir, ".ekaya", "runtime", "env-only") + string(os.PathSeparator)
+	if !strings.HasPrefix(cfg.ConfigPath, expectedRoot) {
+		t.Errorf("expected env-only ConfigPath under %s, got %s", expectedRoot, cfg.ConfigPath)
+	}
+}
+
+func TestLoad_MissingConfigFileEnvOverridesDefaults(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalDir, _ := os.Getwd()
+	_ = os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(originalDir) })
+
+	t.Setenv("HOME", tmpDir)
+	unsetEnvVars(t,
+		"BASE_URL",
+		"BIND_ADDR",
+		"PORT",
+		"ENVIRONMENT",
+		"PGHOST",
+		"DATASOURCE_CONNECTION_TTL_MINUTES",
+	)
+	t.Setenv("PORT", "4567")
+	t.Setenv("ENVIRONMENT", "production")
+	t.Setenv("PGHOST", "env-host")
+	t.Setenv("DATASOURCE_CONNECTION_TTL_MINUTES", "12")
+
+	cfg, err := Load("test-version")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	if cfg.HasConfigFile {
+		t.Fatal("expected env-only mode when config.yaml is missing")
+	}
+	if cfg.Port != "4567" {
+		t.Errorf("expected Port=4567 (from env), got %s", cfg.Port)
+	}
+	if cfg.Env != "production" {
+		t.Errorf("expected Env=production (from env), got %s", cfg.Env)
+	}
+	if cfg.EngineDatabase.Host != "env-host" {
+		t.Errorf("expected EngineDatabase.Host=env-host (from env), got %s", cfg.EngineDatabase.Host)
+	}
+	if cfg.Datasource.ConnectionTTLMinutes != 12 {
+		t.Errorf("expected ConnectionTTLMinutes=12 (from env), got %d", cfg.Datasource.ConnectionTTLMinutes)
+	}
+	if cfg.BaseURL != "http://localhost:4567" {
+		t.Errorf("expected BaseURL=http://localhost:4567 (auto-derived from env PORT), got %s", cfg.BaseURL)
+	}
+	expectedConfigPath, err := envOnlyConfigPath(cfg.BindAddr, cfg.Port)
+	if err != nil {
+		t.Fatalf("envOnlyConfigPath() failed: %v", err)
+	}
+	assertSamePath(t, cfg.ConfigPath, expectedConfigPath)
+}
+
+func TestLoad_EnvOnlyConfigPathStableAcrossTmpDirChanges(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalDir, _ := os.Getwd()
+	_ = os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(originalDir) })
+
+	t.Setenv("HOME", tmpDir)
+	unsetEnvVars(t, "BIND_ADDR", "PORT", "TMPDIR")
+	t.Setenv("PORT", "4567")
+
+	firstTempRoot := filepath.Join(t.TempDir(), "tmp-one")
+	if err := os.MkdirAll(firstTempRoot, 0755); err != nil {
+		t.Fatalf("failed to create first temp root: %v", err)
+	}
+	t.Setenv("TMPDIR", firstTempRoot)
+
+	firstCfg, err := Load("test-version")
+	if err != nil {
+		t.Fatalf("first Load() failed: %v", err)
+	}
+
+	secondTempRoot := filepath.Join(t.TempDir(), "tmp-two")
+	if err := os.MkdirAll(secondTempRoot, 0755); err != nil {
+		t.Fatalf("failed to create second temp root: %v", err)
+	}
+	t.Setenv("TMPDIR", secondTempRoot)
+
+	secondCfg, err := Load("test-version")
+	if err != nil {
+		t.Fatalf("second Load() failed: %v", err)
+	}
+
+	assertSamePath(t, firstCfg.ConfigPath, secondCfg.ConfigPath)
+}
+
+func TestLoad_EnvOnlyConfigPathDiffersByListenerIdentity(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalDir, _ := os.Getwd()
+	_ = os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(originalDir) })
+
+	t.Setenv("HOME", tmpDir)
+	unsetEnvVars(t, "BIND_ADDR", "PORT")
+
+	t.Setenv("PORT", "4567")
+	firstCfg, err := Load("test-version")
+	if err != nil {
+		t.Fatalf("first Load() failed: %v", err)
+	}
+
+	t.Setenv("PORT", "4568")
+	secondCfg, err := Load("test-version")
+	if err != nil {
+		t.Fatalf("second Load() failed: %v", err)
+	}
+
+	if firstCfg.ConfigPath == secondCfg.ConfigPath {
+		t.Fatalf("expected distinct env-only ConfigPath values for different listeners, got %s", firstCfg.ConfigPath)
 	}
 }
 

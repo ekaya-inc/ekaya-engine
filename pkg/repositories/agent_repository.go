@@ -292,10 +292,14 @@ func (r *agentRepository) GetQueryAccess(ctx context.Context, agentID uuid.UUID)
 	}
 
 	rows, err := scope.Conn.Query(ctx, `
-		SELECT query_id
-		FROM engine_agent_queries
-		WHERE agent_id = $1
-		ORDER BY query_id ASC`,
+		SELECT aq.query_id
+		FROM engine_agent_queries aq
+		JOIN engine_queries q ON q.id = aq.query_id
+		WHERE aq.agent_id = $1
+		  AND q.is_enabled = true
+		  AND q.status = 'approved'
+		  AND q.deleted_at IS NULL
+		ORDER BY aq.query_id ASC`,
 		agentID,
 	)
 	if err != nil {
@@ -331,10 +335,14 @@ func (r *agentRepository) GetQueryAccessByAgentIDs(ctx context.Context, agentIDs
 	}
 
 	rows, err := scope.Conn.Query(ctx, `
-		SELECT agent_id, query_id
-		FROM engine_agent_queries
-		WHERE agent_id = ANY($1)
-		ORDER BY agent_id ASC, query_id ASC`,
+		SELECT aq.agent_id, aq.query_id
+		FROM engine_agent_queries aq
+		JOIN engine_queries q ON q.id = aq.query_id
+		WHERE aq.agent_id = ANY($1)
+		  AND q.is_enabled = true
+		  AND q.status = 'approved'
+		  AND q.deleted_at IS NULL
+		ORDER BY aq.agent_id ASC, aq.query_id ASC`,
 		agentIDs,
 	)
 	if err != nil {
@@ -368,8 +376,13 @@ func (r *agentRepository) HasQueryAccess(ctx context.Context, agentID, queryID u
 	err := scope.Conn.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1
-			FROM engine_agent_queries
-			WHERE agent_id = $1 AND query_id = $2
+			FROM engine_agent_queries aq
+			JOIN engine_queries q ON q.id = aq.query_id
+			WHERE aq.agent_id = $1
+			  AND aq.query_id = $2
+			  AND q.is_enabled = true
+			  AND q.status = 'approved'
+			  AND q.deleted_at IS NULL
 		)`,
 		agentID,
 		queryID,
@@ -382,7 +395,45 @@ func (r *agentRepository) HasQueryAccess(ctx context.Context, agentID, queryID u
 }
 
 func (r *agentRepository) FindByAPIKey(ctx context.Context, projectID uuid.UUID) ([]*models.Agent, error) {
-	return r.ListByProject(ctx, projectID)
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	rows, err := scope.Conn.Query(ctx, `
+		SELECT id, project_id, name, api_key_encrypted, created_at, updated_at, last_access_at
+		FROM engine_agents
+		WHERE project_id = $1
+		ORDER BY created_at ASC, name ASC`,
+		projectID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find agents by API key: %w", err)
+	}
+	defer rows.Close()
+
+	var agents []*models.Agent
+	for rows.Next() {
+		var agent models.Agent
+		if err := rows.Scan(
+			&agent.ID,
+			&agent.ProjectID,
+			&agent.Name,
+			&agent.APIKeyEncrypted,
+			&agent.CreatedAt,
+			&agent.UpdatedAt,
+			&agent.LastAccessAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan agent for API key lookup: %w", err)
+		}
+		agents = append(agents, &agent)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate agents for API key lookup: %w", err)
+	}
+
+	return agents, nil
 }
 
 func (r *agentRepository) RecordAccess(ctx context.Context, agentID uuid.UUID) error {

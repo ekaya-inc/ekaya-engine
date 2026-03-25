@@ -153,8 +153,6 @@ const OntologyForgePage = () => {
     // Clear callback params from URL immediately to prevent re-processing
     setSearchParams({}, { replace: true });
 
-    if (callbackStatus === 'cancelled') return;
-
     const processCallback = async () => {
       try {
         const response = await engineApi.completeAppCallback(
@@ -162,6 +160,10 @@ const OntologyForgePage = () => {
         );
         if (response.error) {
           toast({ title: 'Error', description: response.error, variant: 'destructive' });
+          return;
+        }
+        if (callbackStatus === 'cancelled') {
+          await fetchConfig();
           return;
         }
         if (callbackAction === 'uninstall') {
@@ -178,7 +180,7 @@ const OntologyForgePage = () => {
       }
     };
 
-    processCallback();
+    void processCallback();
   }, [searchParams, setSearchParams, pid, navigate, toast, fetchConfig]);
 
   const handleUninstall = async () => {

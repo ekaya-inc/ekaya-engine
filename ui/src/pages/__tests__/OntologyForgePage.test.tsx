@@ -20,6 +20,7 @@ vi.mock('../../services/engineApi', () => ({
     listQueries: vi.fn(),
     getInstalledApp: vi.fn(),
     activateApp: vi.fn(),
+    completeAppCallback: vi.fn(),
     uninstallApp: vi.fn(),
   },
 }));
@@ -194,15 +195,18 @@ const setupMocks = (options: {
     },
   });
 
-  vi.mocked(engineApi.activateApp).mockResolvedValue({
+  vi.mocked(engineApi.activateApp).mockResolvedValue({ success: true, data: {} });
+  vi.mocked(engineApi.completeAppCallback).mockResolvedValue({
     success: true,
-    data: {},
+    data: { action: 'activate', status: 'success' },
   });
 };
 
-const renderPage = async () => {
+const renderPage = async (
+  initialEntry = '/projects/proj-1/ontology-forge'
+) => {
   const result = render(
-    <MemoryRouter initialEntries={['/projects/proj-1/ontology-forge']}>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/projects/:pid/ontology-forge" element={<OntologyForgePage />} />
       </Routes>
@@ -446,6 +450,53 @@ describe('OntologyForgePage - Silent activation on ontology completion', () => {
       expect(screen.getByText('Ontology Forge')).toBeInTheDocument();
     });
     expect(engineApi.activateApp).not.toHaveBeenCalled();
+  });
+});
+
+describe('OntologyForgePage - Callback handling', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('completes lifecycle callbacks from the URL', async () => {
+    setupMocks({ isActivated: false });
+
+    await renderPage(
+      '/projects/proj-1/ontology-forge?callback_action=activate&callback_state=test-state&callback_app=ontology-forge&callback_status=success'
+    );
+
+    await waitFor(() => {
+      expect(engineApi.completeAppCallback).toHaveBeenCalledWith(
+        'proj-1',
+        'ontology-forge',
+        'activate',
+        'success',
+        'test-state',
+      );
+    });
+  });
+
+  it('completes cancelled callbacks without navigating away', async () => {
+    setupMocks({ isActivated: true });
+    vi.mocked(engineApi.completeAppCallback).mockResolvedValue({
+      success: true,
+      data: { action: 'uninstall', status: 'cancelled' },
+    });
+
+    await renderPage(
+      '/projects/proj-1/ontology-forge?callback_action=uninstall&callback_state=test-state&callback_app=ontology-forge&callback_status=cancelled'
+    );
+
+    await waitFor(() => {
+      expect(engineApi.completeAppCallback).toHaveBeenCalledWith(
+        'proj-1',
+        'ontology-forge',
+        'uninstall',
+        'cancelled',
+        'test-state',
+      );
+    });
+    expect(mockNavigate).not.toHaveBeenCalledWith('/projects/proj-1');
   });
 });
 

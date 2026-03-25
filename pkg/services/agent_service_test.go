@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/crypto"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
@@ -21,6 +22,7 @@ const agentServiceTestEncryptionKey = "0123456789abcdef0123456789abcdef"
 type mockAgentRepository struct {
 	agents           map[uuid.UUID]*models.Agent
 	agentsByProj     map[uuid.UUID][]*models.Agent
+	findByProj       map[uuid.UUID][]*models.Agent
 	queryAccess      map[uuid.UUID][]uuid.UUID
 	batchQueryAccess map[uuid.UUID][]uuid.UUID
 	hasAccess        map[uuid.UUID]map[uuid.UUID]bool
@@ -36,12 +38,14 @@ type mockAgentRepository struct {
 	findErr          error
 	getAccessCalls   int
 	batchAccessCalls int
+	findCalls        int
 }
 
 func newMockAgentRepository() *mockAgentRepository {
 	return &mockAgentRepository{
 		agents:           make(map[uuid.UUID]*models.Agent),
 		agentsByProj:     make(map[uuid.UUID][]*models.Agent),
+		findByProj:       make(map[uuid.UUID][]*models.Agent),
 		queryAccess:      make(map[uuid.UUID][]uuid.UUID),
 		batchQueryAccess: make(map[uuid.UUID][]uuid.UUID),
 		hasAccess:        make(map[uuid.UUID]map[uuid.UUID]bool),
@@ -56,6 +60,7 @@ func (m *mockAgentRepository) Create(ctx context.Context, agent *models.Agent, q
 	cloned := *agent
 	m.agents[agent.ID] = &cloned
 	m.agentsByProj[agent.ProjectID] = append(m.agentsByProj[agent.ProjectID], &cloned)
+	m.findByProj[agent.ProjectID] = append(m.findByProj[agent.ProjectID], &cloned)
 	if len(queryIDs) > 0 {
 		clonedQueryIDs := append([]uuid.UUID(nil), queryIDs...)
 		m.queryAccess[agent.ID] = clonedQueryIDs
@@ -88,13 +93,7 @@ func (m *mockAgentRepository) ListByProject(ctx context.Context, projectID uuid.
 		return nil, m.listErr
 	}
 
-	agents := m.agentsByProj[projectID]
-	result := make([]*models.Agent, 0, len(agents))
-	for _, agent := range agents {
-		cloned := *agent
-		result = append(result, &cloned)
-	}
-	return result, nil
+	return cloneAgentList(m.agentsByProj[projectID]), nil
 }
 
 func (m *mockAgentRepository) UpdateAPIKey(ctx context.Context, agentID uuid.UUID, encryptedKey string) error {
@@ -109,6 +108,13 @@ func (m *mockAgentRepository) UpdateAPIKey(ctx context.Context, agentID uuid.UUI
 	agent.APIKeyEncrypted = encryptedKey
 
 	for _, agents := range m.agentsByProj {
+		for _, listed := range agents {
+			if listed.ID == agentID {
+				listed.APIKeyEncrypted = encryptedKey
+			}
+		}
+	}
+	for _, agents := range m.findByProj {
 		for _, listed := range agents {
 			if listed.ID == agentID {
 				listed.APIKeyEncrypted = encryptedKey
@@ -136,6 +142,15 @@ func (m *mockAgentRepository) Delete(ctx context.Context, projectID, agentID uui
 		}
 	}
 	m.agentsByProj[projectID] = filtered
+
+	findAgents := m.findByProj[projectID]
+	filteredFind := make([]*models.Agent, 0, len(findAgents))
+	for _, agent := range findAgents {
+		if agent.ID != agentID {
+			filteredFind = append(filteredFind, agent)
+		}
+	}
+	m.findByProj[projectID] = filteredFind
 
 	return nil
 }
@@ -192,7 +207,8 @@ func (m *mockAgentRepository) FindByAPIKey(ctx context.Context, projectID uuid.U
 		return nil, m.findErr
 	}
 
-	return m.ListByProject(ctx, projectID)
+	m.findCalls++
+	return cloneAgentList(m.findByProj[projectID]), nil
 }
 
 func (m *mockAgentRepository) RecordAccess(_ context.Context, _ uuid.UUID) error {
@@ -221,6 +237,20 @@ func TestAgentServiceCreateRequiresAtLeastOneQuery(t *testing.T) {
 	var validationErr *AgentValidationError
 	require.ErrorAs(t, err, &validationErr)
 	assert.Equal(t, "at least one query must be selected", validationErr.Error())
+}
+
+func TestAgentServiceCreateRejectsIneligibleQueries(t *testing.T) {
+	svc, repo := setupAgentServiceTest(t)
+	repo.createErr = apperrors.ErrNotFound
+
+	agent, key, err := svc.Create(context.Background(), uuid.New(), "sales-bot", []uuid.UUID{uuid.New()})
+	require.Error(t, err)
+	assert.Nil(t, agent)
+	assert.Empty(t, key)
+
+	var validationErr *AgentValidationError
+	require.ErrorAs(t, err, &validationErr)
+	assert.Equal(t, agentIneligibleQuerySelectionMessage, validationErr.Error())
 }
 
 func TestAgentServiceCreateAndValidateKey(t *testing.T) {
@@ -254,6 +284,30 @@ func TestAgentServiceValidateKey_NoLegacyFallback(t *testing.T) {
 	assert.Nil(t, agent)
 }
 
+func TestAgentServiceValidateKeyUsesFindByAPIKeyResults(t *testing.T) {
+	svc, repo := setupAgentServiceTest(t)
+	projectID := uuid.New()
+
+	plainKey := agentAPIKeyPrefix + strings.Repeat("a", agentAPIKeyEntropyBytes*2)
+	encryptedKey, err := svc.(*agentService).encryptor.Encrypt(plainKey)
+	require.NoError(t, err)
+
+	agent := &models.Agent{
+		ID:              uuid.New(),
+		ProjectID:       projectID,
+		Name:            "auth-bot",
+		APIKeyEncrypted: encryptedKey,
+	}
+	repo.findByProj[projectID] = []*models.Agent{agent}
+	repo.listErr = errors.New("list should not be used for key validation")
+
+	validated, err := svc.ValidateKey(context.Background(), projectID, plainKey)
+	require.NoError(t, err)
+	require.NotNil(t, validated)
+	assert.Equal(t, agent.ID, validated.ID)
+	assert.Equal(t, 1, repo.findCalls)
+}
+
 func TestAgentServiceGetAndRotateKey(t *testing.T) {
 	svc, _ := setupAgentServiceTest(t)
 	projectID := uuid.New()
@@ -285,6 +339,22 @@ func TestAgentServiceUpdateQueryAccessRequiresAtLeastOneQuery(t *testing.T) {
 	var validationErr *AgentValidationError
 	require.ErrorAs(t, err, &validationErr)
 	assert.Equal(t, "at least one query must be selected", validationErr.Error())
+}
+
+func TestAgentServiceUpdateQueryAccessRejectsIneligibleQueries(t *testing.T) {
+	svc, repo := setupAgentServiceTest(t)
+	projectID := uuid.New()
+	agentID := uuid.New()
+
+	repo.agents[agentID] = &models.Agent{ID: agentID, ProjectID: projectID, Name: "sales-bot"}
+	repo.setAccessErr = apperrors.ErrNotFound
+
+	err := svc.UpdateQueryAccess(context.Background(), projectID, agentID, []uuid.UUID{uuid.New()})
+	require.Error(t, err)
+
+	var validationErr *AgentValidationError
+	require.ErrorAs(t, err, &validationErr)
+	assert.Equal(t, agentIneligibleQuerySelectionMessage, validationErr.Error())
 }
 
 func TestAgentServiceCreateRequiresName(t *testing.T) {
@@ -333,4 +403,13 @@ func assertGeneratedAgentKeyFormat(t *testing.T, key string) {
 
 	_, err := hex.DecodeString(suffix)
 	require.NoError(t, err)
+}
+
+func cloneAgentList(agents []*models.Agent) []*models.Agent {
+	result := make([]*models.Agent, 0, len(agents))
+	for _, agent := range agents {
+		cloned := *agent
+		result = append(result, &cloned)
+	}
+	return result
 }
