@@ -4,6 +4,8 @@
 
 **Goal:** Each application (MCP Server, Ontology Forge, AI Data Liaison) manages its own tool configuration with Developer and User toggles, while the MCP Server page shows a read-only inventory of all tools grouped by role then by app.
 
+**Update 2026-03-25:** Core approved-query ownership has moved. `create_approved_query`, `update_approved_query`, `delete_approved_query`, `list_approved_queries`, and `execute_approved_query` belong to Ontology Forge, not AI Data Liaison. AI Data Liaison retains suggestion/review/history/feedback workflow tools.
+
 **Architecture:** Replace the flat `ToolGroupConfig` toggle model (AddQueryTools, AddOntologyMaintenance, AllowOntologyMaintenance) with per-app toggle definitions. Each app declares its toggles and the tools they control. The backend computes enabled tools by merging all enabled toggles across apps. The API response includes `app_id` per tool and an `appNames` map for display. The MCP tool filter uses the same computation to ensure UI and MCP Server stay in sync.
 
 **Tech Stack:** Go backend (models, services, loadouts), TypeScript/React frontend (types, components, pages)
@@ -34,14 +36,15 @@ MCP Server (always: `health`):
 - Developer > "Direct Database Access": `echo`, `execute`, `query`
 
 Ontology Forge:
-- Developer > "Add Ontology Maintenance Tools": `get_schema`, `search_schema`, `probe_column`, `probe_columns`, `get_column_metadata`, `update_column`, `update_columns`, `update_table`, `update_project_knowledge`, `update_glossary_term`, `create_glossary_term`, `delete_column_metadata`, `delete_table_metadata`, `delete_project_knowledge`, `delete_glossary_term`, `refresh_schema`, `scan_data_changes`, `list_pending_changes`, `approve_change`, `reject_change`, `approve_all_changes`, `list_ontology_questions`, `resolve_ontology_question`, `skip_ontology_question`, `escalate_ontology_question`, `dismiss_ontology_question`
-- User > "Add Ontology Suggestions [RECOMMENDED]": `get_context`, `get_ontology`, `list_glossary`, `get_glossary_sql`
+- Developer > "Add Ontology Maintenance Tools": existing ontology-maintenance tools plus `create_approved_query`, `update_approved_query`, `delete_approved_query`, `list_approved_queries`, `execute_approved_query`
+- User > "Add Ontology Suggestions [RECOMMENDED]": `get_context`, `get_ontology`, `list_approved_queries`, `execute_approved_query`
 
 AI Data Liaison:
-- Developer > "Add Approval Tools": `list_query_suggestions`, `approve_query_suggestion`, `reject_query_suggestion`, `create_approved_query`, `update_approved_query`, `delete_approved_query`, `explain_query`
-- User > "Add Request Tools [RECOMMENDED]": `query`, `sample`, `validate`, `list_approved_queries`, `execute_approved_query`, `suggest_approved_query`, `suggest_query_update`, `get_query_history`, `record_query_feedback`
+- Developer > "Add Approval Tools": query suggestion review tools, glossary write tools, and `explain_query`
+- User > "Add Request Tools [RECOMMENDED]": `query`, `sample`, `validate`, `list_glossary`, `get_glossary_sql`, `suggest_approved_query`, `suggest_query_update`, `get_query_history`, `record_query_feedback`
 
 Note: `query` appears in two toggles (MCP Server developer, AI Data Liaison user). This is intentional — for developers it's raw DB access; for users it's part of the query workflow.
+Note: `list_approved_queries` and `execute_approved_query` intentionally appear in both Ontology Forge toggles so admin/data and user access can each work from their own role path.
 
 ---
 
@@ -69,23 +72,24 @@ Tool assignments per toggle (exact tool names from `AllToolsOrdered`):
 
 // Ontology Forge — Developer > Add Ontology Maintenance Tools
 {"get_schema", "search_schema", "probe_column", "probe_columns", "get_column_metadata",
- "update_column", "update_columns", "update_table", "update_project_knowledge",
- "update_glossary_term", "create_glossary_term",
- "delete_column_metadata", "delete_table_metadata", "delete_project_knowledge", "delete_glossary_term",
+ "update_column", "update_columns", "update_table", "list_project_knowledge", "update_project_knowledge",
+ "delete_column_metadata", "delete_table_metadata", "delete_project_knowledge",
  "refresh_schema", "scan_data_changes", "list_pending_changes",
  "approve_change", "reject_change", "approve_all_changes",
  "list_ontology_questions", "resolve_ontology_question", "skip_ontology_question",
- "escalate_ontology_question", "dismiss_ontology_question"}
+ "escalate_ontology_question", "dismiss_ontology_question",
+ "create_approved_query", "update_approved_query", "delete_approved_query",
+ "list_approved_queries", "execute_approved_query"}
 
 // Ontology Forge — User > Add Ontology Suggestions
-{"get_context", "get_ontology", "list_glossary", "get_glossary_sql"}
+{"get_context", "get_ontology", "list_approved_queries", "execute_approved_query"}
 
 // AI Data Liaison — Developer > Add Approval Tools
 {"list_query_suggestions", "approve_query_suggestion", "reject_query_suggestion",
- "create_approved_query", "update_approved_query", "delete_approved_query", "explain_query"}
+ "create_glossary_term", "update_glossary_term", "delete_glossary_term", "explain_query"}
 
 // AI Data Liaison — User > Add Request Tools
-{"query", "sample", "validate", "list_approved_queries", "execute_approved_query",
+{"query", "sample", "validate", "list_glossary", "get_glossary_sql",
  "suggest_approved_query", "suggest_query_update", "get_query_history", "record_query_feedback"}
 ```
 
@@ -362,21 +366,21 @@ Replace the hardcoded `DataLiaisonTools` check with per-app installation checks 
 - Test that all 49 tools are accounted for (no tool left behind)
 - Test `GetToolAppID` returns correct app for each role
 - Test that `AppToggles` tool lists don't have duplicates within a role
-- Test that every tool in AllToolsOrdered appears in exactly one toggle per role it belongs to (except `query` which appears in 2)
+- Test that every tool in AllToolsOrdered appears in exactly one toggle per role it belongs to (except tools intentionally exposed through both role paths such as `query`, `list_approved_queries`, and `execute_approved_query`)
 
 **Step 2: Test new `ComputeDeveloperTools`**
 
 - All toggles on: should return health + all developer tools (echo, execute, query, all ontology tools, all approval tools)
 - Only MCP Server toggle on: health + echo + execute + query
-- Only Ontology Forge toggle on: health + 26 ontology tools
-- Only AI Data Liaison toggle on: health + 7 approval tools
+- Only Ontology Forge toggle on: health + ontology-maintenance tools + core approved-query management/execution tools
+- Only AI Data Liaison toggle on: health + AI Data Liaison approval workflow tools
 - All toggles off: health only
 
 **Step 3: Test new `ComputeUserTools`**
 
 - All toggles on: health + ontology reading tools + request tools
-- Only Ontology Forge toggle on: health + get_context, get_ontology, list_glossary, get_glossary_sql
-- Only AI Data Liaison toggle on: health + 9 request tools
+- Only Ontology Forge toggle on: health + get_context, get_ontology, list_approved_queries, execute_approved_query
+- Only AI Data Liaison toggle on: health + AI Data Liaison request/glossary/suggestion/history tools
 - All toggles off: health only
 
 **Step 4: Test backward compatibility**
