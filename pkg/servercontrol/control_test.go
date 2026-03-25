@@ -3,6 +3,7 @@ package servercontrol
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -54,6 +55,39 @@ func TestWriteAndReadState(t *testing.T) {
 	}
 	if got.Token != state.Token {
 		t.Fatalf("Token = %q, want %q", got.Token, state.Token)
+	}
+}
+
+func TestWriteStateCreatesMissingStateDir(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "env-only", "config.yaml")
+	state := &State{
+		Status: Status{
+			PID:        5555,
+			StartedAt:  time.Unix(1700000050, 0).UTC(),
+			Version:    "v1.2.3",
+			ConfigPath: configPath,
+			BaseURL:    "http://localhost:3443",
+		},
+		ControlURL: "http://127.0.0.1:40124",
+		Token:      "secret-token",
+	}
+
+	if err := WriteState(configPath, state); err != nil {
+		t.Fatalf("WriteState() failed: %v", err)
+	}
+
+	if _, err := os.Stat(StatePath(configPath)); err != nil {
+		t.Fatalf("runtime state file missing: %v", err)
+	}
+
+	got, err := ReadState(configPath)
+	if err != nil {
+		t.Fatalf("ReadState() failed: %v", err)
+	}
+	if got.ConfigPath != configPath {
+		t.Fatalf("ConfigPath = %q, want %q", got.ConfigPath, configPath)
 	}
 }
 

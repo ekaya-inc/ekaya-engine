@@ -62,7 +62,11 @@ func Run(version string) error {
 	}
 	defer func() { _ = logger.Sync() }()
 
-	logger.Info("Using config.yaml", zap.String("path", cfg.ConfigPath))
+	if cfg.HasConfigFile {
+		logger.Info("Using config file", zap.String("path", cfg.ConfigPath))
+	} else {
+		logger.Info("Using environment/default configuration", zap.String("state_anchor", cfg.ConfigPath))
+	}
 
 	staleStateRemoved, err := runtimectl.EnsureNotRunning(cfg.ConfigPath)
 	if err != nil {
@@ -83,7 +87,7 @@ func Run(version string) error {
 
 	// Validate required credentials key (fail fast)
 	if cfg.ProjectCredentialsKey == "" {
-		return fmt.Errorf("project_credentials_key is required in config.yaml. Generate with: openssl rand -base64 32")
+		return fmt.Errorf("project_credentials_key is required in configuration. Set PROJECT_CREDENTIALS_KEY or config.yaml. Generate with: openssl rand -base64 32")
 	}
 	credentialEncryptor, err := crypto.NewCredentialEncryptor(cfg.ProjectCredentialsKey)
 	if err != nil {
