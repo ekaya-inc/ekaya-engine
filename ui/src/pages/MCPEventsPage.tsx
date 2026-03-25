@@ -25,6 +25,12 @@ import type { MCPAuditEvent, PaginatedResponse } from '../types';
 // Time range presets
 type TimeRange = '24h' | '7d' | '30d' | 'all';
 
+const SECURITY_LEVEL_OPTIONS = [
+  { value: 'normal', label: 'Normal' },
+  { value: 'warning', label: 'Warning' },
+  { value: 'critical', label: 'Critical' },
+] as const;
+
 function getTimeRangeSince(range: TimeRange): string | undefined {
   if (range === 'all') return undefined;
   const now = new Date();
@@ -189,7 +195,7 @@ const MCPEventsPage = () => {
 
   const securityColor = (level: string) => {
     switch (level) {
-      case 'elevated': return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
+      case 'warning': return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
       case 'critical': return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
       default: return 'bg-surface-secondary text-text-secondary';
     }
@@ -246,9 +252,11 @@ const MCPEventsPage = () => {
               className="text-xs px-2 py-1 rounded border border-border-light bg-surface-primary text-text-primary"
             >
               <option value="">All Security Levels</option>
-              <option value="normal">Normal</option>
-              <option value="elevated">Elevated</option>
-              <option value="critical">Critical</option>
+              {SECURITY_LEVEL_OPTIONS.map(({ value, label }) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
             </select>
             <input
               type="text"
