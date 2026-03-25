@@ -25,7 +25,7 @@ import {
 } from "../components/ui/Card";
 import { useDatasourceConnection } from "../contexts/DatasourceConnectionContext";
 import engineApi from "../services/engineApi";
-import type { RelationshipDetail, RelationshipType, DatasourceSchema } from "../types";
+import type { RelationshipDetail, RelationshipProvenance, RelationshipType, DatasourceSchema } from "../types";
 
 /**
  * RelationshipsPage - Display and manage data relationships
@@ -197,6 +197,8 @@ const RelationshipsPage = () => {
         return <Lightbulb className="h-4 w-4 text-amber-500" />;
       case 'manual':
         return <Pencil className="h-4 w-4 text-green-500" />;
+      case 'review':
+        return <Circle className="h-4 w-4 text-slate-500" />;
     }
   };
 
@@ -209,6 +211,30 @@ const RelationshipsPage = () => {
         return 'Inferred';
       case 'manual':
         return 'Manual';
+      case 'review':
+        return 'Review';
+    }
+  };
+
+  const getProvenanceLabel = (source: RelationshipProvenance): string => {
+    switch (source) {
+      case 'manual':
+        return 'Manual';
+      case 'mcp':
+        return 'MCP';
+      case 'inferred':
+        return 'Inferred';
+    }
+  };
+
+  const getProvenanceBadgeClasses = (source: RelationshipProvenance): string => {
+    switch (source) {
+      case 'manual':
+        return 'bg-green-100 text-green-700';
+      case 'mcp':
+        return 'bg-orange-100 text-orange-700';
+      case 'inferred':
+        return 'bg-slate-100 text-slate-700';
     }
   };
 
@@ -509,6 +535,7 @@ const RelationshipsPage = () => {
                 <option value="fk">Foreign Key</option>
                 <option value="inferred">Inferred</option>
                 <option value="manual">Manual</option>
+                <option value="review">Review</option>
               </select>
             </div>
             <div className="w-48">
@@ -618,12 +645,19 @@ const RelationshipsPage = () => {
                               Cardinality: {rel.cardinality}
                             </div>
                           )}
+                          <div className="mt-1 text-xs text-text-secondary">
+                            Provenance: {getProvenanceLabel(rel.effective_source)}
+                          </div>
                         </div>
 
-                        {/* Type Badge */}
-                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                          {getTypeLabel(rel.relationship_type)}
-                        </span>
+                        <div className="flex flex-col items-end gap-1">
+                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                            {getTypeLabel(rel.relationship_type)}
+                          </span>
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getProvenanceBadgeClasses(rel.effective_source)}`}>
+                            {getProvenanceLabel(rel.effective_source)}
+                          </span>
+                        </div>
 
                         {/* Remove Button - appears on hover */}
                         <button
