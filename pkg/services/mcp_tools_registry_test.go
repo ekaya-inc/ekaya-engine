@@ -84,3 +84,25 @@ func TestListQuerySuggestionsDescriptionMentionsRejected(t *testing.T) {
 	require.NotNil(t, spec)
 	assert.Contains(t, spec.Description, "rejected")
 }
+
+func TestGlossaryToolDescriptionsStayAlignedAcrossRegistryAndLoadouts(t *testing.T) {
+	expected := map[string]string{
+		"list_glossary":        "List business glossary terms with definitions and SQL availability",
+		"get_glossary_sql":     "Get a business term's glossary entry, including SQL when available",
+		"create_glossary_term": "Create a business glossary term with optional SQL",
+		"update_glossary_term": "Create or update a business glossary term with optional SQL and aliases",
+	}
+
+	registryDescriptions := make(map[string]string, len(ToolRegistry))
+	for _, tool := range ToolRegistry {
+		registryDescriptions[tool.Name] = tool.Description
+	}
+
+	for toolName, description := range expected {
+		assert.Equal(t, description, registryDescriptions[toolName], "registry description mismatch for %s", toolName)
+
+		spec := GetToolSpec(toolName)
+		require.NotNil(t, spec)
+		assert.Equal(t, description, spec.Description, "loadout description mismatch for %s", toolName)
+	}
+}

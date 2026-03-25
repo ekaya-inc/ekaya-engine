@@ -36,7 +36,8 @@ func registerListGlossaryTool(s *server.MCPServer, deps *GlossaryToolDeps) {
 		"list_glossary",
 		mcp.WithDescription(
 			"List all business glossary terms for the project. "+
-				"Returns term names, definitions, and aliases for discovery. "+
+				"Returns term names, definitions, aliases, and whether each term has a SQL definition. "+
+				"Definition-only terms are valid and may not have SQL. "+
 				"Use this to explore available business terms like 'Revenue', 'Active User', 'GMV', etc. "+
 				"To get the SQL definition for a specific term, use get_glossary_sql.",
 		),
@@ -90,9 +91,10 @@ func registerGetGlossarySQLTool(s *server.MCPServer, deps *GlossaryToolDeps) {
 	tool := mcp.NewTool(
 		"get_glossary_sql",
 		mcp.WithDescription(
-			"Get the SQL definition for a specific business term. "+
+			"Get the glossary entry for a specific business term, including SQL when available. "+
 				"Accepts term name or alias (e.g., 'Revenue' or 'Total Revenue'). "+
-				"Returns the complete SQL definition, output columns, and metadata needed for query composition. "+
+				"Returns has_sql, defining_sql, output columns, and metadata needed for query composition. "+
+				"Valid terms may have has_sql = false with an empty defining_sql. "+
 				"Use list_glossary first to discover available terms.",
 		),
 		mcp.WithString(
@@ -152,20 +154,22 @@ func registerGetGlossarySQLTool(s *server.MCPServer, deps *GlossaryToolDeps) {
 }
 
 // listGlossaryResponse is the lightweight response format for list_glossary tool.
-// Used for discovery - includes term, definition, aliases, and enrichment status.
+// Used for discovery - includes term, definition, aliases, SQL availability, and enrichment status.
 type listGlossaryResponse struct {
 	Term             string   `json:"term"`
 	Definition       string   `json:"definition"`
+	HasSQL           bool     `json:"has_sql"`
 	Aliases          []string `json:"aliases,omitempty"`
 	EnrichmentStatus string   `json:"enrichment_status,omitempty"` // "pending", "success", "failed"
 	EnrichmentError  string   `json:"enrichment_error,omitempty"`  // Error message if enrichment failed
 }
 
 // getGlossarySQLResponse is the full response format for get_glossary_sql tool.
-// Includes all fields needed for query composition plus enrichment status.
+// Includes all fields needed for query composition plus SQL availability and enrichment status.
 type getGlossarySQLResponse struct {
 	Term             string                `json:"term"`
 	Definition       string                `json:"definition"`
+	HasSQL           bool                  `json:"has_sql"`
 	DefiningSQL      string                `json:"defining_sql"`
 	BaseTable        string                `json:"base_table,omitempty"`
 	OutputColumns    []models.OutputColumn `json:"output_columns,omitempty"`
@@ -179,6 +183,7 @@ func toListGlossaryResponse(term *models.BusinessGlossaryTerm) listGlossaryRespo
 	return listGlossaryResponse{
 		Term:             term.Term,
 		Definition:       term.Definition,
+		HasSQL:           glossaryTermHasSQL(term),
 		Aliases:          term.Aliases,
 		EnrichmentStatus: term.EnrichmentStatus,
 		EnrichmentError:  term.EnrichmentError,
@@ -190,6 +195,7 @@ func toGetGlossarySQLResponse(term *models.BusinessGlossaryTerm) getGlossarySQLR
 	return getGlossarySQLResponse{
 		Term:             term.Term,
 		Definition:       term.Definition,
+		HasSQL:           glossaryTermHasSQL(term),
 		DefiningSQL:      term.DefiningSQL,
 		BaseTable:        term.BaseTable,
 		OutputColumns:    term.OutputColumns,
@@ -197,6 +203,10 @@ func toGetGlossarySQLResponse(term *models.BusinessGlossaryTerm) getGlossarySQLR
 		EnrichmentStatus: term.EnrichmentStatus,
 		EnrichmentError:  term.EnrichmentError,
 	}
+}
+
+func glossaryTermHasSQL(term *models.BusinessGlossaryTerm) bool {
+	return trimString(term.DefiningSQL) != ""
 }
 
 // registerCreateGlossaryTermTool adds the create_glossary_term tool for creating new business terms.
@@ -207,8 +217,9 @@ func registerCreateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 		"create_glossary_term",
 		mcp.WithDescription(
 			"Create a new business glossary term. "+
-				"If SQL is provided, it will be validated before saving. "+
-				"Use this to add new business metrics like 'Revenue', 'Active Users', etc.",
+				"SQL is optional; if provided, it will be validated before saving. "+
+				"SQL-backed terms are typically single-row metric-style definitions. "+
+				"Use this to add business terms like 'Revenue', 'Active Users', or definition-only concepts.",
 		),
 		mcp.WithString("term", mcp.Required(),
 			mcp.Description("The business term name (e.g., 'Daily Active Users')")),
@@ -308,7 +319,8 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 		mcp.WithDescription(
 			"Create or update a business glossary term with upsert semantics. "+
 				"If a term with the given name exists, it will be updated. Otherwise, a new term will be created. "+
-				"The term name is the upsert key. All parameters except 'term' are optional. "+
+				"The term name is the upsert key. Definition is required when creating a new term; SQL is optional, and SQL-backed terms are typically single-row metric-style definitions. "+
+				"All parameters except 'term' are optional for updates. "+
 				"Use this to add business definitions that AI agents discover during analysis.",
 		),
 		mcp.WithString(
@@ -322,7 +334,7 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 		),
 		mcp.WithString(
 			"sql",
-			mcp.Description("SQL pattern to calculate the term (defining_sql)"),
+			mcp.Description("Optional SQL definition for the term (typically a single-row metric-style query)"),
 		),
 		mcp.WithArray(
 			"aliases",
