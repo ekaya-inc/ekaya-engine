@@ -216,6 +216,91 @@ func TestOntologyImportService_ImportBundle_PreservesExistingAgents(t *testing.T
 	assert.Equal(t, 1, count)
 }
 
+func TestOntologyImportService_ImportBundle_DefaultsLegacyRelationshipProvenanceToInferred(t *testing.T) {
+	tc := setupSchemaServiceTest(t)
+	cleanupOntologyImportTestState(t, tc)
+	defer cleanupOntologyImportTestState(t, tc)
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	datasource := &models.Datasource{
+		ID:             tc.dsID,
+		ProjectID:      tc.projectID,
+		Name:           "Primary Datasource",
+		DatasourceType: "postgres",
+	}
+	usersTable := createImportTestTable(t, tc, ctx, datasource.ID, "public", "users", false)
+	createImportTestColumn(t, tc, ctx, usersTable.ID, "id", "uuid", 1, false)
+	ordersTable := createImportTestTable(t, tc, ctx, datasource.ID, "public", "orders", false)
+	createImportTestColumn(t, tc, ctx, ordersTable.ID, "id", "uuid", 1, false)
+	createImportTestColumn(t, tc, ctx, ordersTable.ID, "user_id", "uuid", 2, false)
+
+	bundle := models.OntologyExportBundle{
+		Format:  models.OntologyExportFormat,
+		Version: models.OntologyExportVersion,
+		Project: models.OntologyExportProject{
+			Name: "Ontology Import Test Project",
+		},
+		Datasources: []models.OntologyExportDatasource{
+			{
+				Key:            ontologyImportDatasourceKey,
+				Name:           datasource.Name,
+				DatasourceType: datasource.DatasourceType,
+				SelectedSchema: models.OntologyExportSelectedSchema{
+					Tables: []models.OntologyExportTable{
+						{
+							SchemaName: "public",
+							TableName:  "users",
+							Columns: []models.OntologyExportColumn{
+								{ColumnName: "id", DataType: "uuid", IsPrimaryKey: true, OrdinalPosition: 1},
+							},
+						},
+						{
+							SchemaName: "public",
+							TableName:  "orders",
+							Columns: []models.OntologyExportColumn{
+								{ColumnName: "id", DataType: "uuid", IsPrimaryKey: true, OrdinalPosition: 1},
+								{ColumnName: "user_id", DataType: "uuid", OrdinalPosition: 2},
+							},
+						},
+					},
+					Relationships: []models.OntologyExportRelationship{
+						{
+							Source: models.OntologyExportColumnRef{
+								Table:      models.OntologyExportTableRef{SchemaName: "public", TableName: "orders"},
+								ColumnName: "user_id",
+							},
+							Target: models.OntologyExportColumnRef{
+								Table:      models.OntologyExportTableRef{SchemaName: "public", TableName: "users"},
+								ColumnName: "id",
+							},
+							RelationshipType: models.RelationshipTypeInferred,
+							Cardinality:      models.CardinalityNTo1,
+							Confidence:       0.97,
+							IsValidated:      true,
+						},
+					},
+				},
+			},
+		},
+		Security: models.OntologyExportSecurity{},
+	}
+
+	payload, err := json.Marshal(bundle)
+	require.NoError(t, err)
+
+	svc := newTestOntologyImportService(tc.projectID, tc.repo, datasource)
+	_, err = svc.ImportBundle(ctx, tc.projectID, datasource.ID, payload)
+	require.NoError(t, err)
+
+	relationships, err := tc.repo.ListRelationshipsByDatasource(ctx, tc.projectID, datasource.ID)
+	require.NoError(t, err)
+	require.Len(t, relationships, 1)
+	assert.Equal(t, models.ProvenanceInferred, relationships[0].Source)
+	assert.Nil(t, relationships[0].LastEditSource)
+}
+
 func newTestOntologyImportService(projectID uuid.UUID, schemaRepo ontologyImportSchemaRepository, datasources ...*models.Datasource) *ontologyImportService {
 	project := &models.Project{
 		ID:   projectID,

@@ -95,6 +95,8 @@ type OntologyExportRelationship struct {
 	IsValidated      bool                    `json:"is_validated"`
 	Validation       *ValidationResults      `json:"validation,omitempty"`
 	IsApproved       *bool                   `json:"is_approved,omitempty"`
+	ProvenanceSource string                  `json:"provenance_source,omitempty"`
+	LastEditSource   *string                 `json:"last_edit_source,omitempty"`
 }
 
 // OntologyExportOntology contains semantic project state.

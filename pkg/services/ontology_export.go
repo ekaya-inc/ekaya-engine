@@ -426,6 +426,8 @@ func buildExportRelationships(
 			IsValidated:      rel.IsValidated,
 			Validation:       rel.ValidationResults,
 			IsApproved:       rel.IsApproved,
+			ProvenanceSource: rel.Source,
+			LastEditSource:   rel.LastEditSource,
 		})
 	}
 

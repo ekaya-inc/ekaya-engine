@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
@@ -441,6 +442,7 @@ func TestSchemaHandler_GetRelationships_Success(t *testing.T) {
 func TestSchemaHandler_AddRelationship_Success(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
+	userID := uuid.New()
 
 	service := &mockSchemaService{
 		relationship: &models.SchemaRelationship{
@@ -461,6 +463,10 @@ func TestSchemaHandler_AddRelationship_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/relationships", bytes.NewBufferString(body))
 	req.SetPathValue("pid", projectID.String())
 	req.SetPathValue("dsid", datasourceID.String())
+	req = req.WithContext(context.WithValue(req.Context(), auth.ClaimsKey, &auth.Claims{
+		ProjectID:        projectID.String(),
+		RegisteredClaims: jwt.RegisteredClaims{Subject: userID.String()},
+	}))
 
 	rec := httptest.NewRecorder()
 	handler.AddRelationship(rec, req)
@@ -476,11 +482,16 @@ func TestSchemaHandler_AddRelationship_Conflict(t *testing.T) {
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
+	userID := uuid.New()
 
 	body := `{"source_table": "public.orders", "source_column": "user_id", "target_table": "public.users", "target_column": "id"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/relationships", bytes.NewBufferString(body))
 	req.SetPathValue("pid", projectID.String())
 	req.SetPathValue("dsid", datasourceID.String())
+	req = req.WithContext(context.WithValue(req.Context(), auth.ClaimsKey, &auth.Claims{
+		ProjectID:        projectID.String(),
+		RegisteredClaims: jwt.RegisteredClaims{Subject: userID.String()},
+	}))
 
 	rec := httptest.NewRecorder()
 	handler.AddRelationship(rec, req)
@@ -516,11 +527,16 @@ func TestSchemaHandler_RemoveRelationship_Success(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 	relID := uuid.New()
+	userID := uuid.New()
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/relationships/"+relID.String(), nil)
 	req.SetPathValue("pid", projectID.String())
 	req.SetPathValue("dsid", datasourceID.String())
 	req.SetPathValue("relId", relID.String())
+	req = req.WithContext(context.WithValue(req.Context(), auth.ClaimsKey, &auth.Claims{
+		ProjectID:        projectID.String(),
+		RegisteredClaims: jwt.RegisteredClaims{Subject: userID.String()},
+	}))
 
 	rec := httptest.NewRecorder()
 	handler.RemoveRelationship(rec, req)
@@ -537,11 +553,16 @@ func TestSchemaHandler_RemoveRelationship_NotFound(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 	relID := uuid.New()
+	userID := uuid.New()
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/relationships/"+relID.String(), nil)
 	req.SetPathValue("pid", projectID.String())
 	req.SetPathValue("dsid", datasourceID.String())
 	req.SetPathValue("relId", relID.String())
+	req = req.WithContext(context.WithValue(req.Context(), auth.ClaimsKey, &auth.Claims{
+		ProjectID:        projectID.String(),
+		RegisteredClaims: jwt.RegisteredClaims{Subject: userID.String()},
+	}))
 
 	rec := httptest.NewRecorder()
 	handler.RemoveRelationship(rec, req)

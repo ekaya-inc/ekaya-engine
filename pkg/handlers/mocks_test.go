@@ -320,6 +320,22 @@ func (m *mockSchemaService) AddManualRelationship(ctx context.Context, projectID
 	}, nil
 }
 
+func (m *mockSchemaService) UpdateRelationship(ctx context.Context, projectID, relationshipID uuid.UUID, req *models.UpdateRelationshipRequest) (*models.SchemaRelationship, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.relationship != nil {
+		return m.relationship, nil
+	}
+	return &models.SchemaRelationship{
+		ID:               relationshipID,
+		ProjectID:        projectID,
+		RelationshipType: "inferred",
+		Cardinality:      "1:1",
+		Confidence:       1.0,
+	}, nil
+}
+
 func (m *mockSchemaService) RemoveRelationship(ctx context.Context, projectID, relationshipID uuid.UUID) error {
 	return m.err
 }

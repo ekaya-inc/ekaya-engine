@@ -1066,6 +1066,70 @@ func TestSchemaService_AddManualRelationship_Success(t *testing.T) {
 	}
 }
 
+func TestSchemaService_AddManualRelationship_UsesRequestedCardinality(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	sourceTableID := uuid.New()
+	targetTableID := uuid.New()
+	sourceColumnID := uuid.New()
+	targetColumnID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{
+			{
+				ID:           sourceTableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "orders",
+			},
+			{
+				ID:           targetTableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "users",
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            sourceColumnID,
+				ProjectID:     projectID,
+				SchemaTableID: sourceTableID,
+				ColumnName:    "user_id",
+				DataType:      "uuid",
+			},
+			{
+				ID:            targetColumnID,
+				ProjectID:     projectID,
+				SchemaTableID: targetTableID,
+				ColumnName:    "id",
+				DataType:      "uuid",
+				IsPrimaryKey:  true,
+			},
+		},
+	}
+
+	service := newTestSchemaService(repo, &mockDatasourceService{}, &mockSchemaAdapterFactory{})
+
+	req := &models.AddRelationshipRequest{
+		SourceTableName:  "orders",
+		SourceColumnName: "user_id",
+		TargetTableName:  "users",
+		TargetColumnName: "id",
+		Cardinality:      models.Cardinality1ToN,
+	}
+
+	rel, err := service.AddManualRelationship(context.Background(), projectID, datasourceID, req)
+	if err != nil {
+		t.Fatalf("AddManualRelationship failed: %v", err)
+	}
+
+	if rel.Cardinality != models.Cardinality1ToN {
+		t.Fatalf("expected cardinality %q, got %q", models.Cardinality1ToN, rel.Cardinality)
+	}
+}
+
 func TestSchemaService_AddManualRelationship_WithSchemaPrefix(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -1465,6 +1529,48 @@ func TestSchemaService_RemoveRelationship_WrongProject(t *testing.T) {
 	}
 	if !errors.Is(err, apperrors.ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got: %v", err)
+	}
+}
+
+func TestSchemaService_UpdateRelationship_PreservesTypeAndAppliesRequestedFields(t *testing.T) {
+	projectID := uuid.New()
+	relationshipID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		relationships: []*models.SchemaRelationship{
+			{
+				ID:               relationshipID,
+				ProjectID:        projectID,
+				RelationshipType: models.RelationshipTypeInferred,
+				Cardinality:      models.CardinalityNTo1,
+			},
+		},
+	}
+
+	service := newTestSchemaService(repo, &mockDatasourceService{}, &mockSchemaAdapterFactory{})
+
+	isApproved := true
+	req := &models.UpdateRelationshipRequest{
+		Cardinality: &[]string{models.Cardinality1To1}[0],
+		IsApproved:  &isApproved,
+	}
+
+	rel, err := service.UpdateRelationship(context.Background(), projectID, relationshipID, req)
+	if err != nil {
+		t.Fatalf("UpdateRelationship failed: %v", err)
+	}
+
+	if rel.RelationshipType != models.RelationshipTypeInferred {
+		t.Fatalf("expected relationship type to remain %q, got %q", models.RelationshipTypeInferred, rel.RelationshipType)
+	}
+	if rel.Cardinality != models.Cardinality1To1 {
+		t.Fatalf("expected cardinality %q, got %q", models.Cardinality1To1, rel.Cardinality)
+	}
+	if rel.IsApproved == nil || !*rel.IsApproved {
+		t.Fatalf("expected is_approved=true, got %v", rel.IsApproved)
+	}
+	if len(repo.upsertedRelationships) != 1 {
+		t.Fatalf("expected 1 upserted relationship, got %d", len(repo.upsertedRelationships))
 	}
 }
 

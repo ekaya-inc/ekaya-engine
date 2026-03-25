@@ -523,8 +523,8 @@ func (s *ontologyImportService) insertRelationships(ctx context.Context, tx pgx.
 			INSERT INTO engine_schema_relationships (
 				id, project_id, source_table_id, source_column_id, target_table_id, target_column_id,
 				relationship_type, cardinality, confidence, inference_method, is_validated,
-				validation_results, is_approved, created_at, updated_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14)
+				validation_results, is_approved, source, last_edit_source, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $16)
 			ON CONFLICT (source_column_id, target_column_id)
 				WHERE deleted_at IS NULL
 			DO UPDATE SET
@@ -535,12 +535,14 @@ func (s *ontologyImportService) insertRelationships(ctx context.Context, tx pgx.
 				is_validated = EXCLUDED.is_validated,
 				validation_results = EXCLUDED.validation_results,
 				is_approved = EXCLUDED.is_approved,
+				source = EXCLUDED.source,
+				last_edit_source = EXCLUDED.last_edit_source,
 				deleted_at = NULL,
 				updated_at = EXCLUDED.updated_at
 		`, uuid.New(), plan.project.ID, sourceTableID, sourceID, targetTableID, targetID,
 			relationship.RelationshipType, relationship.Cardinality, relationship.Confidence,
 			relationship.InferenceMethod, relationship.IsValidated, validationJSON, relationship.IsApproved,
-			plan.importedAt); err != nil {
+			normalizeRelationshipBundleSource(relationship.ProvenanceSource), relationship.LastEditSource, plan.importedAt); err != nil {
 			return fmt.Errorf("insert relationship %s -> %s: %w", exportColumnRefKey(relationship.Source), exportColumnRefKey(relationship.Target), err)
 		}
 	}
@@ -935,4 +937,11 @@ func normalizeBundleSource(source string) string {
 		return source
 	}
 	return models.ProvenanceManual
+}
+
+func normalizeRelationshipBundleSource(source string) string {
+	if models.ProvenanceSource(source).IsValid() {
+		return source
+	}
+	return models.ProvenanceInferred
 }
