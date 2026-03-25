@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
@@ -263,6 +264,48 @@ func TestKnowledgeRepository_Update_NotFound(t *testing.T) {
 	err := tc.repo.Update(ctx, fact)
 	if err == nil {
 		t.Error("expected error for non-existent ID")
+	}
+}
+
+// ============================================================================
+// GetByID Tests
+// ============================================================================
+
+func TestKnowledgeRepository_GetByID_Success(t *testing.T) {
+	tc := setupKnowledgeTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	created := tc.createTestFact(ctx, models.FactTypeTerminology, "Application Programming Interface")
+
+	retrieved, err := tc.repo.GetByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+
+	if retrieved.ID != created.ID {
+		t.Errorf("expected ID %v, got %v", created.ID, retrieved.ID)
+	}
+	if retrieved.Value != created.Value {
+		t.Errorf("expected value %q, got %q", created.Value, retrieved.Value)
+	}
+}
+
+func TestKnowledgeRepository_GetByID_NotFound(t *testing.T) {
+	tc := setupKnowledgeTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	_, err := tc.repo.GetByID(ctx, uuid.New())
+	if err == nil {
+		t.Fatal("expected not found error")
+	}
+	if err != apperrors.ErrNotFound {
+		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
 

@@ -420,6 +420,33 @@ func TestUpdateProjectKnowledgeTool_Integration_InvalidCategory(t *testing.T) {
 	assert.Contains(t, errorResp.Message, "category")
 }
 
+func TestUpdateProjectKnowledgeTool_Integration_ProjectOverviewReadOnly(t *testing.T) {
+	tc := setupKnowledgeToolIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	result, err := tc.callTool(ctx, "update_project_knowledge", map[string]any{
+		"fact":     "Retail analytics platform",
+		"category": "project_overview",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.IsError, "should return error result")
+
+	var errorResp ErrorResponse
+	require.Len(t, result.Content, 1)
+	err = json.Unmarshal([]byte(result.Content[0].(mcp.TextContent).Text), &errorResp)
+	require.NoError(t, err)
+
+	assert.True(t, errorResp.Error)
+	assert.Equal(t, "invalid_parameters", errorResp.Code)
+	assert.Contains(t, errorResp.Message, "project_overview")
+	assert.Contains(t, errorResp.Message, "read-only")
+}
+
 func TestUpdateProjectKnowledgeTool_Integration_InvalidFactID(t *testing.T) {
 	tc := setupKnowledgeToolIntegrationTest(t)
 	tc.cleanup()
@@ -447,6 +474,44 @@ func TestUpdateProjectKnowledgeTool_Integration_InvalidFactID(t *testing.T) {
 	assert.Equal(t, "invalid_parameters", errorResp.Code)
 	assert.Contains(t, errorResp.Message, "fact_id")
 	assert.Contains(t, errorResp.Message, "UUID")
+}
+
+func TestDeleteProjectKnowledgeTool_Integration_ProjectOverviewReadOnly(t *testing.T) {
+	tc := setupKnowledgeToolIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	fact := &models.KnowledgeFact{
+		ProjectID: tc.projectID,
+		FactType:  "project_overview",
+		Value:     "Retail analytics platform",
+	}
+	err := tc.knowledgeRepository.Create(ctx, fact)
+	require.NoError(t, err)
+
+	result, err := tc.callTool(ctx, "delete_project_knowledge", map[string]any{
+		"fact_id": fact.ID.String(),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.IsError, "should return error result")
+
+	var errorResp ErrorResponse
+	require.Len(t, result.Content, 1)
+	err = json.Unmarshal([]byte(result.Content[0].(mcp.TextContent).Text), &errorResp)
+	require.NoError(t, err)
+
+	assert.True(t, errorResp.Error)
+	assert.Equal(t, "invalid_parameters", errorResp.Code)
+	assert.Contains(t, errorResp.Message, "project_overview")
+	assert.Contains(t, errorResp.Message, "read-only")
+
+	retrieved, err := tc.knowledgeRepository.GetByID(ctx, fact.ID)
+	require.NoError(t, err)
+	assert.Equal(t, fact.ID, retrieved.ID, "project_overview should remain after rejected delete")
 }
 
 // ============================================================================

@@ -74,11 +74,11 @@ var AllToolsOrdered = []ToolSpec{
 	{Name: "update_columns", Description: "Batch update metadata for multiple columns (up to 50) in a single transaction"},
 	{Name: "update_glossary_term", Description: "Create or update a business glossary term with upsert semantics (definition, sql, aliases)"},
 	{Name: "list_project_knowledge", Description: "List all project knowledge facts with fact IDs for discovery and maintenance"},
-	{Name: "update_project_knowledge", Description: "Create or update domain facts (terminology, business rules, enumerations, conventions)"},
+	{Name: "update_project_knowledge", Description: "Create or update writable domain facts (terminology, business rules, enumerations, conventions); project_overview is read-only here"},
 	{Name: "update_table", Description: "Add or update table-level metadata (description, usage notes, ephemeral status, alternatives)"},
 	{Name: "delete_column_metadata", Description: "Clear custom metadata for a column, reverting to schema-only information"},
 	{Name: "delete_glossary_term", Description: "Delete a business glossary term that's no longer relevant"},
-	{Name: "delete_project_knowledge", Description: "Remove incorrect or outdated domain facts"},
+	{Name: "delete_project_knowledge", Description: "Remove writable domain facts by fact_id; project_overview is read-only here"},
 	{Name: "delete_table_metadata", Description: "Clear custom metadata for a table, removing semantic enrichment"},
 
 	// Schema Management (Living Ontology)

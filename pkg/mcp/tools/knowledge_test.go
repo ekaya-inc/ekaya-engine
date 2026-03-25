@@ -24,6 +24,18 @@ type mockKnowledgeRepository struct {
 	err   error
 }
 
+func (m *mockKnowledgeRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.KnowledgeFact, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	for _, f := range m.facts {
+		if f.ID == id {
+			return f, nil
+		}
+	}
+	return nil, apperrors.ErrNotFound
+}
+
 func (m *mockKnowledgeRepository) Create(ctx context.Context, fact *models.KnowledgeFact) error {
 	if m.err != nil {
 		return m.err
