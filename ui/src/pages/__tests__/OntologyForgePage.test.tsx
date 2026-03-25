@@ -9,7 +9,6 @@ import OntologyForgePage from '../OntologyForgePage';
 
 vi.mock('../../services/engineApi', () => ({
   default: {
-    completeAppCallback: vi.fn(),
     getMCPConfig: vi.fn(),
     listDataSources: vi.fn(),
     getAIConfig: vi.fn(),
