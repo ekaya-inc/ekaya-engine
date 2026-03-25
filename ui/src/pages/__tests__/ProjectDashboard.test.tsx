@@ -3,9 +3,12 @@ import { useEffect } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as authToken from '../../lib/auth-token';
+import type { AuditSummary } from '../../types/audit';
 import ProjectDashboard from '../ProjectDashboard';
 
 const mockNavigate = vi.fn();
+const mockGetAuditSummary = vi.fn();
 
 type MockInstalledApp = {
   app_id: string;
@@ -47,6 +50,16 @@ vi.mock('../../services/ontologyService', () => ({
   },
 }));
 
+vi.mock('../../lib/auth-token', () => ({
+  getUserRoles: vi.fn(() => ['admin']),
+}));
+
+vi.mock('../../services/engineApi', () => ({
+  default: {
+    getAuditSummary: (...args: unknown[]) => mockGetAuditSummary(...args),
+  },
+}));
+
 vi.mock('../../components/AIConfigWidget', () => ({
   default: function AIConfigWidgetMock(
     { onConfigChange }: { onConfigChange: (option: 'byok') => void }
@@ -69,12 +82,30 @@ const renderDashboard = () => {
   );
 };
 
+const createAuditSummary = (overrides: Partial<AuditSummary> = {}): AuditSummary => ({
+  total_query_executions: 0,
+  failed_query_count: 0,
+  ontology_changes_count: 0,
+  pending_schema_changes: 0,
+  pending_query_approvals: 0,
+  mcp_events_count: 0,
+  open_alerts_critical: 0,
+  open_alerts_warning: 0,
+  open_alerts_info: 0,
+  ...overrides,
+});
+
 describe('ProjectDashboard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockInstalledApps = [{ app_id: 'ontology-forge' }];
     mockIsConnected = true;
     mockHasSelectedTables = true;
+    vi.mocked(authToken.getUserRoles).mockReturnValue(['admin']);
+    mockGetAuditSummary.mockResolvedValue({
+      success: true,
+      data: createAuditSummary(),
+    });
   });
 
   it('does not show the Glossary tile when AI Data Liaison is not installed', async () => {
@@ -116,6 +147,85 @@ describe('ProjectDashboard', () => {
     expect(auditLogTile).toBeInTheDocument();
     expect(pendingQueriesTile.compareDocumentPosition(auditLogTile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(intelligenceSection as HTMLElement).queryByText('Audit Log')).not.toBeInTheDocument();
+  });
+
+  it('shows a pending queries badge count when pending suggestions exist', async () => {
+    mockInstalledApps = [{ app_id: 'ontology-forge' }, { app_id: 'ai-data-liaison' }];
+    mockGetAuditSummary.mockResolvedValue({
+      success: true,
+      data: createAuditSummary({ pending_query_approvals: 3 }),
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('3 pending query suggestions')).toBeInTheDocument();
+    });
+
+    expect(mockGetAuditSummary).toHaveBeenCalledWith('proj-1');
+  });
+
+  it('does not show a pending queries badge when there are no pending suggestions', async () => {
+    mockInstalledApps = [{ app_id: 'ontology-forge' }, { app_id: 'ai-data-liaison' }];
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Pending Queries')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByLabelText(/pending query suggestion/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the pending queries tile visible when the badge count fetch fails', async () => {
+    mockInstalledApps = [{ app_id: 'ontology-forge' }, { app_id: 'ai-data-liaison' }];
+    mockGetAuditSummary.mockRejectedValue(new Error('network error'));
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Pending Queries')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByLabelText(/pending query suggestion/)).not.toBeInTheDocument();
+  });
+
+  it('does not fetch the pending queries badge for user-only sessions', async () => {
+    mockInstalledApps = [{ app_id: 'ontology-forge' }, { app_id: 'ai-data-liaison' }];
+    vi.mocked(authToken.getUserRoles).mockReturnValue(['user']);
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Pending Queries')).toBeInTheDocument();
+    });
+
+    expect(mockGetAuditSummary).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText(/pending query suggestion/)).not.toBeInTheDocument();
+  });
+
+  it('renders the dashboard before the pending queries badge resolves', async () => {
+    mockInstalledApps = [{ app_id: 'ontology-forge' }, { app_id: 'ai-data-liaison' }];
+
+    let resolveSummary: ((value: { success: boolean; data: AuditSummary }) => void) | undefined;
+    mockGetAuditSummary.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSummary = resolve;
+      })
+    );
+
+    renderDashboard();
+
+    expect(screen.getByText('Pending Queries')).toBeInTheDocument();
+    expect(screen.queryByLabelText(/pending query suggestion/)).not.toBeInTheDocument();
+
+    resolveSummary?.({
+      success: true,
+      data: createAuditSummary({ pending_query_approvals: 2 }),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('2 pending query suggestions')).toBeInTheDocument();
+    });
   });
 
   it('navigates to the glossary page from the AI Data Liaison tile', async () => {
@@ -177,10 +287,13 @@ describe('ProjectDashboard', () => {
       expect(screen.queryByText('AI Data Liaison')).not.toBeInTheDocument();
     });
 
-    it('renders AI Data Liaison tile when installed', () => {
+    it('renders AI Data Liaison tile when installed', async () => {
       mockInstalledApps = [{ app_id: 'ontology-forge' }, { app_id: 'ai-data-liaison' }];
       renderDashboard();
-      expect(screen.getByText('AI Data Liaison')).toBeInTheDocument();
+
+      await waitFor(() => {
+        expect(screen.getByText('AI Data Liaison')).toBeInTheDocument();
+      });
     });
 
     it('does not render AI Agents tile when not installed', () => {
@@ -194,7 +307,7 @@ describe('ProjectDashboard', () => {
       expect(screen.getByText('AI Agents')).toBeInTheDocument();
     });
 
-    it('renders all application tiles when all apps are installed', () => {
+    it('renders all application tiles when all apps are installed', async () => {
       mockInstalledApps = [
         { app_id: 'ontology-forge' },
         { app_id: 'ai-data-liaison' },
@@ -204,12 +317,14 @@ describe('ProjectDashboard', () => {
       ];
       renderDashboard();
 
-      expect(screen.getByText('MCP Server')).toBeInTheDocument();
-      expect(screen.getByText('Ontology Forge')).toBeInTheDocument();
-      expect(screen.getByText('AI Data Liaison')).toBeInTheDocument();
-      expect(screen.getByText('AI Agents')).toBeInTheDocument();
-      expect(screen.getByText('Spreadsheet Loader [BETA]')).toBeInTheDocument();
-      expect(screen.getByText('MCP Tunnel')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText('MCP Server')).toBeInTheDocument();
+        expect(screen.getByText('Ontology Forge')).toBeInTheDocument();
+        expect(screen.getByText('AI Data Liaison')).toBeInTheDocument();
+        expect(screen.getByText('AI Agents')).toBeInTheDocument();
+        expect(screen.getByText('Spreadsheet Loader [BETA]')).toBeInTheDocument();
+        expect(screen.getByText('MCP Tunnel')).toBeInTheDocument();
+      });
     });
   });
 });

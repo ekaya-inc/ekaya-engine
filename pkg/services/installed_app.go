@@ -165,7 +165,10 @@ func (s *installedAppService) Install(ctx context.Context, projectID uuid.UUID, 
 	}
 
 	// Notify central first
-	callbackUrl := s.buildCallbackURL(projectID.String(), appID, "install")
+	callbackUrl, err := s.buildCallbackURL(ctx, projectID.String(), appID, "install")
+	if err != nil {
+		return nil, fmt.Errorf("failed to build callback URL: %w", err)
+	}
 	token, papiURL, err := s.getAuthContext(ctx)
 	if err != nil {
 		return nil, err
@@ -205,7 +208,10 @@ func (s *installedAppService) Activate(ctx context.Context, projectID uuid.UUID,
 	}
 
 	// Notify central first
-	callbackUrl := s.buildCallbackURL(projectID.String(), appID, "activate")
+	callbackUrl, err := s.buildCallbackURL(ctx, projectID.String(), appID, "activate")
+	if err != nil {
+		return nil, fmt.Errorf("failed to build callback URL: %w", err)
+	}
 	token, papiURL, err := s.getAuthContext(ctx)
 	if err != nil {
 		return nil, err
@@ -246,7 +252,10 @@ func (s *installedAppService) Uninstall(ctx context.Context, projectID uuid.UUID
 	}
 
 	// Notify central first
-	callbackUrl := s.buildCallbackURL(projectID.String(), appID, "uninstall")
+	callbackUrl, err := s.buildCallbackURL(ctx, projectID.String(), appID, "uninstall")
+	if err != nil {
+		return nil, fmt.Errorf("failed to build callback URL: %w", err)
+	}
 	token, papiURL, err := s.getAuthContext(ctx)
 	if err != nil {
 		return nil, err
@@ -289,7 +298,11 @@ func (s *installedAppService) Uninstall(ctx context.Context, projectID uuid.UUID
 // CompleteCallback processes the callback from central after a redirect flow.
 func (s *installedAppService) CompleteCallback(ctx context.Context, projectID uuid.UUID, appID, action, status, nonce, userID string) error {
 	// Validate nonce
-	if !s.nonceStore.Validate(nonce, action, projectID.String(), appID) {
+	valid, err := s.nonceStore.Validate(ctx, nonce, action, projectID.String(), appID)
+	if err != nil {
+		return fmt.Errorf("validate callback nonce: %w", err)
+	}
+	if !valid {
 		return fmt.Errorf("invalid or expired callback nonce")
 	}
 
@@ -471,8 +484,11 @@ func (s *installedAppService) saveInstall(ctx context.Context, projectID uuid.UU
 }
 
 // buildCallbackURL constructs the engine callback URL for central redirects.
-func (s *installedAppService) buildCallbackURL(projectID, appID, action string) string {
-	nonce := s.nonceStore.Generate(action, projectID, appID)
+func (s *installedAppService) buildCallbackURL(ctx context.Context, projectID, appID, action string) (string, error) {
+	nonce, err := s.nonceStore.Generate(ctx, action, projectID, appID)
+	if err != nil {
+		return "", err
+	}
 	// Point to the UI route — central redirects the browser here, the SPA
 	// re-establishes auth context and calls the authenticated API callback.
 	callbackURL := fmt.Sprintf("%s/projects/%s/ai-data-liaison", s.baseURL, projectID)
@@ -482,7 +498,7 @@ func (s *installedAppService) buildCallbackURL(projectID, appID, action string) 
 	params.Set("callback_state", nonce)
 	params.Set("callback_app", appID)
 
-	return callbackURL + "?" + params.Encode()
+	return callbackURL + "?" + params.Encode(), nil
 }
 
 // getAuthContext extracts the JWT token and central API URL from the request context.

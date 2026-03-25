@@ -94,7 +94,10 @@ func (r *mcpAuditRepository) List(ctx context.Context, projectID uuid.UUID, filt
 
 	limit, offset := normalizePageParams(filters.Limit, filters.Offset)
 
-	conditions := []string{"project_id = $1"}
+	conditions := []string{
+		"project_id = $1",
+		fmt.Sprintf("event_type != '%s'", models.MCPEventAuthFailure),
+	}
 	args := []any{projectID}
 	argIdx := 2
 

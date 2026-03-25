@@ -288,7 +288,10 @@ func (s *projectService) Delete(ctx context.Context, id uuid.UUID) (*DeleteResul
 	}
 
 	// Build callback URL pointing to the Settings page
-	callbackUrl := s.buildDeleteCallbackURL(id.String())
+	callbackUrl, err := s.buildDeleteCallbackURL(ctx, id.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to build delete callback URL: %w", err)
+	}
 
 	centralResp, err := s.centralProjectClient.DeleteProject(ctx, papiURL, id.String(), token, callbackUrl)
 	if err != nil {
@@ -321,7 +324,11 @@ func (s *projectService) Delete(ctx context.Context, id uuid.UUID) (*DeleteResul
 // CompleteDeleteCallback processes the callback from central after a redirect flow.
 // Returns the projects_page_url so the frontend can redirect there after deletion.
 func (s *projectService) CompleteDeleteCallback(ctx context.Context, projectID uuid.UUID, action, status, nonce string) (*DeleteCallbackResult, error) {
-	if !s.nonceStore.Validate(nonce, "delete", projectID.String(), "project") {
+	valid, err := s.nonceStore.Validate(ctx, nonce, "delete", projectID.String(), "project")
+	if err != nil {
+		return nil, fmt.Errorf("validate callback nonce: %w", err)
+	}
+	if !valid {
 		return nil, fmt.Errorf("invalid or expired callback nonce")
 	}
 
@@ -356,15 +363,18 @@ func (s *projectService) CompleteDeleteCallback(ctx context.Context, projectID u
 }
 
 // buildDeleteCallbackURL constructs the engine callback URL for project deletion.
-func (s *projectService) buildDeleteCallbackURL(projectID string) string {
-	nonce := s.nonceStore.Generate("delete", projectID, "project")
+func (s *projectService) buildDeleteCallbackURL(ctx context.Context, projectID string) (string, error) {
+	nonce, err := s.nonceStore.Generate(ctx, "delete", projectID, "project")
+	if err != nil {
+		return "", err
+	}
 	callbackURL := fmt.Sprintf("%s/projects/%s/settings", s.baseURL, projectID)
 
 	params := url.Values{}
 	params.Set("callback_action", "delete")
 	params.Set("callback_state", nonce)
 
-	return callbackURL + "?" + params.Encode()
+	return callbackURL + "?" + params.Encode(), nil
 }
 
 // getAuthContext extracts the JWT token and central API URL from the request context.

@@ -527,6 +527,13 @@ func (h *QueriesHandler) Execute(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+		var validationErr *services.QueryExecutionValidationError
+		if errors.As(err, &validationErr) {
+			if err := ErrorResponse(w, http.StatusBadRequest, "validation_error", validationErr.Error()); err != nil {
+				h.logger.Error("Failed to write error response", zap.Error(err))
+			}
+			return
+		}
 		h.logger.Error("Failed to execute query",
 			zap.String("query_id", queryID.String()),
 			zap.Error(err))

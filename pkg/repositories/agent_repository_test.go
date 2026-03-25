@@ -145,6 +145,20 @@ func (tc *agentRepositoryTestContext) createPendingQuery(ctx context.Context, na
 	return query
 }
 
+func (tc *agentRepositoryTestContext) disableQueryWithoutCleanup(ctx context.Context, queryID uuid.UUID) {
+	tc.t.Helper()
+
+	scope, ok := database.GetTenantScope(ctx)
+	require.True(tc.t, ok)
+
+	_, err := scope.Conn.Exec(ctx, `
+		UPDATE engine_queries
+		SET is_enabled = false, updated_at = NOW()
+		WHERE id = $1
+	`, queryID)
+	require.NoError(tc.t, err)
+}
+
 func TestAgentRepository_CreateListGetDelete(t *testing.T) {
 	tc := setupAgentRepositoryTest(t)
 	tc.cleanup()
@@ -269,6 +283,42 @@ func TestAgentRepository_GetQueryAccessByAgentIDs(t *testing.T) {
 	assert.Equal(t, []uuid.UUID{queryB.ID}, access[agentB.ID])
 }
 
+func TestAgentRepository_QueryAccessReadsIgnoreDisabledQueries(t *testing.T) {
+	tc := setupAgentRepositoryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	enabledQuery := tc.createApprovedQuery(ctx, "Enabled query")
+	staleDisabledQuery := tc.createApprovedQuery(ctx, "Disabled query")
+
+	agent := &models.Agent{
+		ProjectID:       tc.projectID,
+		Name:            "agent-with-stale-query",
+		APIKeyEncrypted: "encrypted-key",
+	}
+	require.NoError(t, tc.agentRepo.Create(ctx, agent, []uuid.UUID{enabledQuery.ID, staleDisabledQuery.ID}))
+
+	tc.disableQueryWithoutCleanup(ctx, staleDisabledQuery.ID)
+
+	queryIDs, err := tc.agentRepo.GetQueryAccess(ctx, agent.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []uuid.UUID{enabledQuery.ID}, queryIDs)
+
+	accessByAgentID, err := tc.agentRepo.GetQueryAccessByAgentIDs(ctx, []uuid.UUID{agent.ID})
+	require.NoError(t, err)
+	assert.Equal(t, []uuid.UUID{enabledQuery.ID}, accessByAgentID[agent.ID])
+
+	allowed, err := tc.agentRepo.HasQueryAccess(ctx, agent.ID, enabledQuery.ID)
+	require.NoError(t, err)
+	assert.True(t, allowed)
+
+	denied, err := tc.agentRepo.HasQueryAccess(ctx, agent.ID, staleDisabledQuery.ID)
+	require.NoError(t, err)
+	assert.False(t, denied)
+}
+
 func TestAgentRepository_ListAndGetUseTotalMCPAuditEventCount(t *testing.T) {
 	tc := setupAgentRepositoryTest(t)
 	tc.cleanup()
@@ -310,4 +360,42 @@ func TestAgentRepository_ListAndGetUseTotalMCPAuditEventCount(t *testing.T) {
 	retrieved, err := tc.agentRepo.GetByID(ctx, tc.projectID, agent.ID)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), retrieved.MCPCallCount)
+}
+
+func TestAgentRepository_FindByAPIKeyDoesNotPopulateMCPAuditCounts(t *testing.T) {
+	tc := setupAgentRepositoryTest(t)
+	tc.cleanup()
+	t.Cleanup(tc.cleanup)
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	agent := &models.Agent{
+		ProjectID:       tc.projectID,
+		Name:            "auth-bot",
+		APIKeyEncrypted: "encrypted-key",
+	}
+	require.NoError(t, tc.agentRepo.Create(ctx, agent, nil))
+
+	scope, ok := database.GetTenantScope(ctx)
+	require.True(t, ok)
+
+	_, err := scope.Conn.Exec(ctx, `
+		INSERT INTO engine_mcp_audit_log (
+			id, project_id, user_id, user_email, event_type, tool_name,
+			was_successful, security_level, created_at
+		) VALUES
+			($1, $2, $3, $4, 'tool_call', 'list_approved_queries', true, 'normal', $5),
+			($6, $2, $3, $4, 'tool_error', 'execute_approved_query', false, 'warning', $7)
+	`,
+		uuid.New(), tc.projectID, "agent:"+agent.ID.String(), agent.Name, time.Now().UTC().Add(-2*time.Minute),
+		uuid.New(), time.Now().UTC().Add(-time.Minute),
+	)
+	require.NoError(t, err)
+
+	found, err := tc.agentRepo.FindByAPIKey(ctx, tc.projectID)
+	require.NoError(t, err)
+	require.Len(t, found, 1)
+	assert.Equal(t, agent.ID, found[0].ID)
+	assert.Equal(t, int64(0), found[0].MCPCallCount)
 }

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -35,12 +37,13 @@ type MCPConfig struct {
 // Secrets (passwords, keys) must only come from environment variables.
 type Config struct {
 	// Server configuration
-	BindAddr   string `yaml:"bind_addr" env:"BIND_ADDR" env-default:"127.0.0.1"`
-	Port       string `yaml:"port" env:"PORT" env-default:"3443"`
-	Env        string `yaml:"env" env:"ENVIRONMENT" env-default:"local"`
-	BaseURL    string `yaml:"base_url" env:"BASE_URL" env-default:""` // Auto-derived from Port if empty
-	Version    string `yaml:"-"`                                      // Set at load time, not from config
-	ConfigPath string `yaml:"-"`                                      // Resolved config.yaml path used at load time
+	BindAddr      string `yaml:"bind_addr" env:"BIND_ADDR" env-default:"127.0.0.1"`
+	Port          string `yaml:"port" env:"PORT" env-default:"3443"`
+	Env           string `yaml:"env" env:"ENVIRONMENT" env-default:"local"`
+	BaseURL       string `yaml:"base_url" env:"BASE_URL" env-default:""` // Auto-derived from Port if empty
+	Version       string `yaml:"-"`                                      // Set at load time, not from config
+	ConfigPath    string `yaml:"-"`                                      // Resolved config.yaml path, or a synthetic runtime-state anchor in env-only mode
+	HasConfigFile bool   `yaml:"-"`                                      // True when configuration was loaded from a real config.yaml file
 
 	// TLS configuration (optional - if both provided, server uses HTTPS)
 	TLSCertPath string `yaml:"tls_cert_path" env:"TLS_CERT_PATH" env-default:""`
@@ -185,14 +188,17 @@ func (c *EmbeddedAIConfig) IsAvailable() bool {
 // resolveConfigPath finds config.yaml by checking:
 // 1. Current working directory (./config.yaml)
 // 2. User home directory (~/.ekaya/config.yaml)
-func resolveConfigPath() (string, error) {
+// If no file exists, it returns hasConfigFile=false without an error.
+func resolveConfigPath() (string, bool, error) {
 	// Check CWD first
 	if _, err := os.Stat("config.yaml"); err == nil {
 		absPath, err := filepath.Abs("config.yaml")
 		if err != nil {
-			return "", fmt.Errorf("resolve config.yaml path: %w", err)
+			return "", false, fmt.Errorf("resolve config.yaml path: %w", err)
 		}
-		return absPath, nil
+		return absPath, true, nil
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", false, fmt.Errorf("stat config.yaml: %w", err)
 	}
 
 	// Fall back to ~/.ekaya/config.yaml
@@ -202,35 +208,65 @@ func resolveConfigPath() (string, error) {
 		if _, err := os.Stat(homePath); err == nil {
 			absPath, err := filepath.Abs(homePath)
 			if err != nil {
-				return "", fmt.Errorf("resolve config.yaml path: %w", err)
+				return "", false, fmt.Errorf("resolve config.yaml path: %w", err)
 			}
-			return absPath, nil
+			return absPath, true, nil
+		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", false, fmt.Errorf("stat %s: %w", homePath, err)
 		}
 	}
 
-	return "", fmt.Errorf("config.yaml not found in current directory or ~/.ekaya/")
+	return "", false, nil
+}
+
+func envOnlyConfigPath(bindAddr, port string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory for env-only runtime state: %w", err)
+	}
+
+	stateKey := envOnlyStateKey(bindAddr, port)
+	return filepath.Join(home, ".ekaya", "runtime", "env-only", stateKey, "config.yaml"), nil
+}
+
+func envOnlyStateKey(bindAddr, port string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(bindAddr) + "\n" + strings.TrimSpace(port)))
+	return fmt.Sprintf("%x", sum)
 }
 
 // Load reads configuration from config.yaml with environment variable overrides.
 // The version parameter is injected at build time and set on the returned Config.
 // It looks for config.yaml in the current directory first, then ~/.ekaya/config.yaml.
-// Environment variables override YAML values. Secrets (PGPASSWORD,
-// PROJECT_CREDENTIALS_KEY) must come from environment variables (yaml:"-" fields).
+// If no config file exists, it falls back to environment variables and env-default tags.
+// Environment variables override YAML values.
 func Load(version string) (*Config, error) {
 	cfg := &Config{
 		Version: version,
 	}
 
-	// Resolve config file path (CWD first, then ~/.ekaya/)
-	configPath, err := resolveConfigPath()
+	// Resolve config file path (CWD first, then ~/.ekaya/) or fall back to env-only mode.
+	configPath, hasConfigFile, err := resolveConfigPath()
 	if err != nil {
 		return nil, err
 	}
-	cfg.ConfigPath = configPath
+	cfg.HasConfigFile = hasConfigFile
 
-	// Load config from YAML file with environment variable overrides
-	if err := cleanenv.ReadConfig(configPath, cfg); err != nil {
-		return nil, fmt.Errorf("failed to read %s: %w", configPath, err)
+	if hasConfigFile {
+		cfg.ConfigPath = configPath
+		// Load config from YAML file with environment variable overrides.
+		if err := cleanenv.ReadConfig(configPath, cfg); err != nil {
+			return nil, fmt.Errorf("failed to read %s: %w", configPath, err)
+		}
+	} else {
+		// No config file exists; load from environment variables and env-default tags only.
+		if err := cleanenv.ReadEnv(cfg); err != nil {
+			return nil, fmt.Errorf("failed to read environment config: %w", err)
+		}
+		configPath, err = envOnlyConfigPath(cfg.BindAddr, cfg.Port)
+		if err != nil {
+			return nil, err
+		}
+		cfg.ConfigPath = configPath
 	}
 
 	// Parse complex fields

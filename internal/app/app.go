@@ -62,7 +62,11 @@ func Run(version string) error {
 	}
 	defer func() { _ = logger.Sync() }()
 
-	logger.Info("Using config.yaml", zap.String("path", cfg.ConfigPath))
+	if cfg.HasConfigFile {
+		logger.Info("Using config file", zap.String("path", cfg.ConfigPath))
+	} else {
+		logger.Info("Using environment/default configuration", zap.String("state_anchor", cfg.ConfigPath))
+	}
 
 	staleStateRemoved, err := runtimectl.EnsureNotRunning(cfg.ConfigPath)
 	if err != nil {
@@ -83,7 +87,7 @@ func Run(version string) error {
 
 	// Validate required credentials key (fail fast)
 	if cfg.ProjectCredentialsKey == "" {
-		return fmt.Errorf("project_credentials_key is required in config.yaml. Generate with: openssl rand -base64 32")
+		return fmt.Errorf("project_credentials_key is required in configuration. Set PROJECT_CREDENTIALS_KEY or config.yaml. Generate with: openssl rand -base64 32")
 	}
 	credentialEncryptor, err := crypto.NewCredentialEncryptor(cfg.ProjectCredentialsKey)
 	if err != nil {
@@ -130,6 +134,7 @@ func Run(version string) error {
 	schemaRepo := repositories.NewSchemaRepository()
 	queryRepo := repositories.NewQueryRepository()
 	aiConfigRepo := repositories.NewAIConfigRepository(credentialEncryptor)
+	nonceRepo := repositories.NewNonceRepository()
 
 	// MCP config repository
 	mcpConfigRepo := repositories.NewMCPConfigRepository()
@@ -170,7 +175,7 @@ func Run(version string) error {
 	centralClient := central.NewClient(logger)
 
 	// Create services
-	nonceStore := services.NewNonceStore()
+	nonceStore := services.NewNonceStore(nonceRepo, 15*time.Minute)
 	installedAppService := services.NewInstalledAppService(installedAppRepo, centralClient, nonceStore, cfg.BaseURL, logger)
 	projectService := services.NewProjectService(db, projectRepo, userRepo, mcpConfigRepo, installedAppService, centralClient, nonceStore, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
@@ -538,7 +543,7 @@ func Run(version string) error {
 	mcpAuditLogger.SetAlertTrigger(alertTriggerService)
 
 	// Create retention service and start scheduler for auto-pruning old audit/history data
-	retentionService := services.NewRetentionService(db, queryHistoryRepo, mcpAuditRepo, mcpConfigRepo, logger)
+	retentionService := services.NewRetentionService(db, queryHistoryRepo, mcpAuditRepo, mcpConfigRepo, nonceRepo, logger)
 	retentionCtx, retentionCancel := context.WithCancel(ctx)
 	defer retentionCancel()
 	retentionService.RunScheduler(retentionCtx, 24*time.Hour)

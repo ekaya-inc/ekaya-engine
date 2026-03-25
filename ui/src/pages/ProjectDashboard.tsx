@@ -29,6 +29,8 @@ import { Button } from '../components/ui/Button';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import { useDatasourceConnection } from '../contexts/DatasourceConnectionContext';
 import { useInstalledApps } from '../hooks/useInstalledApps';
+import { getUserRoles } from '../lib/auth-token';
+import engineApi from '../services/engineApi';
 import { ontologyService } from '../services/ontologyService';
 import type {
   AIOption,
@@ -62,10 +64,12 @@ const ProjectDashboard = () => {
   const { pid } = useParams<{ pid: string }>();
   const { isConnected, hasSelectedTables } = useDatasourceConnection();
   const { apps: installedApps } = useInstalledApps(pid);
+  const roles = getUserRoles();
   const [activeAIConfig, setActiveAIConfig] = useState<AIOption>(null);
 
   // Ontology workflow status for badge
   const [ontologyStatus, setOntologyStatus] = useState<OntologyWorkflowStatus | null>(null);
+  const [pendingQueryCount, setPendingQueryCount] = useState<number>(0);
 
   // Subscribe to ontology status for badge display
   useEffect(() => {
@@ -79,6 +83,38 @@ const ProjectDashboard = () => {
 
   const hasOntologyForge = installedApps.some((app) => app.app_id === APP_ID_ONTOLOGY_FORGE);
   const hasAIDataLiaison = installedApps.some((app) => app.app_id === APP_ID_AI_DATA_LIAISON);
+  const hasPendingQueryReviewAccess = roles.includes('admin') || roles.includes('data');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!pid || !hasAIDataLiaison || !hasPendingQueryReviewAccess || !isConnected) {
+      setPendingQueryCount(0);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void (async () => {
+      try {
+        const response = await engineApi.getAuditSummary(pid);
+        if (!cancelled && response.success && response.data) {
+          setPendingQueryCount(response.data.pending_query_approvals);
+          return;
+        }
+      } catch {
+        // Silently fail - badge just won't show
+      }
+
+      if (!cancelled) {
+        setPendingQueryCount(0);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pid, hasAIDataLiaison, hasPendingQueryReviewAccess, isConnected]);
 
   const dataTiles: Tile[] = useMemo(() => {
     const tiles: Tile[] = [
@@ -317,10 +353,32 @@ const ProjectDashboard = () => {
     // Check for ontology badges
     const isOntologyTile = tile.title === 'Ontology Extraction';
     const isQuestionsTile = tile.title === 'Ontology Questions';
+    const isPendingQueriesTile = tile.title === 'Pending Queries';
     const pendingQuestions = ontologyStatus?.pendingQuestionCount ?? 0;
     const isBuilding = ontologyStatus?.progress.state === 'building' || ontologyStatus?.progress.state === 'initializing';
     const progressCurrent = ontologyStatus?.progress.current ?? 0;
     const progressTotal = ontologyStatus?.progress.total ?? 0;
+    const tileBadge: { icon?: LucideIcon; count: number; label: string } | null = !tile.disabled
+      ? (() => {
+          if ((isOntologyTile || isQuestionsTile) && pendingQuestions > 0) {
+            return {
+              icon: MessageCircleQuestion,
+              count: pendingQuestions,
+              label: `${pendingQuestions} pending ontology question${pendingQuestions === 1 ? '' : 's'}`,
+            };
+          }
+
+          if (isPendingQueriesTile && hasPendingQueryReviewAccess && pendingQueryCount > 0) {
+            return {
+              count: pendingQueryCount,
+              label: `${pendingQueryCount} pending query suggestion${pendingQueryCount === 1 ? '' : 's'}`,
+            };
+          }
+
+          return null;
+        })()
+      : null;
+    const BadgeIcon = tileBadge?.icon;
 
     return (
       <Card
@@ -340,11 +398,13 @@ const ProjectDashboard = () => {
               >
                 <Icon className="h-8 w-8" />
               </div>
-              {/* Badge for pending questions (show on Ontology and Ontology Questions tiles) */}
-              {(isOntologyTile || isQuestionsTile) && pendingQuestions > 0 && !tile.disabled && (
-                <div className="absolute -top-1 -right-1 flex items-center gap-1 bg-amber-500 text-white text-xs font-medium px-2 py-0.5 rounded-full">
-                  <MessageCircleQuestion className="h-3 w-3" />
-                  {pendingQuestions}
+              {tileBadge && (
+                <div
+                  aria-label={tileBadge.label}
+                  className="absolute -top-1 -right-1 flex items-center gap-1 bg-amber-500 text-white text-xs font-medium px-2 py-0.5 rounded-full"
+                >
+                  {BadgeIcon && <BadgeIcon className="h-3 w-3" />}
+                  {tileBadge.count}
                 </div>
               )}
             </div>
