@@ -1,7 +1,20 @@
 # FIX: Add `list_project_knowledge` MCP tool so clients can discover `fact_id`s
 
-**Status:** Open
+**Status:** Completed
+**Completed:** 2026-03-25
 **Date:** 2026-03-20
+
+## Resolution
+
+Implemented `list_project_knowledge` as a zero-argument ontology-maintenance MCP tool and wired it into the MCP tool catalog, loadouts, and Ontology Forge app toggle.
+
+Also updated the project-knowledge MCP prompts and tests so the supported maintenance workflow is now:
+
+1. create with `update_project_knowledge`
+2. discover row IDs with `list_project_knowledge`
+3. update or delete by `fact_id`
+
+During implementation review, one claim in this FIX file turned out to be inaccurate: blank or whitespace `fact_id` values were not silently treated as omitted by the runtime. The existing code path rejected them as invalid UUIDs, and the tests were updated to make that behavior explicit.
 
 ## Problem
 
