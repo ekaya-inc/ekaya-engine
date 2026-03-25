@@ -102,11 +102,6 @@ const AIDataLiaisonPage = () => {
     // Clear callback params from URL immediately to prevent re-processing
     setSearchParams({}, { replace: true });
 
-    if (callbackStatus === 'cancelled') {
-      // User cancelled in central — stay on current page, no action needed
-      return;
-    }
-
     const processCallback = async () => {
       try {
         const response = await engineApi.completeAppCallback(
@@ -114,6 +109,10 @@ const AIDataLiaisonPage = () => {
         );
         if (response.error) {
           toast({ title: 'Error', description: response.error, variant: 'destructive' });
+          return;
+        }
+        if (callbackStatus === 'cancelled') {
+          await fetchChecklistData();
           return;
         }
         // Navigate based on completed action
@@ -132,7 +131,7 @@ const AIDataLiaisonPage = () => {
       }
     };
 
-    processCallback();
+    void processCallback();
   }, [searchParams, setSearchParams, pid, navigate, toast, fetchChecklistData]);
 
   const handleUninstall = async () => {

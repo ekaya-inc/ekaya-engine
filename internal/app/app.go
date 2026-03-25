@@ -130,6 +130,7 @@ func Run(version string) error {
 	schemaRepo := repositories.NewSchemaRepository()
 	queryRepo := repositories.NewQueryRepository()
 	aiConfigRepo := repositories.NewAIConfigRepository(credentialEncryptor)
+	nonceRepo := repositories.NewNonceRepository()
 
 	// MCP config repository
 	mcpConfigRepo := repositories.NewMCPConfigRepository()
@@ -170,7 +171,7 @@ func Run(version string) error {
 	centralClient := central.NewClient(logger)
 
 	// Create services
-	nonceStore := services.NewNonceStore()
+	nonceStore := services.NewNonceStore(nonceRepo, 15*time.Minute)
 	installedAppService := services.NewInstalledAppService(installedAppRepo, centralClient, nonceStore, cfg.BaseURL, logger)
 	projectService := services.NewProjectService(db, projectRepo, userRepo, mcpConfigRepo, installedAppService, centralClient, nonceStore, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
@@ -538,7 +539,7 @@ func Run(version string) error {
 	mcpAuditLogger.SetAlertTrigger(alertTriggerService)
 
 	// Create retention service and start scheduler for auto-pruning old audit/history data
-	retentionService := services.NewRetentionService(db, queryHistoryRepo, mcpAuditRepo, mcpConfigRepo, logger)
+	retentionService := services.NewRetentionService(db, queryHistoryRepo, mcpAuditRepo, mcpConfigRepo, nonceRepo, logger)
 	retentionCtx, retentionCancel := context.WithCancel(ctx)
 	defer retentionCancel()
 	retentionService.RunScheduler(retentionCtx, 24*time.Hour)

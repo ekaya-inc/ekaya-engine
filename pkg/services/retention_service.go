@@ -32,6 +32,7 @@ type retentionService struct {
 	queryHistoryRepo repositories.QueryHistoryRepository
 	mcpAuditRepo     repositories.MCPAuditRepository
 	mcpConfigRepo    repositories.MCPConfigRepository
+	nonceRepo        repositories.NonceRepository
 	logger           *zap.Logger
 }
 
@@ -40,6 +41,7 @@ func NewRetentionService(
 	queryHistoryRepo repositories.QueryHistoryRepository,
 	mcpAuditRepo repositories.MCPAuditRepository,
 	mcpConfigRepo repositories.MCPConfigRepository,
+	nonceRepo repositories.NonceRepository,
 	logger *zap.Logger,
 ) RetentionService {
 	return &retentionService{
@@ -47,6 +49,7 @@ func NewRetentionService(
 		queryHistoryRepo: queryHistoryRepo,
 		mcpAuditRepo:     mcpAuditRepo,
 		mcpConfigRepo:    mcpConfigRepo,
+		nonceRepo:        nonceRepo,
 		logger:           logger.Named("retention-service"),
 	}
 }
@@ -146,10 +149,20 @@ func (s *retentionService) pruneAllProjects(ctx context.Context) {
 		s.logger.Error("Retention scheduler: failed to acquire connection", zap.Error(err))
 		return
 	}
+	defer scope.Close()
 
-	rows, err := scope.Conn.Query(ctx, `SELECT project_id, audit_retention_days FROM engine_mcp_config`)
+	globalCtx := database.SetTenantScope(ctx, scope)
+
+	deletedNonces, err := s.nonceRepo.DeleteExpired(globalCtx)
 	if err != nil {
-		scope.Close()
+		s.logger.Error("Retention scheduler: failed to prune callback nonces", zap.Error(err))
+	} else if deletedNonces > 0 {
+		s.logger.Info("Retention scheduler: pruned expired callback nonces",
+			zap.Int64("deleted", deletedNonces))
+	}
+
+	rows, err := scope.Conn.Query(globalCtx, `SELECT project_id, audit_retention_days FROM engine_mcp_config`)
+	if err != nil {
 		s.logger.Error("Retention scheduler: failed to list projects", zap.Error(err))
 		return
 	}
@@ -168,7 +181,6 @@ func (s *retentionService) pruneAllProjects(ctx context.Context) {
 		projects = append(projects, pr)
 	}
 	rows.Close()
-	scope.Close()
 
 	if len(projects) == 0 {
 		return
