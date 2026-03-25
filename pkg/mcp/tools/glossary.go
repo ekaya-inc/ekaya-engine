@@ -196,7 +196,7 @@ func toGetGlossarySQLResponse(term *models.BusinessGlossaryTerm) getGlossarySQLR
 		Term:             term.Term,
 		Definition:       term.Definition,
 		HasSQL:           glossaryTermHasSQL(term),
-		DefiningSQL:      term.DefiningSQL,
+		DefiningSQL:      glossaryTermDefiningSQL(term),
 		BaseTable:        term.BaseTable,
 		OutputColumns:    term.OutputColumns,
 		Aliases:          term.Aliases,
@@ -207,6 +207,14 @@ func toGetGlossarySQLResponse(term *models.BusinessGlossaryTerm) getGlossarySQLR
 
 func glossaryTermHasSQL(term *models.BusinessGlossaryTerm) bool {
 	return trimString(term.DefiningSQL) != ""
+}
+
+func glossaryTermDefiningSQL(term *models.BusinessGlossaryTerm) string {
+	if !glossaryTermHasSQL(term) {
+		return ""
+	}
+
+	return term.DefiningSQL
 }
 
 // registerCreateGlossaryTermTool adds the create_glossary_term tool for creating new business terms.

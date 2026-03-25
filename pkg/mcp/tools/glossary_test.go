@@ -424,7 +424,7 @@ WHERE transaction_state = 'completed'`,
 		resp := toGetGlossarySQLResponse(term)
 
 		assert.False(t, resp.HasSQL)
-		assert.Equal(t, " \n ", resp.DefiningSQL)
+		assert.Equal(t, "", resp.DefiningSQL)
 	})
 }
 
