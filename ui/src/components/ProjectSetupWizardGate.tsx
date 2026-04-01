@@ -106,10 +106,6 @@ const ProjectSetupWizardGate = () => {
     setEmbeddedBackHandler(() => handler);
   }, []);
 
-  if (!shouldShowSetupWizard) {
-    return null;
-  }
-
   const currentStep = STEPS[0];
   if (!currentStep) {
     return null;

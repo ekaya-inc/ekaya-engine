@@ -12,15 +12,10 @@ const ProjectRouteGate = () => {
   }
 
   const setupPath = `/projects/${pid}/setup`;
-  const dashboardPath = `/projects/${pid}`;
   const isSetupPath = location.pathname === setupPath;
 
   if (shouldShowSetupWizard && !isSetupPath) {
     return <Navigate to={setupPath} replace />;
-  }
-
-  if (!shouldShowSetupWizard && isSetupPath) {
-    return <Navigate to={dashboardPath} replace />;
   }
 
   return <Outlet />;

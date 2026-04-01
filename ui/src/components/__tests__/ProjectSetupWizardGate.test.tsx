@@ -46,9 +46,11 @@ vi.mock('../../services/engineApi', () => ({
 function WizardHarness({
   assignedAppIds,
   initialDatasources = [],
+  justProvisioned = true,
 }: {
   assignedAppIds: string[];
   initialDatasources?: ConnectionDetails[];
+  justProvisioned?: boolean;
 }) {
   const { setProjectInfo, shouldShowSetupWizard } = useProject();
   const { connect, isConnected } = useDatasourceConnection();
@@ -60,11 +62,11 @@ function WizardHarness({
       'Wizard Project',
       {},
       {
-        justProvisioned: true,
+        justProvisioned,
         assignedAppIds,
       }
     );
-  }, [assignedAppIds, setProjectInfo]);
+  }, [assignedAppIds, justProvisioned, setProjectInfo]);
 
   useEffect(() => {
     if (hasSeededDatasources.current) {
@@ -87,7 +89,8 @@ function WizardHarness({
 const renderWizard = (
   assignedAppIds: string[],
   initialDatasources: ConnectionDetails[] = [],
-  initialPath = '/projects/proj-1/setup'
+  initialPath = '/projects/proj-1/setup',
+  justProvisioned = true
 ) =>
   render(
     <MemoryRouter initialEntries={[initialPath]}>
@@ -96,7 +99,13 @@ const renderWizard = (
           <Routes>
             <Route
               path="/projects/:pid"
-              element={<WizardHarness assignedAppIds={assignedAppIds} initialDatasources={initialDatasources} />}
+              element={
+                <WizardHarness
+                  assignedAppIds={assignedAppIds}
+                  initialDatasources={initialDatasources}
+                  justProvisioned={justProvisioned}
+                />
+              }
             >
               <Route index element={<div>Project home</div>} />
               <Route path="setup" element={<ProjectSetupWizardGate />} />
@@ -180,6 +189,13 @@ describe('ProjectSetupWizardGate', () => {
     expect(sidebarText.indexOf('Ontology Forge')).toBeGreaterThan(-1);
     expect(sidebarText.indexOf('AI Agents')).toBeGreaterThan(-1);
     expect(sidebarText.indexOf('Ontology Forge')).toBeLessThan(sidebarText.indexOf('AI Agents'));
+  });
+
+  it('renders on the setup route even when the project was not just provisioned', async () => {
+    renderWizard(['mcp-server'], [], '/projects/proj-1/setup', false);
+
+    expect(await screen.findByText('Setup')).toBeInTheDocument();
+    expect(screen.getByText('Wizard hidden')).toBeInTheDocument();
   });
 
   it('cancels the wizard and leaves the current UI visible', async () => {
