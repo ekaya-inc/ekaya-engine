@@ -7,7 +7,8 @@ export default {
   darkMode: ['class'],
   theme: {
     fontFamily: {
-      sans: ['Inter', 'sans-serif'],
+      sans: ['DM Sans', 'Inter', 'sans-serif'],
+      heading: ['Sora', 'DM Sans', 'sans-serif'],
       mono: ['Roboto Mono', 'monospace'],
     },
     extend: {
@@ -27,6 +28,7 @@ export default {
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
+        'wizard-card-enter': 'wizard-card-enter 0.35s ease-out both',
       },
       colors: {
         gray: {

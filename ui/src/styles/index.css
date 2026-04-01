@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=Sora:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -26,6 +26,17 @@
     --surface-submit-hover: #0d8f6f;
     --surface-destructive: #ef4444;
     --surface-destructive-hover: #dc2626;
+
+    /* Wizard tokens */
+    --wizard-sidebar-from: #1e293b;
+    --wizard-sidebar-to: #334155;
+    --wizard-accent: #3b82f6;
+    --wizard-accent-glow: rgba(59, 130, 246, 0.4);
+    --wizard-step-line: #475569;
+    --wizard-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04);
+    --wizard-card-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.12), 0 8px 24px rgba(0, 0, 0, 0.06);
+    --wizard-card-selected-bg: rgba(59, 130, 246, 0.06);
+    --wizard-card-selected-border: #3b82f6;
   }
 
   .dark {
@@ -50,6 +61,17 @@
     --surface-submit-hover: #0d8f6f;
     --surface-destructive: #ef4444;
     --surface-destructive-hover: #dc2626;
+
+    /* Wizard tokens (dark) */
+    --wizard-sidebar-from: #0f172a;
+    --wizard-sidebar-to: #1e293b;
+    --wizard-accent: #60a5fa;
+    --wizard-accent-glow: rgba(96, 165, 250, 0.35);
+    --wizard-step-line: #334155;
+    --wizard-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.15);
+    --wizard-card-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.2);
+    --wizard-card-selected-bg: rgba(96, 165, 250, 0.1);
+    --wizard-card-selected-border: #60a5fa;
   }
 
   * {
@@ -57,7 +79,7 @@
   }
 
   html {
-    font-family: 'Inter', sans-serif;
+    font-family: 'DM Sans', 'Inter', sans-serif;
   }
 
   body {
@@ -123,6 +145,37 @@
 
   .text-balance {
     text-wrap: balance;
+  }
+}
+
+/* Wizard animations */
+@layer components {
+  @keyframes wizard-card-enter {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes wizard-step-check {
+    0% { transform: scale(0); opacity: 0; }
+    60% { transform: scale(1.2); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
+  @keyframes wizard-pulse-glow {
+    0%, 100% { box-shadow: 0 0 0 0 var(--wizard-accent-glow); }
+    50% { box-shadow: 0 0 0 6px transparent; }
+  }
+
+  .wizard-card-enter {
+    animation: wizard-card-enter 0.35s ease-out both;
+  }
+
+  .wizard-step-check {
+    animation: wizard-step-check 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+
+  .wizard-step-active-dot {
+    animation: wizard-pulse-glow 2s ease-in-out infinite;
   }
 }
 
