@@ -353,7 +353,7 @@ dev-build-container: ## Build devcontainer environment
 # Test database image targets
 build-test-image: ## Build the ekaya-engine-test-image for integration tests (local arch only)
 	@echo "$(YELLOW)Building test database image...$(NC)"
-	@docker build -t $(TEST_IMAGE_NAME):latest test/docker/engine-test-db/
+	@docker build -t $(TEST_IMAGE_NAME):latest tests/docker/engine-test-db/
 	@docker tag $(TEST_IMAGE_NAME):latest $(TEST_IMAGE_PATH):latest
 	@echo "$(GREEN)✓ Test image built: $(TEST_IMAGE_NAME):latest$(NC)"
 	@echo "$(GREEN)✓ Tagged as: $(TEST_IMAGE_PATH):latest$(NC)"
@@ -366,7 +366,7 @@ push-test-image: ## Build and push multi-arch test image to ghcr.io (requires GI
 	@docker buildx build --platform linux/amd64,linux/arm64 \
 		-t $(TEST_IMAGE_PATH):latest \
 		--push \
-		test/docker/engine-test-db/
+		tests/docker/engine-test-db/
 	@echo "$(GREEN)✓ Test image pushed to: $(TEST_IMAGE_PATH):latest (linux/amd64, linux/arm64)$(NC)"
 
 pull-test-image: ## Pull test image from ghcr.io
