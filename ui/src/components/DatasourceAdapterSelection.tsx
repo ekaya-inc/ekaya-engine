@@ -1,4 +1,4 @@
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Check, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -153,10 +153,10 @@ const DatasourceAdapterSelection = ({
         )}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className={`${embedded ? "text-2xl" : "text-3xl"} font-bold text-text-primary mb-2`}>
+            <h1 className={`${embedded ? "text-2xl" : "text-3xl"} font-heading font-semibold text-text-primary mb-2`}>
               Select Your Database
             </h1>
-            <p className="text-text-secondary">
+            <p className="text-sm text-text-secondary">
               Choose your database provider to get started
             </p>
           </div>
@@ -164,46 +164,52 @@ const DatasourceAdapterSelection = ({
       </div>
 
       {/* Single unified list: SQL Server first, then PostgreSQL-compatible providers */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {/* Other adapters (SQL Server) first */}
-        {otherAdapters.map((adapter) => {
+        {otherAdapters.map((adapter, index) => {
           const isDisabled = getAdapterDisabledState(adapter.id);
           const isSelected = selectedAdapter === adapter.id;
 
           return (
             <Card
               key={adapter.id}
-              className={`transition-all ${
+              className={`wizard-card-enter relative group transition-all duration-200 ${
                 isDisabled
-                  ? "cursor-not-allowed opacity-50 bg-gray-100 dark:bg-gray-800"
-                  : "cursor-pointer hover:shadow-md"
+                  ? "cursor-not-allowed opacity-50"
+                  : "cursor-pointer hover:shadow-[var(--wizard-card-shadow-hover)] hover:-translate-y-0.5"
               } ${
                 isSelected
-                  ? "ring-2 ring-blue-500 bg-blue-50 dark:bg-blue-950"
-                  : ""
+                  ? "ring-2 ring-[var(--wizard-card-selected-border)] bg-[var(--wizard-card-selected-bg)] shadow-[var(--wizard-card-shadow)]"
+                  : "shadow-[var(--wizard-card-shadow)]"
               }`}
+              style={{ animationDelay: `${index * 50}ms` }}
               onClick={() => !isDisabled && handleAdapterSelect(adapter)}
             >
-              <CardContent className="p-4">
+              {isSelected && (
+                <div className="absolute top-3 right-3 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--wizard-accent)] text-white">
+                  <Check className="h-3 w-3" />
+                </div>
+              )}
+              <CardContent className="p-5">
                 <div className="flex items-center gap-3">
                   {adapter.icon ? (
                     <img
                       src={adapter.icon}
                       alt={adapter.name}
-                      className={`h-10 w-10 object-contain ${
+                      className={`h-11 w-11 object-contain ${
                         isDisabled ? "grayscale" : ""
                       }`}
                     />
                   ) : (
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-200 dark:bg-gray-700">
-                      <span className="text-lg font-bold text-gray-500 dark:text-gray-400">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-surface-secondary">
+                      <span className="text-lg font-bold text-text-tertiary">
                         ?
                       </span>
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
                     <h3
-                      className={`font-semibold truncate ${
+                      className={`text-sm font-semibold truncate ${
                         isDisabled
                           ? "text-text-tertiary"
                           : "text-text-primary"
@@ -220,44 +226,50 @@ const DatasourceAdapterSelection = ({
 
         {/* PostgreSQL-compatible providers */}
         {hasPostgresAdapter &&
-          POSTGRES_PROVIDERS.map((provider) => {
+          POSTGRES_PROVIDERS.map((provider, providerIndex) => {
             const isDisabled = getAdapterDisabledState(provider.adapterType);
             const isSelected = selectedAdapter === provider.adapterType;
 
             return (
               <Card
                 key={provider.id}
-                className={`transition-all ${
+                className={`wizard-card-enter relative group transition-all duration-200 ${
                   isDisabled
-                    ? "cursor-not-allowed opacity-50 bg-gray-100 dark:bg-gray-800"
-                    : "cursor-pointer hover:shadow-md"
+                    ? "cursor-not-allowed opacity-50"
+                    : "cursor-pointer hover:shadow-[var(--wizard-card-shadow-hover)] hover:-translate-y-0.5"
                 } ${
                   isSelected
-                    ? "ring-2 ring-blue-500 bg-blue-50 dark:bg-blue-950"
-                    : ""
+                    ? "ring-2 ring-[var(--wizard-card-selected-border)] bg-[var(--wizard-card-selected-bg)] shadow-[var(--wizard-card-shadow)]"
+                    : "shadow-[var(--wizard-card-shadow)]"
                 }`}
+                style={{ animationDelay: `${(otherAdapters.length + providerIndex) * 50}ms` }}
                 onClick={() => !isDisabled && handleProviderSelect(provider)}
               >
-                <CardContent className="p-4">
+                {isSelected && (
+                  <div className="absolute top-3 right-3 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--wizard-accent)] text-white">
+                    <Check className="h-3 w-3" />
+                  </div>
+                )}
+                <CardContent className="p-5">
                   <div className="flex items-center gap-3">
                     {provider.icon ? (
                       <img
                         src={provider.icon}
                         alt={provider.name}
-                        className={`h-10 w-10 object-contain ${
+                        className={`h-11 w-11 object-contain ${
                           isDisabled ? "grayscale" : ""
                         }`}
                       />
                     ) : (
-                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-200 dark:bg-gray-700">
-                        <span className="text-lg font-bold text-gray-500 dark:text-gray-400">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-surface-secondary">
+                        <span className="text-lg font-bold text-text-tertiary">
                           ?
                         </span>
                       </div>
                     )}
                     <div className="flex-1 min-w-0">
                       <h3
-                        className={`font-semibold truncate ${
+                        className={`text-sm font-semibold truncate ${
                           isDisabled
                             ? "text-text-tertiary"
                             : "text-text-primary"

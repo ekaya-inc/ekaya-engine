@@ -645,7 +645,7 @@ const DatasourceConfiguration = ({
 
   const renderTestConnection = () => (
     <div className="border-t pt-6 mt-6">
-      <h3 className="text-lg font-semibold text-text-primary mb-4">
+      <h3 className="font-heading text-lg font-semibold text-text-primary mb-4">
         Test Connection
       </h3>
 
@@ -1128,7 +1128,7 @@ const DatasourceConfiguration = ({
             </div>
           )}
           <div>
-            <h1 className={`${embedded ? "text-2xl" : "text-3xl"} font-bold text-text-primary`}>
+            <h1 className={`${embedded ? "text-2xl" : "text-3xl"} font-heading font-semibold text-text-primary`}>
               Configure {displayInfo?.name}
             </h1>
           </div>
