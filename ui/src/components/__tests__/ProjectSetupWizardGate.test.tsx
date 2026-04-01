@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useEffect, useRef } from 'react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Outlet, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DatasourceConnectionProvider, useDatasourceConnection } from '../../contexts/DatasourceConnectionContext';
@@ -79,26 +79,28 @@ function WizardHarness({
     <>
       <div>{shouldShowSetupWizard ? 'Wizard visible' : 'Wizard hidden'}</div>
       <div>{isConnected ? 'Datasource connected' : 'Datasource disconnected'}</div>
-      <ProjectSetupWizardGate />
+      <Outlet />
     </>
   );
 }
 
-const renderWizard = (assignedAppIds: string[], initialDatasources: ConnectionDetails[] = []) =>
+const renderWizard = (
+  assignedAppIds: string[],
+  initialDatasources: ConnectionDetails[] = [],
+  initialPath = '/projects/proj-1/setup'
+) =>
   render(
-    <MemoryRouter initialEntries={['/projects/proj-1']}>
+    <MemoryRouter initialEntries={[initialPath]}>
       <ProjectProvider>
         <DatasourceConnectionProvider>
           <Routes>
             <Route
               path="/projects/:pid"
-              element={
-                <WizardHarness
-                  assignedAppIds={assignedAppIds}
-                  initialDatasources={initialDatasources}
-                />
-              }
-            />
+              element={<WizardHarness assignedAppIds={assignedAppIds} initialDatasources={initialDatasources} />}
+            >
+              <Route index element={<div>Project home</div>} />
+              <Route path="setup" element={<ProjectSetupWizardGate />} />
+            </Route>
           </Routes>
         </DatasourceConnectionProvider>
       </ProjectProvider>
@@ -158,37 +160,46 @@ describe('ProjectSetupWizardGate', () => {
   it('shows scratch mode copy when only MCP Server is provisioned', async () => {
     renderWizard(['mcp-server']);
 
-    expect(await screen.findByText('Set up your project')).toBeInTheDocument();
-    expect(screen.getByText('Scratch mode')).toBeInTheDocument();
+    expect(await screen.findByText('Setup')).toBeInTheDocument();
+    expect(screen.queryByText('Scratch mode')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Skip setup' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Finish' })).toBeDisabled();
   });
 
-  it('shows provisioned mode copy when additional apps were assigned during provisioning', async () => {
-    mockInstalledApps = [{ app_id: 'ontology-forge' }];
-    renderWizard(['mcp-server', 'ontology-forge']);
+  it('orders provisioned applications by setup dependency in the sidebar', async () => {
+    mockInstalledApps = [{ app_id: 'ontology-forge' }, { app_id: 'ai-agents' }];
+    renderWizard(['mcp-server', 'ai-agents', 'ontology-forge']);
 
-    expect(await screen.findByText('Set up your project')).toBeInTheDocument();
-    expect(screen.getByText('Provisioned mode')).toBeInTheDocument();
-    expect(screen.getByText('Ontology Forge')).toBeInTheDocument();
+    expect(await screen.findByText('Setup')).toBeInTheDocument();
+
+    const sidebar = screen.getByText('Setup').closest('aside');
+    expect(sidebar).not.toBeNull();
+
+    const sidebarText = sidebar?.textContent ?? '';
+    expect(sidebarText.indexOf('MCP Server')).toBeGreaterThan(-1);
+    expect(sidebarText.indexOf('Ontology Forge')).toBeGreaterThan(-1);
+    expect(sidebarText.indexOf('AI Agents')).toBeGreaterThan(-1);
+    expect(sidebarText.indexOf('Ontology Forge')).toBeLessThan(sidebarText.indexOf('AI Agents'));
   });
 
-  it('skips the wizard and leaves the current UI visible', async () => {
+  it('cancels the wizard and leaves the current UI visible', async () => {
     renderWizard(['mcp-server']);
 
     expect(await screen.findByText('Wizard visible')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Skip setup' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     await waitFor(() => {
       expect(screen.getByText('Wizard hidden')).toBeInTheDocument();
     });
     expect(screen.getByText('Datasource disconnected')).toBeInTheDocument();
+    expect(screen.getByText('Project home')).toBeInTheDocument();
   });
 
   it('keeps the saved datasource connected after cancelling the wizard', async () => {
     renderWizard(['mcp-server']);
 
-    expect(await screen.findByText('Set up your project')).toBeInTheDocument();
+    expect(await screen.findByText('Setup')).toBeInTheDocument();
 
     fireEvent.click(await screen.findByText('Supabase'));
 
@@ -219,12 +230,13 @@ describe('ProjectSetupWizardGate', () => {
 
     expect(screen.getByRole('button', { name: 'Finish' })).toBeEnabled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel setup' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     await waitFor(() => {
       expect(screen.getByText('Wizard hidden')).toBeInTheDocument();
     });
     expect(screen.getByText('Datasource connected')).toBeInTheDocument();
+    expect(screen.getByText('Project home')).toBeInTheDocument();
   });
 
   it('keeps finish disabled when the only datasource is unusable', async () => {

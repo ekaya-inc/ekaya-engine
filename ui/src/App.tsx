@@ -3,6 +3,8 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import ErrorBoundary from './components/ErrorBoundary';
 import Layout from './components/Layout';
 import ProjectDataLoader from './components/ProjectDataLoader';
+import ProjectRouteGate from './components/ProjectRouteGate';
+import ProjectSetupWizardGate from './components/ProjectSetupWizardGate';
 import { ThemeProvider } from './components/ThemeProvider';
 import { ConfigProvider } from './contexts/ConfigContext';
 import { DatasourceConnectionProvider } from './contexts/DatasourceConnectionContext';
@@ -44,37 +46,49 @@ const App = (): JSX.Element => {
           <ToastProviderComponent>
             <Router>
               <ErrorBoundary>
-              <Routes>
-                <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
-                <Route path="/" element={<HomePage />} />
-                <Route path="/projects" element={<ProjectsRedirect />} />
-                <Route path="/projects/:pid" element={<ProjectProvider><ProjectDataLoader><Layout /></ProjectDataLoader></ProjectProvider>}>
-                  <Route index element={<ProjectDashboard />} />
-                  <Route path="applications" element={<ApplicationsPage />} />
-                  <Route path="ai-config" element={<AIConfigPage />} />
-                  <Route path="ai-agents" element={<AIAgentsPage />} />
-                  <Route path="ai-data-liaison" element={<AIDataLiaisonPage />} />
-                  <Route path="audit" element={<AuditPage />} />
-                  <Route path="file-loader" element={<FileLoaderPage />} />
-                  <Route path="datasource" element={<DatasourcePage />} />
-                  <Route path="schema" element={<SchemaPage />} />
-                  <Route path="relationships" element={<RelationshipsPage />} />
-                  <Route path="enrichment" element={<EnrichmentPage />} />
-                  <Route path="glossary" element={<GlossaryPage />} />
-                  <Route path="project-knowledge" element={<ProjectKnowledgePage />} />
-                  <Route path="ontology" element={<OntologyPage />} />
-                  <Route path="ontology-questions" element={<OntologyQuestionsPage />} />
-                  <Route path="pending-queries/*" element={<PendingQueriesPage />} />
-                  <Route path="queries/*" element={<QueriesPage />} />
-                  <Route path="mcp-server" element={<MCPServerPage />} />
-                  <Route path="mcp-events" element={<MCPEventsPage />} />
-                  <Route path="ontology-forge" element={<OntologyForgePage />} />
-                  <Route path="mcp-tunnel" element={<MCPTunnelPage />} />
-                  <Route path="server-setup" element={<ServerSetupPage />} />
-                  <Route path="settings" element={<SettingsPage />} />
-                  <Route path="help" element={<HelpPage />} />
-                </Route>
-              </Routes>
+                <Routes>
+                  <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
+                  <Route path="/" element={<HomePage />} />
+                  <Route path="/projects" element={<ProjectsRedirect />} />
+                  <Route
+                    path="/projects/:pid"
+                    element={
+                      <ProjectProvider>
+                        <ProjectDataLoader>
+                          <ProjectRouteGate />
+                        </ProjectDataLoader>
+                      </ProjectProvider>
+                    }
+                  >
+                    <Route path="setup" element={<ProjectSetupWizardGate />} />
+                    <Route element={<Layout />}>
+                      <Route index element={<ProjectDashboard />} />
+                      <Route path="applications" element={<ApplicationsPage />} />
+                      <Route path="ai-config" element={<AIConfigPage />} />
+                      <Route path="ai-agents" element={<AIAgentsPage />} />
+                      <Route path="ai-data-liaison" element={<AIDataLiaisonPage />} />
+                      <Route path="audit" element={<AuditPage />} />
+                      <Route path="file-loader" element={<FileLoaderPage />} />
+                      <Route path="datasource" element={<DatasourcePage />} />
+                      <Route path="schema" element={<SchemaPage />} />
+                      <Route path="relationships" element={<RelationshipsPage />} />
+                      <Route path="enrichment" element={<EnrichmentPage />} />
+                      <Route path="glossary" element={<GlossaryPage />} />
+                      <Route path="project-knowledge" element={<ProjectKnowledgePage />} />
+                      <Route path="ontology" element={<OntologyPage />} />
+                      <Route path="ontology-questions" element={<OntologyQuestionsPage />} />
+                      <Route path="pending-queries/*" element={<PendingQueriesPage />} />
+                      <Route path="queries/*" element={<QueriesPage />} />
+                      <Route path="mcp-server" element={<MCPServerPage />} />
+                      <Route path="mcp-events" element={<MCPEventsPage />} />
+                      <Route path="ontology-forge" element={<OntologyForgePage />} />
+                      <Route path="mcp-tunnel" element={<MCPTunnelPage />} />
+                      <Route path="server-setup" element={<ServerSetupPage />} />
+                      <Route path="settings" element={<SettingsPage />} />
+                      <Route path="help" element={<HelpPage />} />
+                    </Route>
+                  </Route>
+                </Routes>
               </ErrorBoundary>
             </Router>
           </ToastProviderComponent>
