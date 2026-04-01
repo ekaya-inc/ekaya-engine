@@ -145,7 +145,6 @@ func (s *projectService) Provision(ctx context.Context, projectID uuid.UUID, nam
 	if err == nil {
 		// Project exists - return its info
 		var papiURL, projectsPageURL, projectPageURL string
-		var storedApps []central.ApplicationInfo
 		if existingProject.Parameters != nil {
 			if v, ok := existingProject.Parameters["papi_url"].(string); ok {
 				papiURL = v
@@ -156,12 +155,11 @@ func (s *projectService) Provision(ctx context.Context, projectID uuid.UUID, nam
 			if v, ok := existingProject.Parameters["project_page_url"].(string); ok {
 				projectPageURL = v
 			}
-			storedApps, _ = existingProject.Parameters["applications"].([]central.ApplicationInfo)
 		}
 		return &ProvisionResult{
 			ProjectID:       existingProject.ID,
 			Name:            existingProject.Name,
-			Applications:    storedApps,
+			Applications:    storedProjectApplications(existingProject.Parameters),
 			PAPIURL:         papiURL,
 			ProjectsPageURL: projectsPageURL,
 			ProjectPageURL:  projectPageURL,
@@ -232,6 +230,45 @@ func (s *projectService) Provision(ctx context.Context, projectID uuid.UUID, nam
 		ProjectPageURL:  projectPageURL,
 		Created:         true,
 	}, nil
+}
+
+func storedProjectApplications(parameters map[string]interface{}) []central.ApplicationInfo {
+	if len(parameters) == 0 {
+		return nil
+	}
+
+	rawApplications, ok := parameters["applications"]
+	if !ok || rawApplications == nil {
+		return nil
+	}
+
+	switch applications := rawApplications.(type) {
+	case []central.ApplicationInfo:
+		return applications
+	case []interface{}:
+		result := make([]central.ApplicationInfo, 0, len(applications))
+		for _, rawApplication := range applications {
+			switch application := rawApplication.(type) {
+			case map[string]interface{}:
+				name, _ := application["name"].(string)
+				if name == "" {
+					continue
+				}
+				result = append(result, central.ApplicationInfo{Name: name})
+			case string:
+				if application == "" {
+					continue
+				}
+				result = append(result, central.ApplicationInfo{Name: application})
+			}
+		}
+		if len(result) == 0 {
+			return nil
+		}
+		return result
+	default:
+		return nil
+	}
 }
 
 // createDefaultMCPConfig creates the MCP config with default settings for a new project.

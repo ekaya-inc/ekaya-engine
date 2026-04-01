@@ -8,6 +8,8 @@ export interface ProjectInfoResponse {
   papi_url?: string;
   projects_page_url?: string;
   project_page_url?: string;
+  created?: boolean;
+  applications?: string[];
 }
 
 export interface ProvisionResponse extends ProjectInfoResponse {

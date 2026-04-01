@@ -91,7 +91,10 @@ export default function ProjectDataLoader({
         if (projectInfo.project_page_url) {
           urlInfo.projectPageUrl = projectInfo.project_page_url;
         }
-        setProjectInfo(pid as string, projectInfo.name ?? null, urlInfo);
+        setProjectInfo(pid as string, projectInfo.name ?? null, urlInfo, {
+          justProvisioned: projectInfo.created === true,
+          assignedAppIds: projectInfo.applications ?? [],
+        });
 
         // Step 3: Load datasources
         console.log("Loading datasources for project:", pid);

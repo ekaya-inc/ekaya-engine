@@ -10,6 +10,7 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/central"
 	"github.com/ekaya-inc/ekaya-engine/pkg/config"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
@@ -20,12 +21,14 @@ type TenantMiddleware func(http.HandlerFunc) http.HandlerFunc
 
 // ProjectResponse is the standard response for project endpoints.
 type ProjectResponse struct {
-	Status          string `json:"status"`
-	PID             string `json:"pid"`
-	Name            string `json:"name,omitempty"`
-	PAPIURL         string `json:"papi_url,omitempty"`
-	ProjectsPageURL string `json:"projects_page_url,omitempty"`
-	ProjectPageURL  string `json:"project_page_url,omitempty"`
+	Status          string   `json:"status"`
+	PID             string   `json:"pid"`
+	Name            string   `json:"name,omitempty"`
+	PAPIURL         string   `json:"papi_url,omitempty"`
+	ProjectsPageURL string   `json:"projects_page_url,omitempty"`
+	ProjectPageURL  string   `json:"project_page_url,omitempty"`
+	Created         bool     `json:"created,omitempty"`
+	Applications    []string `json:"applications,omitempty"`
 }
 
 // ProjectsHandler handles project-related HTTP requests.
@@ -143,6 +146,8 @@ func (h *ProjectsHandler) Provision(w http.ResponseWriter, r *http.Request) {
 		PAPIURL:         result.PAPIURL,
 		ProjectsPageURL: result.ProjectsPageURL,
 		ProjectPageURL:  result.ProjectPageURL,
+		Created:         result.Created,
+		Applications:    applicationNames(result.Applications),
 	}
 
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
@@ -425,5 +430,67 @@ func (h *ProjectsHandler) buildProjectResponse(project *models.Project) ProjectR
 		PAPIURL:         papiURL,
 		ProjectsPageURL: projectsPageURL,
 		ProjectPageURL:  projectPageURL,
+		Applications:    projectApplicationNames(project.Parameters),
+	}
+}
+
+func applicationNames(apps []central.ApplicationInfo) []string {
+	if len(apps) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(apps))
+	for _, app := range apps {
+		if app.Name == "" {
+			continue
+		}
+		names = append(names, app.Name)
+	}
+
+	if len(names) == 0 {
+		return nil
+	}
+
+	return names
+}
+
+func projectApplicationNames(parameters map[string]interface{}) []string {
+	if len(parameters) == 0 {
+		return nil
+	}
+
+	rawApplications, ok := parameters["applications"]
+	if !ok || rawApplications == nil {
+		return nil
+	}
+
+	switch applications := rawApplications.(type) {
+	case []central.ApplicationInfo:
+		return applicationNames(applications)
+	case []string:
+		if len(applications) == 0 {
+			return nil
+		}
+		return applications
+	case []interface{}:
+		names := make([]string, 0, len(applications))
+		for _, rawApplication := range applications {
+			switch application := rawApplication.(type) {
+			case string:
+				if application != "" {
+					names = append(names, application)
+				}
+			case map[string]interface{}:
+				if name, ok := application["name"].(string); ok && name != "" {
+					names = append(names, name)
+				}
+			}
+		}
+		if len(names) == 0 {
+			return nil
+		}
+		return names
+	default:
+		return nil
 	}
 }

@@ -6,16 +6,25 @@ interface ProjectURLs {
   projectPageUrl: string | null;
 }
 
+interface ProjectProvisioningState {
+  justProvisioned: boolean;
+  assignedAppIds: string[];
+}
+
 interface ProjectContextValue {
   projectId: string | null;
   projectName: string | null;
   urls: ProjectURLs;
+  provisioning: ProjectProvisioningState;
+  shouldShowSetupWizard: boolean;
   setProjectInfo: (
     projectId: string,
     name: string | null,
-    urls: { projectsPageUrl?: string; projectPageUrl?: string }
+    urls: { projectsPageUrl?: string; projectPageUrl?: string },
+    provisioning?: Partial<ProjectProvisioningState>
   ) => void;
   clearProjectInfo: () => void;
+  dismissSetupWizard: () => void;
 }
 
 const ProjectContext = createContext<ProjectContextValue | undefined>(undefined);
@@ -39,12 +48,18 @@ export const ProjectProvider = ({ children }: ProjectProviderProps) => {
     projectsPageUrl: null,
     projectPageUrl: null,
   });
+  const [provisioning, setProvisioning] = useState<ProjectProvisioningState>({
+    justProvisioned: false,
+    assignedAppIds: [],
+  });
+  const [setupWizardDismissed, setSetupWizardDismissed] = useState(false);
 
   const setProjectInfo = useCallback(
     (
       id: string,
       name: string | null,
-      urlInfo: { projectsPageUrl?: string; projectPageUrl?: string }
+      urlInfo: { projectsPageUrl?: string; projectPageUrl?: string },
+      provisioningInfo?: Partial<ProjectProvisioningState>
     ) => {
       setProjectId(id);
       setProjectName(name);
@@ -52,6 +67,11 @@ export const ProjectProvider = ({ children }: ProjectProviderProps) => {
         projectsPageUrl: urlInfo.projectsPageUrl ?? null,
         projectPageUrl: urlInfo.projectPageUrl ?? null,
       });
+      setProvisioning({
+        justProvisioned: provisioningInfo?.justProvisioned ?? false,
+        assignedAppIds: provisioningInfo?.assignedAppIds ?? [],
+      });
+      setSetupWizardDismissed(false);
     },
     []
   );
@@ -60,14 +80,23 @@ export const ProjectProvider = ({ children }: ProjectProviderProps) => {
     setProjectId(null);
     setProjectName(null);
     setUrls({ projectsPageUrl: null, projectPageUrl: null });
+    setProvisioning({ justProvisioned: false, assignedAppIds: [] });
+    setSetupWizardDismissed(false);
+  }, []);
+
+  const dismissSetupWizard = useCallback(() => {
+    setSetupWizardDismissed(true);
   }, []);
 
   const value: ProjectContextValue = {
     projectId,
     projectName,
     urls,
+    provisioning,
+    shouldShowSetupWizard: provisioning.justProvisioned && !setupWizardDismissed,
     setProjectInfo,
     clearProjectInfo,
+    dismissSetupWizard,
   };
 
   return (

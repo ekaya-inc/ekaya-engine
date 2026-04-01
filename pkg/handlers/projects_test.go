@@ -14,8 +14,10 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/central"
 	"github.com/ekaya-inc/ekaya-engine/pkg/config"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 // testConfig returns a config suitable for testing UpdateAuthServerURL.
@@ -210,6 +212,104 @@ func TestProjectsHandler_Get_WithPAPIURL(t *testing.T) {
 
 	if resp.PAPIURL != "https://papi.example.com" {
 		t.Errorf("expected papi_url 'https://papi.example.com', got %q", resp.PAPIURL)
+	}
+}
+
+func TestProjectsHandler_Get_IncludesStoredProvisionedApplications(t *testing.T) {
+	projectID := uuid.New()
+	projectService := &mockProjectService{
+		project: &models.Project{
+			ID:   projectID,
+			Name: "My Project",
+			Parameters: map[string]interface{}{
+				"applications": []interface{}{
+					map[string]interface{}{"name": central.AppMCPServer},
+					map[string]interface{}{"name": central.AppAIDataLiaison},
+				},
+			},
+		},
+	}
+	handler := NewProjectsHandler(projectService, testConfig(), zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String(), nil)
+	req.SetPathValue("pid", projectID.String())
+
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	ctx := context.WithValue(req.Context(), auth.ClaimsKey, claims)
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+
+	handler.Get(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+
+	var resp ProjectResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	expected := []string{central.AppMCPServer, central.AppAIDataLiaison}
+	if len(resp.Applications) != len(expected) {
+		t.Fatalf("expected %d applications, got %d", len(expected), len(resp.Applications))
+	}
+	for i, app := range expected {
+		if resp.Applications[i] != app {
+			t.Errorf("expected application %d to be %q, got %q", i, app, resp.Applications[i])
+		}
+	}
+}
+
+func TestProjectsHandler_Provision_IncludesProvisioningMetadata(t *testing.T) {
+	projectID := uuid.New()
+	projectService := &mockProjectService{
+		provisionResult: &services.ProvisionResult{
+			ProjectID: projectID,
+			Name:      "Provisioned Project",
+			Created:   true,
+			Applications: []central.ApplicationInfo{
+				{Name: central.AppMCPServer},
+				{Name: central.AppAIDataLiaison},
+			},
+		},
+	}
+	handler := NewProjectsHandler(projectService, testConfig(), zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodPost, "/projects", nil)
+	claims := &auth.Claims{
+		ProjectID: projectID.String(),
+		Email:     "user@example.com",
+	}
+	ctx := context.WithValue(req.Context(), auth.ClaimsKey, claims)
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+
+	handler.Provision(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+
+	var resp ProjectResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if !resp.Created {
+		t.Fatal("expected created=true in provisioning response")
+	}
+
+	expected := []string{central.AppMCPServer, central.AppAIDataLiaison}
+	if len(resp.Applications) != len(expected) {
+		t.Fatalf("expected %d applications, got %d", len(expected), len(resp.Applications))
+	}
+	for i, app := range expected {
+		if resp.Applications[i] != app {
+			t.Errorf("expected application %d to be %q, got %q", i, app, resp.Applications[i])
+		}
 	}
 }
 
