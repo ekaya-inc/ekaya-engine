@@ -2,8 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"os"
-	"runtime"
 
 	"go.uber.org/zap"
 
@@ -13,12 +11,9 @@ import (
 
 // PingResponse contains service status and version information.
 type PingResponse struct {
-	Status      string `json:"status"`
-	Version     string `json:"version"`
-	Service     string `json:"service"`
-	GoVersion   string `json:"go_version"`
-	Hostname    string `json:"hostname"`
-	Environment string `json:"environment"`
+	Status  string `json:"status"`
+	Version string `json:"version"`
+	Service string `json:"service"`
 }
 
 // HealthResponse contains comprehensive health check information including
@@ -71,26 +66,34 @@ func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
 }
 
 // Ping handles GET /ping requests.
-// Returns detailed service information including version and environment.
+// Returns minimal service information for browser-based probe checks.
 func (h *HealthHandler) Ping(w http.ResponseWriter, r *http.Request) {
-	hostname, err := os.Hostname()
-	if err != nil {
-		http.Error(w, "failed to get hostname", http.StatusInternalServerError)
+	setPingCORSHeaders(w)
+
+	switch r.Method {
+	case http.MethodGet, http.MethodHead:
+		response := PingResponse{
+			Status:  "ok",
+			Version: h.cfg.Version,
+			Service: "ekaya-engine",
+		}
+
+		if err := WriteJSON(w, http.StatusOK, response); err != nil {
+			h.logger.Error("Failed to encode ping response", zap.Error(err))
+		}
+	case http.MethodOptions:
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		w.Header().Set("Allow", "GET, HEAD, OPTIONS")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+}
 
-	response := PingResponse{
-		Status:      "ok",
-		Version:     h.cfg.Version,
-		Service:     "ekaya-engine",
-		GoVersion:   runtime.Version(),
-		Hostname:    hostname,
-		Environment: h.cfg.Env,
-	}
-
-	if err := WriteJSON(w, http.StatusOK, response); err != nil {
-		h.logger.Error("Failed to encode ping response", zap.Error(err))
-	}
+func setPingCORSHeaders(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }
 
 // Metrics handles GET /metrics requests.

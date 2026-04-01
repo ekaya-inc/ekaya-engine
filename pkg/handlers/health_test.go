@@ -112,7 +112,6 @@ func TestHealthHandler_Health_WithConnManager(t *testing.T) {
 func TestHealthHandler_Ping(t *testing.T) {
 	cfg := &config.Config{
 		Version: "1.2.3",
-		Env:     "test",
 	}
 	handler := NewHealthHandler(cfg, nil, zap.NewNop())
 
@@ -125,28 +124,55 @@ func TestHealthHandler_Ping(t *testing.T) {
 		t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
 	}
 
-	var response PingResponse
+	assertPingCORSHeaders(t, rec)
+
+	var response map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if response.Status != "ok" {
-		t.Errorf("expected status 'ok', got '%s'", response.Status)
+	expected := map[string]any{
+		"status":  "ok",
+		"version": "1.2.3",
+		"service": "ekaya-engine",
 	}
-	if response.Version != "1.2.3" {
-		t.Errorf("expected version '1.2.3', got '%s'", response.Version)
+
+	if len(response) != len(expected) {
+		t.Fatalf("expected %d ping fields, got %d: %#v", len(expected), len(response), response)
 	}
-	if response.Service != "ekaya-engine" {
-		t.Errorf("expected service 'ekaya-engine', got '%s'", response.Service)
+
+	for key, want := range expected {
+		if got := response[key]; got != want {
+			t.Errorf("expected %s %q, got %#v", key, want, got)
+		}
 	}
-	if response.Environment != "test" {
-		t.Errorf("expected environment 'test', got '%s'", response.Environment)
+
+	for _, field := range []string{"hostname", "go_version", "environment"} {
+		if _, ok := response[field]; ok {
+			t.Errorf("did not expect %q in ping response", field)
+		}
 	}
-	if response.GoVersion == "" {
-		t.Error("expected non-empty go_version")
+}
+
+func TestHealthHandler_PingOptions(t *testing.T) {
+	cfg := &config.Config{
+		Version: "1.2.3",
 	}
-	if response.Hostname == "" {
-		t.Error("expected non-empty hostname")
+	handler := NewHealthHandler(cfg, nil, zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodOptions, "/ping", nil)
+	rec := httptest.NewRecorder()
+
+	handler.Ping(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("expected status %d, got %d", http.StatusNoContent, rec.Code)
+	}
+
+	assertPingCORSHeaders(t, rec)
+
+	if rec.Body.Len() != 0 {
+		t.Errorf("expected empty response body for OPTIONS /ping, got %q", rec.Body.String())
 	}
 }
 
@@ -254,6 +280,15 @@ func TestHealthHandler_RegisterRoutes(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Errorf("/ping: expected status %d, got %d", http.StatusOK, rec.Code)
 	}
+	assertPingCORSHeaders(t, rec)
+
+	req = httptest.NewRequest(http.MethodOptions, "/ping", nil)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("/ping OPTIONS: expected status %d, got %d", http.StatusNoContent, rec.Code)
+	}
+	assertPingCORSHeaders(t, rec)
 
 	// Test /metrics is registered
 	req = httptest.NewRequest(http.MethodGet, "/metrics", nil)
@@ -262,5 +297,19 @@ func TestHealthHandler_RegisterRoutes(t *testing.T) {
 	// Should return 503 when no connection manager is provided
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("/metrics: expected status %d, got %d", http.StatusServiceUnavailable, rec.Code)
+	}
+}
+
+func assertPingCORSHeaders(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Errorf("expected Access-Control-Allow-Origin '*', got %q", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Methods"); got != "GET, HEAD, OPTIONS" {
+		t.Errorf("expected Access-Control-Allow-Methods 'GET, HEAD, OPTIONS', got %q", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Headers"); got != "Content-Type" {
+		t.Errorf("expected Access-Control-Allow-Headers 'Content-Type', got %q", got)
 	}
 }
