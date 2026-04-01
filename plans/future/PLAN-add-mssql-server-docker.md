@@ -271,7 +271,7 @@ make test-all-adapters
 
 If we need pre-loaded test data (like the Postgres test image), create:
 
-**Directory:** `test/docker/mssql-test-db/`
+**Directory:** `tests/docker/mssql-test-db/`
 
 ```dockerfile
 FROM mcr.microsoft.com/mssql/server:2022-latest
