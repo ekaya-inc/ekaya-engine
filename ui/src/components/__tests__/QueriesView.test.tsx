@@ -894,7 +894,10 @@ describe("QueriesView", () => {
   });
 
   it("keeps executed results scoped to the selected pending query", async () => {
-    const basePendingQuery = mockQueriesWithStatuses[1]!;
+    const basePendingQuery = mockQueriesWithStatuses[1];
+    if (!basePendingQuery) {
+      throw new Error("expected a pending query fixture");
+    }
     const pendingQueries = [
       {
         ...basePendingQuery,
