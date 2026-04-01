@@ -41,6 +41,7 @@ interface RenderProps {
   selectedAdapter?: string | null;
   selectedProvider?: ProviderInfo | undefined;
   onBackToSelection?: () => void;
+  onSaveSuccess?: () => void;
 }
 
 const renderComponent = (props: RenderProps = {}) => {
@@ -76,6 +77,7 @@ describe("DatasourceConfiguration", () => {
       saveDataSource: mockSaveDataSource,
       updateDataSource: mockUpdateDataSource,
       deleteDataSource: mockDeleteDataSource,
+      renameDatasource: vi.fn(),
     });
   });
 
@@ -306,6 +308,7 @@ describe("DatasourceConfiguration", () => {
         saveDataSource: mockSaveDataSource,
         updateDataSource: mockUpdateDataSource,
         deleteDataSource: mockDeleteDataSource,
+        renameDatasource: vi.fn(),
       });
 
       renderComponent({
@@ -401,6 +404,7 @@ describe("DatasourceConfiguration", () => {
         saveDataSource: mockSaveDataSource,
         updateDataSource: mockUpdateDataSource,
         deleteDataSource: mockDeleteDataSource,
+        renameDatasource: vi.fn(),
       });
 
       renderComponent({ selectedAdapter: "postgres" });
@@ -435,6 +439,7 @@ describe("DatasourceConfiguration", () => {
         saveDataSource: mockSaveDataSource,
         updateDataSource: mockUpdateDataSource,
         deleteDataSource: mockDeleteDataSource,
+        renameDatasource: vi.fn(),
       });
 
       renderComponent({ selectedAdapter: "postgres" });
@@ -470,6 +475,7 @@ describe("DatasourceConfiguration", () => {
         saveDataSource: mockSaveDataSource,
         updateDataSource: mockUpdateDataSource,
         deleteDataSource: mockDeleteDataSource,
+        renameDatasource: vi.fn(),
       });
 
       renderComponent({ selectedAdapter: "postgres" });
@@ -507,6 +513,7 @@ describe("DatasourceConfiguration", () => {
         saveDataSource: mockSaveDataSource,
         updateDataSource: mockUpdateDataSource,
         deleteDataSource: mockDeleteDataSource,
+        renameDatasource: vi.fn(),
       });
 
       renderComponent({
@@ -961,6 +968,52 @@ describe("DatasourceConfiguration", () => {
 
       // Port should update (Neon uses default 5432)
       expect(screen.getByLabelText("Port")).toHaveValue(5432);
+    });
+  });
+
+  describe("Save callbacks", () => {
+    it("calls onSaveSuccess instead of navigating when provided", async () => {
+      const onSaveSuccess = vi.fn();
+      mockSaveDataSource.mockResolvedValue({ success: true });
+      mockUseDatasourceConnection.mockReturnValue({
+        testConnection: mockTestConnection,
+        connectionStatus: { success: true, message: "Connected" },
+        error: null,
+        isConnected: false,
+        connectionDetails: null,
+        selectedDatasource: null,
+        clearError: mockClearError,
+        saveDataSource: mockSaveDataSource,
+        updateDataSource: mockUpdateDataSource,
+        deleteDataSource: mockDeleteDataSource,
+        renameDatasource: vi.fn(),
+      });
+
+      renderComponent({
+        selectedAdapter: "postgres",
+        selectedProvider: getProvider("supabase"),
+        onSaveSuccess,
+      });
+
+      fireEvent.change(screen.getByLabelText(/^Host/), {
+        target: { value: "db.supabase.example" },
+      });
+      fireEvent.change(screen.getByLabelText(/^Username/), {
+        target: { value: "postgres" },
+      });
+      fireEvent.change(screen.getByLabelText("Password"), {
+        target: { value: "secret" },
+      });
+      fireEvent.change(screen.getByLabelText(/^Database Name/), {
+        target: { value: "postgres" },
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: /save datasource/i }));
+
+      await waitFor(() => {
+        expect(onSaveSuccess).toHaveBeenCalledTimes(1);
+      });
+      expect(mockNavigate).not.toHaveBeenCalled();
     });
   });
 });

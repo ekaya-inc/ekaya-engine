@@ -94,12 +94,18 @@ interface DatasourceConfigurationProps {
   selectedAdapter: string | null;
   selectedProvider?: ProviderInfo | undefined;
   onBackToSelection: () => void;
+  onSaveSuccess?: () => void;
+  embedded?: boolean;
+  showBackButton?: boolean;
 }
 
 const DatasourceConfiguration = ({
   selectedAdapter,
   selectedProvider,
   onBackToSelection,
+  onSaveSuccess,
+  embedded = false,
+  showBackButton = true,
 }: DatasourceConfigurationProps) => {
   const { pid } = useParams<{ pid: string }>();
   const navigate = useNavigate();
@@ -611,7 +617,11 @@ const DatasourceConfiguration = ({
           description: `Datasource ${action} successfully!`,
           variant: "success",
         });
-        navigate(`/projects/${pid}`);
+        if (onSaveSuccess) {
+          onSaveSuccess();
+        } else {
+          navigate(`/projects/${pid}`);
+        }
       } else {
         toast({
           title: "Error",
@@ -1082,6 +1092,11 @@ const DatasourceConfiguration = ({
   );
 
   const handleBack = (): void => {
+    if (embedded) {
+      onBackToSelection();
+      return;
+    }
+
     if (isEditingExisting) {
       navigate(`/projects/${pid}`);
     } else {
@@ -1091,11 +1106,13 @@ const DatasourceConfiguration = ({
 
   return (
     <div className="mx-auto max-w-4xl">
-      <div className="mb-8">
-        <Button variant="ghost" onClick={handleBack} className="mb-4">
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back
-        </Button>
+      <div className={embedded ? "mb-6" : "mb-8"}>
+        {!embedded && (
+          <Button variant="ghost" onClick={handleBack} className="mb-4">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back
+          </Button>
+        )}
         <div className="flex items-center gap-4 mb-4">
           {displayInfo?.icon ? (
             <img
@@ -1111,7 +1128,7 @@ const DatasourceConfiguration = ({
             </div>
           )}
           <div>
-            <h1 className="text-3xl font-bold text-text-primary">
+            <h1 className={`${embedded ? "text-2xl" : "text-3xl"} font-bold text-text-primary`}>
               Configure {displayInfo?.name}
             </h1>
           </div>
@@ -1177,9 +1194,11 @@ const DatasourceConfiguration = ({
 
       <div className="mt-8 flex justify-between items-center">
         <div className="flex gap-2">
-          <Button variant="outline" onClick={handleBack}>
-            Back
-          </Button>
+          {showBackButton && (
+            <Button variant="outline" onClick={handleBack}>
+              Back
+            </Button>
+          )}
           {isConnected && connectionDetails && (
             <Button
               variant="outline"

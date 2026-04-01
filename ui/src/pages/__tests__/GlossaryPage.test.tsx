@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -226,12 +227,15 @@ describe('GlossaryPage', () => {
 
       renderGlossaryPage();
 
-      const addButton = await screen.findByRole('button', { name: /^add term$/i });
-      fireEvent.click(addButton);
+      await screen.findByText(
+        'Generate example business glossary terms from your ontology to get started. Terms will include SQL definitions, business and technical mappings.'
+      );
 
-      await waitFor(() => {
-        expect(screen.getByTestId('glossary-term-editor')).toBeInTheDocument();
-      });
+      const user = userEvent.setup();
+      const addButton = await screen.findByRole('button', { name: /^add term$/i });
+      await user.click(addButton);
+
+      expect(await screen.findByTestId('glossary-term-editor')).toBeInTheDocument();
     });
 
     it('shows dedicated no-qualified-terms state', async () => {
@@ -579,14 +583,11 @@ describe('GlossaryPage', () => {
     it('opens editor when Add Term button clicked', async () => {
       renderGlossaryPage();
 
-      await waitFor(() => {
-        const addButton = screen.getByRole('button', { name: /add term/i });
-        fireEvent.click(addButton);
-      });
+      const user = userEvent.setup();
+      const addButton = await screen.findByRole('button', { name: /add term/i });
+      await user.click(addButton);
 
-      await waitFor(() => {
-        expect(screen.getByTestId('glossary-term-editor')).toBeInTheDocument();
-      });
+      expect(await screen.findByTestId('glossary-term-editor')).toBeInTheDocument();
     });
 
     it('passes the selected datasource dialect to the glossary editor', async () => {
@@ -600,14 +601,11 @@ describe('GlossaryPage', () => {
 
       renderGlossaryPage();
 
-      await waitFor(() => {
-        const addButton = screen.getByRole('button', { name: /add term/i });
-        fireEvent.click(addButton);
-      });
+      const user = userEvent.setup();
+      const addButton = await screen.findByRole('button', { name: /add term/i });
+      await user.click(addButton);
 
-      await waitFor(() => {
-        expect(screen.getByTestId('glossary-term-editor')).toHaveAttribute('data-dialect', 'MSSQL');
-      });
+      expect(await screen.findByTestId('glossary-term-editor')).toHaveAttribute('data-dialect', 'MSSQL');
     });
 
     it('renders edit and delete buttons for each term', async () => {

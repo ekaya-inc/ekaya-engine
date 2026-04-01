@@ -30,12 +30,16 @@ interface DatasourceAdapterSelectionProps {
   selectedAdapter: string | null;
   onAdapterSelect: (adapterId: string, provider?: ProviderInfo) => void;
   datasources?: ConnectionDetails[];
+  embedded?: boolean;
+  onBack?: () => void;
 }
 
 const DatasourceAdapterSelection = ({
   selectedAdapter,
   onAdapterSelect,
   datasources = [],
+  embedded = false,
+  onBack,
 }: DatasourceAdapterSelectionProps) => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
@@ -130,18 +134,26 @@ const DatasourceAdapterSelection = ({
 
   return (
     <div className="mx-auto max-w-6xl">
-      <div className="mb-8">
-        <Button
-          variant="ghost"
-          onClick={() => navigate(`/projects/${pid}`)}
-          className="mb-4"
-        >
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back
-        </Button>
+      <div className={embedded ? "mb-6" : "mb-8"}>
+        {!embedded && (
+          <Button
+            variant="ghost"
+            onClick={() => {
+              if (onBack) {
+                onBack();
+                return;
+              }
+              navigate(`/projects/${pid}`);
+            }}
+            className="mb-4"
+          >
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back
+          </Button>
+        )}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-text-primary mb-2">
+            <h1 className={`${embedded ? "text-2xl" : "text-3xl"} font-bold text-text-primary mb-2`}>
               Select Your Database
             </h1>
             <p className="text-text-secondary">
