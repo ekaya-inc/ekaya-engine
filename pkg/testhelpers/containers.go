@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-connections/nat"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // PostgreSQL driver for database/sql (migrations)
 	"github.com/testcontainers/testcontainers-go"
@@ -65,8 +66,14 @@ func setupTestDB() (*TestDB, error) {
 			"POSTGRES_USER":     "ekaya",
 			"POSTGRES_PASSWORD": "test_password",
 		},
-		WaitingFor: wait.ForListeningPort("5432/tcp").
-			WithStartupTimeout(60 * time.Second),
+		// A listening TCP port is not enough for Postgres on macOS Docker hosts:
+		// the server can still be restarting or not yet accepting SQL connections.
+		WaitingFor: wait.ForAll(
+			wait.ForLog("database system is ready to accept connections"),
+			wait.ForSQL("5432/tcp", "pgx", func(host string, port nat.Port) string {
+				return fmt.Sprintf("postgres://ekaya:test_password@%s:%s/test_data?sslmode=disable", host, port.Port())
+			}),
+		).WithDeadline(90 * time.Second),
 	}
 
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
