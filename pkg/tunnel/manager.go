@@ -24,10 +24,11 @@ type Manager struct {
 	clientConfig ClientConfig
 	logger       *zap.Logger
 
-	mu      sync.RWMutex
-	clients map[uuid.UUID]*Client
-	ctx     context.Context
-	cancel  context.CancelFunc
+	mu            sync.RWMutex
+	clients       map[uuid.UUID]*Client
+	ctx           context.Context
+	cancel        context.CancelFunc
+	connectedHook func(context.Context, uuid.UUID)
 }
 
 // NewManager creates a new tunnel manager.
@@ -113,11 +114,18 @@ func (m *Manager) StartTunnel(ctx context.Context, projectID uuid.UUID) error {
 		m.clientConfig,
 		m.logger,
 	)
+	if m.connectedHook != nil {
+		client.SetConnectedHook(m.connectedHook)
+	}
 
 	m.clients[projectID] = client
 
 	// Start the client in a background goroutine
-	go client.Start(m.ctx)
+	startCtx := m.ctx
+	if startCtx == nil {
+		startCtx = ctx
+	}
+	go client.Start(startCtx)
 
 	m.logger.Info("Tunnel started",
 		zap.String("project_id", projectID.String()),
@@ -125,6 +133,14 @@ func (m *Manager) StartTunnel(ctx context.Context, projectID uuid.UUID) error {
 	)
 
 	return nil
+}
+
+// SetConnectedHook registers a callback that fires after a tunnel client
+// completes its first successful relay registration for a connection.
+func (m *Manager) SetConnectedHook(hook func(context.Context, uuid.UUID)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.connectedHook = hook
 }
 
 // StopTunnel stops the tunnel client for a specific project.

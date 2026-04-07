@@ -10,8 +10,6 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import AppPageHeader from '../components/AppPageHeader';
 import MCPEnabledTools from '../components/mcp/MCPEnabledTools';
-import SetupChecklist from '../components/SetupChecklist';
-import type { ChecklistItem } from '../components/SetupChecklist';
 import { Button } from '../components/ui/Button';
 import {
   Card,
@@ -34,7 +32,7 @@ import { useConfig } from '../contexts/ConfigContext';
 import { useToast } from '../hooks/useToast';
 import { getUserRoles } from '../lib/auth-token';
 import engineApi from '../services/engineApi';
-import type { AIConfigResponse, DAGStatusResponse, Datasource, MCPConfigResponse } from '../types';
+import type { MCPConfigResponse } from '../types';
 
 const OntologyForgePage = () => {
   const navigate = useNavigate();
@@ -46,14 +44,6 @@ const OntologyForgePage = () => {
   const [config, setConfig] = useState<MCPConfigResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
-
-  // Setup checklist state
-  const [datasource, setDatasource] = useState<Datasource | null>(null);
-  const [hasSelectedTables, setHasSelectedTables] = useState(false);
-  const [aiConfig, setAiConfig] = useState<AIConfigResponse | null>(null);
-  const [dagStatus, setDagStatus] = useState<DAGStatusResponse | null>(null);
-  const [questionCounts, setQuestionCounts] = useState<{ required: number; optional: number } | null>(null);
-  const [hasApprovedQueries, setHasApprovedQueries] = useState(false);
 
   // Uninstall state
   const [confirmText, setConfirmText] = useState('');
@@ -69,61 +59,12 @@ const OntologyForgePage = () => {
 
     try {
       setLoading(true);
-      const [mcpRes, datasourcesRes, aiConfigRes, installedAppRes] = await Promise.all([
-        engineApi.getMCPConfig(pid),
-        engineApi.listDataSources(pid),
-        engineApi.getAIConfig(pid),
-        engineApi.getInstalledApp(pid, 'ontology-forge').catch(() => null),
-      ]);
+      const mcpRes = await engineApi.getMCPConfig(pid);
 
       if (mcpRes.success && mcpRes.data) {
         setConfig(mcpRes.data);
       } else {
         throw new Error(mcpRes.error ?? 'Failed to load MCP configuration');
-      }
-
-      const ds = datasourcesRes.data?.datasources?.[0] ?? null;
-      setDatasource(ds);
-      setAiConfig(aiConfigRes.data ?? null);
-
-      let dagCompleted = false;
-      if (ds) {
-        try {
-          const schemaRes = await engineApi.getSchema(pid, ds.datasource_id);
-          const hasSelections = schemaRes.data?.tables?.some((t) => t.is_selected === true) ?? false;
-          setHasSelectedTables(hasSelections);
-        } catch {
-          setHasSelectedTables(false);
-        }
-
-        try {
-          const dagRes = await engineApi.getOntologyDAGStatus(pid, ds.datasource_id);
-          setDagStatus(dagRes.data ?? null);
-          dagCompleted = dagRes.data?.status === 'completed';
-        } catch {
-          setDagStatus(null);
-        }
-
-        try {
-          const countsRes = await engineApi.getOntologyQuestionCounts(pid);
-          setQuestionCounts(countsRes.data ?? null);
-        } catch {
-          setQuestionCounts(null);
-        }
-
-        try {
-          const queriesRes = await engineApi.listQueries(pid, ds.datasource_id);
-          const approvedCount = queriesRes.data?.queries?.filter((q) => q.status === 'approved').length ?? 0;
-          setHasApprovedQueries(approvedCount > 0);
-        } catch {
-          setHasApprovedQueries(false);
-        }
-      }
-
-      // Silently activate when ontology extraction completes for the first time
-      const appData = installedAppRes?.data ?? null;
-      if (dagCompleted && appData && !appData.activated_at) {
-        engineApi.activateApp(pid, 'ontology-forge').catch(() => {});
       }
     } catch (error) {
       console.error('Failed to fetch MCP config:', error);
@@ -211,133 +152,6 @@ const OntologyForgePage = () => {
     } finally {
       setIsUninstalling(false);
     }
-  };
-
-  const getChecklistItems = (): ChecklistItem[] => {
-    const items: ChecklistItem[] = [];
-
-    // 1. MCP Server set up (datasource configured = MCP Server core is ready)
-    items.push({
-      id: 'mcp-server',
-      title: 'MCP Server set up',
-      description: datasource
-        ? 'Datasource configured'
-        : 'Configure datasource in the MCP Server',
-      status: loading ? 'loading' : datasource ? 'complete' : 'pending',
-      link: `/projects/${pid}/mcp-server`,
-      linkText: datasource ? 'Manage' : 'Configure',
-    });
-
-    // 2. Schema selected
-    const schemaItem: ChecklistItem = {
-      id: 'schema',
-      title: 'Schema selected',
-      description: hasSelectedTables
-        ? 'Tables and columns selected for analysis'
-        : datasource
-          ? 'Select which tables and columns to include'
-          : 'Configure datasource first',
-      status: loading ? 'loading' : hasSelectedTables ? 'complete' : 'pending',
-      linkText: hasSelectedTables ? 'Manage' : 'Configure',
-    };
-    if (datasource) {
-      schemaItem.link = `/projects/${pid}/schema`;
-    }
-    items.push(schemaItem);
-
-    // 3. Create Pre-Approved Queries (optional)
-    const queriesItem: ChecklistItem = {
-      id: 'queries',
-      title: 'Create Pre-Approved Queries',
-      description: hasApprovedQueries
-        ? 'Pre-approved queries are available for the MCP Server'
-        : datasource
-          ? 'Create pre-approved SQL queries for the MCP Server to use'
-          : 'Configure datasource first',
-      status: loading ? 'loading' : hasApprovedQueries ? 'complete' : 'pending',
-      linkText: hasApprovedQueries ? 'Manage' : 'Configure',
-      optional: true,
-    };
-    if (datasource) {
-      queriesItem.link = `/projects/${pid}/queries`;
-    }
-    items.push(queriesItem);
-
-    // 4. AI configured
-    const isAIConfigured = !!aiConfig?.config_type && aiConfig.config_type !== 'none';
-    const aiConfigItem: ChecklistItem = {
-      id: 'ai-config',
-      title: 'AI configured',
-      description: isAIConfigured
-        ? 'AI model configured'
-        : hasSelectedTables
-          ? 'Configure an AI model for ontology extraction'
-          : 'Configure datasource and select schema first',
-      status: loading ? 'loading' : isAIConfigured ? 'complete' : 'pending',
-    };
-    if (datasource && hasSelectedTables) {
-      aiConfigItem.link = `/projects/${pid}/ai-config`;
-      aiConfigItem.linkText = isAIConfigured ? 'Manage' : 'Configure';
-    }
-    items.push(aiConfigItem);
-
-    // 5. Ontology extracted
-    const ontologyComplete = dagStatus?.status === 'completed';
-    const ontologyRunning = dagStatus?.status === 'running';
-    const ontologyFailed = dagStatus?.status === 'failed';
-
-    const ontologyItem: ChecklistItem = {
-      id: 'ontology',
-      title: 'Ontology extracted',
-      description: ontologyComplete
-        ? 'Schema semantics extracted and ready'
-        : ontologyRunning
-          ? `Extracting... (${dagStatus?.current_node ?? 'starting'})`
-          : ontologyFailed
-            ? 'Extraction failed - click to retry'
-            : datasource && hasSelectedTables && isAIConfigured
-              ? 'Extract semantic understanding from your schema'
-              : 'Configure datasource, select schema, and configure AI first',
-      status: loading
-        ? 'loading'
-        : ontologyComplete
-          ? 'complete'
-          : ontologyFailed
-            ? 'error'
-            : 'pending',
-      linkText: ontologyComplete ? 'Manage' : ontologyFailed ? 'Retry' : 'Configure',
-    };
-    if (datasource && hasSelectedTables && isAIConfigured) {
-      ontologyItem.link = `/projects/${pid}/ontology`;
-    }
-    items.push(ontologyItem);
-
-    // 6. Critical ontology questions answered
-    const questionsComplete = questionCounts !== null && questionCounts.required === 0;
-    const hasQuestions = questionCounts !== null && (questionCounts.required > 0 || questionsComplete);
-    const questionsItem: ChecklistItem = {
-      id: 'questions',
-      title: 'Critical Ontology Questions answered',
-      description: questionsComplete
-        ? 'All critical questions about your schema have been answered'
-        : questionCounts !== null
-          ? `${questionCounts.required} critical question${questionCounts.required === 1 ? '' : 's'} need${questionCounts.required === 1 ? 's' : ''} answer${questionCounts.required === 1 ? '' : 's'}`
-          : ontologyComplete
-            ? 'Check for critical questions about your schema'
-            : 'Extract ontology first',
-      status: loading
-        ? 'loading'
-        : questionsComplete
-          ? 'complete'
-          : 'pending',
-    };
-    if (ontologyComplete && hasQuestions) {
-      questionsItem.link = `/projects/${pid}/ontology-questions`;
-      questionsItem.linkText = questionsComplete ? 'Manage' : 'Answer';
-    }
-    items.push(questionsItem);
-
-    return items;
   };
 
   const handleOntologyMaintenanceToolsChange = async (enabled: boolean) => {
@@ -448,8 +262,6 @@ const OntologyForgePage = () => {
     );
   }
 
-  const checklistItems = getChecklistItems();
-
   return (
     <div className="mx-auto max-w-4xl">
       <AppPageHeader
@@ -460,14 +272,6 @@ const OntologyForgePage = () => {
       />
 
       <div className="space-y-6">
-        {/* Setup Checklist */}
-        <SetupChecklist
-          items={checklistItems}
-          title="Setup Checklist"
-          description="Complete these steps to build your business semantic layer"
-          completeDescription="Ontology Forge is ready"
-        />
-
         {config && (
           <Card>
             <CardHeader>

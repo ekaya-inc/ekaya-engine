@@ -45,13 +45,18 @@ type OntologyDAGService interface {
 	Shutdown(ctx context.Context) error
 }
 
+type InstalledAppServiceAware interface {
+	SetInstalledAppService(installedAppSvc InstalledAppService)
+}
+
 type ontologyDAGService struct {
-	dagRepo       repositories.OntologyDAGRepository
-	schemaRepo    repositories.SchemaRepository
-	questionRepo  repositories.OntologyQuestionRepository
-	chatRepo      repositories.OntologyChatRepository
-	knowledgeRepo repositories.KnowledgeRepository
-	glossaryRepo  repositories.GlossaryRepository
+	dagRepo         repositories.OntologyDAGRepository
+	schemaRepo      repositories.SchemaRepository
+	questionRepo    repositories.OntologyQuestionRepository
+	chatRepo        repositories.OntologyChatRepository
+	knowledgeRepo   repositories.KnowledgeRepository
+	glossaryRepo    repositories.GlossaryRepository
+	installedAppSvc InstalledAppService
 
 	// Adapted service methods for dag package
 	knowledgeSeedingMethods         dag.KnowledgeSeedingMethods
@@ -62,8 +67,9 @@ type ontologyDAGService struct {
 	finalizationMethods             dag.OntologyFinalizationMethods
 	columnEnrichmentMethods         dag.ColumnEnrichmentMethods
 
-	getTenantCtx TenantContextFunc
-	logger       *zap.Logger
+	getTenantCtx  TenantContextFunc
+	setupStateSvc SetupStateService
+	logger        *zap.Logger
 
 	// Ownership tracking for graceful shutdown
 	serverInstanceID uuid.UUID
@@ -99,6 +105,47 @@ func NewOntologyDAGService(
 }
 
 var _ OntologyDAGService = (*ontologyDAGService)(nil)
+
+func (s *ontologyDAGService) SetSetupStateService(setupStateSvc SetupStateService) {
+	s.setupStateSvc = setupStateSvc
+}
+
+func (s *ontologyDAGService) SetInstalledAppService(installedAppSvc InstalledAppService) {
+	s.installedAppSvc = installedAppSvc
+}
+
+type installedAppAuthSnapshot struct {
+	token  string
+	claims *auth.Claims
+}
+
+func captureInstalledAppAuthSnapshot(ctx context.Context) *installedAppAuthSnapshot {
+	token, ok := auth.GetToken(ctx)
+	if !ok {
+		return nil
+	}
+
+	claims, ok := auth.GetClaims(ctx)
+	if !ok || claims == nil {
+		return nil
+	}
+
+	claimsCopy := *claims
+	return &installedAppAuthSnapshot{
+		token:  token,
+		claims: &claimsCopy,
+	}
+}
+
+func (s *installedAppAuthSnapshot) apply(ctx context.Context) context.Context {
+	if s == nil {
+		return ctx
+	}
+
+	ctx = context.WithValue(ctx, auth.TokenKey, s.token)
+	ctx = context.WithValue(ctx, auth.ClaimsKey, s.claims)
+	return ctx
+}
 
 // SetKnowledgeSeedingMethods sets the knowledge seeding methods interface.
 // This is called after service construction to avoid circular dependencies.
@@ -154,6 +201,7 @@ func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID 
 	if err != nil {
 		return nil, fmt.Errorf("user authentication required to start extraction: %w", err)
 	}
+	appAuthSnapshot := captureInstalledAppAuthSnapshot(ctx)
 
 	// Store project overview as knowledge if provided.
 	// Uses manual provenance since this is user-provided context.
@@ -304,10 +352,23 @@ func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID 
 		return nil, fmt.Errorf("update DAG status: %w", err)
 	}
 
+	if s.setupStateSvc != nil {
+		if err := s.setupStateSvc.SetStepState(ctx, projectID, SetupStepOntologyExtracted, false); err != nil {
+			s.logger.Warn("Failed to clear ontology setup state on DAG start",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		}
+		if err := s.setupStateSvc.SetStepState(ctx, projectID, SetupStepQuestionsAnswered, false); err != nil {
+			s.logger.Warn("Failed to clear questions setup state on DAG start",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		}
+	}
+
 	// Run DAG execution in background
 	// Pass userID for provenance tracking - all inference-created objects will record this user as created_by
 	// Note: heartbeat is started inside executeDAG after defer is established
-	go s.executeDAG(projectID, dagRecord.ID, userID, changeSet)
+	go s.executeDAG(projectID, dagRecord.ID, userID, changeSet, appAuthSnapshot)
 
 	// Return DAG with nodes
 	dagRecord.Nodes = nodes
@@ -455,6 +516,20 @@ func (s *ontologyDAGService) Delete(ctx context.Context, projectID uuid.UUID) er
 	}
 
 	s.logger.Info("Successfully deleted all ontology data", zap.String("project_id", projectID.String()))
+
+	if s.setupStateSvc != nil {
+		if err := s.setupStateSvc.SetStepState(ctx, projectID, SetupStepOntologyExtracted, false); err != nil {
+			s.logger.Warn("Failed to clear ontology setup state after delete",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		}
+		if err := s.setupStateSvc.SetStepState(ctx, projectID, SetupStepQuestionsAnswered, false); err != nil {
+			s.logger.Warn("Failed to clear questions setup state after delete",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		}
+	}
+
 	return nil
 }
 
@@ -503,7 +578,7 @@ func (s *ontologyDAGService) createNodes(dagID uuid.UUID) []models.DAGNode {
 // executeDAG runs the DAG execution in a background goroutine.
 // userID is the user who triggered the extraction - used for provenance tracking on all created objects.
 // changeSet is nil for full extraction, non-nil for incremental extraction.
-func (s *ontologyDAGService) executeDAG(projectID, dagID, userID uuid.UUID, changeSet *models.ChangeSet) {
+func (s *ontologyDAGService) executeDAG(projectID, dagID, userID uuid.UUID, changeSet *models.ChangeSet, appAuthSnapshot *installedAppAuthSnapshot) {
 	// Create cancellable context
 	ctx, cancel := context.WithCancel(context.Background())
 	s.activeDAGs.Store(dagID, cancel)
@@ -596,7 +671,7 @@ func (s *ontologyDAGService) executeDAG(projectID, dagID, userID uuid.UUID, chan
 	}
 
 	// All nodes completed successfully
-	s.markDAGCompleted(projectID, dagRecord.DatasourceID, dagID)
+	s.markDAGCompleted(projectID, dagRecord.DatasourceID, dagID, appAuthSnapshot)
 }
 
 // executeNode runs a single node with retry logic.
@@ -835,8 +910,8 @@ func (s *ontologyDAGService) markDAGFailed(projectID, dagID uuid.UUID, errMsg st
 }
 
 // markDAGCompleted marks the DAG as completed.
-func (s *ontologyDAGService) markDAGCompleted(projectID, datasourceID, dagID uuid.UUID) {
-	ctx, cleanup, err := s.getTenantCtx(context.Background(), projectID)
+func (s *ontologyDAGService) markDAGCompleted(projectID, datasourceID, dagID uuid.UUID, appAuthSnapshot *installedAppAuthSnapshot) {
+	ctx, cleanup, err := s.getTenantCtx(appAuthSnapshot.apply(context.Background()), projectID)
 	if err != nil {
 		s.logger.Error("Failed to get tenant context for marking DAG completed", zap.Error(err))
 		return
@@ -857,4 +932,49 @@ func (s *ontologyDAGService) markDAGCompleted(projectID, datasourceID, dagID uui
 	}
 
 	s.logger.Info("DAG completed successfully", zap.String("dag_id", dagID.String()))
+
+	if s.installedAppSvc != nil {
+		installed, err := s.installedAppSvc.IsInstalled(ctx, projectID, models.AppIDOntologyForge)
+		if err != nil {
+			s.logger.Warn("Failed to check ontology-forge installation after extraction",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		} else if installed {
+			app, err := s.installedAppSvc.GetApp(ctx, projectID, models.AppIDOntologyForge)
+			if err != nil {
+				s.logger.Warn("Failed to load ontology-forge app after extraction",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err))
+			} else if app.ActivatedAt == nil {
+				if appAuthSnapshot == nil {
+					s.logger.Warn("Skipping ontology-forge auto-activation after extraction because auth context is unavailable",
+						zap.String("project_id", projectID.String()))
+				} else {
+					result, err := s.installedAppSvc.Activate(ctx, projectID, models.AppIDOntologyForge)
+					if err != nil {
+						s.logger.Warn("Failed to activate ontology-forge via central after extraction",
+							zap.String("project_id", projectID.String()),
+							zap.Error(err))
+					} else if result != nil && result.RedirectUrl != "" {
+						s.logger.Warn("Ontology-forge activation requires a redirect and could not be completed automatically after extraction",
+							zap.String("project_id", projectID.String()),
+							zap.String("status", result.Status))
+					}
+				}
+			}
+		}
+	}
+
+	if s.setupStateSvc != nil {
+		if err := s.setupStateSvc.SetStepState(ctx, projectID, SetupStepOntologyExtracted, true); err != nil {
+			s.logger.Warn("Failed to mark ontology setup step complete",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		}
+		if err := s.setupStateSvc.ReconcileStep(ctx, projectID, SetupStepQuestionsAnswered); err != nil {
+			s.logger.Warn("Failed to reconcile question setup step after extraction",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		}
+	}
 }

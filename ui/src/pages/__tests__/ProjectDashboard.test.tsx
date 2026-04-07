@@ -18,6 +18,7 @@ type MockInstalledApp = {
 let mockInstalledApps: MockInstalledApp[] = [];
 let mockIsConnected = true;
 let mockHasSelectedTables = true;
+let mockSetupStatus: { incomplete_count: number; steps: Record<string, boolean>; next_step?: string } | null = null;
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom');
@@ -34,6 +35,15 @@ vi.mock('../../hooks/useInstalledApps', () => ({
     error: null,
     refetch: vi.fn().mockResolvedValue(undefined),
     isInstalled: (appId: string) => mockInstalledApps.some((app) => app.app_id === appId),
+  }),
+}));
+
+vi.mock('../../hooks/useSetupStatus', () => ({
+  useSetupStatus: () => ({
+    status: mockSetupStatus,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn().mockResolvedValue(mockSetupStatus),
   }),
 }));
 
@@ -101,6 +111,7 @@ describe('ProjectDashboard', () => {
     mockInstalledApps = [{ app_id: 'ontology-forge' }];
     mockIsConnected = true;
     mockHasSelectedTables = true;
+    mockSetupStatus = null;
     vi.mocked(authToken.getUserRoles).mockReturnValue(['admin']);
     mockGetAuditSummary.mockResolvedValue({
       success: true,
@@ -116,6 +127,39 @@ describe('ProjectDashboard', () => {
     });
 
     expect(screen.queryByText('Glossary')).not.toBeInTheDocument();
+  });
+
+  it('shows a setup button when setup is incomplete', async () => {
+    mockSetupStatus = {
+      incomplete_count: 2,
+      steps: {
+        datasource_configured: false,
+        schema_selected: false,
+      },
+      next_step: 'datasource_configured',
+    };
+
+    renderDashboard();
+
+    expect(await screen.findByRole('button', { name: /setup/i })).toBeInTheDocument();
+    expect(screen.getByLabelText('2 incomplete setup steps')).toBeInTheDocument();
+  });
+
+  it('keeps the setup button visible when no required setup steps remain', async () => {
+    mockSetupStatus = {
+      incomplete_count: 0,
+      steps: {
+        datasource_configured: true,
+      },
+    };
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Applications')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: /setup/i })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/incomplete setup step/i)).not.toBeInTheDocument();
   });
 
   it('shows the Glossary tile when AI Data Liaison is installed', async () => {

@@ -37,6 +37,7 @@ type aiConfigService struct {
 	repo            repositories.AIConfigRepository
 	communityConfig *config.CommunityAIConfig
 	embeddedConfig  *config.EmbeddedAIConfig
+	setupStateSvc   SetupStateService
 	logger          *zap.Logger
 }
 
@@ -53,6 +54,10 @@ func NewAIConfigService(
 		embeddedConfig:  embeddedConfig,
 		logger:          logger,
 	}
+}
+
+func (s *aiConfigService) SetSetupStateService(setupStateSvc SetupStateService) {
+	s.setupStateSvc = setupStateSvc
 }
 
 // Get retrieves the AI config for a project.
@@ -94,6 +99,14 @@ func (s *aiConfigService) Upsert(ctx context.Context, projectID uuid.UUID, cfg *
 		zap.String("config_type", string(cfg.ConfigType)),
 	)
 
+	if s.setupStateSvc != nil {
+		if err := s.setupStateSvc.ReconcileStep(ctx, projectID, SetupStepAIConfigured); err != nil {
+			s.logger.Warn("Failed to reconcile AI setup state after upsert",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		}
+	}
+
 	return nil
 }
 
@@ -106,6 +119,14 @@ func (s *aiConfigService) Delete(ctx context.Context, projectID uuid.UUID) error
 	s.logger.Info("AI config deleted",
 		zap.String("project_id", projectID.String()),
 	)
+
+	if s.setupStateSvc != nil {
+		if err := s.setupStateSvc.SetStepState(ctx, projectID, SetupStepAIConfigured, false); err != nil {
+			s.logger.Warn("Failed to clear AI setup state after delete",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		}
+	}
 
 	return nil
 }

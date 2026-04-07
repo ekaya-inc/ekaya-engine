@@ -427,10 +427,16 @@ func TestValidate_NoUserContext(t *testing.T) {
 
 // mockQueryRepository implements repositories.QueryRepository for testing.
 type mockQueryRepository struct {
-	query     *models.Query
-	createErr error
-	getErr    error
-	updateErr error
+	query                        *models.Query
+	createErr                    error
+	getErr                       error
+	updateErr                    error
+	updateEnabledStatusErr       error
+	lastEnabledStatusProjectID   uuid.UUID
+	lastEnabledStatusQueryID     uuid.UUID
+	lastEnabledStatusValue       *bool
+	hasApprovedEnabledQueries    bool
+	hasApprovedEnabledQueriesErr error
 }
 
 func (m *mockQueryRepository) Create(ctx context.Context, query *models.Query) error {
@@ -477,6 +483,12 @@ func (m *mockQueryRepository) ListEnabledByTags(ctx context.Context, projectID, 
 }
 
 func (m *mockQueryRepository) UpdateEnabledStatus(ctx context.Context, projectID, queryID uuid.UUID, isEnabled bool) error {
+	m.lastEnabledStatusProjectID = projectID
+	m.lastEnabledStatusQueryID = queryID
+	m.lastEnabledStatusValue = &isEnabled
+	if m.updateEnabledStatusErr != nil {
+		return m.updateEnabledStatusErr
+	}
 	return nil
 }
 
@@ -486,6 +498,13 @@ func (m *mockQueryRepository) IncrementUsageCount(ctx context.Context, queryID u
 
 func (m *mockQueryRepository) HasEnabledQueries(ctx context.Context, projectID, datasourceID uuid.UUID) (bool, error) {
 	return false, nil
+}
+
+func (m *mockQueryRepository) HasApprovedEnabledQueriesByProject(ctx context.Context, projectID uuid.UUID) (bool, error) {
+	if m.hasApprovedEnabledQueriesErr != nil {
+		return false, m.hasApprovedEnabledQueriesErr
+	}
+	return m.hasApprovedEnabledQueries, nil
 }
 
 func (m *mockQueryRepository) ListPending(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error) {
@@ -558,6 +577,66 @@ func (m *mockDatasourceSvc) TestConnection(ctx context.Context, dsType string, c
 
 func (m *mockDatasourceSvc) Rename(ctx context.Context, id uuid.UUID, name string) error {
 	return nil
+}
+
+type mockSetupStateService struct {
+	reconcileCalls int
+	lastProjectID  uuid.UUID
+	lastStepIDs    []string
+}
+
+func (m *mockSetupStateService) GetSetupStatus(ctx context.Context, projectID uuid.UUID) (*SetupStatus, error) {
+	return nil, nil
+}
+
+func (m *mockSetupStateService) EnsureInitialized(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockSetupStateService) SetStepState(ctx context.Context, projectID uuid.UUID, stepID string, complete bool) error {
+	return nil
+}
+
+func (m *mockSetupStateService) EnsureAppSteps(ctx context.Context, projectID uuid.UUID, appID string) error {
+	return nil
+}
+
+func (m *mockSetupStateService) RemoveAppSteps(ctx context.Context, projectID uuid.UUID, appID string) error {
+	return nil
+}
+
+func (m *mockSetupStateService) ReconcileStep(ctx context.Context, projectID uuid.UUID, stepID string) error {
+	return nil
+}
+
+func (m *mockSetupStateService) ReconcileSteps(ctx context.Context, projectID uuid.UUID, stepIDs ...string) error {
+	m.reconcileCalls++
+	m.lastProjectID = projectID
+	m.lastStepIDs = append([]string(nil), stepIDs...)
+	return nil
+}
+
+func TestSetEnabledStatus_ReconcilesSetupState(t *testing.T) {
+	projectID := uuid.New()
+	queryID := uuid.New()
+	repo := &mockQueryRepository{}
+	setupState := &mockSetupStateService{}
+	svc := &queryService{
+		logger:        zap.NewNop(),
+		queryRepo:     repo,
+		setupStateSvc: setupState,
+	}
+
+	err := svc.SetEnabledStatus(context.Background(), projectID, queryID, false)
+	require.NoError(t, err)
+
+	require.NotNil(t, repo.lastEnabledStatusValue)
+	assert.Equal(t, projectID, repo.lastEnabledStatusProjectID)
+	assert.Equal(t, queryID, repo.lastEnabledStatusQueryID)
+	assert.False(t, *repo.lastEnabledStatusValue)
+	assert.Equal(t, 1, setupState.reconcileCalls)
+	assert.Equal(t, projectID, setupState.lastProjectID)
+	assert.Equal(t, []string{SetupStepQueriesCreated, SetupStepAgentsQueriesCreated}, setupState.lastStepIDs)
 }
 
 // --- Tests for Create() parameter validation ---
@@ -1139,6 +1218,15 @@ func (m *mockQueryRepoForApproval) IncrementUsageCount(ctx context.Context, quer
 }
 
 func (m *mockQueryRepoForApproval) HasEnabledQueries(ctx context.Context, projectID, datasourceID uuid.UUID) (bool, error) {
+	return false, nil
+}
+
+func (m *mockQueryRepoForApproval) HasApprovedEnabledQueriesByProject(ctx context.Context, projectID uuid.UUID) (bool, error) {
+	for _, q := range m.queries {
+		if q.ProjectID == projectID && q.Status == "approved" && q.IsEnabled {
+			return true, nil
+		}
+	}
 	return false, nil
 }
 

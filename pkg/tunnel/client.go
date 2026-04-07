@@ -57,6 +57,7 @@ type Client struct {
 	connectedSince *time.Time
 	cancel         context.CancelFunc
 	done           chan struct{}
+	onConnected    func(context.Context, uuid.UUID)
 }
 
 // NewClient creates a new tunnel client for a project.
@@ -208,6 +209,12 @@ func (c *Client) ConnectedSince() *time.Time {
 	return c.connectedSince
 }
 
+func (c *Client) SetConnectedHook(hook func(context.Context, uuid.UUID)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onConnected = hook
+}
+
 func (c *Client) setStatus(s TunnelStatus) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -279,6 +286,13 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 	c.logger.Info("Tunnel registered",
 		zap.String("public_url", registered.PublicURL),
 	)
+
+	c.mu.RLock()
+	onConnected := c.onConnected
+	c.mu.RUnlock()
+	if onConnected != nil {
+		onConnected(ctx, c.projectID)
+	}
 
 	// Enter message relay loop
 	return c.messageLoop(ctx, conn)

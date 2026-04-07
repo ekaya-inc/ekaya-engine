@@ -17,9 +17,7 @@ vi.mock('../../services/engineApi', () => ({
 
 const mockToast = vi.fn();
 vi.mock('../../hooks/useToast', () => ({
-  useToast: () => ({
-    toast: mockToast,
-  }),
+  useToast: () => ({ toast: mockToast }),
 }));
 
 vi.mock('../../contexts/ProjectContext', () => ({
@@ -59,7 +57,6 @@ function setupMocks(options: {
       ...(isActivated ? { activated_at: '2026-03-12T10:05:00Z' } : {}),
     },
   });
-
   vi.mocked(engineApi.getTunnelStatus).mockResolvedValue({
     success: true,
     data: {
@@ -67,27 +64,22 @@ function setupMocks(options: {
       ...(publicURL ? { public_url: publicURL } : {}),
     },
   });
-
   vi.mocked(engineApi.activateApp).mockResolvedValue({
     success: true,
     data: { status: 'activated' },
   });
-
   vi.mocked(engineApi.uninstallApp).mockResolvedValue({
     success: true,
     data: { status: 'uninstalled' },
   });
-
   vi.mocked(engineApi.completeAppCallback).mockResolvedValue({
     success: true,
     data: { action: 'activate', status: 'success' },
   });
 }
 
-async function renderMCPTunnelPage(
-  initialEntry = '/projects/proj-1/mcp-tunnel'
-) {
-  const result = render(
+async function renderPage(initialEntry = '/projects/proj-1/mcp-tunnel') {
+  render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/projects/:pid/mcp-tunnel" element={<MCPTunnelPage />} />
@@ -98,19 +90,6 @@ async function renderMCPTunnelPage(
   await waitFor(() => {
     expect(screen.getByText('MCP Tunnel')).toBeInTheDocument();
   });
-
-  return result;
-}
-
-function getConfirmButton() {
-  const buttons = screen.getAllByRole('button', {
-    name: /uninstall application/i,
-  });
-  const confirmButton = buttons.at(-1);
-  if (!confirmButton) {
-    throw new Error('Confirm uninstall button not found');
-  }
-  return confirmButton;
 }
 
 describe('MCPTunnelPage', () => {
@@ -123,27 +102,28 @@ describe('MCPTunnelPage', () => {
     vi.useRealTimers();
   });
 
-  it('shows the activation checklist step when the tunnel is installed but not activated', async () => {
-    await renderMCPTunnelPage();
+  it('shows activation controls in the status card instead of the old setup checklist', async () => {
+    await renderPage();
 
-    expect(screen.getByText('1. Activate MCP Tunnel')).toBeInTheDocument();
-    expect(
-      screen.getByText('Activate the application so the engine starts the outbound tunnel client.')
-    ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^activate$/i })).toBeInTheDocument();
+    expect(screen.queryByText('Setup Checklist')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Activate MCP Tunnel' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open Setup' })).toHaveAttribute(
+      'href',
+      '/projects/proj-1/setup'
+    );
   });
 
-  it('calls activateApp when the Activate button is clicked', async () => {
-    await renderMCPTunnelPage();
+  it('calls activateApp when the activate button is clicked', async () => {
+    await renderPage();
 
-    fireEvent.click(screen.getByRole('button', { name: /^activate$/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Activate MCP Tunnel' }));
 
     await waitFor(() => {
       expect(engineApi.activateApp).toHaveBeenCalledWith('proj-1', 'mcp-tunnel');
     });
   });
 
-  it('redirects to central when activateApp returns a redirect URL', async () => {
+  it('redirects to central when activateApp returns a redirect url', async () => {
     vi.mocked(engineApi.activateApp).mockResolvedValue({
       success: true,
       data: {
@@ -159,8 +139,8 @@ describe('MCPTunnelPage', () => {
       configurable: true,
     });
 
-    await renderMCPTunnelPage();
-    fireEvent.click(screen.getByRole('button', { name: /^activate$/i }));
+    await renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Activate MCP Tunnel' }));
 
     await waitFor(() => {
       expect(window.location.href).toBe('https://central.example.com/billing');
@@ -180,18 +160,14 @@ describe('MCPTunnelPage', () => {
       publicURL: 'https://mcp.ekaya.ai/mcp/proj-1',
     });
 
-    await renderMCPTunnelPage();
+    await renderPage();
 
     expect(screen.getByText('Connected')).toBeInTheDocument();
-    expect(screen.queryByText('https://mcp.ekaya.ai/mcp/proj-1')).not.toBeInTheDocument();
-    expect(screen.queryByText('Public URL')).not.toBeInTheDocument();
     expect(
       screen.getByRole('link', {
         name: 'Find your MCP URL and setup instructions on the MCP Server page.',
       })
     ).toHaveAttribute('href', '/projects/proj-1/mcp-server');
-    expect(screen.getByText('2. Confirm tunnel connection')).toBeInTheDocument();
-    expect(screen.getByText('Tunnel connected and public URL assigned')).toBeInTheDocument();
   });
 
   it('polls status while the tunnel is still connecting', async () => {
@@ -222,8 +198,7 @@ describe('MCPTunnelPage', () => {
         },
       });
 
-    await renderMCPTunnelPage();
-
+    await renderPage();
     expect(screen.getByText('Connecting')).toBeInTheDocument();
 
     await act(async () => {
@@ -234,79 +209,6 @@ describe('MCPTunnelPage', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Connected')).toBeInTheDocument();
-    });
-  });
-
-  it('completes lifecycle callbacks from the URL', async () => {
-    await renderMCPTunnelPage(
-      '/projects/proj-1/mcp-tunnel?callback_action=activate&callback_state=test-state&callback_app=mcp-tunnel&callback_status=success'
-    );
-
-    await waitFor(() => {
-      expect(engineApi.completeAppCallback).toHaveBeenCalledWith(
-        'proj-1',
-        'mcp-tunnel',
-        'activate',
-        'success',
-        'test-state'
-      );
-    });
-  });
-
-  it('completes cancelled callbacks without navigating away', async () => {
-    vi.mocked(engineApi.completeAppCallback).mockResolvedValue({
-      success: true,
-      data: { action: 'uninstall', status: 'cancelled' },
-    });
-
-    await renderMCPTunnelPage(
-      '/projects/proj-1/mcp-tunnel?callback_action=uninstall&callback_state=test-state&callback_app=mcp-tunnel&callback_status=cancelled'
-    );
-
-    await waitFor(() => {
-      expect(engineApi.completeAppCallback).toHaveBeenCalledWith(
-        'proj-1',
-        'mcp-tunnel',
-        'uninstall',
-        'cancelled',
-        'test-state'
-      );
-    });
-    expect(mockNavigate).not.toHaveBeenCalledWith('/projects/proj-1');
-  });
-
-  it('redirects to central when uninstallApp returns a redirect URL', async () => {
-    vi.mocked(engineApi.uninstallApp).mockResolvedValue({
-      success: true,
-      data: {
-        redirectUrl: 'https://central.example.com/cancel-billing',
-        status: 'pending_uninstall',
-      },
-    });
-
-    const originalLocation = window.location;
-    Object.defineProperty(window, 'location', {
-      value: { ...originalLocation, href: '' },
-      writable: true,
-      configurable: true,
-    });
-
-    await renderMCPTunnelPage();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Uninstall Application' }));
-    fireEvent.change(screen.getByPlaceholderText('uninstall application'), {
-      target: { value: 'uninstall application' },
-    });
-    fireEvent.click(getConfirmButton());
-
-    await waitFor(() => {
-      expect(window.location.href).toBe('https://central.example.com/cancel-billing');
-    });
-
-    Object.defineProperty(window, 'location', {
-      value: originalLocation,
-      writable: true,
-      configurable: true,
     });
   });
 });

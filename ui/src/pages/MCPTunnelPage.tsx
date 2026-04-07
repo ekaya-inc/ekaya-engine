@@ -8,8 +8,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import AppPageHeader from '../components/AppPageHeader';
-import SetupChecklist from '../components/SetupChecklist';
-import type { ChecklistItem } from '../components/SetupChecklist';
 import { Button } from '../components/ui/Button';
 import {
   Card,
@@ -258,8 +256,6 @@ const MCPTunnelPage = () => {
 
   const appInstalled = installedApp != null;
   const activated = installedApp?.activated_at != null;
-  const tunnelConnected =
-    tunnelStatus.tunnel_status === 'connected' && tunnelStatus.public_url != null;
   const connectedSince = formatConnectedSince(tunnelStatus.connected_since);
 
   useEffect(() => {
@@ -280,45 +276,6 @@ const MCPTunnelPage = () => {
     };
   }, [activated, tunnelStatus.tunnel_status, fetchPageData]);
 
-  const checklistItems: ChecklistItem[] = [
-    {
-      id: 'activate',
-      title: 'Activate MCP Tunnel',
-      description: !appInstalled
-        ? 'Install MCP Tunnel from the Applications page before activating it.'
-        : activated
-          ? 'MCP Tunnel activated'
-          : 'Activate the application so the engine starts the outbound tunnel client.',
-      status: loading ? 'loading' : activated ? 'complete' : 'pending',
-      disabled: !appInstalled,
-      ...(activated || !appInstalled
-        ? {}
-        : {
-            onAction: handleActivate,
-            actionText: 'Activate',
-            actionDisabled: activating,
-          }),
-    },
-    {
-      id: 'connection',
-      title: 'Confirm tunnel connection',
-      description: !activated
-        ? 'Complete step 1 before checking the tunnel connection.'
-        : tunnelConnected
-          ? 'Tunnel connected and public URL assigned'
-          : getTunnelStatusDescription(tunnelStatus.tunnel_status),
-      status: loading ? 'loading' : tunnelConnected ? 'complete' : 'pending',
-      disabled: !activated,
-      ...(!activated || tunnelConnected
-        ? {}
-        : {
-            onAction: handleRefreshStatus,
-            actionText: 'Refresh',
-            actionDisabled: refreshingStatus,
-          }),
-    },
-  ];
-
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -337,13 +294,6 @@ const MCPTunnelPage = () => {
         showInfoLink={false}
       />
 
-      <SetupChecklist
-        items={checklistItems}
-        title="Setup Checklist"
-        description="Activate the tunnel and confirm the relay connection."
-        completeDescription="MCP Tunnel is ready for external MCP clients."
-      />
-
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between gap-4">
@@ -360,7 +310,7 @@ const MCPTunnelPage = () => {
               variant="outline"
               size="sm"
               onClick={handleRefreshStatus}
-              disabled={refreshingStatus}
+              disabled={refreshingStatus || !activated}
             >
               {refreshingStatus ? (
                 <>
@@ -374,6 +324,23 @@ const MCPTunnelPage = () => {
                 </>
               )}
             </Button>
+          </div>
+          <div className="flex flex-wrap gap-3 pt-2">
+            {!activated && appInstalled ? (
+              <Button onClick={() => void handleActivate()} disabled={activating}>
+                {activating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Activating...
+                  </>
+                ) : (
+                  'Activate MCP Tunnel'
+                )}
+              </Button>
+            ) : null}
+            <Link to={`/projects/${pid}/setup`}>
+              <Button variant="outline">Open Setup</Button>
+            </Link>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">

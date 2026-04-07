@@ -752,6 +752,8 @@ const DatasourceConfiguration = ({
         <div className="flex gap-2">
           <Input
             id="connectionString"
+            name="database_connection_string"
+            autoComplete="off"
             placeholder="postgresql://user:password@host:port/database"
             value={connectionString}
             onChange={(e) => {
@@ -808,6 +810,8 @@ const DatasourceConfiguration = ({
           </Label>
           <Input
             id="host"
+            name="database_host"
+            autoComplete="off"
             placeholder="localhost or IP address"
             value={config.host}
             onChange={(e) => handleConfigChange("host", e.target.value)}
@@ -820,6 +824,8 @@ const DatasourceConfiguration = ({
           <Label htmlFor="port">Port</Label>
           <Input
             id="port"
+            name="database_port"
+            autoComplete="off"
             type="number"
             placeholder={selectedAdapter === "mssql" ? "1433" : "5432"}
             value={config.port}
@@ -837,6 +843,8 @@ const DatasourceConfiguration = ({
         </Label>
         <Input
           id="name"
+          name="database_name"
+          autoComplete="off"
           placeholder="Database name"
           value={config.name}
           onChange={(e) => handleConfigChange("name", e.target.value)}
@@ -881,11 +889,13 @@ const DatasourceConfiguration = ({
         // PostgreSQL, MySQL, etc. - always show username/password
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label htmlFor="user">
+            <Label htmlFor="db-user">
               Username <span className="text-red-500">*</span>
             </Label>
             <Input
-              id="user"
+              id="db-user"
+              name="db_username"
+              autoComplete="off"
               placeholder="Database user"
               value={config.user}
               onChange={(e) => handleConfigChange("user", e.target.value)}
@@ -896,9 +906,11 @@ const DatasourceConfiguration = ({
             </p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
+            <Label htmlFor="db-password">Password</Label>
             <Input
-              id="password"
+              id="db-password"
+              name="db_password"
+              autoComplete="new-password"
               type="password"
               placeholder="Database password"
               value={config.password}
@@ -913,11 +925,13 @@ const DatasourceConfiguration = ({
         // MSSQL SQL Authentication
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label htmlFor="user">
+            <Label htmlFor="sql-auth-user">
               Username <span className="text-red-500">*</span>
             </Label>
             <Input
-              id="user"
+              id="sql-auth-user"
+              name="sql_server_username"
+              autoComplete="off"
               placeholder="SQL Server user"
               value={config.user}
               onChange={(e) => handleConfigChange("user", e.target.value)}
@@ -927,11 +941,13 @@ const DatasourceConfiguration = ({
             </p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="password">
+            <Label htmlFor="sql-auth-password">
               Password <span className="text-red-500">*</span>
             </Label>
             <Input
-              id="password"
+              id="sql-auth-password"
+              name="sql_server_password"
+              autoComplete="new-password"
               type="password"
               placeholder="SQL Server password"
               value={config.password}
@@ -951,6 +967,8 @@ const DatasourceConfiguration = ({
             </Label>
             <Input
               id="tenantId"
+              name="azure_tenant_id"
+              autoComplete="off"
               placeholder="00000000-0000-0000-0000-000000000000"
               value={config.tenantId ?? ""}
               onChange={(e) => handleConfigChange("tenantId", e.target.value)}
@@ -966,6 +984,8 @@ const DatasourceConfiguration = ({
               </Label>
               <Input
                 id="clientId"
+                name="azure_client_id"
+                autoComplete="off"
                 placeholder="00000000-0000-0000-0000-000000000000"
                 value={config.clientId ?? ""}
                 onChange={(e) => handleConfigChange("clientId", e.target.value)}
@@ -980,6 +1000,8 @@ const DatasourceConfiguration = ({
               </Label>
               <Input
                 id="clientSecret"
+                name="azure_client_secret"
+                autoComplete="new-password"
                 type="password"
                 placeholder="Client secret value"
                 value={config.clientSecret ?? ""}

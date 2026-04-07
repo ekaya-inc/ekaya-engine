@@ -93,11 +93,16 @@ type projectService struct {
 	userRepo             repositories.UserRepository
 	mcpConfigRepo        repositories.MCPConfigRepository
 	installedAppService  InstalledAppService
+	setupStateSvc        SetupStateService
 	centralClient        *central.Client
 	centralProjectClient CentralProjectClient
 	nonceStore           NonceStore
 	baseURL              string
 	logger               *zap.Logger
+}
+
+func (s *projectService) SetSetupStateService(setupStateSvc SetupStateService) {
+	s.setupStateSvc = setupStateSvc
 }
 
 // NewProjectService creates a new project service with dependencies.
@@ -768,6 +773,14 @@ func (s *projectService) ProvisionFromClaims(ctx context.Context, claims *auth.C
 				zap.String("app_id", app.Name),
 				zap.Error(err))
 			// Don't return — app install failure shouldn't block provisioning
+		}
+	}
+
+	if s.setupStateSvc != nil {
+		if err := s.setupStateSvc.EnsureInitialized(ctxWithScope, projectID); err != nil {
+			s.logger.Warn("Failed to initialize setup state during provisioning",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
 		}
 	}
 

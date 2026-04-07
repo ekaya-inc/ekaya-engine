@@ -3,8 +3,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import AppPageHeader from '../components/AppPageHeader';
-import SetupChecklist from '../components/SetupChecklist';
-import type { ChecklistItem } from '../components/SetupChecklist';
 import { Button } from '../components/ui/Button';
 import {
   Card,
@@ -50,9 +48,6 @@ const AIAgentsPage = () => {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [approvedQueries, setApprovedQueries] = useState<Query[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const [ontologyForgeReady, setOntologyForgeReady] = useState(false);
-  const [hasQueries, setHasQueries] = useState(false);
 
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newAgentName, setNewAgentName] = useState('');
@@ -102,8 +97,7 @@ const AIAgentsPage = () => {
 
     setLoading(true);
     try {
-      const [ontologyForgeRes, datasourcesRes, agentsRes, mcpConfigRes] = await Promise.all([
-        engineApi.getInstalledApp(pid, 'ontology-forge').catch(() => null),
+      const [datasourcesRes, agentsRes, mcpConfigRes] = await Promise.all([
         engineApi.listDataSources(pid),
         engineApi.listAgents(pid),
         engineApi.getMCPConfig(pid).catch(() => null),
@@ -119,8 +113,6 @@ const AIAgentsPage = () => {
         setServerUrl(mcpConfigRes.data.serverUrl);
       }
 
-      setOntologyForgeReady(ontologyForgeRes?.data?.activated_at != null);
-
       const datasource = datasourcesRes.data?.datasources?.[0] ?? null;
       if (datasource) {
         const queriesRes = await engineApi.listQueries(pid, datasource.datasource_id);
@@ -129,10 +121,8 @@ const AIAgentsPage = () => {
             (query) => query.status === 'approved' && query.is_enabled
           ) ?? [];
         setApprovedQueries(approved);
-        setHasQueries(approved.length > 0);
       } else {
         setApprovedQueries([]);
-        setHasQueries(false);
       }
     } catch (error) {
       console.error('Failed to fetch AI Agents config:', error);
@@ -149,40 +139,6 @@ const AIAgentsPage = () => {
   useEffect(() => {
     void fetchData();
   }, [fetchData]);
-
-  const getChecklistItems = (): ChecklistItem[] => {
-    const items: ChecklistItem[] = [];
-
-    items.push({
-      id: 'ontology-forge',
-      title: 'Ontology Forge set up',
-      description: ontologyForgeReady
-        ? 'Ontology Forge is configured and ready'
-        : 'Set up Ontology Forge to extract your business semantic layer',
-      status: loading ? 'loading' : ontologyForgeReady ? 'complete' : 'pending',
-      link: `/projects/${pid}/ontology-forge`,
-      linkText: ontologyForgeReady ? 'Manage' : 'Set up',
-    });
-
-    const queriesItem: ChecklistItem = {
-      id: 'queries',
-      title: 'Pre-Approved Queries created',
-      description: hasQueries
-        ? 'Queries available for agents to execute'
-        : ontologyForgeReady
-          ? 'Create queries that agents can run'
-          : 'Complete step 1 first',
-      status: loading ? 'loading' : hasQueries ? 'complete' : 'pending',
-      linkText: hasQueries ? 'Manage' : 'Configure',
-      disabled: !ontologyForgeReady && !hasQueries,
-    };
-    if (ontologyForgeReady) {
-      queriesItem.link = `/projects/${pid}/queries`;
-    }
-    items.push(queriesItem);
-
-    return items;
-  };
 
   const resetAddDialog = () => {
     setNewAgentName('');
@@ -512,13 +468,6 @@ const AIAgentsPage = () => {
         slug="ai-agents"
         icon={<Bot className="h-8 w-8 text-orange-500" />}
         description="Create multiple named AI agents with their own API keys and pre-approved query access."
-      />
-
-      <SetupChecklist
-        items={getChecklistItems()}
-        title="Setup Checklist"
-        description="Complete these steps to enable AI Agents"
-        completeDescription="AI Agents is ready"
       />
 
       <Card>

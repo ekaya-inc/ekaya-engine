@@ -9,8 +9,6 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import AppPageHeader from '../components/AppPageHeader';
 import MCPEnabledTools from '../components/mcp/MCPEnabledTools';
-import SetupChecklist from '../components/SetupChecklist';
-import type { ChecklistItem } from '../components/SetupChecklist';
 import { Button } from '../components/ui/Button';
 import {
   Card,
@@ -44,10 +42,7 @@ const AIDataLiaisonPage = () => {
   const [isUninstalling, setIsUninstalling] = useState(false);
   const [showUninstallDialog, setShowUninstallDialog] = useState(false);
 
-  // Checklist state
   const [loading, setLoading] = useState(true);
-  const [ontologyForgeReady, setOntologyForgeReady] = useState(false);
-  const [glossaryReady, setGlossaryReady] = useState(false);
   const [mcpConfig, setMcpConfig] = useState<MCPConfigResponse | null>(null);
   const [installedApp, setInstalledApp] = useState<InstalledApp | null>(null);
   const [activating, setActivating] = useState(false);
@@ -57,25 +52,20 @@ const AIDataLiaisonPage = () => {
   const addApprovalTools = mcpConfig?.toolGroups['tools']?.addApprovalTools ?? true;
   const addRequestTools = mcpConfig?.toolGroups['tools']?.addRequestTools ?? true;
 
-  const fetchChecklistData = useCallback(async () => {
+  const fetchPageData = useCallback(async () => {
     if (!pid) return;
 
     setLoading(true);
     try {
-      // Fetch MCP config, installed app status, ontology prerequisites, and glossary readiness in parallel.
-      const [mcpConfigRes, installedAppRes, ontologyForgeRes, glossaryRes] = await Promise.all([
+      const [mcpConfigRes, installedAppRes] = await Promise.all([
         engineApi.getMCPConfig(pid),
         engineApi.getInstalledApp(pid, 'ai-data-liaison').catch(() => null),
-        engineApi.getInstalledApp(pid, 'ontology-forge').catch(() => null),
-        engineApi.listGlossaryTerms(pid).catch(() => null),
       ]);
 
       setMcpConfig(mcpConfigRes.data ?? null);
       setInstalledApp(installedAppRes?.data ?? null);
-      setOntologyForgeReady(ontologyForgeRes?.data?.activated_at != null);
-      setGlossaryReady((glossaryRes?.data?.terms?.length ?? 0) > 0);
     } catch (error) {
-      console.error('Failed to fetch checklist data:', error);
+      console.error('Failed to fetch AI Data Liaison page data:', error);
       toast({
         title: 'Error',
         description: 'Failed to load configuration status',
@@ -87,8 +77,8 @@ const AIDataLiaisonPage = () => {
   }, [pid, toast]);
 
   useEffect(() => {
-    fetchChecklistData();
-  }, [fetchChecklistData]);
+    fetchPageData();
+  }, [fetchPageData]);
 
   // Process callback from central redirect (e.g., after billing confirmation)
   useEffect(() => {
@@ -112,7 +102,7 @@ const AIDataLiaisonPage = () => {
           return;
         }
         if (callbackStatus === 'cancelled') {
-          await fetchChecklistData();
+          await fetchPageData();
           return;
         }
         // Navigate based on completed action
@@ -120,7 +110,7 @@ const AIDataLiaisonPage = () => {
           navigate(`/projects/${pid}`);
         } else {
           // For install/activate, refresh data to show updated state
-          await fetchChecklistData();
+          await fetchPageData();
         }
       } catch (error) {
         toast({
@@ -132,7 +122,7 @@ const AIDataLiaisonPage = () => {
     };
 
     void processCallback();
-  }, [searchParams, setSearchParams, pid, navigate, toast, fetchChecklistData]);
+  }, [searchParams, setSearchParams, pid, navigate, toast, fetchPageData]);
 
   const handleUninstall = async () => {
     if (confirmText !== 'uninstall application' || !pid) return;
@@ -175,7 +165,7 @@ const AIDataLiaisonPage = () => {
         return;
       }
       // Activation succeeded without redirect — refresh data
-      await fetchChecklistData();
+      await fetchPageData();
     } catch (error) {
       toast({
         title: 'Error',
@@ -247,65 +237,7 @@ const AIDataLiaisonPage = () => {
     }
   };
 
-  // Build checklist items based on current state
-  const getChecklistItems = (): ChecklistItem[] => {
-    const items: ChecklistItem[] = [];
-    const glossaryConfigured = glossaryReady;
-
-    // 1. Ontology Forge set up
-    items.push({
-      id: 'ontology-forge',
-      title: 'Ontology Forge set up',
-      description: ontologyForgeReady
-        ? 'Ontology Forge is configured and ready'
-        : 'Set up Ontology Forge to extract your business semantic layer',
-      status: loading ? 'loading' : ontologyForgeReady ? 'complete' : 'pending',
-      link: `/projects/${pid}/ontology-forge`,
-      linkText: ontologyForgeReady ? 'Manage' : 'Set up',
-    });
-
-    // 2. Glossary set up
-    items.push({
-      id: 'glossary',
-      title: 'Glossary set up',
-      description: glossaryConfigured
-        ? 'Glossary is configured and ready'
-        : ontologyForgeReady
-          ? 'Set up the business glossary for consistent business terminology'
-          : 'Complete step 1 first',
-      status: loading ? 'loading' : glossaryConfigured ? 'complete' : 'pending',
-      disabled: !ontologyForgeReady && !glossaryConfigured,
-      link: `/projects/${pid}/glossary`,
-      linkText: glossaryConfigured ? 'Manage' : 'Set up',
-    });
-
-    // 3. Activate AI Data Liaison after Ontology Forge and Glossary are ready
-    const activated = installedApp?.activated_at != null;
-    const activationReady = ontologyForgeReady && glossaryConfigured;
-    items.push({
-      id: 'activate',
-      title: 'Activate AI Data Liaison',
-      description: activated
-        ? 'AI Data Liaison activated'
-        : activationReady
-          ? 'Activate to start using the application'
-          : ontologyForgeReady
-            ? 'Complete step 2 before activating'
-            : 'Complete steps 1 and 2 before activating',
-      status: loading ? 'loading' : activated ? 'complete' : 'pending',
-      disabled: !activationReady && !activated,
-      ...(activated ? {} : {
-        onAction: handleActivate,
-        actionText: 'Activate',
-        actionDisabled: activating || !activationReady,
-      }),
-    });
-
-    return items;
-  };
-
-  const checklistItems = getChecklistItems();
-  const allComplete = checklistItems.every((item) => item.status === 'complete');
+  const activated = installedApp?.activated_at != null;
 
   if (loading) {
     return (
@@ -324,13 +256,43 @@ const AIDataLiaisonPage = () => {
         description="Ekaya acts as a data liaison between you and your business users. This application extends the Ekaya Engine with MCP tools that let teams manage query workflows, share glossary terminology, and collaborate through governed business definitions."
       />
 
-      {/* Setup Checklist */}
-      <SetupChecklist
-        items={checklistItems}
-        title="Setup Checklist"
-        description="Complete these steps to enable AI Data Liaison"
-        completeDescription="AI Data Liaison is ready for business users"
-      />
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Application Status</CardTitle>
+          <CardDescription>
+            Setup guidance now lives in the shared Setup flow. You can still activate this app here when you are ready.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-text-primary">
+              {activated ? 'AI Data Liaison is activated.' : 'AI Data Liaison is not activated yet.'}
+            </p>
+            <p className="mt-1 text-sm text-text-secondary">
+              {activated
+                ? 'Business-user workflows and governance tools are available for this project.'
+                : 'Finish the remaining setup steps from the Setup page, or activate now if the project is ready.'}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {!activated ? (
+              <Button onClick={() => void handleActivate()} disabled={activating}>
+                {activating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Activating...
+                  </>
+                ) : (
+                  'Activate'
+                )}
+              </Button>
+            ) : null}
+            <Link to={`/projects/${pid}/setup`}>
+              <Button variant="outline">Open Setup</Button>
+            </Link>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Tool Configuration */}
       {mcpConfig && (
@@ -389,8 +351,8 @@ const AIDataLiaisonPage = () => {
         </Card>
       )}
 
-      {/* Auditing (only when setup is complete) */}
-      {allComplete && (
+      {/* Auditing */}
+      {activated && (
         <Card>
           <CardHeader>
             <div className="flex items-center gap-3">

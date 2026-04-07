@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/internal/runtimectl"
@@ -255,6 +256,36 @@ func Run(version string) error {
 		ontologyQuestionRepo, ontologyChatRepo, knowledgeRepo,
 		glossaryRepo, getTenantCtx, logger)
 
+	setupStateService := services.NewSetupStateService(
+		db,
+		datasourceService,
+		schemaRepo,
+		aiConfigService,
+		ontologyDAGService,
+		ontologyQuestionService,
+		queryRepo,
+		glossaryRepo,
+		installedAppRepo,
+		logger,
+	)
+
+	for _, svc := range []any{
+		datasourceService,
+		schemaService,
+		queryService,
+		aiConfigService,
+		ontologyQuestionService,
+		glossaryService,
+		ontologyDAGService,
+		installedAppService,
+		projectService,
+	} {
+		if aware, ok := svc.(services.SetupStateAware); ok {
+			aware.SetSetupStateService(setupStateService)
+		}
+	}
+	ontologyDAGService.SetInstalledAppService(installedAppService)
+
 	// Wire DAG adapters using setter pattern (avoids import cycles)
 	knowledgeSeedingService := services.NewKnowledgeSeedingService(knowledgeService, schemaService, llmFactory, logger)
 	ontologyDAGService.SetKnowledgeSeedingMethods(knowledgeSeedingService)
@@ -438,6 +469,9 @@ func Run(version string) error {
 	projectsHandler := handlers.NewProjectsHandler(projectService, cfg, logger)
 	projectsHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
+	setupHandler := handlers.NewSetupHandler(setupStateService, logger)
+	setupHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
 	// Register users handler (protected)
 	usersHandler := handlers.NewUsersHandler(userService, logger)
 	usersHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
@@ -515,6 +549,16 @@ func Run(version string) error {
 		},
 		logger,
 	)
+	setupStateService.SetTunnelConnectedResolver(func(ctx context.Context, projectID uuid.UUID) bool {
+		return tunnelManager.Status(ctx, projectID).Status == tunnel.StatusConnected
+	})
+	tunnelManager.SetConnectedHook(func(ctx context.Context, projectID uuid.UUID) {
+		if err := setupStateService.SetStepState(ctx, projectID, services.SetupStepTunnelConnected, true); err != nil {
+			logger.Warn("Failed to mark tunnel connection setup step complete",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		}
+	})
 
 	// Wire tunnel lifecycle hook into installed app handler
 	tunnelHook := tunnel.NewLifecycleHook(tunnelManager, logger)

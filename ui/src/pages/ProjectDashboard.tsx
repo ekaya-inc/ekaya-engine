@@ -29,6 +29,7 @@ import { Button } from '../components/ui/Button';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import { useDatasourceConnection } from '../contexts/DatasourceConnectionContext';
 import { useInstalledApps } from '../hooks/useInstalledApps';
+import { useSetupStatus } from '../hooks/useSetupStatus';
 import { getUserRoles } from '../lib/auth-token';
 import engineApi from '../services/engineApi';
 import { ontologyService } from '../services/ontologyService';
@@ -64,6 +65,7 @@ const ProjectDashboard = () => {
   const { pid } = useParams<{ pid: string }>();
   const { isConnected, hasSelectedTables } = useDatasourceConnection();
   const { apps: installedApps } = useInstalledApps(pid);
+  const { status: setupStatus } = useSetupStatus(pid);
   const roles = getUserRoles();
   const [activeAIConfig, setActiveAIConfig] = useState<AIOption>(null);
 
@@ -480,14 +482,31 @@ const ProjectDashboard = () => {
       <section>
         <div className="flex items-center justify-between mb-2">
           <h1 className="text-2xl font-semibold">Applications</h1>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => navigate(`/projects/${pid}/applications`)}
-          >
-            <Plus className="h-4 w-4" />
-            Install Applications
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate(`/projects/${pid}/setup`)}
+            >
+              Setup
+              {setupStatus && setupStatus.incomplete_count > 0 ? (
+                <span
+                  aria-label={`${setupStatus.incomplete_count} incomplete setup step${setupStatus.incomplete_count === 1 ? '' : 's'}`}
+                  className="inline-flex min-w-6 items-center justify-center rounded-full bg-amber-500 px-2 py-0.5 text-xs font-semibold text-white"
+                >
+                  {setupStatus.incomplete_count}
+                </span>
+              ) : null}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate(`/projects/${pid}/applications`)}
+            >
+              <Plus className="h-4 w-4" />
+              Install Applications
+            </Button>
+          </div>
         </div>
         <p className="text-text-secondary mb-4">
           Install applications that safely connect to your data through secure interfaces accessed only by authenticated and authorized users.

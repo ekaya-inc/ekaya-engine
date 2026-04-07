@@ -161,6 +161,7 @@ type queryService struct {
 	datasourceSvc  DatasourceService
 	adapterFactory datasource.DatasourceAdapterFactory
 	auditor        *audit.SecurityAuditor
+	setupStateSvc  SetupStateService
 	logger         *zap.Logger
 }
 
@@ -178,6 +179,27 @@ func NewQueryService(
 		adapterFactory: adapterFactory,
 		auditor:        auditor,
 		logger:         logger,
+	}
+}
+
+func (s *queryService) SetSetupStateService(setupStateSvc SetupStateService) {
+	s.setupStateSvc = setupStateSvc
+}
+
+func (s *queryService) reconcileSetupState(ctx context.Context, projectID uuid.UUID) {
+	if s.setupStateSvc == nil {
+		return
+	}
+
+	if err := s.setupStateSvc.ReconcileSteps(
+		ctx,
+		projectID,
+		SetupStepQueriesCreated,
+		SetupStepAgentsQueriesCreated,
+	); err != nil {
+		s.logger.Warn("Failed to reconcile query setup state",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
 	}
 }
 
@@ -284,6 +306,8 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 		zap.String("datasource_id", datasourceID.String()),
 	)
 
+	s.reconcileSetupState(ctx, projectID)
+
 	return query, nil
 }
 
@@ -383,6 +407,8 @@ func (s *queryService) Update(ctx context.Context, projectID, queryID uuid.UUID,
 		zap.String("project_id", projectID.String()),
 	)
 
+	s.reconcileSetupState(ctx, projectID)
+
 	return query, nil
 }
 
@@ -405,6 +431,8 @@ func (s *queryService) Delete(ctx context.Context, projectID, queryID uuid.UUID)
 		zap.String("id", queryID.String()),
 		zap.String("project_id", projectID.String()),
 	)
+
+	s.reconcileSetupState(ctx, projectID)
 
 	return nil
 }
@@ -445,6 +473,8 @@ func (s *queryService) SetEnabledStatus(ctx context.Context, projectID, queryID 
 		zap.String("id", queryID.String()),
 		zap.Bool("is_enabled", isEnabled),
 	)
+
+	s.reconcileSetupState(ctx, projectID)
 
 	return nil
 }
@@ -1338,6 +1368,8 @@ func (s *queryService) ApproveQuery(ctx context.Context, projectID, queryID uuid
 		)
 	}
 
+	s.reconcileSetupState(ctx, projectID)
+
 	return nil
 }
 
@@ -1368,6 +1400,8 @@ func (s *queryService) RejectQuery(ctx context.Context, projectID, queryID uuid.
 		zap.String("reason", reason),
 	)
 
+	s.reconcileSetupState(ctx, projectID)
+
 	return nil
 }
 
@@ -1394,6 +1428,8 @@ func (s *queryService) MoveToPending(ctx context.Context, projectID, queryID uui
 	s.logger.Info("Moved rejected query back to pending",
 		zap.String("id", queryID.String()),
 	)
+
+	s.reconcileSetupState(ctx, projectID)
 
 	return nil
 }
@@ -1463,6 +1499,8 @@ func (s *queryService) DeleteWithPendingRejection(ctx context.Context, projectID
 		zap.String("project_id", projectID.String()),
 		zap.Int("rejected_count", rejectedCount),
 	)
+
+	s.reconcileSetupState(ctx, projectID)
 
 	return rejectedCount, nil
 }

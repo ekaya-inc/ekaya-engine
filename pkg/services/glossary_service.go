@@ -130,6 +130,7 @@ type glossaryService struct {
 	adapterFactory     datasource.DatasourceAdapterFactory
 	llmFactory         llm.LLMClientFactory
 	getTenant          TenantContextFunc
+	setupStateSvc      SetupStateService
 	logger             *zap.Logger
 	env                string
 }
@@ -164,6 +165,10 @@ func NewGlossaryService(
 		logger:             logger.Named("glossary-service"),
 		env:                env,
 	}
+}
+
+func (s *glossaryService) SetSetupStateService(setupStateSvc SetupStateService) {
+	s.setupStateSvc = setupStateSvc
 }
 
 // buildColumnMetadataLookup builds a tableName → columnName → ColumnMetadata map
@@ -355,6 +360,14 @@ func (s *glossaryService) CreateTerm(ctx context.Context, projectID uuid.UUID, t
 		zap.String("term", term.Term),
 		zap.String("term_id", term.ID.String()))
 
+	if s.setupStateSvc != nil {
+		if err := s.setupStateSvc.ReconcileStep(ctx, projectID, SetupStepGlossarySetup); err != nil {
+			s.logger.Warn("Failed to reconcile glossary setup state after create",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		}
+	}
+
 	return nil
 }
 
@@ -433,6 +446,14 @@ func (s *glossaryService) UpdateTerm(ctx context.Context, term *models.BusinessG
 }
 
 func (s *glossaryService) DeleteTerm(ctx context.Context, termID uuid.UUID) error {
+	term, err := s.glossaryRepo.GetByID(ctx, termID)
+	if err != nil {
+		s.logger.Error("Failed to get glossary term before delete",
+			zap.String("term_id", termID.String()),
+			zap.Error(err))
+		return fmt.Errorf("get glossary term: %w", err)
+	}
+
 	if err := s.glossaryRepo.Delete(ctx, termID); err != nil {
 		s.logger.Error("Failed to delete glossary term",
 			zap.String("term_id", termID.String()),
@@ -442,6 +463,14 @@ func (s *glossaryService) DeleteTerm(ctx context.Context, termID uuid.UUID) erro
 
 	s.logger.Info("Deleted glossary term",
 		zap.String("term_id", termID.String()))
+
+	if term != nil && s.setupStateSvc != nil {
+		if err := s.setupStateSvc.ReconcileStep(ctx, term.ProjectID, SetupStepGlossarySetup); err != nil {
+			s.logger.Warn("Failed to reconcile glossary setup state after delete",
+				zap.String("project_id", term.ProjectID.String()),
+				zap.Error(err))
+		}
+	}
 
 	return nil
 }
@@ -2698,5 +2727,13 @@ func (s *glossaryService) RunAutoGenerate(ctx context.Context, projectID uuid.UU
 		zap.String("project_id", projectID.String()),
 		zap.String("status", status.Status),
 		zap.String("message", status.Message))
+
+	if s.setupStateSvc != nil {
+		if err := s.setupStateSvc.ReconcileStep(ctx, projectID, SetupStepGlossarySetup); err != nil {
+			s.logger.Warn("Failed to reconcile glossary setup state after auto-generate",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		}
+	}
 	return nil
 }

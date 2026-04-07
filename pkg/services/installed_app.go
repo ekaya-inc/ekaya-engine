@@ -80,6 +80,7 @@ type installedAppService struct {
 	centralClient CentralAppClient
 	nonceStore    NonceStore
 	baseURL       string
+	setupStateSvc SetupStateService
 	logger        *zap.Logger
 }
 
@@ -98,6 +99,10 @@ func NewInstalledAppService(
 		baseURL:       baseURL,
 		logger:        logger,
 	}
+}
+
+func (s *installedAppService) SetSetupStateService(setupStateSvc SetupStateService) {
+	s.setupStateSvc = setupStateSvc
 }
 
 // ListInstalled returns all installed apps for a project.
@@ -240,6 +245,8 @@ func (s *installedAppService) Activate(ctx context.Context, projectID uuid.UUID,
 		zap.String("app_id", appID),
 	)
 
+	s.reconcileAppActivation(ctx, projectID, appID)
+
 	return &AppActionResult{Status: centralResp.Status}, nil
 }
 
@@ -292,6 +299,15 @@ func (s *installedAppService) Uninstall(ctx context.Context, projectID uuid.UUID
 		zap.String("app_id", appID),
 	)
 
+	if s.setupStateSvc != nil {
+		if err := s.setupStateSvc.RemoveAppSteps(ctx, projectID, appID); err != nil {
+			s.logger.Warn("Failed to remove app setup steps after uninstall",
+				zap.String("project_id", projectID.String()),
+				zap.String("app_id", appID),
+				zap.Error(err))
+		}
+	}
+
 	return &AppActionResult{Status: centralResp.Status}, nil
 }
 
@@ -334,6 +350,7 @@ func (s *installedAppService) CompleteCallback(ctx context.Context, projectID uu
 			zap.String("project_id", projectID.String()),
 			zap.String("app_id", appID),
 		)
+		s.reconcileAppActivation(ctx, projectID, appID)
 	case "uninstall":
 		if err := s.repo.Uninstall(ctx, projectID, appID); err != nil {
 			return fmt.Errorf("failed to complete uninstall: %w", err)
@@ -342,6 +359,14 @@ func (s *installedAppService) CompleteCallback(ctx context.Context, projectID uu
 			zap.String("project_id", projectID.String()),
 			zap.String("app_id", appID),
 		)
+		if s.setupStateSvc != nil {
+			if err := s.setupStateSvc.RemoveAppSteps(ctx, projectID, appID); err != nil {
+				s.logger.Warn("Failed to remove app setup steps after uninstall callback",
+					zap.String("project_id", projectID.String()),
+					zap.String("app_id", appID),
+					zap.Error(err))
+			}
+		}
 	default:
 		return fmt.Errorf("unknown callback action: %s", action)
 	}
@@ -480,7 +505,39 @@ func (s *installedAppService) saveInstall(ctx context.Context, projectID uuid.UU
 		zap.String("installed_by", userID),
 	)
 
+	if s.setupStateSvc != nil {
+		if err := s.setupStateSvc.EnsureAppSteps(ctx, projectID, appID); err != nil {
+			s.logger.Warn("Failed to ensure app setup steps after install",
+				zap.String("project_id", projectID.String()),
+				zap.String("app_id", appID),
+				zap.Error(err))
+		}
+	}
+
 	return app, nil
+}
+
+func (s *installedAppService) reconcileAppActivation(ctx context.Context, projectID uuid.UUID, appID string) {
+	if s.setupStateSvc == nil {
+		return
+	}
+
+	var stepID string
+	switch appID {
+	case models.AppIDAIDataLiaison:
+		stepID = SetupStepADLActivated
+	case models.AppIDMCPTunnel:
+		stepID = SetupStepTunnelActivated
+	default:
+		return
+	}
+
+	if err := s.setupStateSvc.ReconcileStep(ctx, projectID, stepID); err != nil {
+		s.logger.Warn("Failed to reconcile app activation setup step",
+			zap.String("project_id", projectID.String()),
+			zap.String("app_id", appID),
+			zap.Error(err))
+	}
 }
 
 // buildCallbackURL constructs the engine callback URL for central redirects.

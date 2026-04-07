@@ -965,7 +965,7 @@ func TestExecuteDAG_PanicRecovery(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		service.executeDAG(projectID, dagID, testUserID, nil)
+		service.executeDAG(projectID, dagID, testUserID, nil, nil)
 	}()
 
 	// Wait for goroutine to complete with timeout
@@ -1041,7 +1041,7 @@ func TestExecuteDAG_HeartbeatCleanupOrder(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		service.executeDAG(projectID, dagID, testUserID, nil)
+		service.executeDAG(projectID, dagID, testUserID, nil, nil)
 	}()
 
 	// Wait for goroutine to complete with timeout
@@ -1087,6 +1087,24 @@ func TestStart_RequiresAuthenticatedUser(t *testing.T) {
 	assert.Contains(t, err.Error(), "user authentication required")
 }
 
+func TestCaptureInstalledAppAuthSnapshot_AppliesAuthValues(t *testing.T) {
+	snapshot := captureInstalledAppAuthSnapshot(testAuthContext())
+	if snapshot == nil {
+		t.Fatal("expected auth snapshot")
+	}
+
+	ctx := snapshot.apply(context.Background())
+
+	token, ok := auth.GetToken(ctx)
+	assert.True(t, ok)
+	assert.Equal(t, "test-token", token)
+
+	claims, ok := auth.GetClaims(ctx)
+	assert.True(t, ok)
+	assert.NotNil(t, claims)
+	assert.Equal(t, "https://central.example.com", claims.PAPI)
+}
+
 // TestExecuteDAG_SetsInferenceProvenance verifies that executeDAG properly sets
 // inference provenance on the tenant context with the triggering user's ID.
 func TestExecuteDAG_SetsInferenceProvenance(t *testing.T) {
@@ -1128,7 +1146,7 @@ func TestExecuteDAG_SetsInferenceProvenance(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		service.executeDAG(projectID, dagID, userID, nil)
+		service.executeDAG(projectID, dagID, userID, nil, nil)
 	}()
 
 	// Wait for goroutine to complete

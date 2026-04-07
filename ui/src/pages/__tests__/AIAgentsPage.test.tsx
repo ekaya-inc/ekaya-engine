@@ -230,8 +230,6 @@ describe('AIAgentsPage', () => {
 
     await renderPage();
 
-    expect(screen.getByText('Create queries that agents can run')).toBeInTheDocument();
-
     fireEvent.click(screen.getByRole('button', { name: /add agent/i }));
 
     expect(screen.getByText('No enabled approved queries available yet.')).toBeInTheDocument();

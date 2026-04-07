@@ -1,12 +1,10 @@
 import { AlertTriangle, ExternalLink, Loader2, Check, Copy } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 
 import AppPageHeader from '../components/AppPageHeader';
 import MCPLogo from '../components/icons/MCPLogo';
 import ToolInventory from '../components/mcp/ToolInventory';
-import SetupChecklist from '../components/SetupChecklist';
-import type { ChecklistItem } from '../components/SetupChecklist';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Switch } from '../components/ui/Switch';
@@ -15,7 +13,6 @@ import { useToast } from '../hooks/useToast';
 import { getUserRoles } from '../lib/auth-token';
 import engineApi from '../services/engineApi';
 import type {
-  Datasource,
   MCPConfigResponse,
   ServerStatusResponse,
   TunnelStatusResponse,
@@ -31,8 +28,6 @@ const MCPServerPage = () => {
   const [updating, setUpdating] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
 
-  // Setup checklist state
-  const [datasource, setDatasource] = useState<Datasource | null>(null);
   const [serverStatus, setServerStatus] = useState<ServerStatusResponse | null>(null);
   const [tunnelStatus, setTunnelStatus] = useState<TunnelStatusResponse | null>(null);
 
@@ -44,9 +39,8 @@ const MCPServerPage = () => {
 
     try {
       setLoading(true);
-      const [mcpRes, datasourcesRes, serverStatusRes, tunnelStatusRes] = await Promise.all([
+      const [mcpRes, serverStatusRes, tunnelStatusRes] = await Promise.all([
         engineApi.getMCPConfig(pid),
-        engineApi.listDataSources(pid),
         engineApi.getServerStatus(),
         engineApi.getTunnelStatus(pid).catch(() => null),
       ]);
@@ -57,8 +51,6 @@ const MCPServerPage = () => {
         throw new Error(mcpRes.error ?? 'Failed to load MCP configuration');
       }
 
-      const ds = datasourcesRes.data?.datasources?.[0] ?? null;
-      setDatasource(ds);
       setServerStatus(serverStatusRes);
       setTunnelStatus(tunnelStatusRes?.data ?? null);
     } catch (error) {
@@ -76,21 +68,6 @@ const MCPServerPage = () => {
   useEffect(() => {
     fetchConfig();
   }, [fetchConfig]);
-
-  const getChecklistItems = (): ChecklistItem[] => {
-    return [
-      {
-        id: 'datasource',
-        title: 'Datasource configured',
-        description: datasource
-          ? `Connected to ${datasource.name} (${datasource.type})`
-          : 'Connect a database to enable the MCP Server',
-        status: loading ? 'loading' : datasource ? 'complete' : 'pending',
-        link: `/projects/${pid}/datasource`,
-        linkText: datasource ? 'Manage' : 'Configure',
-      },
-    ];
-  };
 
   const handleDirectDatabaseAccessChange = async (enabled: boolean) => {
     if (!pid || !config) return;
@@ -227,22 +204,7 @@ const MCPServerPage = () => {
     );
   }
 
-  const checklistItems = getChecklistItems();
-
   const isAccessible = serverStatus?.accessible_for_business_users ?? false;
-  const deploymentItems: ChecklistItem[] = [
-    {
-      id: 'server-accessible',
-      title: 'MCP Server securely deployed',
-      description: isAccessible
-        ? 'Server is reachable by other users over HTTPS'
-        : 'Configure HTTPS on a reachable domain for other users',
-      status: loading ? 'loading' : isAccessible ? 'complete' : 'pending',
-      link: `/projects/${pid}/server-setup`,
-      linkText: isAccessible ? 'Review' : 'Configure',
-    },
-  ];
-
   return (
     <div className="mx-auto max-w-4xl">
       <AppPageHeader
@@ -253,21 +215,32 @@ const MCPServerPage = () => {
       />
 
       <div className="space-y-6">
-        {/* Setup Checklist */}
-        <SetupChecklist
-          items={checklistItems}
-          title="Setup Checklist"
-          description="Complete these steps to enable the MCP Server"
-          completeDescription="MCP Server is ready"
-        />
-
         {/* Deployment Checklist */}
-        <SetupChecklist
-          items={deploymentItems}
-          title="Deployment"
-          description="Optional steps for sharing with other users"
-          completeDescription="MCP Server is accessible to other users"
-        />
+        <div className="rounded-lg border border-border-light bg-surface-primary p-6">
+          <h2 className="text-lg font-semibold text-text-primary">Deployment</h2>
+          <p className="mt-2 text-sm text-text-secondary">
+            These optional steps help other users reach this project&apos;s MCP Server over HTTPS.
+          </p>
+          <div className="mt-4 rounded-lg border border-border-light bg-surface-secondary/60 p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium text-text-primary">
+                  MCP Server securely deployed
+                </p>
+                <p className="mt-1 text-sm text-text-secondary">
+                  {isAccessible
+                    ? 'Server is reachable by other users over HTTPS.'
+                    : 'Configure HTTPS on a reachable domain for other users.'}
+                </p>
+              </div>
+              <Button asChild variant="outline">
+                <Link to={`/projects/${pid}/server-setup`}>
+                  {isAccessible ? 'Review' : 'Configure'}
+                </Link>
+              </Button>
+            </div>
+          </div>
+        </div>
 
         {config && (
           <>

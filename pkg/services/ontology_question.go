@@ -45,6 +45,7 @@ type ontologyQuestionService struct {
 	schemaRepo         repositories.SchemaRepository
 	knowledgeRepo      repositories.KnowledgeRepository
 	builder            OntologyBuilderService
+	setupStateSvc      SetupStateService
 	logger             *zap.Logger
 }
 
@@ -64,6 +65,22 @@ func NewOntologyQuestionService(
 		knowledgeRepo:      knowledgeRepo,
 		builder:            builder,
 		logger:             logger.Named("ontology-question"),
+	}
+}
+
+func (s *ontologyQuestionService) SetSetupStateService(setupStateSvc SetupStateService) {
+	s.setupStateSvc = setupStateSvc
+}
+
+func (s *ontologyQuestionService) reconcileQuestionsSetupState(ctx context.Context, projectID uuid.UUID) {
+	if s.setupStateSvc == nil {
+		return
+	}
+
+	if err := s.setupStateSvc.ReconcileStep(ctx, projectID, SetupStepQuestionsAnswered); err != nil {
+		s.logger.Warn("Failed to reconcile ontology question setup state",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
 	}
 }
 
@@ -216,6 +233,8 @@ func (s *ontologyQuestionService) AnswerQuestion(ctx context.Context, questionID
 		return nil, err
 	}
 
+	s.reconcileQuestionsSetupState(ctx, question.ProjectID)
+
 	return &models.AnswerResult{
 		QuestionID:     questionID,
 		FollowUp:       processingResult.FollowUp,
@@ -321,6 +340,8 @@ func (s *ontologyQuestionService) applyColumnUpdates(ctx context.Context, projec
 }
 
 func (s *ontologyQuestionService) SkipQuestion(ctx context.Context, questionID uuid.UUID) error {
+	question, _ := s.questionRepo.GetByID(ctx, questionID)
+
 	if err := s.questionRepo.UpdateStatus(ctx, questionID, models.QuestionStatusSkipped); err != nil {
 		s.logger.Error("Failed to skip question",
 			zap.String("question_id", questionID.String()),
@@ -331,10 +352,16 @@ func (s *ontologyQuestionService) SkipQuestion(ctx context.Context, questionID u
 	s.logger.Info("Question skipped",
 		zap.String("question_id", questionID.String()))
 
+	if question != nil {
+		s.reconcileQuestionsSetupState(ctx, question.ProjectID)
+	}
+
 	return nil
 }
 
 func (s *ontologyQuestionService) DeleteQuestion(ctx context.Context, questionID uuid.UUID) error {
+	question, _ := s.questionRepo.GetByID(ctx, questionID)
+
 	if err := s.questionRepo.UpdateStatus(ctx, questionID, models.QuestionStatusDeleted); err != nil {
 		s.logger.Error("Failed to delete question",
 			zap.String("question_id", questionID.String()),
@@ -345,6 +372,10 @@ func (s *ontologyQuestionService) DeleteQuestion(ctx context.Context, questionID
 	s.logger.Info("Question deleted",
 		zap.String("question_id", questionID.String()))
 
+	if question != nil {
+		s.reconcileQuestionsSetupState(ctx, question.ProjectID)
+	}
+
 	return nil
 }
 
@@ -352,5 +383,9 @@ func (s *ontologyQuestionService) CreateQuestions(ctx context.Context, questions
 	if len(questions) == 0 {
 		return nil
 	}
-	return s.questionRepo.CreateBatch(ctx, questions)
+	if err := s.questionRepo.CreateBatch(ctx, questions); err != nil {
+		return err
+	}
+	s.reconcileQuestionsSetupState(ctx, questions[0].ProjectID)
+	return nil
 }

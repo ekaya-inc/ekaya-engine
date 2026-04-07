@@ -84,6 +84,7 @@ type schemaService struct {
 	columnMetadataRepo repositories.ColumnMetadataRepository
 	datasourceSvc      DatasourceService
 	adapterFactory     datasource.DatasourceAdapterFactory
+	setupStateSvc      SetupStateService
 	logger             *zap.Logger
 }
 
@@ -102,6 +103,10 @@ func NewSchemaService(
 		adapterFactory:     adapterFactory,
 		logger:             logger,
 	}
+}
+
+func (s *schemaService) SetSetupStateService(setupStateSvc SetupStateService) {
+	s.setupStateSvc = setupStateSvc
 }
 
 // tableExclusionPatterns contains compiled regex patterns for tables that should
@@ -900,6 +905,14 @@ func (s *schemaService) SaveSelections(ctx context.Context, projectID, datasourc
 		zap.Int("tables", len(tableSelections)),
 		zap.Int("column_tables", len(columnSelections)),
 	)
+
+	if s.setupStateSvc != nil {
+		if err := s.setupStateSvc.ReconcileStep(ctx, projectID, SetupStepSchemaSelected); err != nil {
+			s.logger.Warn("Failed to reconcile schema setup state after save selections",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		}
+	}
 
 	return nil
 }

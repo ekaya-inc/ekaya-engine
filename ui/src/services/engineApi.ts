@@ -64,6 +64,7 @@ import type {
   SchemaChange,
   SchemaRefreshResponse,
   ServerStatusResponse,
+  SetupStatus,
   TestConnectionRequest,
   TestConnectionResponse,
   TestQueryRequest,
@@ -1001,6 +1002,16 @@ class EngineApiService {
     return this.makeRequest<TunnelStatusResponse>(
       `/${projectId}/apps/mcp-tunnel/status`
     );
+  }
+
+  /**
+   * Get the persisted setup status for a project
+   * GET /api/projects/{projectId}/setup-status
+   */
+  async getSetupStatus(
+    projectId: string
+  ): Promise<ApiResponse<SetupStatus>> {
+    return this.makeRequest<SetupStatus>(`/${projectId}/setup-status`);
   }
 
   /**

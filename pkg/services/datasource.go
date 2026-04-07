@@ -52,6 +52,7 @@ type datasourceService struct {
 	encryptor      *crypto.CredentialEncryptor
 	adapterFactory datasource.DatasourceAdapterFactory
 	projectService ProjectService
+	setupStateSvc  SetupStateService
 	logger         *zap.Logger
 }
 
@@ -70,6 +71,10 @@ func NewDatasourceService(
 		projectService: projectService,
 		logger:         logger,
 	}
+}
+
+func (s *datasourceService) SetSetupStateService(setupStateSvc SetupStateService) {
+	s.setupStateSvc = setupStateSvc
 }
 
 // Create creates a new datasource with encrypted config.
@@ -130,6 +135,14 @@ func (s *datasourceService) Create(ctx context.Context, projectID uuid.UUID, nam
 					zap.String("project_id", projectID.String()),
 					zap.String("datasource_id", ds.ID.String()))
 			}
+		}
+	}
+
+	if s.setupStateSvc != nil {
+		if err := s.setupStateSvc.ReconcileStep(ctx, projectID, SetupStepDatasourceConfigured); err != nil {
+			s.logger.Warn("Failed to reconcile datasource setup state after create",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
 		}
 	}
 
@@ -252,6 +265,19 @@ func (s *datasourceService) Update(ctx context.Context, id uuid.UUID, name, dsTy
 		zap.String("id", id.String()),
 	)
 
+	if s.setupStateSvc != nil {
+		projectID, projectErr := s.repo.GetProjectID(ctx, id)
+		if projectErr != nil {
+			s.logger.Warn("Failed to resolve project for datasource setup reconciliation",
+				zap.String("datasource_id", id.String()),
+				zap.Error(projectErr))
+		} else if err := s.setupStateSvc.ReconcileStep(ctx, projectID, SetupStepDatasourceConfigured); err != nil {
+			s.logger.Warn("Failed to reconcile datasource setup state after update",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		}
+	}
+
 	return nil
 }
 
@@ -297,6 +323,24 @@ func (s *datasourceService) Delete(ctx context.Context, id uuid.UUID) error {
 		zap.String("id", id.String()),
 		zap.String("project_id", projectID.String()),
 	)
+
+	if s.setupStateSvc != nil {
+		if err := s.setupStateSvc.ReconcileSteps(
+			ctx,
+			projectID,
+			SetupStepDatasourceConfigured,
+			SetupStepSchemaSelected,
+			SetupStepOntologyExtracted,
+			SetupStepQuestionsAnswered,
+			SetupStepQueriesCreated,
+			SetupStepAgentsQueriesCreated,
+			SetupStepGlossarySetup,
+		); err != nil {
+			s.logger.Warn("Failed to reconcile setup state after datasource delete",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		}
+	}
 
 	return nil
 }

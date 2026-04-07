@@ -26,6 +26,9 @@ type QueryRepository interface {
 	ListEnabledByTags(ctx context.Context, projectID, datasourceID uuid.UUID, tags []string) ([]*models.Query, error)
 	// HasEnabledQueries efficiently checks if any enabled queries exist (uses LIMIT 1).
 	HasEnabledQueries(ctx context.Context, projectID, datasourceID uuid.UUID) (bool, error)
+	// HasApprovedEnabledQueriesByProject checks whether the project has at least one
+	// approved, enabled query across any datasource.
+	HasApprovedEnabledQueriesByProject(ctx context.Context, projectID uuid.UUID) (bool, error)
 
 	// Status management
 	UpdateEnabledStatus(ctx context.Context, projectID, queryID uuid.UUID, isEnabled bool) error
@@ -353,6 +356,33 @@ func (r *queryRepository) HasEnabledQueries(ctx context.Context, projectID, data
 			return false, nil
 		}
 		return false, fmt.Errorf("failed to check enabled queries: %w", err)
+	}
+
+	return true, nil
+}
+
+func (r *queryRepository) HasApprovedEnabledQueriesByProject(ctx context.Context, projectID uuid.UUID) (bool, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return false, fmt.Errorf("no tenant scope in context")
+	}
+
+	sql := `
+		SELECT 1
+		FROM engine_queries
+		WHERE project_id = $1
+		  AND is_enabled = true
+		  AND status = 'approved'
+		  AND deleted_at IS NULL
+		LIMIT 1`
+
+	var exists int
+	err := scope.Conn.QueryRow(ctx, sql, projectID).Scan(&exists)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check approved enabled queries: %w", err)
 	}
 
 	return true, nil
