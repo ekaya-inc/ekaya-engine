@@ -630,7 +630,7 @@ type createApprovedQueryResponse struct {
 func registerCreateApprovedQueryTool(mcpServer *server.MCPServer, deps *DevQueryToolDeps) {
 	tool := mcp.NewTool(
 		"create_approved_query",
-		mcp.WithDescription(`Create a new pre-approved query directly (no review required).
+		mcp.WithDescription(`Create a new approved query directly (no review required).
 The query will be immediately available for execution with status='approved'.
 SQL syntax is validated before creation. Use this for admin-created queries that bypass the suggestion workflow.
 If datasource_id is not provided, the project's default datasource will be used.`),
@@ -924,7 +924,7 @@ type updateApprovedQueryResponse struct {
 func registerUpdateApprovedQueryTool(mcpServer *server.MCPServer, deps *DevQueryToolDeps) {
 	tool := mcp.NewTool(
 		"update_approved_query",
-		mcp.WithDescription(`Update an existing pre-approved query directly (no review required).
+		mcp.WithDescription(`Update an existing approved query directly (no review required).
 Changes are applied immediately. SQL syntax is validated if a new SQL query is provided.
 Use this for admin-initiated updates that bypass the suggestion workflow.`),
 		mcp.WithString("query_id",
@@ -1166,7 +1166,7 @@ type deleteApprovedQueryResponse struct {
 func registerDeleteApprovedQueryTool(mcpServer *server.MCPServer, deps *DevQueryToolDeps) {
 	tool := mcp.NewTool(
 		"delete_approved_query",
-		mcp.WithDescription(`Delete a pre-approved query.
+		mcp.WithDescription(`Delete an approved query.
 The query will be soft-deleted and no longer available for execution.
 Any pending update suggestions for this query will be automatically rejected with reason "Original query was deleted".`),
 		mcp.WithString("query_id",

@@ -66,7 +66,7 @@ func DetectSQLType(sql string) SQLStatementType {
 		strings.HasPrefix(normalized, "TRUNCATE"):
 		return SQLTypeDDL
 
-	// Transaction control - blocked (not supported in pre-approved queries)
+	// Transaction control - blocked (not supported in approved queries)
 	case strings.HasPrefix(normalized, "BEGIN"),
 		strings.HasPrefix(normalized, "COMMIT"),
 		strings.HasPrefix(normalized, "ROLLBACK"),
@@ -105,7 +105,7 @@ func (e *SQLTypeError) Error() string {
 	return e.Message
 }
 
-// ValidateSQLType validates the SQL statement type for pre-approved queries.
+// ValidateSQLType validates the SQL statement type for approved queries.
 // Returns an error if the statement type is not allowed.
 //
 // Rules:
@@ -120,7 +120,7 @@ func ValidateSQLType(sql string, allowsModification bool) (SQLStatementType, err
 	if sqlType == SQLTypeDDL {
 		return sqlType, &SQLTypeError{
 			Type:    sqlType,
-			Message: "DDL statements (CREATE, ALTER, DROP, TRUNCATE) are not allowed in pre-approved queries",
+			Message: "DDL statements (CREATE, ALTER, DROP, TRUNCATE) are not allowed in approved queries",
 		}
 	}
 

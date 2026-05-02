@@ -37,7 +37,7 @@ Extism Host SDK (wraps wazero, pure Go, no CGO)
     ▼
 ├── db_query(sql, params)                → app's isolated Postgres schema
 ├── datasource_query(sql, params)        → read-only queries on project datasource
-├── datasource_execute(query_id, params) → pre-approved queries on project datasource
+├── datasource_execute(query_id, params) → approved queries on project datasource
 ├── mcp_tool_invoke(tool_name, params)   → ToolRegistry
 ├── llm_generate(prompt, options)        → project's LLM config (BYOK/community/embedded/on-prem)
 ├── http_request(method, url, ...)       → allowlisted external APIs
@@ -232,7 +232,7 @@ ai-drift-monitor/
 |---------------|---------|-------|
 | `db_query(sql, params)` | App-isolated Postgres schema | Each app gets its own schema. RLS or schema-based isolation. |
 | `datasource_query(sql, params)` | `QueryExecutor.Query()` | Read-only queries on project datasource. For apps like Drift Monitor that need schema introspection. |
-| `datasource_execute(query_id, params)` | `QueryService.Execute()` | Pre-approved parameterized queries only. App cannot run arbitrary SQL against project datasource. |
+| `datasource_execute(query_id, params)` | `QueryService.Execute()` | Approved parameterized queries only. App cannot run arbitrary SQL against project datasource. |
 | `mcp_tool_invoke(tool_name, params)` | `ToolRegistry` | Subject to same role/app-installation checks. |
 | `llm_generate(prompt, options)` | `LLMClientFactory.CreateForProject()` | Uses project's AI config. Rate-limited. Token usage tracked. |
 | `http_request(method, url, headers, body, timeout)` | Direct HTTP | Allowlisted endpoints declared in app capabilities. |

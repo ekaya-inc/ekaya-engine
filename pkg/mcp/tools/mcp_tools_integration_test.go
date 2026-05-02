@@ -221,7 +221,7 @@ func TestMCPTools_NewProject_UserGetsBusinessTools(t *testing.T) {
 		"validate",               // Query loadout - SQL validation
 		"get_schema",             // Query loadout - schema access
 		"get_ontology",           // Query loadout - semantic context
-		"list_approved_queries",  // Query loadout - pre-approved queries
+		"list_approved_queries",  // Query loadout - approved queries
 		"execute_approved_query", // Query loadout - run approved queries
 	}
 
