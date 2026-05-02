@@ -245,14 +245,14 @@ const OntologyForgePage = () => {
     }
     items.push(schemaItem);
 
-    // 3. Create Pre-Approved Queries (optional)
+    // 3. Create Approved Queries (optional)
     const queriesItem: ChecklistItem = {
       id: 'queries',
-      title: 'Create Pre-Approved Queries',
+      title: 'Create Approved Queries',
       description: hasApprovedQueries
-        ? 'Pre-approved queries are available for the MCP Server'
+        ? 'Approved queries are available for the MCP Server'
         : datasource
-          ? 'Create pre-approved SQL queries for the MCP Server to use'
+          ? 'Create approved SQL queries for the MCP Server to use'
           : 'Configure datasource first',
       status: loading ? 'loading' : hasApprovedQueries ? 'complete' : 'pending',
       linkText: hasApprovedQueries ? 'Manage' : 'Configure',

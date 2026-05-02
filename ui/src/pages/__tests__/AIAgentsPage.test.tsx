@@ -190,7 +190,7 @@ describe('AIAgentsPage', () => {
     expect(engineApi.createAgent).not.toHaveBeenCalled();
   });
 
-  it('requires selecting at least one pre-approved query before save is enabled', async () => {
+  it('requires selecting at least one approved query before save is enabled', async () => {
     await renderPage();
 
     fireEvent.click(screen.getByRole('button', { name: /add agent/i }));

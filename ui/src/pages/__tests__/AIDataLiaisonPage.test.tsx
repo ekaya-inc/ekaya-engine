@@ -453,7 +453,7 @@ describe('AIDataLiaisonPage', () => {
             },
             {
               name: 'create_approved_query',
-              description: 'Create a new pre-approved query directly',
+              description: 'Create a new approved query directly',
               appId: 'ontology-forge',
             },
           ],
@@ -465,7 +465,7 @@ describe('AIDataLiaisonPage', () => {
             },
             {
               name: 'list_approved_queries',
-              description: 'List pre-approved SQL queries',
+              description: 'List approved SQL queries',
               appId: 'ontology-forge',
             },
           ],

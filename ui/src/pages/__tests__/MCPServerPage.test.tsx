@@ -176,7 +176,7 @@ describe('MCPServerPage - Setup Checklist', () => {
     expect(screen.queryByText(/AI configured/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Ontology extracted/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Critical Ontology Questions/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Create Pre-Approved Queries/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Create Approved Queries/)).not.toBeInTheDocument();
   });
 
   it('shows "MCP Server is ready" when datasource is configured', async () => {

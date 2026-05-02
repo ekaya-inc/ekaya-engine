@@ -288,12 +288,12 @@ describe('OntologyForgePage - Checklist step prerequisites match dashboard tiles
     expect(btn).toBeNull();
   });
 
-  // -- Step 3: Pre-Approved Queries (optional) -- requires datasource
+  // -- Step 3: Approved Queries (optional) -- requires datasource
   it('queries step shows Configure button when datasource exists but no queries', async () => {
     setupMocks({ hasDatasource: true, hasApprovedQueries: false });
     await renderPage();
     await waitFor(() => {
-      const btn = getStepButton('Create Pre-Approved Queries');
+      const btn = getStepButton('Create Approved Queries');
       expect(btn).toBeInTheDocument();
       expect(btn).toHaveTextContent('Configure');
     });
@@ -303,7 +303,7 @@ describe('OntologyForgePage - Checklist step prerequisites match dashboard tiles
     setupMocks({ hasDatasource: true, hasApprovedQueries: true });
     await renderPage();
     await waitFor(() => {
-      const btn = getStepButton('Create Pre-Approved Queries');
+      const btn = getStepButton('Create Approved Queries');
       expect(btn).toBeInTheDocument();
       expect(btn).toHaveTextContent('Manage');
     });
@@ -313,9 +313,9 @@ describe('OntologyForgePage - Checklist step prerequisites match dashboard tiles
     setupMocks({ hasDatasource: false, hasApprovedQueries: false });
     await renderPage();
     await waitFor(() => {
-      expect(screen.getByText(/Create Pre-Approved Queries/)).toBeInTheDocument();
+      expect(screen.getByText(/Create Approved Queries/)).toBeInTheDocument();
     });
-    const stepEl = screen.getByText(/Create Pre-Approved Queries/).closest('[class*="rounded-lg"]');
+    const stepEl = screen.getByText(/Create Approved Queries/).closest('[class*="rounded-lg"]');
     const btn = stepEl?.querySelector('a button');
     expect(btn).toBeNull();
   });
@@ -695,12 +695,12 @@ describe('OntologyForgePage - Tool Configuration', () => {
         developerTools: [
           {
             name: 'create_approved_query',
-            description: 'Create a new pre-approved query directly',
+            description: 'Create a new approved query directly',
             appId: 'ontology-forge',
           },
           {
             name: 'list_approved_queries',
-            description: 'List pre-approved SQL queries',
+            description: 'List approved SQL queries',
             appId: 'ontology-forge',
           },
           {
@@ -712,7 +712,7 @@ describe('OntologyForgePage - Tool Configuration', () => {
         userTools: [
           {
             name: 'execute_approved_query',
-            description: 'Execute a pre-approved query by ID',
+            description: 'Execute an approved query by ID',
             appId: 'ontology-forge',
           },
           {
