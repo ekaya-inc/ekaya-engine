@@ -52,6 +52,12 @@ Each task below becomes a TASK-*.md file when it's the next one to implement. On
 
 - [x] **Task 5: PII detection logic** — Implement PII detection in the WASM module. Regex patterns sourced from Presidio/PIISA, content scanning, high-watermark tracking.
   - TASK file: `TASK-app-pii-radar-pii-detection.md` — **DONE**
+  - Library: `pii_detector` crate at `pkg/wasm/guests/pii_detector/` — pure Rust, no extism-pdk dependency.
+  - Detection modes: column name matching + content regex scanning with validators (Luhn, SSN checksum).
+  - Categories: `secrets`, `pii_identity`, `pii_contact`, `pii_financial`. Confidence: `high`, `medium`, `low`.
+  - Guest module: `pkg/wasm/guests/pii_radar_guest/` — full scan lifecycle (load state → get schema → column scan → content scan → save state → report).
+  - Tests: `pkg/wasm/pii_radar_test.go` — Go integration tests with mock MCP tools.
+  - WASM binary: `pkg/wasm/testdata/pii_radar_guest.wasm` (~300KB).
 
 - [ ] **Task 6: Periodic and on-demand execution** — Host can schedule a WASM app on a cron schedule. Host can trigger a WASM app on-demand (manual, startup, schema refresh).
   - TASK file: `TASK-app-pii-radar-execution.md`
