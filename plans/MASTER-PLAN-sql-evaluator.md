@@ -27,7 +27,7 @@ This initiative also absorbs the remaining valid concerns from prior glossary-on
 Every internal SQL path should call the same evaluator before SQL is accepted, executed, or recorded as a trusted example. That includes:
 
 - glossary example generation
-- pre-approved query validation
+- approved query validation
 - pending query review
 - MCP `validate`
 - MCP `query`
@@ -194,7 +194,7 @@ This order matters because it keeps the early work testable and low-risk. It als
 - All SQL entry points route through `SQLEvaluator`.
 - Glossary generation rejects wrong enum literals, degenerate outputs, and semantically useless example SQL.
 - Security rule findings are available to callers and can block high-risk flows.
-- Pre-approved queries and vetted historical queries can be distinguished from unvetted SQL.
+- Approved queries and vetted historical queries can be distinguished from unvetted SQL.
 - Query history and evaluation storage are rich enough to support future query reuse, admin review, and external-request vetting.
 
 ## Open Questions to Resolve During Implementation

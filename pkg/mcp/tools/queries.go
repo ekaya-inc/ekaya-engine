@@ -51,7 +51,7 @@ var approvedQueriesToolNames = map[string]bool{
 	"record_query_feedback":  true,
 }
 
-// RegisterApprovedQueriesTools registers tools for executing Pre-Approved Queries.
+// RegisterApprovedQueriesTools registers tools for executing Approved Queries.
 func RegisterApprovedQueriesTools(s *server.MCPServer, deps *QueryToolDeps) {
 	registerListApprovedQueriesTool(s, deps)
 	registerExecuteApprovedQueryTool(s, deps)
@@ -98,7 +98,7 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 	tool := mcp.NewTool(
 		"list_approved_queries",
 		mcp.WithDescription(
-			"List all pre-approved SQL queries available for execution. "+
+			"List all approved SQL queries available for execution. "+
 				"Returns query metadata including parameters needed for execution. "+
 				"Optionally filter by tags to find queries in specific categories. "+
 				"Use execute_approved_query to run a specific query with parameters.",
@@ -214,12 +214,12 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 	})
 }
 
-// registerExecuteApprovedQueryTool - Executes a pre-approved query with parameters, includes injection detection.
+// registerExecuteApprovedQueryTool - Executes an approved query with parameters, includes injection detection.
 func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) {
 	tool := mcp.NewTool(
 		"execute_approved_query",
 		mcp.WithDescription(
-			"Execute a pre-approved SQL query by ID with optional parameters. "+
+			"Execute an approved SQL query by ID with optional parameters. "+
 				"Use list_approved_queries first to see available queries and required parameters. "+
 				"Parameters are type-checked and validated before execution. "+
 				"SQL injection attempts are detected and logged.",
@@ -783,7 +783,7 @@ func registerSuggestQueryUpdateTool(s *server.MCPServer, deps *QueryToolDeps) {
 	tool := mcp.NewTool(
 		"suggest_query_update",
 		mcp.WithDescription(
-			"Suggest an update to an existing pre-approved query. "+
+			"Suggest an update to an existing approved query. "+
 				"The suggestion will be reviewed by an administrator before being applied. "+
 				"The original query remains active until the update is approved.",
 		),

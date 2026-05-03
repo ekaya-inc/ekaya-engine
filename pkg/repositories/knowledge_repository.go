@@ -63,12 +63,13 @@ func (r *knowledgeRepository) Create(ctx context.Context, fact *models.Knowledge
 		INSERT INTO engine_project_knowledge (
 			id, project_id, fact_type, value, context,
 			source, created_by, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING created_at, updated_at`
 
-	_, err := scope.Conn.Exec(ctx, query,
+	err := scope.Conn.QueryRow(ctx, query,
 		fact.ID, fact.ProjectID, fact.FactType, fact.Value, fact.Context,
 		fact.Source, fact.CreatedBy, fact.CreatedAt, fact.UpdatedAt,
-	)
+	).Scan(&fact.CreatedAt, &fact.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to create knowledge fact: %w", err)
 	}

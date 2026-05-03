@@ -199,7 +199,7 @@ Use `ToolSearch` to load tools before calling them.
 | `get_entity` | Full entity details by name |
 | `search_schema` | Full-text search across tables, columns, entities |
 | `list_glossary` | List business glossary terms |
-| `list_approved_queries` | List pre-approved SQL queries |
+| `list_approved_queries` | List approved SQL queries |
 | `query` | Execute read-only SQL SELECT |
 | `sample` | Quick data preview from table |
 

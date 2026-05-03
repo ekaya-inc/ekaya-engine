@@ -460,7 +460,7 @@ Parameter types are declared and validated before execution. Type coercion happe
 All string parameters are scanned with libinjection. Detection happens before query execution. Suspicious values are rejected and logged.
 
 ### 4. Query Approval
-MCP clients can only execute pre-approved query templates. Users cannot execute arbitrary SQL. Templates are reviewed and validated before enabling.
+MCP clients can only execute approved query templates. Users cannot execute arbitrary SQL. Templates are reviewed and validated before enabling.
 
 ### 5. Audit Logging
 - All query executions logged with parameter values

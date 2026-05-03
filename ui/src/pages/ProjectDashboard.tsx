@@ -139,7 +139,7 @@ const ProjectDashboard = () => {
       });
     }
 
-    // Schema and Pre-Approved Queries only show when Ontology Forge is installed
+    // Schema and Approved Queries only show when Ontology Forge is installed
     // (they are part of the business semantic layer)
     if (hasOntologyForge) {
       tiles.push(
@@ -152,7 +152,7 @@ const ProjectDashboard = () => {
           color: 'purple', // Ontology Forge color
         },
         {
-          title: 'Pre-Approved Queries',
+          title: 'Approved Queries',
           description: 'Create safe, parameterized queries your users can execute.',
           icon: Search,
           path: `/projects/${pid}/queries`,

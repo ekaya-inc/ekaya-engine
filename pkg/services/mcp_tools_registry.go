@@ -61,7 +61,7 @@ var ToolRegistry = []ToolDefinition{
 
 	// Business user tools (user group)
 	// These read-only query tools enable business users to answer ad-hoc questions
-	// when pre-approved queries don't match their request.
+	// when approved queries don't match their request.
 	{Name: "query", Description: "Execute read-only SQL SELECT statements", ToolGroup: ToolGroupUser},
 	{Name: "sample", Description: "Quick data preview from a table", ToolGroup: ToolGroupUser},
 	{Name: "validate", Description: "Check SQL syntax without executing", ToolGroup: ToolGroupUser},
@@ -72,10 +72,10 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "update_glossary_term", Description: "Create or update a business glossary term with optional SQL and aliases", ToolGroup: ToolGroupDeveloper},
 	{Name: "delete_glossary_term", Description: "Delete a business glossary term that's no longer relevant", ToolGroup: ToolGroupDeveloper},
 	{Name: "create_glossary_term", Description: "Create a business glossary term with optional SQL", ToolGroup: ToolGroupDeveloper},
-	{Name: "list_approved_queries", Description: "List pre-approved SQL queries", ToolGroup: ToolGroupUser},
-	{Name: "execute_approved_query", Description: "Execute a pre-approved query by ID", ToolGroup: ToolGroupUser},
+	{Name: "list_approved_queries", Description: "List approved SQL queries", ToolGroup: ToolGroupUser},
+	{Name: "execute_approved_query", Description: "Execute an approved query by ID", ToolGroup: ToolGroupUser},
 	{Name: "suggest_approved_query", Description: "Suggest a reusable parameterized query for approval", ToolGroup: ToolGroupUser},
-	{Name: "suggest_query_update", Description: "Suggest an update to an existing pre-approved query for review", ToolGroup: ToolGroupUser},
+	{Name: "suggest_query_update", Description: "Suggest an update to an existing approved query for review", ToolGroup: ToolGroupUser},
 	{Name: "get_query_history", Description: "Get recent query execution history to avoid rewriting queries", ToolGroup: ToolGroupUser},
 	{Name: "record_query_feedback", Description: "Record whether a generated query was helpful", ToolGroup: ToolGroupUser},
 
@@ -83,9 +83,9 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "list_query_suggestions", Description: "List query suggestions awaiting review or previously rejected", ToolGroup: ToolGroupDeveloper},
 	{Name: "approve_query_suggestion", Description: "Approve a pending query suggestion", ToolGroup: ToolGroupDeveloper},
 	{Name: "reject_query_suggestion", Description: "Reject a pending query suggestion with reason", ToolGroup: ToolGroupDeveloper},
-	{Name: "create_approved_query", Description: "Create a new pre-approved query directly (no review required)", ToolGroup: ToolGroupDeveloper},
-	{Name: "update_approved_query", Description: "Update an existing pre-approved query directly (no review required)", ToolGroup: ToolGroupDeveloper},
-	{Name: "delete_approved_query", Description: "Delete a pre-approved query", ToolGroup: ToolGroupDeveloper},
+	{Name: "create_approved_query", Description: "Create a new approved query directly (no review required)", ToolGroup: ToolGroupDeveloper},
+	{Name: "update_approved_query", Description: "Update an existing approved query directly (no review required)", ToolGroup: ToolGroupDeveloper},
+	{Name: "delete_approved_query", Description: "Delete an approved query", ToolGroup: ToolGroupDeveloper},
 
 	// Health is always available
 	{Name: "health", Description: "Server health check", ToolGroup: ToolGroupAlways},

@@ -1,6 +1,6 @@
 # Test: Approved Queries Read Operations
 
-Test pre-approved query listing and execution.
+Test approved query listing and execution.
 
 ## Tools Under Test
 

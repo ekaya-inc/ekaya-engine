@@ -19,7 +19,7 @@ const (
 	// Query events
 	MCPEventQueryExecuted         = "query_executed"          // Query execution via MCP tool
 	MCPEventQueryBlocked          = "query_blocked"           // Query blocked by policy
-	MCPEventApprovedQueryExecuted = "approved_query_executed" // Pre-approved query execution
+	MCPEventApprovedQueryExecuted = "approved_query_executed" // Approved query execution
 
 	// Security events
 	MCPEventSQLInjectionAttempt     = "sql_injection_attempt"     // SQL injection pattern detected

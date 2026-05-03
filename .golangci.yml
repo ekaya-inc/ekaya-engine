@@ -35,6 +35,8 @@ linters:
   # Exclusion rules for when errcheck/staticcheck/misspell are re-enabled.
   # Each rule requires at least 2 of: text, source, path, linters.
   exclusions:
+    paths:
+      - ui/node_modules/.*
     rules:
       - linters: [misspell]
         text: "`ect` is a misspelling of `etc`"

@@ -166,7 +166,7 @@ const AIAgentsPage = () => {
 
     const queriesItem: ChecklistItem = {
       id: 'queries',
-      title: 'Pre-Approved Queries created',
+      title: 'Approved Queries created',
       description: hasQueries
         ? 'Queries available for agents to execute'
         : ontologyForgeReady
@@ -511,7 +511,7 @@ const AIAgentsPage = () => {
         title="AI Agents"
         slug="ai-agents"
         icon={<Bot className="h-8 w-8 text-orange-500" />}
-        description="Create multiple named AI agents with their own API keys and pre-approved query access."
+        description="Create multiple named AI agents with their own API keys and approved query access."
       />
 
       <SetupChecklist
@@ -649,7 +649,7 @@ const AIAgentsPage = () => {
           <DialogHeader>
             <DialogTitle>Add Agent</DialogTitle>
             <DialogDescription>
-              Create a named agent and choose which pre-approved queries it can access.
+              Create a named agent and choose which approved queries it can access.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -1071,7 +1071,7 @@ function QuerySelectionList({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <div className="text-sm font-medium text-text-primary">Pre-Approved Queries</div>
+          <div className="text-sm font-medium text-text-primary">Approved Queries</div>
           <div className="text-xs text-text-secondary">
             Select at least one query for this agent.
           </div>

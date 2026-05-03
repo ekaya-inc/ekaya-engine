@@ -1,6 +1,6 @@
 /**
  * Queries Page
- * Entry point for pre-approved query management, gets context and passes to QueriesView
+ * Entry point for approved query management, gets context and passes to QueriesView
  *
  * URL Structure:
  * - /queries - Default (approved queries)
@@ -118,10 +118,10 @@ const QueriesPage = () => {
             <div>
               <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
                 <Search className="h-8 w-8 text-blue-500" />
-                Pre-Approved Queries
+                Approved Queries
               </h1>
               <p className="mt-2 text-text-secondary">
-                Manage pre-approved natural language queries and their
+                Manage approved natural language queries and their
                 corresponding SQL
               </p>
             </div>
@@ -164,10 +164,10 @@ const QueriesPage = () => {
           <div>
             <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
               <Search className="h-8 w-8 text-blue-500" />
-              Pre-Approved Queries
+              Approved Queries
             </h1>
             <p className="mt-2 text-text-secondary">
-              Manage pre-approved natural language queries and their
+              Manage approved natural language queries and their
               corresponding SQL
             </p>
           </div>

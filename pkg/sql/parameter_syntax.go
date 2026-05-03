@@ -181,7 +181,7 @@ The template syntax is part of a defense-in-depth security model:
    - Suspicious values rejected and logged
 
 4. Query Approval
-   - MCP clients can only execute pre-approved query templates
+   - MCP clients can only execute approved query templates
    - Users cannot execute arbitrary SQL
    - Templates are reviewed and validated before enabling
 

@@ -65,6 +65,7 @@ ekaya-engine
 
 # Developer
 .dvx/
+.omx/
 
 # Certificates (keep README and .gitkeep)
 certs/*
